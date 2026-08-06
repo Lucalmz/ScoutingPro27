@@ -43,10 +43,34 @@ export const useUserStore = defineStore('user', () => {
     }
   }
 
+  async function register(usernameInput: string, passwordInput: string): Promise<boolean> {
+    loading.value = true
+    error.value = null
+    try {
+      const { register: apiRegister } = await import('@/services/api')
+      const u = await apiRegister({ username: usernameInput, password: passwordInput })
+      user.value = u
+      localStorage.setItem('scoutingpro-user', JSON.stringify(u))
+      return true
+    } catch (e: any) {
+      const msg = e.message ?? 'Registration failed'
+      error.value = msg
+      useToastStore().showError(msg)
+      return false
+    } finally {
+      loading.value = false
+    }
+  }
+
   function logout() {
     user.value = null
     localStorage.removeItem('scoutingpro-user')
   }
 
-  return { user, loading, error, isLoggedIn, userId, username, restoreFromCache, login, logout }
+  // Handle automatic logout on 401
+  window.addEventListener('auth-unauthorized', () => {
+    logout()
+  })
+
+  return { user, loading, error, isLoggedIn, userId, username, restoreFromCache, login, register, logout }
 })

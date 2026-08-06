@@ -9,15 +9,21 @@ CREATE TABLE IF NOT EXISTS users (
 CREATE TABLE IF NOT EXISTS events (
     id           VARCHAR(36)  PRIMARY KEY,
     name         VARCHAR(100) NOT NULL,
-    invite_code  VARCHAR(10),
-    is_host      BOOLEAN      NOT NULL DEFAULT FALSE,
+    invite_code  VARCHAR(10)  UNIQUE,
+    host_id      VARCHAR(36)  NOT NULL REFERENCES users(id),
     created_at   TIMESTAMP    DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE TABLE IF NOT EXISTS event_users (
+    event_id VARCHAR(36) REFERENCES events(id) ON DELETE CASCADE,
+    user_id VARCHAR(36) REFERENCES users(id) ON DELETE CASCADE,
+    PRIMARY KEY(event_id, user_id)
 );
 
 CREATE TABLE IF NOT EXISTS scouting_records (
     id              VARCHAR(36)   PRIMARY KEY,
     event_id        VARCHAR(36)   NOT NULL REFERENCES events(id),
-    scout_id        VARCHAR(36)   NOT NULL,
+    scout_id        VARCHAR(36)   NOT NULL REFERENCES users(id),
     scout_name      VARCHAR(50)   NOT NULL,
     match_number    INT           NOT NULL,
     team_number     INT           NOT NULL,

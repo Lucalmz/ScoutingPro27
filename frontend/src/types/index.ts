@@ -6,6 +6,17 @@
 export interface User {
   id: string
   username: string
+  token?: string
+}
+
+// --- System Messaging ---
+export interface SystemMessage {
+  id: string
+  title: string
+  body: string
+  read: boolean
+  timestamp: string
+  type?: 'conflict' | 'direct'
 }
 
 // --- Event ---
@@ -13,7 +24,9 @@ export interface ScoutingEvent {
   id: string
   name: string
   inviteCode: string
-  isHost: boolean
+  hostId: string
+  ftcYear?: number
+  ftcEventCode?: string
 }
 
 // --- Scouting Record (后端存储的粗粒度版本) ---
@@ -45,13 +58,32 @@ export interface ScoutingFormData {
   matchNumber: number
   teamNumber: number
   allianceColor: 'none' | 'red' | 'blue'
-  autoMoved: boolean
-  autoParked: boolean
-  autoPixelsPlaced: number
-  teleOpPixelsScored: number
-  teleOpPixelsMissed: number
-  endgameHang: 'none' | 'low' | 'high'
-  endgameDrone: boolean
+  
+  // 2026 DECODE Fields
+  // Auto
+  autoClassified: number
+  autoOverflow: number
+  autoPatterns: number
+  autoMovementScore: number
+
+  // Teleop
+  teleopClassified: number
+  teleopOverflow: number
+  gatesTriggered: number
+
+  // Endgame
+  baseScore: number
+  supportMultiplier: number
+}
+
+// --- Official Match ---
+export interface OfficialMatch {
+  matchNum: number
+  scores: {
+    red: { penaltyPointsCommitted: number; totalPointsNp: number }
+    blue: { penaltyPointsCommitted: number; totalPointsNp: number }
+  } | null
+  teams: { teamNumber: number; alliance: string }[]
 }
 
 export type SyncStatus = 'PENDING' | 'SYNCED'
@@ -65,6 +97,7 @@ export interface LoginRequest {
 export interface LoginResponse {
   id: string
   username: string
+  token: string
 }
 
 export interface CreateEventRequest {
@@ -81,11 +114,21 @@ export type WebRtcMessage =
   | WebRtcRequestSync
   | WebRtcSyncData
   | WebRtcAckSync
+  | WebRtcDirectMessage
+
+export interface WebRtcDirectMessage {
+  type: 'DIRECT_MESSAGE'
+  targetId: string
+  title: string
+  body: string
+  authCode?: string
+}
 
 export interface WebRtcRequestSync {
   type: 'REQUEST_SYNC'
   lastSyncTime: string
   authCode?: string
+  senderUserId?: string
 }
 
 export interface WebRtcSyncData {
@@ -111,5 +154,6 @@ export interface RankingRow {
   avgTeleopScore: number
   avgEndgameScore: number
   maxScore: number
-  totalScore: number
+  avgRating: number
+  trend: 'up' | 'down' | 'stable' | 'new'
 }

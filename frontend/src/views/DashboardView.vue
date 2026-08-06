@@ -109,7 +109,7 @@ function handleLogout() {
             <span class="event-name">{{ evt.name }}</span>
             <span class="event-meta">
               {{ t('event.code') }}: <strong>{{ evt.inviteCode }}</strong>
-              - {{ evt.isHost ? t('event.host') : t('event.client') }}
+              - {{ evt.hostId === userStore.userId ? t('event.host') : t('event.client') }}
             </span>
           </div>
           <span class="event-arrow material-icons" style="font-size: 20px;">arrow_forward</span>
@@ -152,12 +152,11 @@ function handleLogout() {
             :placeholder="t('dashboard.modal_join_placeholder')"
             :disabled="joining"
             @keyup.enter="handleJoin"
-            maxlength="6"
             style="text-transform: uppercase;"
           />
           <div class="modal-actions">
             <button class="btn-cancel" @click="showJoinModal = false">{{ t('dashboard.btn_cancel') }}</button>
-            <button class="btn-confirm" :disabled="joining || inviteCode.length < 6" @click="handleJoin">
+            <button class="btn-confirm" :disabled="joining || !inviteCode.trim()" @click="handleJoin">
               {{ joining ? t('dashboard.btn_joining') : t('dashboard.btn_join') }}
             </button>
           </div>

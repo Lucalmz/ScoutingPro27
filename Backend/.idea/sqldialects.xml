@@ -4,5 +4,7 @@
     <file url="file://$PROJECT_DIR$/src/main/resources/db/V1__Init.sql" dialect="H2" />
     <file url="file://$PROJECT_DIR$/src/main/resources/db/V2__Add_Password.sql" dialect="H2" />
     <file url="file://$PROJECT_DIR$/src/main/resources/db/V3__Add_Username_Unique.sql" dialect="H2" />
+    <file url="file://$PROJECT_DIR$/src/main/resources/db/V4__Cascade_Delete_Records.sql" dialect="H2" />
+    <file url="file://$PROJECT_DIR$/src/main/resources/db/V5__Add_Event_Code_Year.sql" dialect="H2" />
   </component>
 </project>

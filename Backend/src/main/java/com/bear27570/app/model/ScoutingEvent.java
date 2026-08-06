@@ -4,8 +4,11 @@ public class ScoutingEvent {
     private String id;
     private String name;
     private String inviteCode;
-    private boolean isHost;
+    private String hostId;
     private String createdAt;
+
+    private Integer ftcYear;
+    private String ftcEventCode;
 
     public ScoutingEvent() {}
 
@@ -15,8 +18,12 @@ public class ScoutingEvent {
     public void setName(String name) { this.name = name; }
     public String getInviteCode() { return inviteCode; }
     public void setInviteCode(String inviteCode) { this.inviteCode = inviteCode; }
-    public boolean getIsHost() { return isHost; }
-    public void setIsHost(boolean host) { isHost = host; }
+    public String getHostId() { return hostId; }
+    public void setHostId(String hostId) { this.hostId = hostId; }
     public String getCreatedAt() { return createdAt; }
     public void setCreatedAt(String createdAt) { this.createdAt = createdAt; }
+    public Integer getFtcYear() { return ftcYear; }
+    public void setFtcYear(Integer ftcYear) { this.ftcYear = ftcYear; }
+    public String getFtcEventCode() { return ftcEventCode; }
+    public void setFtcEventCode(String ftcEventCode) { this.ftcEventCode = ftcEventCode; }
 }

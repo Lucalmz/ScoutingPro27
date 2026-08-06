@@ -12,6 +12,7 @@ import ConnectionStatus from '@/components/common/ConnectionStatus.vue'
 import ScoutingForm from '@/components/scouting/ScoutingForm.vue'
 import RankingsTable from '@/components/rankings/RankingsTable.vue'
 import HistoryList from '@/components/history/HistoryList.vue'
+import { updateEventFtcConfig } from '@/services/api'
 
 const route = useRoute()
 const router = useRouter()
@@ -21,12 +22,18 @@ const recordStore = useRecordStore()
 const connStore = useConnectionStore()
 const { t } = useI18n()
 
-const activeTab = ref<'scout' | 'rankings' | 'history'>('scout')
-const tabs = computed(() => [
-  { key: 'scout' as const, label: t('event.tab_scout') },
-  { key: 'rankings' as const, label: t('event.tab_rankings') },
-  { key: 'history' as const, label: t('event.tab_history') },
-])
+const activeTab = ref<'scout' | 'rankings' | 'history' | 'scouts'>('scout')
+const tabs = computed(() => {
+  const baseTabs: Array<{ key: 'scout' | 'rankings' | 'history' | 'scouts', label: string }> = [
+    { key: 'scout' as const, label: t('event.tab_scout') },
+    { key: 'rankings' as const, label: t('event.tab_rankings') },
+    { key: 'history' as const, label: t('event.tab_history') },
+  ]
+  if (eventStore.isHost) {
+    baseTabs.push({ key: 'scouts' as const, label: 'Scouts' })
+  }
+  return baseTabs
+})
 
 const eventId = computed(() => route.params.eventId as string)
 const event = computed(() => eventStore.currentEvent)
@@ -38,18 +45,20 @@ onMounted(async () => {
   }
 
   // Find event in store
-  const evt = eventStore.events.find((e) => e.id === eventId.value)
-  if (evt) {
-    eventStore.setCurrentEvent(evt)
-  } else if (eventId.value === 'joined') {
-    // Joined via invite - current event already set
-  } else {
-    router.replace('/dashboard')
-    return
+  let evt = eventStore.events.find((e) => e.id === eventId.value)
+  if (!evt) {
+    await eventStore.fetchEvents(userStore.userId)
+    evt = eventStore.events.find((e) => e.id === eventId.value)
+    if (!evt) {
+      router.replace('/dashboard')
+      return
+    }
   }
 
+  eventStore.setCurrentEvent(evt)
+
   // Load records
-  await recordStore.fetchRecords(eventId.value)
+  await recordStore.fetchRecords(eventId.value, evt.ftcYear, evt.ftcEventCode)
 
   // Set up WebRTC
   setupWebRTC()
@@ -84,7 +93,7 @@ async function setupWebRTC() {
   connStore.setRtcService(rtc)
 
   try {
-    if (evt.isHost) {
+    if (eventStore.isHost) {
       await rtc.host(evt.inviteCode)
     } else {
       await rtc.join(evt.inviteCode)
@@ -97,9 +106,9 @@ async function setupWebRTC() {
 
 watch(() => connStore.status, (status) => {
   const evt = eventStore.currentEvent
-  if (status === 'connected' && evt && !evt.isHost) {
+  if (status === 'connected' && evt && !eventStore.isHost) {
     // Client connected, request sync for new records
-    connStore.requestSync(new Date(0).toISOString())
+    connStore.requestSync(new Date(0).toISOString(), undefined, userStore.userId)
   }
 })
 
@@ -131,6 +140,54 @@ function goBack() {
   eventStore.setCurrentEvent(null)
   router.push('/dashboard')
 }
+
+const uniqueScouts = computed(() => {
+  const scouts = new Map<string, { id: string, name: string, recordCount: number }>()
+  for (const r of recordStore.records) {
+    if (!scouts.has(r.scoutId)) {
+      scouts.set(r.scoutId, { id: r.scoutId, name: r.scoutName, recordCount: 0 })
+    }
+    scouts.get(r.scoutId)!.recordCount++
+  }
+  return Array.from(scouts.values())
+})
+
+function sendDirectMessage(scoutId: string) {
+  if (connStore.rtcService?.sendDirectMessage) {
+    const msg = prompt('Enter message to send:')
+    if (msg) {
+      connStore.rtcService.sendDirectMessage({ targetId: scoutId, title: 'Message from Host', body: msg })
+    }
+  } else {
+    alert('Direct messaging not ready.')
+  }
+}
+
+// --- FTC Config Settings ---
+const settingsYear = ref(event.value?.ftcYear ?? 2025)
+const settingsCode = ref(event.value?.ftcEventCode ?? '')
+const isSavingSettings = ref(false)
+
+async function saveEventSettings() {
+  if (!event.value) return
+  isSavingSettings.value = true
+  try {
+    await updateEventFtcConfig(event.value.id, settingsYear.value, settingsCode.value.trim())
+    
+    // Update local store
+    event.value.ftcYear = settingsYear.value
+    event.value.ftcEventCode = settingsCode.value.trim()
+    
+    // Re-fetch records/matches
+    await recordStore.fetchRecords(event.value.id, event.value.ftcYear, event.value.ftcEventCode)
+    
+    alert('Settings saved and official matches synced successfully!')
+  } catch (e: any) {
+    alert('Failed to save settings: ' + (e.message || String(e)))
+  } finally {
+    isSavingSettings.value = false
+  }
+}
 </script>
 
 <template>
@@ -143,7 +200,7 @@ function goBack() {
           <span class="event-name">{{ event?.name ?? t('event.event') }}</span>
           <span v-if="event" class="event-code">
             {{ t('event.code') }}: <strong>{{ event.inviteCode }}</strong>
-            - {{ event.isHost ? t('event.host') : t('event.client') }}
+            - {{ eventStore.isHost ? t('event.host') : t('event.client') }}
           </span>
         </div>
       </div>
@@ -153,7 +210,7 @@ function goBack() {
     </header>
 
     <!-- Tab Bar -->
-    <nav class="tab-bar">
+    <nav class="tab-bar" :style="{ '--indicator-width': 100 / tabs.length + '%' }">
       <div 
         class="tab-indicator"
         :style="{ transform: `translateX(${tabs.findIndex(t => t.key === activeTab) * 100}%)` }"
@@ -179,6 +236,7 @@ function goBack() {
           :scout-name="userStore.username"
           :edit-record="editingRecord"
           @submit="onRecordSubmitted"
+          @cancelEdit="editingRecord = null"
         />
         <RankingsTable
           v-else-if="activeTab === 'rankings'"
@@ -191,6 +249,32 @@ function goBack() {
           :loading="recordStore.loading"
           @editRecord="handleEditRecord"
         />
+        <div v-else-if="activeTab === 'scouts'">
+          <div class="settings-panel">
+            <h2>Event Settings</h2>
+            <div class="settings-form">
+              <div class="form-group">
+                <label>FTC Season (Year)</label>
+                <input type="number" v-model="settingsYear" :disabled="isSavingSettings" />
+              </div>
+              <div class="form-group">
+                <label>Event Code</label>
+                <input type="text" v-model="settingsCode" placeholder="e.g. CNCMPLB" :disabled="isSavingSettings" />
+              </div>
+              <button class="btn-primary" @click="saveEventSettings" :disabled="isSavingSettings">
+                {{ isSavingSettings ? 'Saving...' : 'Save & Sync Official Data' }}
+              </button>
+            </div>
+          </div>
+
+          <h2>Scouts</h2>
+          <ul class="scouts-list">
+            <li v-for="s in uniqueScouts" :key="s.id" class="scout-item">
+              <span class="scout-info">{{ s.name }} (Records: {{ s.recordCount }})</span>
+              <button @click="sendDirectMessage(s.id)" class="btn-msg">Send Message</button>
+            </li>
+          </ul>
+        </div>
       </Transition>
     </main>
   </div>
@@ -261,7 +345,7 @@ function goBack() {
   position: absolute;
   bottom: -2px;
   left: 0;
-  width: 33.333%;
+  width: var(--indicator-width, 33.333%);
   height: 3px;
   background: var(--primary);
   transition: transform 0.3s cubic-bezier(0.4, 0, 0.2, 1);
@@ -294,6 +378,86 @@ function goBack() {
   flex: 1;
   padding: 24px;
   overflow-y: auto;
+}
+
+.scouts-list {
+  list-style: none;
+  padding: 0;
+  margin: 0;
+}
+
+.scout-item {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 12px;
+  background: var(--card);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  margin-bottom: 8px;
+}
+
+.scout-info {
+  font-weight: 500;
+}
+
+.btn-msg {
+  background: var(--primary);
+  color: var(--primary-foreground);
+  border: none;
+  border-radius: 6px;
+  padding: 6px 12px;
+  cursor: pointer;
+  font-size: 13px;
+  font-weight: 600;
+}
+
+.btn-msg:hover {
+  filter: brightness(1.1);
+}
+
+.settings-panel {
+  background: var(--card);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 16px;
+  margin-bottom: 24px;
+}
+.settings-form {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  margin-top: 12px;
+}
+.form-group {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.form-group label {
+  font-size: 14px;
+  font-weight: 500;
+}
+.form-group input {
+  padding: 8px;
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  background: var(--input);
+  color: var(--foreground);
+}
+.btn-primary {
+  background: var(--primary);
+  color: var(--primary-foreground);
+  border: none;
+  padding: 10px;
+  border-radius: 6px;
+  font-weight: 600;
+  cursor: pointer;
+  margin-top: 8px;
+}
+.btn-primary:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
 }
 </style>
 

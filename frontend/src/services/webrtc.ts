@@ -3,7 +3,8 @@
 // ============================================================
 
 import mqtt from 'mqtt'
-import type { WebRtcMessage, ScoutingRecord, ConnectionStatus } from '@/types'
+import type { WebRtcMessage, ScoutingRecord, ConnectionStatus, WebRtcDirectMessage } from '@/types'
+import { useInboxStore } from '@/stores/inbox'
 
 // ---------- Configuration ----------
 
@@ -19,13 +20,21 @@ const STUN_SERVERS: RTCConfiguration = {
  */
 class SignalingChannel {
   private client: mqtt.MqttClient | null = null
-  private topic: string
+  private topic: string = ''
   private clientId: string
   private messageCallback: ((data: unknown) => void) | null = null
 
   constructor(private room: string) {
-    this.topic = `scoutingpro27/signal/${room}`
     this.clientId = `sp27-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`
+  }
+
+  async initTopic() {
+    const encoder = new TextEncoder()
+    const data = encoder.encode(this.room + "-scoutingpro27")
+    const hashBuffer = await crypto.subtle.digest('SHA-256', data)
+    const hashArray = Array.from(new Uint8Array(hashBuffer))
+    const hashHex = hashArray.map(b => b.toString(16).padStart(2, '0')).join('')
+    this.topic = `scoutingpro27/signal/${hashHex}`
   }
 
   connect(callbacks: {
@@ -113,6 +122,8 @@ export function createWebRtcService(callbacks: WebRtcCallbacks) {
   const clients = new Map<string, { pc: RTCPeerConnection, dc?: RTCDataChannel, pendingCandidates: RTCIceCandidateInit[] }>()
   const preOfferCandidates = new Map<string, RTCIceCandidateInit[]>()
   const hostQueues = new Map<string, Promise<void>>()
+  const scoutIdToClientId = new Map<string, string>()
+  const offlineMessages = new Map<string, WebRtcDirectMessage[]>()
 
   function enqueueHostTask(sender: string, task: () => Promise<void>) {
     const q = hostQueues.get(sender) || Promise.resolve()
@@ -179,6 +190,14 @@ export function createWebRtcService(callbacks: WebRtcCallbacks) {
 
     switch (msg.type) {
       case 'REQUEST_SYNC':
+        if (msg.senderUserId && senderId) {
+          scoutIdToClientId.set(msg.senderUserId, senderId)
+          const pending = offlineMessages.get(msg.senderUserId)
+          if (pending && pending.length > 0) {
+            pending.forEach(m => sendMessage(m, senderId))
+            offlineMessages.delete(msg.senderUserId)
+          }
+        }
         callbacks.onRequestSync(msg.lastSyncTime || '', senderId)
         break
       case 'SYNC_DATA':
@@ -199,6 +218,17 @@ export function createWebRtcService(callbacks: WebRtcCallbacks) {
         break
       case 'ACK_SYNC':
         callbacks.onAckReceived(msg.recordIds)
+        break
+      case 'DIRECT_MESSAGE':
+        // As a host, direct messages are sent BY the host via sendDirectMessage,
+        // but if a client sends one to the host, it will just show up in the host's inbox.
+        // We do not relay DMs between clients currently.
+        const inboxStore = useInboxStore()
+        inboxStore.addMessage({
+          title: msg.title,
+          body: msg.body,
+          type: 'direct'
+        })
         break
     }
   }
@@ -248,6 +278,7 @@ export function createWebRtcService(callbacks: WebRtcCallbacks) {
     currentInviteCode = inviteCode
     setStatus('connecting')
     signaling = new SignalingChannel(inviteCode)
+    await signaling.initTopic()
 
     signaling.connect({
       onConnect: () => {
@@ -327,6 +358,7 @@ export function createWebRtcService(callbacks: WebRtcCallbacks) {
     currentInviteCode = inviteCode
     setStatus('connecting')
     signaling = new SignalingChannel(inviteCode)
+    await signaling.initTopic()
     
     clientPendingCandidates = []
     clientPc = createPeerConnection()
@@ -339,9 +371,16 @@ export function createWebRtcService(callbacks: WebRtcCallbacks) {
     signaling.connect({
       onConnect: async () => {
         if (!clientPc) return
-        const offer = await clientPc.createOffer()
-        await clientPc.setLocalDescription(offer)
-        signaling!.send({ offer })
+        try {
+          const offer = await clientPc.createOffer()
+          await clientPc.setLocalDescription(offer)
+          signaling!.send({ offer })
+        } catch (err) {
+          console.error('Error creating offer:', err)
+          if (status !== 'connected' && (!clientPc || clientPc.connectionState !== 'connected')) {
+            setStatus('offline')
+          }
+        }
       },
       onError: () => {
         if (status !== 'connected' && (!clientPc || clientPc.connectionState !== 'connected')) {
@@ -350,11 +389,15 @@ export function createWebRtcService(callbacks: WebRtcCallbacks) {
       },
       onMessage: async (data: any) => {
         if (data.answer && clientPc) {
-          await clientPc.setRemoteDescription(new RTCSessionDescription(data.answer))
-          for (const c of clientPendingCandidates) {
-            await clientPc.addIceCandidate(new RTCIceCandidate(c))
+          try {
+            await clientPc.setRemoteDescription(new RTCSessionDescription(data.answer))
+            for (const c of clientPendingCandidates) {
+              await clientPc.addIceCandidate(new RTCIceCandidate(c))
+            }
+            clientPendingCandidates = []
+          } catch (err) {
+            console.error('Error setting remote description:', err)
           }
-          clientPendingCandidates = []
         } else if (data.candidate && clientPc) {
           try {
             await clientPc.addIceCandidate(new RTCIceCandidate(data.candidate))
@@ -367,8 +410,8 @@ export function createWebRtcService(callbacks: WebRtcCallbacks) {
   }
 
   // --- request a sync from the connected peer ---
-  function requestSync(lastSyncTime: string, authCode?: string) {
-    sendMessage({ type: 'REQUEST_SYNC', lastSyncTime, authCode: authCode || currentInviteCode })
+  function requestSync(lastSyncTime: string, authCode?: string, senderUserId?: string) {
+    sendMessage({ type: 'REQUEST_SYNC', lastSyncTime, authCode: authCode || currentInviteCode, senderUserId })
   }
 
   // --- push records to the connected peer ---
@@ -379,6 +422,39 @@ export function createWebRtcService(callbacks: WebRtcCallbacks) {
   // --- acknowledge received records ---
   function ackRecords(recordIds: string[], targetId?: string) {
     sendMessage({ type: 'ACK_SYNC', recordIds, authCode: currentInviteCode }, targetId)
+  }
+
+  // --- send a direct message ---
+  function sendDirectMessage(payload: { targetId: string, title: string, body: string }) {
+    const directMsg: WebRtcDirectMessage = {
+      type: 'DIRECT_MESSAGE',
+      targetId: payload.targetId,
+      title: payload.title,
+      body: payload.body,
+      authCode: currentInviteCode
+    }
+
+    if (isHostMode) {
+      const clientId = scoutIdToClientId.get(payload.targetId)
+      let sent = false
+      if (clientId) {
+        const targetClient = clients.get(clientId)
+        if (targetClient && targetClient.dc && targetClient.dc.readyState === 'open') {
+          targetClient.dc.send(JSON.stringify(directMsg))
+          sent = true
+        }
+      }
+      
+      if (!sent) {
+        // Queue it for offline delivery
+        const queue = offlineMessages.get(payload.targetId) || []
+        queue.push(directMsg)
+        offlineMessages.set(payload.targetId, queue)
+      }
+    } else {
+      // Client sending
+      sendMessage(directMsg)
+    }
   }
 
   // --- tear down ---
@@ -408,6 +484,7 @@ export function createWebRtcService(callbacks: WebRtcCallbacks) {
     requestSync,
     pushRecords,
     ackRecords,
+    sendDirectMessage,
     disconnect,
     getStatus: () => status,
     getDataChannel: () => isHostMode ? (clients.values().next().value?.dc || null) : clientDc,

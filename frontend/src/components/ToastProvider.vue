@@ -1,4 +1,4 @@
-﻿<script setup lang="ts">
+<script setup lang="ts">
 import { useToastStore } from '@/stores/toast'
 
 const toastStore = useToastStore()
@@ -48,6 +48,7 @@ const toastStore = useToastStore()
 .toast-error {
   border-left: 4px solid var(--status-error);
   background: rgba(127, 29, 29, 0.9);
+  box-shadow: 0 0 15px rgba(239, 68, 68, 0.5);
 }
 
 .toast-success {

@@ -11,7 +11,7 @@ vi.mock('../services/api', () => ({
   markRecordsSynced: vi.fn()
 }))
 
-const createDummyRecord = (id: string, teamNumber: number, autoScore: number, teleopScore: number, endgameScore: number, scoutId = 's1', syncStatus = 'PENDING'): ScoutingRecord => ({
+const createDummyRecord = (id: string, teamNumber: number, autoScore: number, teleopScore: number, endgameScore: number, scoutId = 's1', syncStatus = 'PENDING', allianceColor = 'none'): ScoutingRecord => ({
   id,
   eventId: 'e1',
   scoutId,
@@ -23,7 +23,7 @@ const createDummyRecord = (id: string, teamNumber: number, autoScore: number, te
   endgameScore,
   totalScore: autoScore + teleopScore + endgameScore,
   notes: '',
-  rawData: '{}',
+  rawData: JSON.stringify({ allianceColor }),
   syncStatus: syncStatus as any,
   createdAt: '',
   updatedAt: ''
@@ -35,23 +35,29 @@ describe('Records Store', () => {
     vi.clearAllMocks()
   })
 
-  it('rankings computation', () => {
+  it('rankings computation with allianceColor and splitting logic', () => {
     const store = useRecordStore()
     store.records = [
-      createDummyRecord('r1', 118, 10, 20, 10), // total 40
-      createDummyRecord('r2', 118, 20, 30, 10), // total 60 (max)
-      createDummyRecord('r3', 254, 30, 40, 20)  // total 90
+      createDummyRecord('r1', 118, 10, 20, 10, 's1', 'PENDING', 'red'), // total 40
+      createDummyRecord('r2', 118, 20, 30, 10, 's2', 'PENDING', 'blue'), // total 60 (max)
+      createDummyRecord('r3', 254, 30, 40, 20, 's1', 'PENDING', 'red'),  // total 90
+      createDummyRecord('r4', 254, 10, 10, 10, 's2', 'PENDING', 'blue')  // total 30
     ]
     
     const rankings = store.rankings
     expect(rankings).toHaveLength(2)
     // Sorted by totalScore descending
-    expect(rankings[0].teamNumber).toBe(118) // total 100
-    expect(rankings[0].maxScore).toBe(60)
-    expect(rankings[0].avgAutoScore).toBe(15) // (10+20)/2
+    expect(rankings[0].teamNumber).toBe(254) // total 120
+    expect(rankings[0].maxScore).toBe(90)
+    expect(rankings[0].avgAutoScore).toBe(20) // (30+10)/2
     
-    expect(rankings[1].teamNumber).toBe(254) // total 90
-    expect(rankings[1].maxScore).toBe(90)
+    expect(rankings[1].teamNumber).toBe(118) // total 100
+    expect(rankings[1].maxScore).toBe(60)
+    expect(rankings[1].avgAutoScore).toBe(15) // (10+20)/2
+
+    // Check that allianceColor is stored correctly in rawData
+    const r1Data = JSON.parse(store.records[0].rawData)
+    expect(r1Data.allianceColor).toBe('red')
   })
 
   it('addRecord', async () => {

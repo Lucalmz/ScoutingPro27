@@ -57,7 +57,12 @@ async function handleLogin() {
     return
   }
   submitted.value = true
-  const ok = await userStore.login(username.value.trim(), password.value.trim())
+  let ok = false
+  if (isNewUser.value) {
+    ok = await userStore.register(username.value.trim(), password.value.trim())
+  } else {
+    ok = await userStore.login(username.value.trim(), password.value.trim())
+  }
   submitted.value = false
   if (ok) {
     router.push('/dashboard')
@@ -76,9 +81,10 @@ async function handleLogin() {
     
     <div class="login-card">
       <div class="logo-area">
-        <span class="material-icons logo-icon">explore</span>
+        <span class="material-icons logo-icon">hive</span>
         <h1>ScoutingPro 27</h1>
         <p class="subtitle">{{ t('login.title') }}</p>
+        <p class="powered-by">powered by 27570 B.E.A.R. and 25787 TechBY</p>
       </div>
 
       <form @submit.prevent="handleLogin">
@@ -194,6 +200,13 @@ h1 {
   color: var(--muted-foreground);
   font-size: 13px;
   margin: 0;
+}
+
+.powered-by {
+  color: var(--muted-foreground);
+  font-size: 11px;
+  margin-top: 8px;
+  opacity: 0.8;
 }
 
 label {

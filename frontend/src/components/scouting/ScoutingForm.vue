@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { ref, computed, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
+import { useRecordStore } from '@/stores/records'
 import type { ScoutingRecord, ScoutingFormData } from '@/types'
 
 const { t } = useI18n()
@@ -14,6 +15,7 @@ const props = defineProps<{
 
 const emit = defineEmits<{
   submit: [record: ScoutingRecord | ScoutingRecord[]]
+  cancelEdit: []
 }>()
 
 // --- Form State ---
@@ -23,25 +25,29 @@ const matchNumber = ref(1)
 
 interface TeamScoutData {
   teamNumber: number | null
-  autoMoved: boolean
-  autoParked: boolean
-  autoPixelsPlaced: number
-  teleOpPixelsScored: number
-  teleOpPixelsMissed: number
-  endgameHang: 'none' | 'low' | 'high'
-  endgameDrone: boolean
+  autoClassified: number
+  autoOverflow: number
+  autoPatterns: number
+  autoMovementScore: number
+  teleopClassified: number
+  teleopOverflow: number
+  gatesTriggered: number
+  baseScore: number
+  supportMultiplier: number
 }
 
 function createEmptyTeam(): TeamScoutData {
   return {
     teamNumber: null,
-    autoMoved: false,
-    autoParked: false,
-    autoPixelsPlaced: 0,
-    teleOpPixelsScored: 0,
-    teleOpPixelsMissed: 0,
-    endgameHang: 'none',
-    endgameDrone: false
+    autoClassified: 0,
+    autoOverflow: 0,
+    autoPatterns: 0,
+    autoMovementScore: 0,
+    teleopClassified: 0,
+    teleopOverflow: 0,
+    gatesTriggered: 0,
+    baseScore: 5,
+    supportMultiplier: 0
   }
 }
 
@@ -50,13 +56,12 @@ const teamsData = ref<TeamScoutData[]>([createEmptyTeam()])
 watch(scoutMode, (mode) => {
   if (mode === 'alliance' && teamsData.value.length === 1) {
     teamsData.value.push(createEmptyTeam())
-  } else if (mode === 'single' && teamsData.value.length === 2) {
-    teamsData.value.pop()
   }
 })
 
 const submitting = ref(false)
 const submitStatus = ref<'none' | 'success' | 'error'>('none')
+const submitErrorMsg = ref('')
 const previousScoutMode = ref<'single' | 'alliance'>('single')
 
 watch(() => props.editRecord, (rec: ScoutingRecord | null | undefined) => {
@@ -65,66 +70,90 @@ watch(() => props.editRecord, (rec: ScoutingRecord | null | undefined) => {
       previousScoutMode.value = scoutMode.value
       scoutMode.value = 'single'
     }
-    const raw = JSON.parse(rec.rawData)
+    let raw: Partial<ScoutingFormData> = {}
+    try {
+      raw = JSON.parse(rec.rawData) as Partial<ScoutingFormData>
+    } catch {
+      // Fallback to empty if corrupted
+    }
     matchNumber.value = rec.matchNumber
     allianceColor.value = raw.allianceColor || 'none'
     teamsData.value = [{
       teamNumber: rec.teamNumber,
-      autoMoved: raw.autoMoved,
-      autoParked: raw.autoParked,
-      autoPixelsPlaced: raw.autoPixelsPlaced,
-      teleOpPixelsScored: raw.teleOpPixelsScored,
-      teleOpPixelsMissed: raw.teleOpPixelsMissed,
-      endgameHang: raw.endgameHang,
-      endgameDrone: raw.endgameDrone
+      autoClassified: raw.autoClassified ?? 0,
+      autoOverflow: raw.autoOverflow ?? 0,
+      autoPatterns: raw.autoPatterns ?? 0,
+      autoMovementScore: raw.autoMovementScore ?? 0,
+      teleopClassified: raw.teleopClassified ?? 0,
+      teleopOverflow: raw.teleopOverflow ?? 0,
+      gatesTriggered: raw.gatesTriggered ?? 0,
+      baseScore: raw.baseScore ?? 5,
+      supportMultiplier: raw.supportMultiplier ?? 0
     }]
   }
 }, { immediate: true })
 
 function calcTeamTotal(team: TeamScoutData) {
-  const auto = (team.autoMoved ? 2 : 0) + (team.autoParked ? 5 : 0) + team.autoPixelsPlaced * 5
-  const teleop = team.teleOpPixelsScored * 2 - team.teleOpPixelsMissed
-  const endgame = (team.endgameHang === 'low' ? 10 : team.endgameHang === 'high' ? 20 : 0)
-    + (team.endgameDrone ? 15 : 0)
+  const auto = (3 * team.autoClassified) + (1 * team.autoOverflow) + (2 * team.autoPatterns) + (Number(team.autoMovementScore) || 0)
+  const teleop = (3 * team.teleopClassified) + (1 * team.teleopOverflow) + (1.5 * team.gatesTriggered)
+  const endgame = team.baseScore + (team.supportMultiplier * 18)
   return auto + teleop + endgame
 }
 
 const isFormValid = computed(() => {
   const isMatchValid = matchNumber.value > 0
-  const areTeamsValid = teamsData.value.every(t => t.teamNumber !== null && t.teamNumber > 0)
+  const activeTeams = scoutMode.value === 'single' ? teamsData.value.slice(0, 1) : teamsData.value
+  const areTeamsValid = activeTeams.every(t => t.teamNumber !== null && t.teamNumber > 0)
   const isColorValid = allianceColor.value !== 'none'
-  const isUnique = new Set(teamsData.value.map(t => t.teamNumber)).size === teamsData.value.length
+  const isUnique = new Set(activeTeams.map(t => t.teamNumber)).size === activeTeams.length
   return isMatchValid && areTeamsValid && isColorValid && isUnique
 })
 
 async function handleSubmit() {
   if (!isFormValid.value) {
     submitStatus.value = 'error'
+    submitErrorMsg.value = t('scouting.submit_failed')
     setTimeout(() => { submitStatus.value = 'none' }, 2000)
     return
   }
+  
+  const recordStore = useRecordStore()
+  const activeTeams = scoutMode.value === 'single' ? teamsData.value.slice(0, 1) : teamsData.value
+
+  if (!props.editRecord) {
+    for (const team of activeTeams) {
+      if (recordStore.records.some(r => r.matchNumber === matchNumber.value && r.teamNumber === team.teamNumber)) {
+        submitStatus.value = 'error'
+        submitErrorMsg.value = `Duplicate: Match ${matchNumber.value}, Team ${team.teamNumber}`
+        setTimeout(() => { submitStatus.value = 'none' }, 2000)
+        return
+      }
+    }
+  }
+
   submitting.value = true
   submitStatus.value = 'none'
 
   try {
-    const records: ScoutingRecord[] = teamsData.value.map(team => {
-      const auto = (team.autoMoved ? 2 : 0) + (team.autoParked ? 5 : 0) + team.autoPixelsPlaced * 5
-      const teleop = team.teleOpPixelsScored * 2 - team.teleOpPixelsMissed
-      const endgame = (team.endgameHang === 'low' ? 10 : team.endgameHang === 'high' ? 20 : 0)
-        + (team.endgameDrone ? 15 : 0)
+    const records: ScoutingRecord[] = activeTeams.map(team => {
+      const auto = (3 * team.autoClassified) + (1 * team.autoOverflow) + (2 * team.autoPatterns) + (Number(team.autoMovementScore) || 0)
+      const teleop = (3 * team.teleopClassified) + (1 * team.teleopOverflow) + (1.5 * team.gatesTriggered)
+      const endgame = team.baseScore + (team.supportMultiplier * 18)
       const total = auto + teleop + endgame
 
       const formData: ScoutingFormData = {
         matchNumber: matchNumber.value,
         teamNumber: team.teamNumber!,
         allianceColor: allianceColor.value,
-        autoMoved: team.autoMoved,
-        autoParked: team.autoParked,
-        autoPixelsPlaced: team.autoPixelsPlaced,
-        teleOpPixelsScored: team.teleOpPixelsScored,
-        teleOpPixelsMissed: team.teleOpPixelsMissed,
-        endgameHang: team.endgameHang,
-        endgameDrone: team.endgameDrone,
+        autoClassified: team.autoClassified,
+        autoOverflow: team.autoOverflow,
+        autoPatterns: team.autoPatterns,
+        autoMovementScore: team.autoMovementScore,
+        teleopClassified: team.teleopClassified,
+        teleopOverflow: team.teleopOverflow,
+        gatesTriggered: team.gatesTriggered,
+        baseScore: team.baseScore,
+        supportMultiplier: team.supportMultiplier
       }
 
       return {
@@ -165,6 +194,10 @@ async function handleSubmit() {
       allianceColor.value = 'none'
     }
 
+    if (props.editRecord) {
+      emit('cancelEdit')
+    }
+
   } catch (err) {
     submitStatus.value = 'error'
   } finally {
@@ -200,10 +233,9 @@ const wrapperClass = computed(() => {
         <div class="setting-group">
           <span>{{ t('scouting.alliance_color') }}</span>
           <div class="spdt-switch" :class="'pos-' + allianceColor">
-            <div class="spdt-thumb"></div>
+            <div class="spdt-thumb" v-show="allianceColor !== 'none'"></div>
             <div class="spdt-labels">
               <span @click="allianceColor = 'red'" :class="{ active: allianceColor === 'red' }">{{ t('scouting.red') }}</span>
-              <span @click="allianceColor = 'none'" :class="{ active: allianceColor === 'none' }">{{ t('scouting.none') }}</span>
               <span @click="allianceColor = 'blue'" :class="{ active: allianceColor === 'blue' }">{{ t('scouting.blue') }}</span>
             </div>
           </div>
@@ -216,13 +248,13 @@ const wrapperClass = computed(() => {
         <div class="field-row">
           <label class="field">
             <span>{{ t('scouting.match_number') }}</span>
-            <input v-model.number="matchNumber" type="number" min="1" />
+            <input v-model.number="matchNumber" type="number" min="1" max="999" />
           </label>
         </div>
       </section>
 
       <div class="teams-grid" :class="{ 'alliance-grid': scoutMode === 'alliance' }">
-        <div v-for="(team, index) in teamsData" :key="index" class="team-column">
+        <div v-for="(team, index) in (scoutMode === 'single' ? teamsData.slice(0, 1) : teamsData)" :key="index" class="team-column">
           <h2 class="team-header" v-if="scoutMode === 'alliance'">
             {{ index === 0 ? t('scouting.team_1') : t('scouting.team_2') }}: #{{ team.teamNumber || '?' }}
           </h2>
@@ -231,7 +263,7 @@ const wrapperClass = computed(() => {
             <div class="field-row">
               <label class="field">
                 <span>{{ t('scouting.team_number') }}</span>
-                <input v-model.number="team.teamNumber" type="number" min="1" placeholder="e.g. 12345" />
+                <input v-model.number="team.teamNumber" type="number" min="1" max="99999" placeholder="e.g. 12345" />
               </label>
             </div>
           </section>
@@ -239,22 +271,36 @@ const wrapperClass = computed(() => {
           <!-- Autonomous -->
           <section class="form-section">
             <h3><span class="material-icons">smart_toy</span> {{ t('scouting.autonomous') }}</h3>
-            <div class="toggle-row">
-              <label class="toggle">
-                <input v-model="team.autoMoved" type="checkbox" />
-                <span>{{ t('scouting.auto_moved') }}</span>
+            <div class="field-row">
+              <label class="field">
+                <span>{{ t('scouting.movement') }}</span>
+                <input v-model.number="team.autoMovementScore" type="number" max="999" />
               </label>
-              <label class="toggle">
-                <input v-model="team.autoParked" type="checkbox" />
-                <span>{{ t('scouting.auto_parked') }}</span>
-              </label>
+              <div class="counter-field" style="flex: 1">
+                <span>{{ t('scouting.patterns') }}</span>
+                <div class="counter">
+                  <button type="button" class="counter-btn" @click="team.autoPatterns > 0 && team.autoPatterns--">-</button>
+                  <span class="counter-val">{{ team.autoPatterns }}</span>
+                  <button type="button" class="counter-btn" @click="team.autoPatterns < 99 && team.autoPatterns++">+</button>
+                </div>
+              </div>
             </div>
-            <div class="counter-field">
-              <span>{{ t('scouting.pixels_placed') }}</span>
-              <div class="counter">
-                <button type="button" class="counter-btn" @click="team.autoPixelsPlaced > 0 && team.autoPixelsPlaced--">-</button>
-                <span class="counter-val">{{ team.autoPixelsPlaced }}</span>
-                <button type="button" class="counter-btn" @click="team.autoPixelsPlaced++">+</button>
+            <div class="field-row" style="margin-top: 12px">
+              <div class="counter-field" style="flex: 1">
+                <span>{{ t('scouting.classified') }}</span>
+                <div class="counter">
+                  <button type="button" class="counter-btn" @click="team.autoClassified > 0 && team.autoClassified--">-</button>
+                  <span class="counter-val">{{ team.autoClassified }}</span>
+                  <button type="button" class="counter-btn" @click="team.autoClassified < 99 && team.autoClassified++">+</button>
+                </div>
+              </div>
+              <div class="counter-field" style="flex: 1">
+                <span>{{ t('scouting.overflow') }}</span>
+                <div class="counter">
+                  <button type="button" class="counter-btn" @click="team.autoOverflow > 0 && team.autoOverflow--">-</button>
+                  <span class="counter-val">{{ team.autoOverflow }}</span>
+                  <button type="button" class="counter-btn" @click="team.autoOverflow < 99 && team.autoOverflow++">+</button>
+                </div>
               </div>
             </div>
           </section>
@@ -262,20 +308,32 @@ const wrapperClass = computed(() => {
           <!-- TeleOp -->
           <section class="form-section">
             <h3><span class="material-icons">sports_esports</span> {{ t('scouting.teleop') }}</h3>
-            <div class="counter-field">
-              <span>{{ t('scouting.pixels_scored') }}</span>
-              <div class="counter">
-                <button type="button" class="counter-btn" @click="team.teleOpPixelsScored > 0 && team.teleOpPixelsScored--">-</button>
-                <span class="counter-val">{{ team.teleOpPixelsScored }}</span>
-                <button type="button" class="counter-btn" @click="team.teleOpPixelsScored++">+</button>
+            <div class="field-row">
+              <div class="counter-field" style="flex: 1">
+                <span>{{ t('scouting.gates') }}</span>
+                <div class="counter">
+                  <button type="button" class="counter-btn" @click="team.gatesTriggered > 0 && team.gatesTriggered--">-</button>
+                  <span class="counter-val">{{ team.gatesTriggered }}</span>
+                  <button type="button" class="counter-btn" @click="team.gatesTriggered < 99 && team.gatesTriggered++">+</button>
+                </div>
               </div>
             </div>
-            <div class="counter-field">
-              <span>{{ t('scouting.pixels_missed') }}</span>
-              <div class="counter">
-                <button type="button" class="counter-btn" @click="team.teleOpPixelsMissed > 0 && team.teleOpPixelsMissed--">-</button>
-                <span class="counter-val">{{ team.teleOpPixelsMissed }}</span>
-                <button type="button" class="counter-btn" @click="team.teleOpPixelsMissed++">+</button>
+            <div class="field-row" style="margin-top: 12px">
+              <div class="counter-field" style="flex: 1">
+                <span>{{ t('scouting.classified') }}</span>
+                <div class="counter">
+                  <button type="button" class="counter-btn" @click="team.teleopClassified > 0 && team.teleopClassified--">-</button>
+                  <span class="counter-val">{{ team.teleopClassified }}</span>
+                  <button type="button" class="counter-btn" @click="team.teleopClassified < 99 && team.teleopClassified++">+</button>
+                </div>
+              </div>
+              <div class="counter-field" style="flex: 1">
+                <span>{{ t('scouting.overflow') }}</span>
+                <div class="counter">
+                  <button type="button" class="counter-btn" @click="team.teleopOverflow > 0 && team.teleopOverflow--">-</button>
+                  <span class="counter-val">{{ team.teleopOverflow }}</span>
+                  <button type="button" class="counter-btn" @click="team.teleopOverflow < 99 && team.teleopOverflow++">+</button>
+                </div>
               </div>
             </div>
           </section>
@@ -284,16 +342,15 @@ const wrapperClass = computed(() => {
           <section class="form-section">
             <h3><span class="material-icons">flag</span> {{ t('scouting.endgame') }}</h3>
             <div class="field">
-              <span>{{ t('scouting.suspended') }}</span>
-              <select v-model="team.endgameHang">
-                <option value="none">{{ t('scouting.hang_none') }}</option>
-                <option value="low">{{ t('scouting.hang_low') }}</option>
-                <option value="high">{{ t('scouting.hang_high') }}</option>
+              <span>{{ t('scouting.base_score') }}</span>
+              <select v-model.number="team.baseScore">
+                <option :value="5">5 pts</option>
+                <option :value="10">10 pts</option>
               </select>
             </div>
             <label class="toggle" style="margin-top: 10px">
-              <input v-model="team.endgameDrone" type="checkbox" />
-              <span>{{ t('scouting.drone_pts') }}</span>
+              <input v-model="team.supportMultiplier" :true-value="1" :false-value="0" type="checkbox" />
+              <span>{{ t('scouting.support') }}</span>
             </label>
           </section>
           
@@ -307,23 +364,29 @@ const wrapperClass = computed(() => {
       <!-- Submit area -->
       <div class="submit-area">
         <div class="submit-status-msg" v-if="submitStatus === 'success'"><span class="material-icons">check_circle</span> {{ t('scouting.submitted') }}</div>
-        <div class="submit-status-msg error" v-else-if="submitStatus === 'error'"><span class="material-icons">error</span> {{ t('scouting.submit_failed') }}</div>
+        <div class="submit-status-msg error" v-else-if="submitStatus === 'error'"><span class="material-icons">error</span> {{ submitErrorMsg || t('scouting.submit_failed') }}</div>
         <div v-else></div>
 
-        <button 
-          type="submit" 
-          :disabled="submitting" 
-          class="btn-submit" 
-          :class="{ 'btn-edit-mode': !!editRecord }"
-        >
-          <span class="material-icons" v-if="!submitting">cloud_upload</span>
-          <template v-if="editRecord">
-            {{ submitting ? t('scouting.saving') : t('scouting.submit_edit') }}
-          </template>
-          <template v-else>
-            {{ submitting ? t('scouting.saving') : t('scouting.submit') }}
-          </template>
-        </button>
+        <div style="display: flex; gap: 12px;">
+          <button v-if="editRecord" type="button" class="btn-cancel" @click="$emit('cancelEdit')">
+            <span class="material-icons">close</span> Cancel
+          </button>
+
+          <button 
+            type="submit" 
+            :disabled="submitting || !isFormValid" 
+            class="btn-submit" 
+            :class="{ 'btn-edit-mode': !!editRecord }"
+          >
+            <span class="material-icons" v-if="!submitting">{{ editRecord ? 'edit' : 'cloud_upload' }}</span>
+            <template v-if="editRecord">
+              {{ submitting ? t('scouting.saving') : t('history.btn_save') }}
+            </template>
+            <template v-else>
+              {{ submitting ? t('scouting.saving') : t('scouting.submit') }}
+            </template>
+          </button>
+        </div>
       </div>
     </form>
   </div>
@@ -333,8 +396,8 @@ const wrapperClass = computed(() => {
 .scouting-wrapper {
   position: relative;
   transition: box-shadow 0.5s ease, background 0.5s ease;
-  border-radius: 16px;
-  padding: 16px;
+  border-radius: 24px;
+  padding: 24px;
   z-index: 1;
 }
 
@@ -342,25 +405,39 @@ const wrapperClass = computed(() => {
   content: '';
   position: absolute;
   inset: 0;
-  border-radius: 16px;
+  border-radius: 24px;
   pointer-events: none;
   transition: opacity 0.5s ease, box-shadow 0.5s ease;
   opacity: 0;
   z-index: -1;
 }
 
-@keyframes randomFlickerGlow {
-  0% { opacity: 0.5; transform: scale(1); }
-  7% { opacity: 0.9; transform: scale(1.02); }
-  14% { opacity: 0.4; transform: scale(0.99); }
-  22% { opacity: 0.8; transform: scale(1.01); }
-  35% { opacity: 0.3; transform: scale(0.98); }
-  42% { opacity: 1; transform: scale(1.03); }
-  55% { opacity: 0.6; transform: scale(1); }
-  68% { opacity: 0.9; transform: scale(1.015); }
-  80% { opacity: 0.4; transform: scale(0.995); }
-  92% { opacity: 0.85; transform: scale(1.01); }
-  100% { opacity: 0.5; transform: scale(1); }
+@keyframes randomFlickerGlowRed {
+  0% { opacity: 0.5; box-shadow: 0 0 70px 15px rgba(239, 68, 68, 0.3); }
+  7% { opacity: 0.9; box-shadow: 0 0 90px 25px rgba(239, 68, 68, 0.4); }
+  14% { opacity: 0.4; box-shadow: 0 0 60px 10px rgba(239, 68, 68, 0.25); }
+  22% { opacity: 0.8; box-shadow: 0 0 85px 20px rgba(239, 68, 68, 0.35); }
+  35% { opacity: 0.3; box-shadow: 0 0 50px 5px rgba(239, 68, 68, 0.2); }
+  42% { opacity: 1; box-shadow: 0 0 100px 30px rgba(239, 68, 68, 0.45); }
+  55% { opacity: 0.6; box-shadow: 0 0 75px 18px rgba(239, 68, 68, 0.3); }
+  68% { opacity: 0.9; box-shadow: 0 0 95px 28px rgba(239, 68, 68, 0.4); }
+  80% { opacity: 0.4; box-shadow: 0 0 65px 12px rgba(239, 68, 68, 0.25); }
+  92% { opacity: 0.85; box-shadow: 0 0 88px 22px rgba(239, 68, 68, 0.38); }
+  100% { opacity: 0.5; box-shadow: 0 0 70px 15px rgba(239, 68, 68, 0.3); }
+}
+
+@keyframes randomFlickerGlowBlue {
+  0% { opacity: 0.5; box-shadow: 0 0 70px 15px rgba(59, 130, 246, 0.3); }
+  7% { opacity: 0.9; box-shadow: 0 0 90px 25px rgba(59, 130, 246, 0.4); }
+  14% { opacity: 0.4; box-shadow: 0 0 60px 10px rgba(59, 130, 246, 0.25); }
+  22% { opacity: 0.8; box-shadow: 0 0 85px 20px rgba(59, 130, 246, 0.35); }
+  35% { opacity: 0.3; box-shadow: 0 0 50px 5px rgba(59, 130, 246, 0.2); }
+  42% { opacity: 1; box-shadow: 0 0 100px 30px rgba(59, 130, 246, 0.45); }
+  55% { opacity: 0.6; box-shadow: 0 0 75px 18px rgba(59, 130, 246, 0.3); }
+  68% { opacity: 0.9; box-shadow: 0 0 95px 28px rgba(59, 130, 246, 0.4); }
+  80% { opacity: 0.4; box-shadow: 0 0 65px 12px rgba(59, 130, 246, 0.25); }
+  92% { opacity: 0.85; box-shadow: 0 0 88px 22px rgba(59, 130, 246, 0.38); }
+  100% { opacity: 0.5; box-shadow: 0 0 70px 15px rgba(59, 130, 246, 0.3); }
 }
 
 /* Glowing effects */
@@ -378,8 +455,7 @@ const wrapperClass = computed(() => {
 }
 .scouting-wrapper.color-red::before {
   opacity: 1;
-  box-shadow: 0 0 80px 20px rgba(239, 68, 68, 0.35);
-  animation: randomFlickerGlow 4.7s infinite alternate;
+  animation: randomFlickerGlowRed 12s infinite alternate;
 }
 
 .scouting-wrapper.color-blue {
@@ -388,8 +464,7 @@ const wrapperClass = computed(() => {
 }
 .scouting-wrapper.color-blue::before {
   opacity: 1;
-  box-shadow: 0 0 80px 20px rgba(59, 130, 246, 0.35);
-  animation: randomFlickerGlow 4.7s infinite alternate;
+  animation: randomFlickerGlowBlue 12s infinite alternate;
 }
 
 @keyframes errorBlink {
@@ -408,9 +483,13 @@ const wrapperClass = computed(() => {
   animation: errorBlink 0.5s infinite;
 }
 
-.scouting-form {
+.scouting-wrapper {
   max-width: 800px;
   margin: 0 auto;
+}
+
+.scouting-form {
+  width: 100%;
 }
 
 .settings-section {
@@ -477,7 +556,7 @@ const wrapperClass = computed(() => {
   position: absolute;
   top: 3px;
   bottom: 3px;
-  width: calc(33.333% - 2px);
+  width: calc(50% - 3px);
   border-radius: 16px;
   background: white;
   transition: left 0.3s cubic-bezier(0.4, 0, 0.2, 1), background 0.3s, box-shadow 0.3s;
@@ -490,13 +569,8 @@ const wrapperClass = computed(() => {
   box-shadow: 0 0 10px #ef4444;
 }
 
-.spdt-switch.pos-none .spdt-thumb {
-  left: calc(33.333% + 1px);
-  background: var(--muted-foreground);
-}
-
 .spdt-switch.pos-blue .spdt-thumb {
-  left: calc(66.666% - 1px);
+  left: calc(50% + 1px);
   background: #3b82f6;
   box-shadow: 0 0 10px #3b82f6;
 }
@@ -655,4 +729,23 @@ input:focus, select:focus { border-color: var(--primary); }
 }
 .btn-submit:hover:not(:disabled) { filter: brightness(1.1); }
 .btn-submit:disabled { opacity: 0.5; cursor: not-allowed; }
+
+.btn-cancel {
+  padding: 14px 20px;
+  background: transparent;
+  color: var(--muted-foreground);
+  font-size: 16px;
+  font-weight: 700;
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  transition: all 0.2s;
+}
+.btn-cancel:hover {
+  background: var(--card);
+  color: var(--foreground);
+}
 </style>

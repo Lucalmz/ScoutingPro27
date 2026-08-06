@@ -24,7 +24,7 @@ public interface RecordDao {
             :matchNumber, :teamNumber,
             :autoScore, :teleopScore, :endgameScore, :totalScore,
             :notes, :rawData, :syncStatus,
-            :createdAt, :updatedAt
+            COALESCE((SELECT created_at FROM scouting_records WHERE id = :id), COALESCE(:createdAt, CURRENT_TIMESTAMP)), COALESCE(:updatedAt, CURRENT_TIMESTAMP)
         )
     """)
     void upsert(@BindBean ScoutingRecord record);
@@ -35,6 +35,6 @@ public interface RecordDao {
     @SqlQuery("SELECT * FROM scouting_records WHERE sync_status = 'PENDING' AND event_id = :eventId")
     List<ScoutingRecord> findPendingByEventId(@Bind("eventId") String eventId);
 
-    @SqlUpdate("UPDATE scouting_records SET sync_status = 'SYNCED' WHERE id = :id")
-    void markSynced(@Bind("id") String id);
+    @SqlUpdate("UPDATE scouting_records SET sync_status = 'SYNCED' WHERE id = :id AND scout_id = :userId")
+    void markSynced(@Bind("id") String id, @Bind("userId") String userId);
 }

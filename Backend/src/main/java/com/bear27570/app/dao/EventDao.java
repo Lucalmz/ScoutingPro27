@@ -12,11 +12,17 @@ import java.util.List;
 @RegisterBeanMapper(ScoutingEvent.class)
 public interface EventDao {
 
-    @SqlUpdate("INSERT INTO events (id, name, invite_code, is_host) VALUES (:id, :name, :inviteCode, :isHost)")
+    @SqlUpdate("INSERT INTO events (id, name, invite_code, host_id, ftc_year, ftc_event_code) VALUES (:id, :name, :inviteCode, :hostId, :ftcYear, :ftcEventCode)")
     void insert(@BindBean ScoutingEvent event);
 
-    @SqlQuery("SELECT * FROM events")
-    List<ScoutingEvent> findAll();
+    @SqlUpdate("UPDATE events SET ftc_year = :year, ftc_event_code = :code WHERE id = :id")
+    void updateFtcConfig(@Bind("id") String id, @Bind("year") Integer year, @Bind("code") String code);
+
+    @SqlUpdate("INSERT INTO event_users (event_id, user_id) VALUES (:eventId, :userId)")
+    void joinEvent(@Bind("eventId") String eventId, @Bind("userId") String userId);
+
+    @SqlQuery("SELECT DISTINCT e.* FROM events e LEFT JOIN event_users eu ON e.id = eu.event_id WHERE e.host_id = :userId OR eu.user_id = :userId")
+    List<ScoutingEvent> findForUser(@Bind("userId") String userId);
 
     @SqlQuery("SELECT * FROM events WHERE id = :id")
     ScoutingEvent findById(@Bind("id") String id);

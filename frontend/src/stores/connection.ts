@@ -38,8 +38,8 @@ export const useConnectionStore = defineStore('connection', () => {
     rtcService.value?.pushRecords(records, targetId)
   }
 
-  function requestSync(lastSyncTime: string, authCode?: string) {
-    rtcService.value?.requestSync(lastSyncTime, authCode)
+  function requestSync(lastSyncTime: string, authCode?: string, senderUserId?: string) {
+    rtcService.value?.requestSync(lastSyncTime, authCode, senderUserId)
   }
 
   return {

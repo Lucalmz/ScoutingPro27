@@ -11,7 +11,7 @@ const props = defineProps<{
 }>()
 
 type SortKey = keyof RankingRow
-const sortKey = ref<SortKey>('totalScore')
+const sortKey = ref<SortKey>('avgRating')
 const sortDir = ref<'asc' | 'desc'>('desc')
 
 function setSort(key: SortKey) {
@@ -40,6 +40,32 @@ function sortIndicator(key: SortKey): string {
   if (sortKey.value !== key) return ''
   return sortDir.value === 'asc' ? 'arrow_drop_up' : 'arrow_drop_down'
 }
+
+const highlightTop = ref(0)
+const highlightHeight = ref(0)
+const highlightVisible = ref(false)
+
+function onRowEnter(e: MouseEvent) {
+  const target = e.currentTarget as HTMLElement
+  const wrapper = target.closest('.table-wrapper') as HTMLElement
+  if (wrapper && target) {
+    const wrapperRect = wrapper.getBoundingClientRect()
+    const targetRect = target.getBoundingClientRect()
+    highlightTop.value = targetRect.top - wrapperRect.top + wrapper.scrollTop
+    highlightHeight.value = targetRect.height
+    highlightVisible.value = true
+  }
+}
+
+function onTableLeave() {
+  highlightVisible.value = false
+}
+
+const highlightStyle = computed(() => ({
+  top: `${highlightTop.value}px`,
+  height: `${highlightHeight.value}px`,
+  opacity: highlightVisible.value ? 1 : 0
+}))
 </script>
 
 <template>
@@ -48,7 +74,8 @@ function sortIndicator(key: SortKey): string {
     <div v-else-if="rankings.length === 0" class="empty-state">
       <p>{{ t('rankings.no_data') }}</p>
     </div>
-    <div v-else class="table-wrapper">
+    <div v-else class="table-wrapper" style="position: relative;" @mouseleave="onTableLeave">
+      <div class="hover-highlight" :style="highlightStyle"></div>
       <table>
         <thead>
           <tr>
@@ -70,20 +97,27 @@ function sortIndicator(key: SortKey): string {
             <th @click="setSort('maxScore')" class="sortable">
               {{ t('rankings.max') }}<span class="material-icons" style="font-size: 18px; vertical-align: middle;">{{ sortIndicator('maxScore') }}</span>
             </th>
-            <th @click="setSort('totalScore')" class="sortable">
-              {{ t('rankings.total') }}<span class="material-icons" style="font-size: 18px; vertical-align: middle;">{{ sortIndicator('totalScore') }}</span>
+            <th @click="setSort('avgRating')" class="sortable">
+              {{ t('rankings.rating') }}<span class="material-icons" style="font-size: 18px; vertical-align: middle;">{{ sortIndicator('avgRating') }}</span>
             </th>
+            <th>{{ t('rankings.trend') }}</th>
           </tr>
         </thead>
         <tbody>
-          <tr v-for="row in sorted" :key="row.teamNumber">
+          <tr v-for="row in sorted" :key="row.teamNumber" @mouseenter="onRowEnter">
             <td class="team-cell">{{ row.teamNumber }}</td>
             <td>{{ row.matchCount }}</td>
             <td>{{ row.avgAutoScore.toFixed(1) }}</td>
             <td>{{ row.avgTeleopScore.toFixed(1) }}</td>
             <td>{{ row.avgEndgameScore.toFixed(1) }}</td>
             <td>{{ row.maxScore }}</td>
-            <td class="total-cell">{{ row.totalScore }}</td>
+            <td class="total-cell">{{ row.avgRating.toFixed(1) }}</td>
+            <td class="trend-cell">
+              <span v-if="row.trend === 'up'" style="color: var(--status-success); font-weight: bold;">↗</span>
+              <span v-else-if="row.trend === 'down'" style="color: var(--status-error); font-weight: bold;">↘</span>
+              <span v-else-if="row.trend === 'stable'" style="color: var(--muted-foreground);">➡</span>
+              <span v-else style="color: var(--muted-foreground)">-</span>
+            </td>
           </tr>
         </tbody>
       </table>
@@ -139,8 +173,16 @@ tbody td {
   color: var(--muted-foreground);
 }
 
-tbody tr:hover {
-  background: var(--card);
+.hover-highlight {
+  position: absolute;
+  left: 0;
+  right: 0;
+  background: rgba(128, 128, 128, 0.1);
+  backdrop-filter: brightness(1.1);
+  pointer-events: none;
+  transition: top 0.25s cubic-bezier(0.25, 1, 0.5, 1), height 0.25s cubic-bezier(0.25, 1, 0.5, 1), opacity 0.2s ease;
+  z-index: 10;
+  border-radius: 6px;
 }
 
 .team-cell {

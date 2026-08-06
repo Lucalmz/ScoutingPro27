@@ -1,6 +1,7 @@
 import { defineStore } from 'pinia'
 import { ref, computed } from 'vue'
 import { listEvents, createEvent, joinEvent } from '@/services/api'
+import { useUserStore } from '@/stores/user'
 import type { ScoutingEvent } from '@/types'
 
 export const useEventStore = defineStore('events', () => {
@@ -8,8 +9,12 @@ export const useEventStore = defineStore('events', () => {
   const currentEvent = ref<ScoutingEvent | null>(null)
   const loading = ref(false)
   const error = ref<string | null>(null)
+  
+  const userStore = useUserStore()
 
-  const isHost = computed(() => currentEvent.value?.isHost ?? false)
+  const isHost = computed(() => {
+    return currentEvent.value?.hostId === userStore.userId
+  })
 
   async function fetchEvents(userId: string) {
     loading.value = true
@@ -32,7 +37,7 @@ export const useEventStore = defineStore('events', () => {
         id: res.id,
         name,
         inviteCode: res.inviteCode,
-        isHost: true,
+        hostId: userStore.userId,
       }
       events.value.push(evt)
       currentEvent.value = evt
@@ -49,13 +54,8 @@ export const useEventStore = defineStore('events', () => {
     loading.value = true
     error.value = null
     try {
-      const evt: ScoutingEvent = {
-        id: crypto.randomUUID?.() ?? `${Date.now()}-${Math.random().toString(36).slice(2)}`,
-        name: eventName,
-        inviteCode,
-        isHost: false,
-      }
-      await joinEvent(evt)
+      const evt = await joinEvent(inviteCode)
+      // Note: we can ignore eventName since the real name comes from evt
       events.value.push(evt)
       currentEvent.value = evt
       return evt

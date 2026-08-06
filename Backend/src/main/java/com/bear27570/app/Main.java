@@ -90,6 +90,11 @@ public class Main {
             CefAppBuilder builder = new CefAppBuilder();
             builder.setInstallDir(new File("jcef-bundle"));
             builder.getCefSettings().windowless_rendering_enabled = false;
+            
+            // 为每个实例分配独立的缓存目录，防止多开时互相锁死崩溃
+            File cacheDir = new File(System.getProperty("java.io.tmpdir"), "scoutingpro-jcef-" + java.util.UUID.randomUUID().toString());
+            cacheDir.mkdirs();
+            builder.getCefSettings().cache_path = cacheDir.getAbsolutePath();
 
             CefApp cefApp = builder.build();
             CefClient cefClient = cefApp.createClient();
@@ -110,6 +115,8 @@ public class Main {
                     CefApp.getInstance().dispose();
                     app.stop();
                     frame.dispose();
+                    // 尝试清理临时缓存目录
+                    deleteDir(cacheDir);
                     System.exit(0);
                 }
             });
@@ -122,5 +129,17 @@ public class Main {
             JOptionPane.showMessageDialog(null, "启动失败: " + e.getMessage());
             System.exit(1);
         }
+    }
+
+    private static void deleteDir(File file) {
+        if (file.isDirectory()) {
+            File[] files = file.listFiles();
+            if (files != null) {
+                for (File f : files) {
+                    deleteDir(f);
+                }
+            }
+        }
+        file.delete();
     }
 }

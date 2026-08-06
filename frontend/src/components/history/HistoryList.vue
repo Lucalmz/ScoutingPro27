@@ -1,9 +1,11 @@
 <script setup lang="ts">
-import { ref } from 'vue'
+import { ref, computed } from 'vue'
 import { useI18n } from 'vue-i18n'
 import type { ScoutingRecord } from '@/types'
+import { useRecordStore } from '@/stores/records'
 
 const { t } = useI18n()
+const recordStore = useRecordStore()
 
 defineProps<{
   records: ScoutingRecord[]
@@ -33,6 +35,32 @@ function formatDate(iso: string): string {
   const d = new Date(iso)
   return d.toLocaleString()
 }
+
+const highlightTop = ref(0)
+const highlightHeight = ref(0)
+const highlightVisible = ref(false)
+
+function onCardEnter(e: MouseEvent) {
+  const target = e.currentTarget as HTMLElement
+  const wrapper = target.closest('.history-list') as HTMLElement
+  if (wrapper && target) {
+    const wrapperRect = wrapper.getBoundingClientRect()
+    const targetRect = target.getBoundingClientRect()
+    highlightTop.value = targetRect.top - wrapperRect.top + wrapper.scrollTop
+    highlightHeight.value = targetRect.height
+    highlightVisible.value = true
+  }
+}
+
+function onListLeave() {
+  highlightVisible.value = false
+}
+
+const highlightStyle = computed(() => ({
+  top: `${highlightTop.value}px`,
+  height: `${highlightHeight.value}px`,
+  opacity: highlightVisible.value ? 1 : 0
+}))
 </script>
 
 <template>
@@ -41,11 +69,14 @@ function formatDate(iso: string): string {
     <div v-else-if="records.length === 0" class="empty-state">
       <p>{{ t('history.no_data') }}</p>
     </div>
-    <div v-else class="history-list">
+    <div v-else class="history-list" style="position: relative;" @mouseleave="onListLeave">
+      <div class="hover-highlight" :style="highlightStyle"></div>
       <div
         v-for="rec in records"
         :key="rec.id"
         class="history-card"
+        :class="{ 'low-reliability-record': recordStore.scoutReliability[rec.scoutId] === 'low' }"
+        @mouseenter="onCardEnter"
       >
         <div class="card-main">
           <div class="card-info">
@@ -109,6 +140,23 @@ function formatDate(iso: string): string {
   border: 1px solid var(--border);
   border-radius: 12px;
   padding: 16px 20px;
+}
+
+.hover-highlight {
+  position: absolute;
+  left: -4px;
+  right: -4px;
+  background: rgba(128, 128, 128, 0.1);
+  backdrop-filter: brightness(1.1);
+  pointer-events: none;
+  transition: top 0.25s cubic-bezier(0.25, 1, 0.5, 1), height 0.25s cubic-bezier(0.25, 1, 0.5, 1), opacity 0.2s ease;
+  z-index: 10;
+  border-radius: 14px;
+}
+
+.history-card.low-reliability-record {
+  border-color: #ef4444 !important;
+  background: rgba(239, 68, 68, 0.05);
 }
 
 .history-card.editing {

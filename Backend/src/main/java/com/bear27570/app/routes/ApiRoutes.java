@@ -46,9 +46,31 @@ public class ApiRoutes {
             ctx.result(gson.toJson(Map.of("exists", exists))).contentType("application/json");
         });
 
-        routes.post("/api/user/login", ctx -> {
+        // Global Authentication Interceptor
+        routes.before("/api/*", ctx -> {
+            String path = ctx.path();
+            if (path.equals("/api/user/login") || path.equals("/api/user/register") || path.equals("/api/user/check")) return; // skip user routes
+            if (ctx.method().name().equals("OPTIONS")) return; // skip CORS preflight
+            
+            String authHeader = ctx.header("Authorization");
+            if (authHeader == null || !authHeader.startsWith("Bearer ")) {
+                throw new io.javalin.http.UnauthorizedResponse("Missing or invalid token");
+            }
+            String token = authHeader.substring(7);
+            String userId = com.bear27570.app.util.JwtUtil.verifyToken(token);
+            if (userId == null) {
+                throw new io.javalin.http.UnauthorizedResponse("Invalid or expired token");
+            }
+            ctx.attribute("userId", userId);
+        });
+
+        routes.post("/api/user/register", ctx -> {
             @SuppressWarnings("unchecked")
             Map<String, String> body = gson.fromJson(ctx.body(), Map.class);
+            if (body == null) {
+                ctx.status(400).result("Invalid JSON body");
+                return;
+            }
             String username = body.get("username");
             String password = body.get("password");
             
@@ -64,36 +86,67 @@ public class ApiRoutes {
                 User user = jdbi.withExtension(UserDao.class, dao -> {
                     User existing = dao.findByUsername(username);
                     if (existing != null) {
-                        String storedPassword = existing.getPassword();
-                        if (storedPassword == null || storedPassword.isBlank()) {
-                            // Silent upgrade for legacy users with no password
-                            existing.setPassword(org.mindrot.jbcrypt.BCrypt.hashpw(password, org.mindrot.jbcrypt.BCrypt.gensalt()));
-                            dao.upsert(existing);
-                        } else if (!storedPassword.startsWith("$2a$") && !storedPassword.startsWith("$2b$") && !storedPassword.startsWith("$2y$")) {
-                            // Legacy plaintext password
-                            if (!password.equals(storedPassword)) {
-                                throw new RuntimeException("Invalid password");
-                            }
-                            // Silent upgrade
-                            existing.setPassword(org.mindrot.jbcrypt.BCrypt.hashpw(password, org.mindrot.jbcrypt.BCrypt.gensalt()));
-                            dao.upsert(existing);
-                        } else if (!org.mindrot.jbcrypt.BCrypt.checkpw(password, storedPassword)) {
-                            throw new RuntimeException("Invalid password");
-                        }
-                        return existing;
+                        throw new RuntimeException("User already exists");
                     }
                     User u = new User(UUID.randomUUID().toString(), username);
                     u.setPassword(org.mindrot.jbcrypt.BCrypt.hashpw(password, org.mindrot.jbcrypt.BCrypt.gensalt()));
                     dao.upsert(u);
                     return u;
                 });
+                
+                String token = com.bear27570.app.util.JwtUtil.generateToken(user.getId(), user.getUsername());
                 ctx.result(gson.toJson(Map.of(
                         "id", user.getId(),
-                        "username", user.getUsername()
+                        "username", user.getUsername(),
+                        "token", token
                 ))).contentType("application/json");
             } catch (RuntimeException e) {
-                if ("Invalid password".equals(e.getMessage())) {
-                    ctx.status(401).result("Invalid password");
+                if ("User already exists".equals(e.getMessage())) {
+                    ctx.status(409).result("User already exists");
+                } else {
+                    System.err.println("Register error: " + e.getMessage());
+                    ctx.status(500).result("Internal Server Error");
+                }
+            }
+        });
+
+        routes.post("/api/user/login", ctx -> {
+            @SuppressWarnings("unchecked")
+            Map<String, String> body = gson.fromJson(ctx.body(), Map.class);
+            if (body == null) {
+                ctx.status(400).result("Invalid JSON body");
+                return;
+            }
+            String username = body.get("username");
+            String password = body.get("password");
+            
+            if (username == null || username.isBlank() || password == null || password.isBlank()) {
+                ctx.status(400).result("username and password required");
+                return;
+            }
+            try {
+                User user = jdbi.withExtension(UserDao.class, dao -> {
+                    User existing = dao.findByUsername(username);
+                    if (existing == null) {
+                        throw new RuntimeException("Invalid credentials");
+                    }
+                    String storedPassword = existing.getPassword();
+                    if (storedPassword == null || storedPassword.isBlank() || 
+                        !org.mindrot.jbcrypt.BCrypt.checkpw(password, storedPassword)) {
+                        throw new RuntimeException("Invalid credentials");
+                    }
+                    return existing;
+                });
+                
+                String token = com.bear27570.app.util.JwtUtil.generateToken(user.getId(), user.getUsername());
+                ctx.result(gson.toJson(Map.of(
+                        "id", user.getId(),
+                        "username", user.getUsername(),
+                        "token", token
+                ))).contentType("application/json");
+            } catch (RuntimeException e) {
+                if ("Invalid credentials".equals(e.getMessage())) {
+                    ctx.status(401).result("Invalid credentials");
                 } else {
                     System.err.println("Login error: " + e.getMessage());
                     ctx.status(500).result("Internal Server Error");
@@ -104,27 +157,83 @@ public class ApiRoutes {
         // ==================== Events ====================
 
         routes.get("/api/events", ctx -> {
-            List<ScoutingEvent> events = jdbi.withExtension(EventDao.class, EventDao::findAll);
+            String userId = ctx.attribute("userId");
+            List<ScoutingEvent> events = jdbi.withExtension(EventDao.class, dao -> dao.findForUser(userId));
             ctx.result(gson.toJson(events)).contentType("application/json");
         });
 
         routes.post("/api/events", ctx -> {
             @SuppressWarnings("unchecked")
             Map<String, String> body = gson.fromJson(ctx.body(), Map.class);
+            if (body == null) {
+                ctx.status(400).result("Invalid JSON body");
+                return;
+            }
+            String userId = ctx.attribute("userId");
             ScoutingEvent event = new ScoutingEvent();
             event.setId(UUID.randomUUID().toString());
             event.setName(body.get("name"));
-            event.setInviteCode(generateInviteCode());
-            event.setIsHost(true);
-            jdbi.useExtension(EventDao.class, dao -> dao.insert(event));
+            event.setHostId(userId);
+            jdbi.useExtension(EventDao.class, dao -> {
+                event.setInviteCode(generateInviteCode(dao));
+                dao.insert(event);
+                dao.joinEvent(event.getId(), userId);
+            });
             ctx.result(gson.toJson(Map.of("id", event.getId(), "inviteCode", event.getInviteCode())))
                .contentType("application/json");
         });
 
         routes.post("/api/events/join", ctx -> {
-            ScoutingEvent incoming = gson.fromJson(ctx.body(), ScoutingEvent.class);
-            incoming.setIsHost(false);
-            jdbi.useExtension(EventDao.class, dao -> dao.insert(incoming));
+            @SuppressWarnings("unchecked")
+            Map<String, String> body = gson.fromJson(ctx.body(), Map.class);
+            if (body == null) {
+                ctx.status(400).result("Invalid JSON body");
+                return;
+            }
+            String inviteCode = body.get("inviteCode");
+            
+            if (inviteCode == null || inviteCode.isBlank()) {
+                ctx.status(400).result("Missing inviteCode");
+                return;
+            }
+
+            ScoutingEvent evt = jdbi.withExtension(EventDao.class, dao -> {
+                ScoutingEvent e = dao.findByInviteCode(inviteCode);
+                if (e != null) {
+                    dao.joinEvent(e.getId(), ctx.attribute("userId"));
+                }
+                return e;
+            });
+            if (evt == null) {
+                ctx.status(404).result("Event not found");
+                return;
+            }
+            
+            ctx.status(200).result(gson.toJson(evt)).contentType("application/json");
+        });
+
+        routes.put("/api/events/{id}/ftc-config", ctx -> {
+            String eventId = ctx.pathParam("id");
+            @SuppressWarnings("unchecked")
+            Map<String, Object> body = gson.fromJson(ctx.body(), Map.class);
+            if (body == null) {
+                ctx.status(400).result("Invalid JSON body");
+                return;
+            }
+            Integer year = body.get("ftcYear") != null ? ((Number) body.get("ftcYear")).intValue() : null;
+            String code = (String) body.get("ftcEventCode");
+            
+            String userId = ctx.attribute("userId");
+            jdbi.useExtension(EventDao.class, dao -> {
+                ScoutingEvent e = dao.findById(eventId);
+                if (e == null) {
+                    throw new io.javalin.http.NotFoundResponse("Event not found");
+                }
+                if (!userId.equals(e.getHostId())) {
+                    throw new io.javalin.http.ForbiddenResponse("Only the host can configure the event");
+                }
+                dao.updateFtcConfig(eventId, year, code);
+            });
             ctx.status(200).result("OK");
         });
 
@@ -138,21 +247,54 @@ public class ApiRoutes {
         });
 
         routes.post("/api/records", ctx -> {
-            ScoutingRecord record = gson.fromJson(ctx.body(), ScoutingRecord.class);
-            jdbi.useExtension(RecordDao.class, dao -> dao.upsert(record));
-            ctx.status(200).result("OK");
+            try {
+                ScoutingRecord record = gson.fromJson(ctx.body(), ScoutingRecord.class);
+                if (record == null) {
+                    ctx.status(400).result("Invalid JSON body");
+                    return;
+                }
+                if (record.getMatchNumber() <= 0 || record.getTeamNumber() <= 0) {
+                    ctx.status(400).result("Invalid matchNumber or teamNumber");
+                    return;
+                }
+                if (record.getEventId() == null || record.getEventId().isBlank()) {
+                    ctx.status(400).result("Event ID cannot be blank");
+                    return;
+                }
+                record.setScoutId(ctx.attribute("userId"));
+                jdbi.useExtension(RecordDao.class, dao -> dao.upsert(record));
+                ctx.status(200).result("OK");
+            } catch (Exception e) {
+                ctx.status(400).result("Invalid data: " + e.getMessage());
+            }
         });
 
         routes.post("/api/records/sync", ctx -> {
-            Type t = new TypeToken<List<ScoutingRecord>>() {}.getType();
-            List<ScoutingRecord> records = gson.fromJson(ctx.body(), t);
-            jdbi.useExtension(RecordDao.class, dao -> {
-                for (ScoutingRecord r : records) {
-                    r.setSyncStatus("SYNCED");
-                    dao.upsert(r);
+            try {
+                Type t = new TypeToken<List<ScoutingRecord>>() {}.getType();
+                List<ScoutingRecord> records = gson.fromJson(ctx.body(), t);
+                if (records == null) {
+                    ctx.status(400).result("Invalid JSON body");
+                    return;
                 }
-            });
-            ctx.status(200).result("OK");
+                String userId = ctx.attribute("userId");
+                
+                // Wrap in a transaction to prevent partial failure corruption
+                jdbi.useTransaction(handle -> {
+                    RecordDao dao = handle.attach(RecordDao.class);
+                    for (ScoutingRecord r : records) {
+                        if (r.getMatchNumber() <= 0 || r.getTeamNumber() <= 0 || r.getEventId() == null) {
+                            throw new IllegalArgumentException("Invalid record detected in batch sync");
+                        }
+                        r.setScoutId(userId);
+                        r.setSyncStatus("SYNCED");
+                        dao.upsert(r);
+                    }
+                });
+                ctx.status(200).result("OK");
+            } catch (Exception e) {
+                ctx.status(400).result("Sync failed: " + e.getMessage());
+            }
         });
 
         routes.get("/api/records/pending", ctx -> {
@@ -163,23 +305,37 @@ public class ApiRoutes {
         });
 
         routes.post("/api/records/mark-synced", ctx -> {
-            Type t = new TypeToken<List<String>>() {}.getType();
-            List<String> ids = gson.fromJson(ctx.body(), t);
-            jdbi.useExtension(RecordDao.class, dao -> {
-                for (String id : ids) {
-                    dao.markSynced(id);
+            try {
+                Type t = new TypeToken<List<String>>() {}.getType();
+                List<String> ids = gson.fromJson(ctx.body(), t);
+                if (ids == null) {
+                    ctx.status(400).result("Invalid JSON body");
+                    return;
                 }
-            });
-            ctx.status(200).result("OK");
+                String userId = ctx.attribute("userId");
+                jdbi.useExtension(RecordDao.class, dao -> {
+                    for (String id : ids) {
+                        dao.markSynced(id, userId);
+                    }
+                });
+                ctx.status(200).result("OK");
+            } catch (Exception e) {
+                ctx.status(400).result("Invalid data");
+            }
         });
     }
 
-    private String generateInviteCode() {
+    private String generateInviteCode(EventDao dao) {
         String chars = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789";
-        StringBuilder sb = new StringBuilder(6);
-        for (int i = 0; i < 6; i++) {
-            sb.append(chars.charAt(ThreadLocalRandom.current().nextInt(chars.length())));
+        while (true) {
+            StringBuilder sb = new StringBuilder(6);
+            for (int i = 0; i < 6; i++) {
+                sb.append(chars.charAt(ThreadLocalRandom.current().nextInt(chars.length())));
+            }
+            String code = sb.toString();
+            if (dao.findByInviteCode(code) == null) {
+                return code;
+            }
         }
-        return sb.toString();
     }
 }
