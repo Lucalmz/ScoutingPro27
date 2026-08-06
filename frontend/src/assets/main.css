@@ -1,0 +1,169 @@
+/* ============================================================
+   ScoutingPro27 — Global Styles
+   ============================================================ */
+
+:root {
+  /* Semantic Tokens (Shadcn/Ant Design inspired) */
+  --background: #000000;
+  --foreground: #f1f5f9;
+  
+  --card: #0a0a0a;
+  --card-foreground: #f1f5f9;
+  
+  --popover: #111111;
+  --popover-foreground: #f1f5f9;
+  
+  --primary: #39ff14; /* Fluorescent Green */
+  --primary-foreground: #000000;
+  
+  --muted: #1a1a1a;
+  --muted-foreground: #a3a3a3;
+  
+  --accent: #39ff14;
+  --accent-foreground: #000000;
+  
+  --destructive: #ef4444;
+  --destructive-foreground: #ffffff;
+  
+  --border: #262626;
+  --input: #1a1a1a;
+  --ring: #39ff14;
+  
+  /* Status Colors */
+  --status-success: #39ff14;
+  --status-warning: #fcd34d;
+  --status-error: #ef4444;
+
+  /* Glow Effects */
+  --glow-primary: 0 0 10px rgba(57, 255, 20, 0.4), 0 0 20px rgba(57, 255, 20, 0.2);
+  --glow-primary-hover: 0 0 15px rgba(57, 255, 20, 0.6), 0 0 30px rgba(57, 255, 20, 0.3);
+}
+
+*,
+*::before,
+*::after {
+  box-sizing: border-box;
+  margin: 0;
+  padding: 0;
+}
+
+html {
+  font-family:
+    'Segoe UI',
+    'Helvetica Neue',
+    Arial,
+    sans-serif;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+body {
+  background: var(--background);
+  color: var(--foreground);
+  min-height: 100vh;
+  overflow-x: hidden;
+}
+
+/* Scrollbar styling */
+::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+
+::-webkit-scrollbar-track {
+  background: var(--background);
+}
+
+::-webkit-scrollbar-thumb {
+  background: var(--muted);
+  border-radius: 4px;
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background: var(--border);
+}
+
+/* Selection */
+::selection {
+  background: rgba(57, 255, 20, 0.3);
+  color: var(--foreground);
+}
+
+/* Links */
+a {
+  color: var(--primary);
+  text-decoration: none;
+}
+
+a:hover {
+  text-decoration: underline;
+}
+
+/* Remove number input spinners */
+input[type='number']::-webkit-inner-spin-button,
+input[type='number']::-webkit-outer-spin-button {
+  -webkit-appearance: none;
+  margin: 0;
+}
+
+input[type='number'] {
+  -moz-appearance: textfield;
+}
+
+/* Focus visible */
+:focus-visible {
+  outline: 2px solid var(--ring);
+  outline-offset: 2px;
+  box-shadow: var(--glow-primary);
+}
+
+/* Utility */
+button {
+  font-family: inherit;
+}
+
+/* Global Glow Utilities */
+.shadow-glow {
+  box-shadow: var(--glow-primary);
+}
+.shadow-glow:hover {
+  box-shadow: var(--glow-primary-hover);
+}
+.text-glow {
+  text-shadow: 0 0 8px rgba(57, 255, 20, 0.6);
+}
+
+
+/* ==========================================================================
+   Animations & Transitions
+   ========================================================================== */
+
+/* Fade Transition (Tabs) */
+.fade-enter-active,
+.fade-leave-active {
+  transition: opacity 0.25s ease, transform 0.25s ease;
+}
+.fade-enter-from,
+.fade-leave-to {
+  opacity: 0;
+  transform: translateY(10px);
+}
+
+/* Modal Transition */
+.modal-enter-active,
+.modal-leave-active {
+  transition: opacity 0.3s ease;
+}
+.modal-enter-active .modal-card,
+.modal-leave-active .modal-card {
+  transition: transform 0.3s cubic-bezier(0.34, 1.56, 0.64, 1);
+}
+.modal-enter-from,
+.modal-leave-to {
+  opacity: 0;
+}
+.modal-enter-from .modal-card,
+.modal-leave-to .modal-card {
+  transform: scale(0.9) translateY(20px);
+}
+

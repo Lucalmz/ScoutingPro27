@@ -1,0 +1,410 @@
+<script setup lang="ts">
+import { ref, onMounted } from 'vue'
+import { useRouter } from 'vue-router'
+import { useUserStore } from '@/stores/user'
+import { useEventStore } from '@/stores/events'
+import { useI18n } from 'vue-i18n'
+
+const { t } = useI18n()
+
+const router = useRouter()
+const userStore = useUserStore()
+const eventStore = useEventStore()
+
+const showCreateModal = ref(false)
+const showJoinModal = ref(false)
+const newEventName = ref('')
+const inviteCode = ref('')
+const creating = ref(false)
+const joining = ref(false)
+const enteringEventId = ref<string | null>(null)
+
+onMounted(async () => {
+  if (!userStore.isLoggedIn) {
+    router.replace('/')
+    return
+  }
+  await eventStore.fetchEvents(userStore.userId)
+})
+
+async function handleCreate() {
+  if (!newEventName.value.trim() || creating.value) return
+  creating.value = true
+  const evt = await eventStore.create(newEventName.value.trim())
+  creating.value = false
+  if (evt) {
+    showCreateModal.value = false
+    newEventName.value = ''
+    router.push(`/event/${evt.id}`)
+  }
+}
+
+async function handleJoin() {
+  if (!inviteCode.value.trim()) return
+  joining.value = true
+  const evt = await eventStore.join(
+    inviteCode.value.trim().toUpperCase(),
+    'Joined Event',
+  )
+  joining.value = false
+  if (evt) {
+    showJoinModal.value = false
+    inviteCode.value = ''
+    router.push(`/event/${evt.id}`)
+  }
+}
+
+function enterEvent(evt: { id: string }) {
+  enteringEventId.value = evt.id
+  setTimeout(() => {
+    router.push(`/event/${evt.id}`)
+  }, 350)
+}
+
+function handleLogout() {
+  userStore.logout()
+  router.replace('/')
+}
+</script>
+
+<template>
+  <div class="dashboard">
+    <header class="topbar">
+      <div class="topbar-left">
+        <span class="brand" style="display: flex; align-items: center; gap: 8px;"><span class="material-icons">explore</span> ScoutingPro 27</span>
+      </div>
+      <div class="topbar-right">
+        <span class="user-tag" style="display: flex; align-items: center;"><span class="material-icons" style="font-size: 18px; margin-right: 4px;">account_circle</span> {{ userStore.username }}</span>
+        <button class="btn-logout" @click="handleLogout">{{ t('dashboard.logout') }}</button>
+      </div>
+    </header>
+
+    <main class="main-content">
+      <h2>{{ t('dashboard.welcome') }}</h2>
+
+      <div class="action-buttons">
+        <button class="action-btn primary" @click="showCreateModal = true">
+          {{ t('dashboard.create_event') }}
+        </button>
+        <button class="action-btn secondary" @click="showJoinModal = true">
+          {{ t('dashboard.join_event') }}
+        </button>
+      </div>
+
+      <!-- Event List -->
+      <div v-if="eventStore.loading" class="loading-msg">Loading events...</div>
+      <p v-else-if="eventStore.error" class="error-msg">{{ eventStore.error }}</p>
+      <div v-else-if="eventStore.events.length === 0" class="empty-state">
+        <p>{{ t('dashboard.no_events') }}</p>
+      </div>
+      <div v-else class="event-list">
+        <div
+          v-for="evt in eventStore.events"
+          :key="evt.id"
+          class="event-card"
+          :class="{ 'slide-out-right': enteringEventId === evt.id }"
+          @click="enterEvent(evt)"
+        >
+          <div class="event-info">
+            <span class="event-name">{{ evt.name }}</span>
+            <span class="event-meta">
+              {{ t('event.code') }}: <strong>{{ evt.inviteCode }}</strong>
+              - {{ evt.isHost ? t('event.host') : t('event.client') }}
+            </span>
+          </div>
+          <span class="event-arrow material-icons" style="font-size: 20px;">arrow_forward</span>
+        </div>
+      </div>
+    </main>
+
+    <!-- Create Event Modal -->
+    <Transition name="modal">
+      <div v-if="showCreateModal" class="modal-overlay" @click.self="showCreateModal = false">
+        <div class="modal-card">
+          <h3>{{ t('dashboard.modal_create_title') }}</h3>
+          <label>{{ t('dashboard.modal_create_name') }}</label>
+          <input
+            v-model="newEventName"
+            type="text"
+            :placeholder="t('dashboard.modal_create_placeholder')"
+            :disabled="creating"
+            @keyup.enter="handleCreate"
+          />
+          <div class="modal-actions">
+            <button class="btn-cancel" @click="showCreateModal = false">{{ t('dashboard.btn_cancel') }}</button>
+            <button class="btn-confirm" :disabled="creating || !newEventName.trim()" @click="handleCreate">
+              {{ creating ? t('dashboard.btn_creating') : t('dashboard.btn_create') }}
+            </button>
+          </div>
+        </div>
+      </div>
+    </Transition>
+
+    <!-- Join Event Modal -->
+    <Transition name="modal">
+      <div v-if="showJoinModal" class="modal-overlay" @click.self="showJoinModal = false">
+        <div class="modal-card">
+          <h3>{{ t('dashboard.modal_join_title') }}</h3>
+          <label>{{ t('dashboard.modal_join_code') }}</label>
+          <input
+            v-model="inviteCode"
+            type="text"
+            :placeholder="t('dashboard.modal_join_placeholder')"
+            :disabled="joining"
+            @keyup.enter="handleJoin"
+            maxlength="6"
+            style="text-transform: uppercase;"
+          />
+          <div class="modal-actions">
+            <button class="btn-cancel" @click="showJoinModal = false">{{ t('dashboard.btn_cancel') }}</button>
+            <button class="btn-confirm" :disabled="joining || inviteCode.length < 6" @click="handleJoin">
+              {{ joining ? t('dashboard.btn_joining') : t('dashboard.btn_join') }}
+            </button>
+          </div>
+        </div>
+      </div>
+    </Transition>
+  </div>
+</template>
+
+<style scoped>
+.dashboard {
+  min-height: 100vh;
+  background: var(--background);
+  color: var(--foreground);
+}
+
+.topbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 14px 24px;
+  background: var(--card);
+  border-bottom: 1px solid var(--border);
+}
+
+.brand {
+  font-weight: 700;
+  font-size: 18px;
+}
+
+.user-tag {
+  color: var(--muted-foreground);
+  margin-right: 12px;
+}
+
+.btn-logout {
+  background: transparent;
+  border: 1px solid var(--input);
+  color: var(--muted-foreground);
+  padding: 6px 14px;
+  border-radius: 8px;
+  cursor: pointer;
+  font-size: 13px;
+}
+
+.btn-logout:hover {
+  background: var(--border);
+}
+
+.main-content {
+  max-width: 720px;
+  margin: 0 auto;
+  padding: 32px 24px;
+}
+
+h2 {
+  font-size: 22px;
+  margin: 0 0 20px;
+}
+
+.action-buttons {
+  display: flex;
+  gap: 12px;
+  margin-bottom: 28px;
+}
+
+.action-btn {
+  flex: 1;
+  padding: 14px;
+  border-radius: 12px;
+  font-size: 15px;
+  font-weight: 600;
+  cursor: pointer;
+  border: none;
+  transition: background 0.2s;
+}
+
+.action-btn.primary {
+  background: var(--primary);
+  color: var(--primary-foreground);
+}
+
+.action-btn.primary:hover {
+  background: var(--primary);
+}
+
+.action-btn.secondary {
+  background: var(--border);
+  color: var(--foreground);
+}
+
+.action-btn.secondary:hover {
+  background: var(--input);
+}
+
+.event-list {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.event-card {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  background: var(--card);
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  padding: 16px 20px;
+  cursor: pointer;
+  transition: border-color 0.2s, transform 0.4s cubic-bezier(0.4, 0, 0.2, 1), opacity 0.4s;
+}
+
+.event-card.slide-out-right {
+  transform: translateX(150px);
+  opacity: 0;
+}
+
+.event-card:hover {
+  border-color: var(--primary);
+}
+
+.event-info {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.event-name {
+  font-weight: 600;
+  font-size: 16px;
+}
+
+.event-meta {
+  font-size: 13px;
+  color: var(--muted-foreground);
+}
+
+.event-arrow {
+  font-size: 20px;
+  color: var(--muted-foreground);
+}
+
+.loading-msg,
+.error-msg,
+.empty-state {
+  text-align: center;
+  padding: 40px;
+  color: var(--muted-foreground);
+}
+
+.error-msg {
+  color: var(--status-error);
+}
+
+/* Modal */
+.modal-overlay {
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.6);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 100;
+}
+
+.modal-card {
+  background: var(--card);
+  border: 1px solid var(--border);
+  border-radius: 16px;
+  padding: 28px;
+  width: 100%;
+  max-width: 400px;
+}
+
+.modal-card h3 {
+  margin: 0 0 16px;
+  font-size: 18px;
+}
+
+.modal-card label {
+  display: block;
+  font-size: 13px;
+  color: var(--muted-foreground);
+  margin-bottom: 4px;
+}
+
+.modal-card input {
+  width: 100%;
+  padding: 10px 14px;
+  background: var(--background);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  color: var(--foreground);
+  font-size: 16px;
+  outline: none;
+  box-sizing: border-box;
+}
+
+.modal-card input:focus {
+  border-color: var(--primary);
+}
+
+.hint {
+  font-size: 12px;
+  color: var(--muted-foreground);
+  margin: 6px 0 0;
+}
+
+.modal-actions {
+  display: flex;
+  gap: 10px;
+  margin-top: 20px;
+  justify-content: flex-end;
+}
+
+.btn-cancel,
+.btn-confirm {
+  padding: 10px 20px;
+  border-radius: 10px;
+  font-size: 14px;
+  font-weight: 600;
+  cursor: pointer;
+  border: none;
+}
+
+.btn-cancel {
+  background: var(--border);
+  color: var(--muted-foreground);
+}
+
+.btn-cancel:hover {
+  background: var(--input);
+}
+
+.btn-confirm {
+  background: var(--primary);
+  color: var(--primary-foreground);
+}
+
+.btn-confirm:hover:not(:disabled) {
+  background: var(--primary);
+}
+
+.btn-confirm:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+</style>
+
