@@ -45,4 +45,9 @@ ScoutingPro27 是一款专为 FIRST Tech Challenge (FTC) 打造的现代化、�
 
 ---
 
+## 🎨 设计与视觉资产
+本项目在 UI 视觉表现上追求极简与现代化，应用内出现的所有高辨识度符号与矢量图标均完全采用并原生集成了 **Google Material Icons** 库，确保了多端分辨率下绝对的锐利与一致性。
+
+---
+
 > _Powered by 27570 B.E.A.R. and 25787 TechBY_
