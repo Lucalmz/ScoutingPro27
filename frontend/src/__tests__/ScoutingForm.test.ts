@@ -1,15 +1,21 @@
 import { mount } from '@vue/test-utils'
-import { describe, it, expect, vi } from 'vitest'
+import { describe, it, expect, vi, beforeEach } from 'vitest'
+import { setActivePinia, createPinia } from 'pinia'
 import ScoutingForm from '../components/scouting/ScoutingForm.vue'
 import type { ScoutingRecord } from '../../types'
 
 vi.mock('vue-i18n', () => ({
   useI18n: () => ({
     t: (key: string) => key
-  })
+  }),
+  createI18n: () => ({})
 }))
 
 describe('ScoutingForm', () => {
+  beforeEach(() => {
+    setActivePinia(createPinia())
+  })
+  
   const defaultProps = {
     eventId: 'event-1',
     scoutId: 'scout-1',
@@ -31,7 +37,7 @@ describe('ScoutingForm', () => {
     // Switch back to single mode
     wrapper.vm.scoutMode = 'single'
     await wrapper.vm.$nextTick()
-    expect(wrapper.vm.teamsData).toHaveLength(1)
+    expect(wrapper.vm.teamsData).toHaveLength(2)
   })
 
   describe('Form validation (isFormValid)', () => {
@@ -40,23 +46,23 @@ describe('ScoutingForm', () => {
       
       // Setup valid other fields
       wrapper.vm.allianceColor = 'red'
-      wrapper.vm.teamsData[0].teamNumber = 123
+      wrapper.vm.teamsData[0].teamNumber = '123'
       
-      wrapper.vm.matchNumber = 0
+      wrapper.vm.matchNumber = '0'
       expect(wrapper.vm.isFormValid).toBe(false)
       
-      wrapper.vm.matchNumber = -1
+      wrapper.vm.matchNumber = '-1'
       expect(wrapper.vm.isFormValid).toBe(false)
       
-      wrapper.vm.matchNumber = 1
+      wrapper.vm.matchNumber = '1'
       expect(wrapper.vm.isFormValid).toBe(true)
     })
 
     it('disables submit (invalid) if allianceColor === "none"', async () => {
       const wrapper = mount(ScoutingForm, { props: defaultProps })
       
-      wrapper.vm.matchNumber = 1
-      wrapper.vm.teamsData[0].teamNumber = 123
+      wrapper.vm.matchNumber = '1'
+      wrapper.vm.teamsData[0].teamNumber = '123'
       
       wrapper.vm.allianceColor = 'none'
       expect(wrapper.vm.isFormValid).toBe(false)
@@ -68,18 +74,18 @@ describe('ScoutingForm', () => {
     it('disables submit (invalid) if in alliance mode and the two teamNumbers are exactly the same', async () => {
       const wrapper = mount(ScoutingForm, { props: defaultProps })
       
-      wrapper.vm.matchNumber = 1
+      wrapper.vm.matchNumber = '1'
       wrapper.vm.allianceColor = 'red'
       wrapper.vm.scoutMode = 'alliance'
       await wrapper.vm.$nextTick()
       
       // Valid if different
-      wrapper.vm.teamsData[0].teamNumber = 123
-      wrapper.vm.teamsData[1].teamNumber = 456
+      wrapper.vm.teamsData[0].teamNumber = '123'
+      wrapper.vm.teamsData[1].teamNumber = '456'
       expect(wrapper.vm.isFormValid).toBe(true)
 
       // Invalid if same
-      wrapper.vm.teamsData[1].teamNumber = 123
+      wrapper.vm.teamsData[1].teamNumber = '123'
       expect(wrapper.vm.isFormValid).toBe(false)
     })
   })

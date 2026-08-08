@@ -2,6 +2,41 @@
    ScoutingPro27 — Global Styles
    ============================================================ */
 
+@font-face {
+  font-family: 'Manrope';
+  src: url('./fonts/Manrope-VariableFont_wght.ttf') format('truetype');
+  font-weight: 200 800;
+  font-style: normal;
+}
+
+@font-face {
+  font-family: 'Orbitron';
+  src: url('./fonts/Orbitron-VariableFont_wght.ttf') format('truetype');
+  font-weight: 400 900;
+  font-style: normal;
+}
+
+@font-face {
+  font-family: 'ZCOOLQingKeHuangYou';
+  src: url('./fonts/ZCOOLQingKeHuangYou-Regular.ttf') format('truetype');
+  font-weight: normal;
+  font-style: normal;
+}
+
+@font-face {
+  font-family: 'ZCOOLXiaoWei';
+  src: url('./fonts/ZCOOLXiaoWei-Regular.ttf') format('truetype');
+  font-weight: normal;
+  font-style: normal;
+}
+
+@font-face {
+  font-family: 'PinyonScript';
+  src: url('./fonts/PinyonScript-Regular.ttf') format('truetype');
+  font-weight: normal;
+  font-style: normal;
+}
+
 :root {
   /* Semantic Tokens (Shadcn/Ant Design inspired) */
   --background: #000000;
@@ -49,12 +84,19 @@
 
 html {
   font-family:
+    'Manrope',
+    'ZCOOLXiaoWei',
     'Segoe UI',
     'Helvetica Neue',
     Arial,
     sans-serif;
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
+}
+
+h1, h2, h3, h4, h5, h6, .font-heading {
+  font-family: 'Orbitron', 'ZCOOLQingKeHuangYou', sans-serif;
+  letter-spacing: 0.05em;
 }
 
 body {

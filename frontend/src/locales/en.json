@@ -120,6 +120,7 @@
     "invalid_password": "Invalid password",
     "passwords_mismatch": "Passwords do not match",
     "server_error": "Internal Server Error",
-    "network_error": "Network error, please check connection"
+    "network_error": "Network error, please check connection",
+    "welcome_back": "Welcome back {name}"
   }
 }

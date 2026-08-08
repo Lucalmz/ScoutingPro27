@@ -1,8 +1,12 @@
 <script setup lang="ts">
 import { ref } from 'vue'
 import { useInboxStore } from '@/stores/inbox'
+import { useRouter, useRoute } from 'vue-router'
+import type { SystemMessage } from '@/types'
 
 const inboxStore = useInboxStore()
+const router = useRouter()
+const route = useRoute()
 const isOpen = ref(false)
 
 function toggleOpen() {
@@ -11,6 +15,18 @@ function toggleOpen() {
 
 function handleMarkRead(id: string) {
   inboxStore.markRead(id)
+}
+
+function handleMessageClick(msg: SystemMessage) {
+  if (msg.type === 'conflict' && msg.conflictMatchNumber && msg.conflictTeamNumber) {
+    const eventId = route.params.eventId
+    if (eventId) {
+      router.push(`/event/${eventId}?tab=history&highlightMatch=${msg.conflictMatchNumber}&highlightTeam=${msg.conflictTeamNumber}`)
+      isOpen.value = false
+    } else {
+      alert('Please enter the event first to view the conflict.')
+    }
+  }
 }
 </script>
 
@@ -26,13 +42,19 @@ function handleMarkRead(id: string) {
       </div>
       <div class="inbox-list">
         <div v-if="inboxStore.messages.length === 0" class="empty">No messages</div>
-        <div v-for="msg in inboxStore.messages" :key="msg.id" class="inbox-item" :class="{ unread: !msg.read }">
+        <div 
+          v-for="msg in inboxStore.messages" 
+          :key="msg.id" 
+          class="inbox-item" 
+          :class="{ unread: !msg.read, clickable: msg.type === 'conflict' }"
+          @click="handleMessageClick(msg)"
+        >
           <div class="inbox-item-header">
             <h4>{{ msg.title }}</h4>
             <span class="time">{{ new Date(msg.timestamp).toLocaleTimeString() }}</span>
           </div>
           <p>{{ msg.body }}</p>
-          <button v-if="!msg.read" @click="handleMarkRead(msg.id)" class="mark-read">Mark Read</button>
+          <button v-if="!msg.read" @click.stop="handleMarkRead(msg.id)" class="mark-read">Mark Read</button>
         </div>
       </div>
     </div>
@@ -116,6 +138,15 @@ function handleMarkRead(id: string) {
   padding: 1rem;
   border-bottom: 1px solid #eee;
   background: #fff;
+}
+
+.inbox-item.clickable {
+  cursor: pointer;
+  transition: background 0.15s;
+}
+
+.inbox-item.clickable:hover {
+  background: #f9f9f9;
 }
 
 .inbox-item.unread {

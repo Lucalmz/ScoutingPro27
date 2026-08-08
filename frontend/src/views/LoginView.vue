@@ -65,6 +65,7 @@ async function handleLogin() {
   }
   submitted.value = false
   if (ok) {
+    toastStore.showToast(t('toast.welcome_back', { name: username.value.trim() }), 'success')
     router.push('/dashboard')
   }
 }
@@ -83,7 +84,6 @@ async function handleLogin() {
       <div class="logo-area">
         <span class="material-icons logo-icon">hive</span>
         <h1>ScoutingPro 27</h1>
-        <p class="subtitle">{{ t('login.title') }}</p>
         <p class="powered-by">powered by 27570 B.E.A.R. and 25787 TechBY</p>
       </div>
 
@@ -194,12 +194,6 @@ h1 {
   font-weight: 700;
   color: var(--foreground);
   margin: 0 0 4px;
-}
-
-.subtitle {
-  color: var(--muted-foreground);
-  font-size: 13px;
-  margin: 0;
 }
 
 .powered-by {

@@ -17,6 +17,8 @@ export interface SystemMessage {
   read: boolean
   timestamp: string
   type?: 'conflict' | 'direct'
+  conflictMatchNumber?: number
+  conflictTeamNumber?: number
 }
 
 // --- Event ---

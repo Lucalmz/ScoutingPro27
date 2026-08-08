@@ -18,38 +18,41 @@ import java.awt.event.WindowEvent;
 import java.io.File;
 
 public class Main {
-    public static void main(String[] args) {
-        // 1. 启动提示框
-        JFrame splash = new JFrame("启动中...");
-        JLabel splashLabel = new JLabel("程序正在初始化，请稍候...", SwingConstants.CENTER);
-        splash.add(splashLabel);
-        splash.setSize(300, 100);
-        splash.setLocationRelativeTo(null);
-        splash.setUndecorated(true);
-        splash.setVisible(true);
 
+    public static void main(String[] args) {
+        // 1. 先在 EDT 上把启动动画显示出来
+        SplashScreen splash = new SplashScreen();
+        SwingUtilities.invokeLater(() -> splash.setVisible(true));
+
+        // 2. 真正耗时的初始化放到后台线程，避免卡住 EDT 导致动画卡帧/掉帧
+        new Thread(() -> initAndRun(args, splash), "app-init").start();
+    }
+
+    private static void initAndRun(String[] args, SplashScreen splash) {
         try {
             // ==========================================
-            // 2. 数据库配置
+            // 数据库配置 + 迁移
             // ==========================================
+            splash.updateProgress(10, "Preparing database...");
             String dbUrl = "jdbc:h2:./app_data;AUTO_SERVER=TRUE";
             String dbUser = "sa";
             String dbPassword = "";
 
             System.out.println("执行数据库迁移...");
             Flyway flyway = Flyway.configure()
-                .dataSource(dbUrl, dbUser, dbPassword)
-                .locations("classpath:db")
-                .cleanDisabled(false)
-                .load();
+                    .dataSource(dbUrl, dbUser, dbPassword)
+                    .locations("classpath:db")
+                    .cleanDisabled(false)
+                    .load();
             flyway.repair();
             flyway.migrate();
 
+            splash.updateProgress(35, "Connecting to database...");
             System.out.println("连接 JDBI...");
             Jdbi jdbi = JdbiConfig.create(dbUrl, dbUser, dbPassword);
 
             // ==========================================
-            // 3. 端口配置：--port=N 或 DEV_PORT 环境变量，默认 0（随机）
+            // 端口配置：--port=N 或 DEV_PORT 环境变量，默认 0（随机）
             // ==========================================
             int port = 0;
             String devPort = System.getenv("DEV_PORT");
@@ -63,8 +66,9 @@ public class Main {
             }
 
             // ==========================================
-            // 4. 启动 Javalin（Javalin 7：路由在 config.routes 中注册）
+            // 启动 Javalin（Javalin 7：路由在 config.routes 中注册）
             // ==========================================
+            splash.updateProgress(55, "Starting local server...");
             ApiRoutes apiRoutes = new ApiRoutes(jdbi);
 
             Javalin app = Javalin.create(config -> {
@@ -85,48 +89,59 @@ public class Main {
             System.out.println("Javalin 运行在: " + localUrl);
 
             // ==========================================
-            // 5. 配置 JCEF 浏览器
+            // 配置 JCEF 浏览器
             // ==========================================
+            splash.updateProgress(70, "Initializing browser engine...");
             CefAppBuilder builder = new CefAppBuilder();
             builder.setInstallDir(new File("jcef-bundle"));
             builder.getCefSettings().windowless_rendering_enabled = false;
-            
+
             // 为每个实例分配独立的缓存目录，防止多开时互相锁死崩溃
-            File cacheDir = new File(System.getProperty("java.io.tmpdir"), "scoutingpro-jcef-" + java.util.UUID.randomUUID().toString());
+            File cacheDir = new File(System.getProperty("java.io.tmpdir"), "scoutingpro-jcef-" + java.util.UUID.randomUUID());
             cacheDir.mkdirs();
             builder.getCefSettings().cache_path = cacheDir.getAbsolutePath();
 
             CefApp cefApp = builder.build();
             CefClient cefClient = cefApp.createClient();
+
+            splash.updateProgress(88, "Loading interface...");
             CefBrowser browser = cefClient.createBrowser(localUrl, false, false);
             Component browserUI = browser.getUIComponent();
 
-            // ==========================================
-            // 6. 显示主窗口
-            // ==========================================
-            JFrame frame = new JFrame("ScoutingPro27");
-            frame.getContentPane().add(browserUI, BorderLayout.CENTER);
-            frame.setSize(1024, 768);
-            frame.setLocationRelativeTo(null);
+            splash.updateProgress(100, "Ready");
 
-            frame.addWindowListener(new WindowAdapter() {
-                @Override
-                public void windowClosing(WindowEvent e) {
-                    CefApp.getInstance().dispose();
-                    app.stop();
-                    frame.dispose();
-                    // 尝试清理临时缓存目录
-                    deleteDir(cacheDir);
-                    System.exit(0);
-                }
+            // ==========================================
+            // 切回 EDT：显示主窗口，动画淡出关闭
+            // ==========================================
+            SwingUtilities.invokeLater(() -> {
+                JFrame frame = new JFrame("ScoutingPro27");
+                frame.getContentPane().add(browserUI, BorderLayout.CENTER);
+                frame.setSize(1024, 768);
+                frame.setLocationRelativeTo(null);
+
+                frame.addWindowListener(new WindowAdapter() {
+                    @Override
+                    public void windowClosing(WindowEvent e) {
+                        CefApp.getInstance().dispose();
+                        app.stop();
+                        frame.dispose();
+                        // 尝试清理临时缓存目录
+                        deleteDir(cacheDir);
+                        System.exit(0);
+                    }
+                });
+
+                // 动画满足最短展示时长后自动淡出，回调里再显示主窗口，
+                // 这样视觉上是“动画放完 -> 主界面出现”，衔接不会有空档或闪烁。
+                splash.closeSmoothly(() -> frame.setVisible(true));
             });
-
-            splash.dispose();
-            frame.setVisible(true);
 
         } catch (Exception e) {
             e.printStackTrace();
-            JOptionPane.showMessageDialog(null, "启动失败: " + e.getMessage());
+            SwingUtilities.invokeLater(() -> {
+                splash.dispose();
+                JOptionPane.showMessageDialog(null, "Startup failed: " + e.getMessage());
+            });
             System.exit(1);
         }
     }

@@ -21,14 +21,14 @@ const emit = defineEmits<{
 // --- Form State ---
 const scoutMode = ref<'single' | 'alliance'>('single')
 const allianceColor = ref<'none' | 'red' | 'blue'>('none')
-const matchNumber = ref(1)
+const matchNumber = ref('1')
 
 interface TeamScoutData {
-  teamNumber: number | null
+  teamNumber: string
   autoClassified: number
   autoOverflow: number
   autoPatterns: number
-  autoMovementScore: number
+  autoMovementScore: string
   teleopClassified: number
   teleopOverflow: number
   gatesTriggered: number
@@ -38,11 +38,11 @@ interface TeamScoutData {
 
 function createEmptyTeam(): TeamScoutData {
   return {
-    teamNumber: null,
+    teamNumber: '',
     autoClassified: 0,
     autoOverflow: 0,
     autoPatterns: 0,
-    autoMovementScore: 0,
+    autoMovementScore: '',
     teleopClassified: 0,
     teleopOverflow: 0,
     gatesTriggered: 0,
@@ -76,14 +76,14 @@ watch(() => props.editRecord, (rec: ScoutingRecord | null | undefined) => {
     } catch {
       // Fallback to empty if corrupted
     }
-    matchNumber.value = rec.matchNumber
+    matchNumber.value = String(rec.matchNumber)
     allianceColor.value = raw.allianceColor || 'none'
     teamsData.value = [{
-      teamNumber: rec.teamNumber,
+      teamNumber: String(rec.teamNumber),
       autoClassified: raw.autoClassified ?? 0,
       autoOverflow: raw.autoOverflow ?? 0,
       autoPatterns: raw.autoPatterns ?? 0,
-      autoMovementScore: raw.autoMovementScore ?? 0,
+      autoMovementScore: String(raw.autoMovementScore ?? 0),
       teleopClassified: raw.teleopClassified ?? 0,
       teleopOverflow: raw.teleopOverflow ?? 0,
       gatesTriggered: raw.gatesTriggered ?? 0,
@@ -94,25 +94,31 @@ watch(() => props.editRecord, (rec: ScoutingRecord | null | undefined) => {
 }, { immediate: true })
 
 function calcTeamTotal(team: TeamScoutData) {
-  const auto = (3 * team.autoClassified) + (1 * team.autoOverflow) + (2 * team.autoPatterns) + (Number(team.autoMovementScore) || 0)
+  const auto = (3 * team.autoClassified) + (1 * team.autoOverflow) + (2 * team.autoPatterns) + (parseInt(team.autoMovementScore) || 0)
   const teleop = (3 * team.teleopClassified) + (1 * team.teleopOverflow) + (1.5 * team.gatesTriggered)
   const endgame = team.baseScore + (team.supportMultiplier * 18)
   return auto + teleop + endgame
 }
 
 const isFormValid = computed(() => {
-  const isMatchValid = matchNumber.value > 0
+  const isMatchValid = /^\d{1,8}$/.test(matchNumber.value) && parseInt(matchNumber.value) > 0
   const activeTeams = scoutMode.value === 'single' ? teamsData.value.slice(0, 1) : teamsData.value
-  const areTeamsValid = activeTeams.every(t => t.teamNumber !== null && t.teamNumber > 0)
+  const areTeamsValid = activeTeams.every(t => /^\d{1,8}$/.test(t.teamNumber) && parseInt(t.teamNumber) > 0)
+  const areMovementValid = activeTeams.every(t => t.autoMovementScore === '' || /^\d{1,8}$/.test(t.autoMovementScore))
   const isColorValid = allianceColor.value !== 'none'
   const isUnique = new Set(activeTeams.map(t => t.teamNumber)).size === activeTeams.length
-  return isMatchValid && areTeamsValid && isColorValid && isUnique
+  return isMatchValid && areTeamsValid && areMovementValid && isColorValid && isUnique
 })
+
+function isInvalidFormat(val: string) {
+  if (!val) return false
+  return !/^\d{1,8}$/.test(val)
+}
 
 async function handleSubmit() {
   if (!isFormValid.value) {
     submitStatus.value = 'error'
-    submitErrorMsg.value = t('scouting.submit_failed')
+    submitErrorMsg.value = '包含非法字符或长度超限，请检查标红的输入框'
     setTimeout(() => { submitStatus.value = 'none' }, 2000)
     return
   }
@@ -122,7 +128,7 @@ async function handleSubmit() {
 
   if (!props.editRecord) {
     for (const team of activeTeams) {
-      if (recordStore.records.some(r => r.matchNumber === matchNumber.value && r.teamNumber === team.teamNumber)) {
+      if (recordStore.records.some(r => r.matchNumber === parseInt(matchNumber.value) && r.teamNumber === parseInt(team.teamNumber))) {
         submitStatus.value = 'error'
         submitErrorMsg.value = `Duplicate: Match ${matchNumber.value}, Team ${team.teamNumber}`
         setTimeout(() => { submitStatus.value = 'none' }, 2000)
@@ -136,19 +142,19 @@ async function handleSubmit() {
 
   try {
     const records: ScoutingRecord[] = activeTeams.map(team => {
-      const auto = (3 * team.autoClassified) + (1 * team.autoOverflow) + (2 * team.autoPatterns) + (Number(team.autoMovementScore) || 0)
+      const auto = (3 * team.autoClassified) + (1 * team.autoOverflow) + (2 * team.autoPatterns) + (parseInt(team.autoMovementScore) || 0)
       const teleop = (3 * team.teleopClassified) + (1 * team.teleopOverflow) + (1.5 * team.gatesTriggered)
       const endgame = team.baseScore + (team.supportMultiplier * 18)
       const total = auto + teleop + endgame
 
       const formData: ScoutingFormData = {
-        matchNumber: matchNumber.value,
-        teamNumber: team.teamNumber!,
+        matchNumber: parseInt(matchNumber.value),
+        teamNumber: parseInt(team.teamNumber),
         allianceColor: allianceColor.value,
         autoClassified: team.autoClassified,
         autoOverflow: team.autoOverflow,
         autoPatterns: team.autoPatterns,
-        autoMovementScore: team.autoMovementScore,
+        autoMovementScore: parseInt(team.autoMovementScore) || 0,
         teleopClassified: team.teleopClassified,
         teleopOverflow: team.teleopOverflow,
         gatesTriggered: team.gatesTriggered,
@@ -161,8 +167,8 @@ async function handleSubmit() {
         eventId: props.eventId,
         scoutId: props.scoutId,
         scoutName: props.scoutName,
-        matchNumber: matchNumber.value,
-        teamNumber: team.teamNumber!,
+        matchNumber: parseInt(matchNumber.value),
+        teamNumber: parseInt(team.teamNumber),
         autoScore: auto,
         teleopScore: teleop,
         endgameScore: endgame,
@@ -182,7 +188,7 @@ async function handleSubmit() {
     }
 
     submitStatus.value = 'success'
-    matchNumber.value++
+    matchNumber.value = String(parseInt(matchNumber.value) + 1)
     // reset teams
     if (props.editRecord && previousScoutMode.value === 'alliance') {
       scoutMode.value = 'alliance'
@@ -248,7 +254,7 @@ const wrapperClass = computed(() => {
         <div class="field-row">
           <label class="field">
             <span>{{ t('scouting.match_number') }}</span>
-            <input v-model.number="matchNumber" type="number" min="1" max="999" />
+            <input v-model="matchNumber" type="text" inputmode="numeric" placeholder="1-999" :class="{ 'invalid-field': isInvalidFormat(matchNumber) }" />
           </label>
         </div>
       </section>
@@ -263,7 +269,7 @@ const wrapperClass = computed(() => {
             <div class="field-row">
               <label class="field">
                 <span>{{ t('scouting.team_number') }}</span>
-                <input v-model.number="team.teamNumber" type="number" min="1" max="99999" placeholder="e.g. 12345" />
+                <input v-model="team.teamNumber" type="text" inputmode="numeric" placeholder="e.g. 12345" :class="{ 'invalid-field': isInvalidFormat(team.teamNumber) }" />
               </label>
             </div>
           </section>
@@ -274,7 +280,7 @@ const wrapperClass = computed(() => {
             <div class="field-row">
               <label class="field">
                 <span>{{ t('scouting.movement') }}</span>
-                <input v-model.number="team.autoMovementScore" type="number" max="999" />
+                <input v-model="team.autoMovementScore" type="text" inputmode="numeric" placeholder="0" :class="{ 'invalid-field': isInvalidFormat(team.autoMovementScore) }" />
               </label>
               <div class="counter-field" style="flex: 1">
                 <span>{{ t('scouting.patterns') }}</span>
@@ -374,7 +380,7 @@ const wrapperClass = computed(() => {
 
           <button 
             type="submit" 
-            :disabled="submitting || !isFormValid" 
+            :disabled="submitting" 
             class="btn-submit" 
             :class="{ 'btn-edit-mode': !!editRecord }"
           >
@@ -617,6 +623,12 @@ const wrapperClass = computed(() => {
   color: var(--primary);
 }
 
+.team-column {
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+}
+
 .form-section {
   background: var(--card);
   border: 1px solid var(--border);
@@ -634,11 +646,12 @@ const wrapperClass = computed(() => {
   gap: 8px;
 }
 
-.field-row { display: flex; gap: 12px; }
-.field { display: flex; flex-direction: column; gap: 4px; flex: 1; }
+.field-row { display: flex; gap: 12px; flex-wrap: wrap; }
+.field { display: flex; flex-direction: column; gap: 4px; flex: 1; min-width: 120px; }
 .field > span, .counter-field > span:first-child { font-size: 13px; color: var(--muted-foreground); }
+.counter-field { display: flex; align-items: center; justify-content: space-between; padding: 8px 0; flex: 1; min-width: 210px; gap: 8px; flex-wrap: wrap; }
 
-input[type='number'], select {
+input[type='text'], input[type='number'], select {
   padding: 10px 12px;
   background: var(--background);
   border: 1px solid var(--border);
@@ -648,8 +661,15 @@ input[type='number'], select {
   outline: none;
   width: 100%;
   box-sizing: border-box;
+  transition: all 0.3s ease;
 }
 input:focus, select:focus { border-color: var(--primary); }
+
+input.invalid-field {
+  border-color: #ef4444;
+  box-shadow: 0 0 0 3px rgba(239, 68, 68, 0.2);
+  background-color: rgba(239, 68, 68, 0.05);
+}
 
 .toggle-row { display: flex; gap: 20px; margin-bottom: 12px; }
 .toggle { display: flex; align-items: center; gap: 8px; cursor: pointer; font-size: 14px; color: var(--muted-foreground); }
@@ -665,7 +685,7 @@ input:focus, select:focus { border-color: var(--primary); }
 .toggle input[type='checkbox']:checked { background: var(--primary); box-shadow: var(--glow-primary); }
 .toggle input[type='checkbox']:checked::after { transform: translateX(20px); background: var(--primary-foreground); }
 
-.counter-field { display: flex; align-items: center; justify-content: space-between; padding: 8px 0; }
+/* .counter-field rule was moved up to be grouped with .field */
 .counter { display: flex; align-items: center; gap: 12px; }
 .counter-btn {
   width: 36px; height: 36px; border-radius: 8px; border: 1px solid var(--input);

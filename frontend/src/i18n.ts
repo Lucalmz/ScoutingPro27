@@ -19,4 +19,8 @@ export const i18n = createI18n({
 export function switchLanguage(lang: 'en' | 'zh') {
   i18n.global.locale.value = lang
   localStorage.setItem('app-locale', lang)
+  document.documentElement.lang = lang
 }
+
+// Set initial lang
+document.documentElement.lang = savedLocale

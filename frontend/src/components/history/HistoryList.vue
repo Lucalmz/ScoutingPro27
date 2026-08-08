@@ -1,5 +1,6 @@
 <script setup lang="ts">
-import { ref, computed } from 'vue'
+import { ref, computed, watch, nextTick } from 'vue'
+import { useRoute } from 'vue-router'
 import { useI18n } from 'vue-i18n'
 import type { ScoutingRecord } from '@/types'
 import { useRecordStore } from '@/stores/records'
@@ -7,7 +8,7 @@ import { useRecordStore } from '@/stores/records'
 const { t } = useI18n()
 const recordStore = useRecordStore()
 
-defineProps<{
+const props = defineProps<{
   records: ScoutingRecord[]
   loading: boolean
 }>()
@@ -15,6 +16,35 @@ defineProps<{
 const emit = defineEmits<{
   (e: 'editRecord', record: ScoutingRecord): void
 }>()
+
+const route = useRoute()
+const highlightMatch = computed(() => Number(route.query.highlightMatch))
+const highlightTeam = computed(() => Number(route.query.highlightTeam))
+
+function isConflictHighlighted(rec: ScoutingRecord) {
+  return highlightMatch.value === rec.matchNumber && highlightTeam.value === rec.teamNumber
+}
+
+const hasScrolled = ref(false)
+
+// Reset scroll flag if the URL highlight targets change
+watch([highlightMatch, highlightTeam], () => {
+  hasScrolled.value = false
+})
+
+watch([highlightMatch, highlightTeam, () => props.records], async ([m, t]) => {
+  if (m && t && !hasScrolled.value && props.records.length > 0) {
+    await nextTick()
+    const targetRec = props.records.find(r => r.matchNumber === m && r.teamNumber === t)
+    if (targetRec) {
+      const el = document.getElementById('history-card-' + targetRec.id)
+      if (el) {
+        el.scrollIntoView({ behavior: 'smooth', block: 'center' })
+        hasScrolled.value = true
+      }
+    }
+  }
+}, { immediate: true })
 
 function syncIcon(status: string): string {
   return status === 'SYNCED' ? 'check_circle' : 'hourglass_empty'
@@ -74,8 +104,12 @@ const highlightStyle = computed(() => ({
       <div
         v-for="rec in records"
         :key="rec.id"
+        :id="'history-card-' + rec.id"
         class="history-card"
-        :class="{ 'low-reliability-record': recordStore.scoutReliability[rec.scoutId] === 'low' }"
+        :class="{ 
+          'low-reliability-record': recordStore.scoutReliability[rec.scoutId] === 'low',
+          'highlight-conflict': isConflictHighlighted(rec)
+        }"
         @mouseenter="onCardEnter"
       >
         <div class="card-main">
@@ -157,6 +191,18 @@ const highlightStyle = computed(() => ({
 .history-card.low-reliability-record {
   border-color: #ef4444 !important;
   background: rgba(239, 68, 68, 0.05);
+}
+
+.history-card.highlight-conflict {
+  border-color: #ef4444 !important;
+  box-shadow: 0 0 15px rgba(239, 68, 68, 0.4);
+  animation: pulse-conflict 2s infinite;
+}
+
+@keyframes pulse-conflict {
+  0% { box-shadow: 0 0 10px rgba(239, 68, 68, 0.3); }
+  50% { box-shadow: 0 0 20px rgba(239, 68, 68, 0.7); }
+  100% { box-shadow: 0 0 10px rgba(239, 68, 68, 0.3); }
 }
 
 .history-card.editing {

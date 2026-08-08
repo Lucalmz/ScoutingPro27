@@ -41,3 +41,4 @@ build/
 jcef-bundle
 
 app_data.mv.db
+app_data.trace.db

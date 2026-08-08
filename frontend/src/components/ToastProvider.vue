@@ -52,7 +52,15 @@ const toastStore = useToastStore()
 }
 
 .toast-success {
-  border-left: 4px solid var(--status-success);
+  background: var(--primary);
+  color: var(--primary-foreground);
+  border: none;
+}
+
+.toast-success:lang(en) {
+  font-family: 'PinyonScript', 'Manrope', sans-serif;
+  font-size: 24px; /* Script fonts usually need to be larger to be readable */
+  line-height: 1.2;
 }
 
 /* Transitions */

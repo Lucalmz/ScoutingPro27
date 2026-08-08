@@ -3,8 +3,8 @@ import { fetchEventMatches } from '@/services/graphql'
 
 describe('GraphQL API', () => {
   it('should fetch matches for event CNCMPLB', async () => {
-    // Increase timeout since this is a real network request
-    const matches = await fetchEventMatches('CNCMPLB')
+    // 2025 season, CNCMPLB event code
+    const matches = await fetchEventMatches(2025, 'CNCMPLB')
     
     expect(Array.isArray(matches)).toBe(true)
     expect(matches.length).toBeGreaterThan(0)

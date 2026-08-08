@@ -60,6 +60,10 @@ onMounted(async () => {
   // Load records
   await recordStore.fetchRecords(eventId.value, evt.ftcYear, evt.ftcEventCode)
 
+  if (route.query.tab === 'history') {
+    activeTab.value = 'history'
+  }
+
   // Set up WebRTC
   setupWebRTC()
 })
@@ -109,6 +113,12 @@ watch(() => connStore.status, (status) => {
   if (status === 'connected' && evt && !eventStore.isHost) {
     // Client connected, request sync for new records
     connStore.requestSync(new Date(0).toISOString(), undefined, userStore.userId)
+  }
+})
+
+watch(() => route.query, (newQuery) => {
+  if (newQuery.tab === 'history') {
+    activeTab.value = 'history'
   }
 })
 
@@ -245,7 +255,7 @@ async function saveEventSettings() {
         />
         <HistoryList
           v-else-if="activeTab === 'history'"
-          :records="recordStore.myRecords(userStore.userId)"
+          :records="eventStore.isHost ? recordStore.records : recordStore.myRecords(userStore.userId)"
           :loading="recordStore.loading"
           @editRecord="handleEditRecord"
         />

@@ -70,23 +70,20 @@ export const useRecordStore = defineStore('records', () => {
 
   // --- computed rankings ---
   const rankings = computed<RankingRow[]>(() => {
-    const map = new Map<number, Map<number, ScoutingRecord>>()
+    const map = new Map<number, ScoutingRecord[]>()
     for (const r of records.value) {
-      let teamMap = map.get(r.teamNumber)
-      if (!teamMap) {
-        teamMap = new Map<number, ScoutingRecord>()
-        map.set(r.teamNumber, teamMap)
+      let teamRecs = map.get(r.teamNumber)
+      if (!teamRecs) {
+        teamRecs = []
+        map.set(r.teamNumber, teamRecs)
       }
-      const existing = teamMap.get(r.matchNumber)
-      if (!existing || new Date(r.updatedAt) > new Date(existing.updatedAt)) {
-        teamMap.set(r.matchNumber, r)
-      }
+      teamRecs.push(r)
     }
 
     const rows: RankingRow[] = []
-    for (const [teamNumber, teamMap] of map) {
+    for (const [teamNumber, teamRecs] of map) {
       // Sort records by matchNumber ascending to find the true progression
-      const sortedRecs = Array.from(teamMap.values()).sort((a, b) => a.matchNumber - b.matchNumber)
+      const sortedRecs = teamRecs.sort((a, b) => a.matchNumber - b.matchNumber)
       const matchCount = sortedRecs.length
       
       let weightSum = 0;
@@ -192,6 +189,19 @@ export const useRecordStore = defineStore('records', () => {
     }
   }
 
+  function checkAndClearResolvedConflicts() {
+    const inboxStore = useInboxStore()
+    const conflicts = inboxStore.messages.filter(m => m.type === 'conflict' && !m.read)
+    for (const msg of conflicts) {
+      if (msg.conflictMatchNumber !== undefined && msg.conflictTeamNumber !== undefined) {
+        const count = records.value.filter(r => r.matchNumber === msg.conflictMatchNumber && r.teamNumber === msg.conflictTeamNumber).length
+        if (count <= 1) {
+          inboxStore.markRead(msg.id)
+        }
+      }
+    }
+  }
+
   // --- save a new record locally ---
   async function addRecord(record: ScoutingRecord): Promise<boolean> {
     try {
@@ -202,6 +212,7 @@ export const useRecordStore = defineStore('records', () => {
       } else {
         records.value.push(record)
       }
+      checkAndClearResolvedConflicts()
       return true
     } catch (e: any) {
       error.value = e.message ?? 'Failed to save record'
@@ -222,7 +233,9 @@ export const useRecordStore = defineStore('records', () => {
           inboxStore.addMessage({
             title: conflictTitle,
             body: conflictBody,
-            type: 'conflict'
+            type: 'conflict',
+            conflictMatchNumber: inc.matchNumber,
+            conflictTeamNumber: inc.teamNumber
           })
         }
       }
