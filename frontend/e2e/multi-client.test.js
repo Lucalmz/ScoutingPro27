@@ -123,10 +123,12 @@ async function runTest() {
     page.on('console', msg => console.log(`[${name}] ${msg.text()}`));
   }
 
+  let pageHost, pageClient1, pageClient2;
+
   try {
-    const pageHost = await browserHost.newPage();
-    const pageClient1 = await browserClient1.newPage();
-    const pageClient2 = await browserClient2.newPage();
+    pageHost = await browserHost.newPage();
+    pageClient1 = await browserClient1.newPage();
+    pageClient2 = await browserClient2.newPage();
     
     attachLogs(pageHost, 'HOST');
     attachLogs(pageClient1, 'CLIENT1');
@@ -222,13 +224,20 @@ async function runTest() {
     
     // Continue test anyway
     
-    console.log('\n=== Step 5: Simulate Client1 Disconnect ===');
-    // We disconnect Client1's WebRTC explicitly
-    await pageClient1.evaluate(() => {
-      import('/src/stores/connection.ts').then(({ useConnectionStore }) => {
-        useConnectionStore().rtcService.disconnect();
-      });
+    console.log('\n=== Step 5: Simulate Client1 Disconnect (Network Offline) ===');
+    const client1Session = await pageClient1.target().createCDPSession();
+    await client1Session.send('Network.emulateNetworkConditions', {
+      offline: true,
+      latency: 0,
+      downloadThroughput: -1,
+      uploadThroughput: -1
     });
+    
+    // Wait for the app to detect offline and transition to disconnected
+    await pageClient1.waitForSelector('.connection-status.offline, .connection-status.degraded', { timeout: 15000 }).catch(() => {
+        console.log('[Warn] Client1 did not transition to offline/degraded UI in time, but network is offline.');
+    });
+    
     await delay(2000);
     
     console.log('\n=== Step 6: Host and Client2 correct their records while Client1 is offline ===');
@@ -260,11 +269,13 @@ async function runTest() {
     console.log('✅ Host and Client2 corrected their records.');
     
     console.log('\n=== Step 7: Client1 Reconnects and Receives Updated State ===');
-    await pageClient1.evaluate((code) => {
-      import('/src/stores/connection.ts').then(({ useConnectionStore }) => {
-        useConnectionStore().rtcService.connect(code);
-      });
-    }, eventCode);
+    // We restore network. We DO NOT reload the page. The background auto-reconnect should pick this up.
+    await client1Session.send('Network.emulateNetworkConditions', {
+      offline: false,
+      latency: 0,
+      downloadThroughput: -1,
+      uploadThroughput: -1
+    });
     
     // Wait for connection to restore
     await pageClient1.waitForSelector('.connection-status.connected', { timeout: 30000 });
@@ -289,6 +300,11 @@ async function runTest() {
     process.exitCode = 1;
   } finally {
     console.log('\n=== Cleanup ===');
+    // We exit the process aggressively to avoid dangling timers in Puppeteer contexts
+    
+    // Give it a brief moment to clear timeouts
+    await delay(500);
+
     await browserHost.close();
     await browserClient1.close();
     await browserClient2.close();
@@ -296,6 +312,7 @@ async function runTest() {
       killProcessTree(backendProcess.pid);
     }
     console.log('Done.');
+    process.exit(process.exitCode || 0);
   }
 }
 

@@ -150,7 +150,7 @@ export interface WebRtcAckSync {
 }
 
 // --- Connection status ---
-export type ConnectionStatus = 'offline' | 'connecting' | 'waiting' | 'connected' | 'degraded'
+export type ConnectionStatus = 'offline' | 'connecting' | 'waiting' | 'connected' | 'degraded' | 'long_offline'
 
 // --- Rankings row (aggregated client-side) ---
 export interface RankingRow {

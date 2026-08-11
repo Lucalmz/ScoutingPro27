@@ -93,7 +93,7 @@ class SignalingChannel {
         if (msg.target && msg.target !== this.clientId) return
         
         // 校验载荷结构：必须包含 offer/answer/candidate 或 特定指令
-        if (!msg.offer && !msg.answer && !msg.candidate && msg.type !== 'host_hello') return
+        if (!msg.offer && !msg.answer && !msg.candidate && msg.type !== 'host_hello' && msg.type !== 'HOST_LEAVING') return
         this.messageCallback?.(msg)
       } catch {
         // ignore malformed
@@ -261,7 +261,7 @@ export function createWebRtcService(callbacks: WebRtcCallbacks) {
   }
 
   // --- build peer connection + data channel ---
-  function createPeerConnection(targetSender?: string): RTCPeerConnection {
+  function createPeerConnection(targetSender?: string, onDisconnect?: () => void): RTCPeerConnection {
     const peer = new RTCPeerConnection(STUN_SERVERS)
 
     peer.onicecandidate = (ev) => {
@@ -308,14 +308,20 @@ export function createWebRtcService(callbacks: WebRtcCallbacks) {
     peer.oniceconnectionstatechange = async () => {
       console.log(`[WebRTC] ICE Connection state: ${peer.iceConnectionState}`);
       
-      if (peer.iceConnectionState === 'checking' || peer.iceConnectionState === 'disconnected') {
+      if (peer.iceConnectionState === 'checking') {
+         // do nothing
+      } else if (peer.iceConnectionState === 'disconnected' || peer.iceConnectionState === 'failed') {
         if (!iceTimeout) {
           iceTimeout = setTimeout(() => {
-            if (peer.iceConnectionState === 'checking' || peer.iceConnectionState === 'disconnected' || peer.iceConnectionState === 'failed') {
-              console.log('[WebRTC] Connection degraded (timeout)');
-              setStatus('degraded')
+            if (peer.iceConnectionState === 'disconnected' || peer.iceConnectionState === 'failed') {
+              if (onDisconnect) {
+                onDisconnect()
+              } else {
+                console.log('[WebRTC] Connection degraded (timeout)');
+                setStatus('degraded')
+              }
             }
-          }, 15000);
+          }, 1000); // 1s tolerance for transient network shifts
         }
       } else if (peer.iceConnectionState === 'connected' || peer.iceConnectionState === 'completed') {
         if (iceTimeout) {
@@ -336,9 +342,6 @@ export function createWebRtcService(callbacks: WebRtcCallbacks) {
             console.log(`[WebRTC] Active Pair: Local(${local?.candidateType || 'unknown'}) <-> Remote(${remote?.candidateType || 'unknown'})`);
           }
         } catch(e) {}
-      } else if (peer.iceConnectionState === 'failed') {
-        console.log('[WebRTC] Connection failed');
-        setStatus('degraded')
       }
     }
 
@@ -437,9 +440,39 @@ export function createWebRtcService(callbacks: WebRtcCallbacks) {
     isHostMode = false
     currentInviteCode = inviteCode
     setStatus('connecting')
+    
+    let reconnectAttempts = 0
+    let reconnectTimer: NodeJS.Timeout | null = null
+
     signaling = new SignalingChannel(inviteCode)
     await signaling.initTopic()
     
+    function triggerClientReconnect() {
+      if (status === 'long_offline') return;
+
+      if (reconnectTimer) {
+        clearTimeout(reconnectTimer);
+        reconnectTimer = null;
+      }
+
+      if (reconnectAttempts >= 6) {
+        console.log('[WebRTC] Max reconnect attempts reached. Moving to long_offline.');
+        setStatus('long_offline');
+        return;
+      }
+
+      // First retry is 1s, then 2s, 4s, 8s, 16s, 32s
+      const delay = reconnectAttempts === 0 ? 1000 : Math.pow(2, reconnectAttempts) * 1000;
+      reconnectAttempts++;
+
+      console.log(`[WebRTC] Attempting to reconnect in ${delay}ms (Attempt ${reconnectAttempts}/6)...`);
+      setStatus('connecting');
+
+      reconnectTimer = setTimeout(async () => {
+        await setupClientConnection();
+      }, delay);
+    }
+
     async function setupClientConnection() {
       clientPendingCandidates = []
       if (clientPc) {
@@ -449,12 +482,23 @@ export function createWebRtcService(callbacks: WebRtcCallbacks) {
         clientDc.close()
       }
       
-      clientPc = createPeerConnection()
+      clientPc = createPeerConnection(undefined, triggerClientReconnect)
 
       clientDc = clientPc.createDataChannel('scoutingpro-data')
       clientDc.onmessage = (e) => handleChannelMessage(e)
-      clientDc.onopen = () => setStatus('connected')
-      clientDc.onclose = () => setStatus('offline')
+      clientDc.onopen = () => {
+        setStatus('connected')
+        reconnectAttempts = 0
+        if (reconnectTimer) {
+          clearTimeout(reconnectTimer)
+          reconnectTimer = null
+        }
+      }
+      clientDc.onclose = () => {
+        if (status !== 'long_offline' && status !== 'offline') {
+          triggerClientReconnect()
+        }
+      }
 
       try {
         const offer = await clientPc.createOffer()
@@ -462,9 +506,7 @@ export function createWebRtcService(callbacks: WebRtcCallbacks) {
         signaling!.send({ offer })
       } catch (err) {
         console.error('Error creating offer:', err)
-        if (status !== 'connected' && (!clientPc || clientPc.connectionState !== 'connected')) {
-          setStatus('offline')
-        }
+        triggerClientReconnect()
       }
     }
 
@@ -479,9 +521,23 @@ export function createWebRtcService(callbacks: WebRtcCallbacks) {
       },
       onMessage: async (data: any) => {
         if (data.type === 'host_hello') {
-          // Host just came online, we need to restart our connection process
+          console.log('[WebRTC] Received host_hello, reconnecting immediately.');
+          if (reconnectTimer) {
+            clearTimeout(reconnectTimer);
+            reconnectTimer = null;
+          }
+          reconnectAttempts = 0; // Host is fresh, start clean
           clientHostSenderId = data.sender
           await setupClientConnection()
+        } else if (data.type === 'HOST_LEAVING') {
+          console.log('[WebRTC] Host explicitly left the room.');
+          if (reconnectTimer) {
+            clearTimeout(reconnectTimer);
+            reconnectTimer = null;
+          }
+          if (clientPc) clientPc.close()
+          if (clientDc) clientDc.close()
+          setStatus('offline')
         } else if (data.answer && clientPc) {
           try {
             clientHostSenderId = data.sender
@@ -559,6 +615,9 @@ export function createWebRtcService(callbacks: WebRtcCallbacks) {
   // --- tear down ---
   function disconnect() {
     if (isHostMode) {
+      if (signaling) {
+        signaling.send({ type: 'HOST_LEAVING' })
+      }
       clients.forEach(c => {
         c.dc?.close()
         c.pc.close()

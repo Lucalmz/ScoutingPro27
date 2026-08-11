@@ -66,12 +66,25 @@ onMounted(async () => {
 
   // Set up WebRTC
   setupWebRTC()
+  
+  if (eventStore.isHost) {
+    window.addEventListener('beforeunload', handleBeforeUnload)
+  }
 })
 
 onUnmounted(() => {
+  if (eventStore.isHost) {
+    window.removeEventListener('beforeunload', handleBeforeUnload)
+  }
   connStore.rtcService?.disconnect()
   connStore.setRtcService(null)
 })
+
+function handleBeforeUnload() {
+  if (eventStore.isHost) {
+    connStore.rtcService?.disconnect()
+  }
+}
 
 async function setupWebRTC() {
   const evt = eventStore.currentEvent
@@ -111,8 +124,10 @@ async function setupWebRTC() {
   }
 }
 
-watch(() => connStore.status, (status) => {
+watch(() => connStore.status, (status, oldStatus) => {
   const evt = eventStore.currentEvent
+  console.log(`[EventView] connStore.status changed: ${oldStatus} -> ${status}`)
+  
   if (status === 'connected' && evt && !eventStore.isHost) {
     // Client connected, request sync for new records
     connStore.requestSync(new Date(0).toISOString(), undefined, userStore.userId, userStore.username)
