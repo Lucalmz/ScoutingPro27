@@ -65,7 +65,7 @@ describe('Records Store', () => {
     vi.mocked(api.saveRecord).mockResolvedValue(undefined)
     
     const rec = createDummyRecord('rnew', 1234, 1, 2, 3)
-    const success = await store.addRecord(rec)
+    const { success } = await store.addRecord(rec)
     expect(success).toBe(true)
     expect(store.records).toHaveLength(1)
   })

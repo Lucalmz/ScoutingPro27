@@ -53,6 +53,8 @@ export interface ScoutingRecord {
   syncStatus: SyncStatus
   createdAt: string
   updatedAt: string
+  isBroken: boolean
+  isConflict?: boolean
 }
 
 // --- 前端表单数据（序列化后放入 rawData）---
@@ -60,6 +62,7 @@ export interface ScoutingFormData {
   matchNumber: number
   teamNumber: number
   allianceColor: 'none' | 'red' | 'blue'
+  isBroken: boolean
   
   // 2026 DECODE Fields
   // Auto
@@ -131,6 +134,7 @@ export interface WebRtcRequestSync {
   lastSyncTime: string
   authCode?: string
   senderUserId?: string
+  senderUserName?: string
 }
 
 export interface WebRtcSyncData {
@@ -146,7 +150,7 @@ export interface WebRtcAckSync {
 }
 
 // --- Connection status ---
-export type ConnectionStatus = 'offline' | 'connecting' | 'waiting' | 'connected'
+export type ConnectionStatus = 'offline' | 'connecting' | 'waiting' | 'connected' | 'degraded'
 
 // --- Rankings row (aggregated client-side) ---
 export interface RankingRow {
@@ -157,5 +161,6 @@ export interface RankingRow {
   avgEndgameScore: number
   maxScore: number
   avgRating: number
+  brokenCount: number
   trend: 'up' | 'down' | 'stable' | 'new'
 }

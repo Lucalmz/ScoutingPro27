@@ -2,8 +2,17 @@
 import { ref, computed } from 'vue'
 import { useI18n } from 'vue-i18n'
 import type { RankingRow } from '@/types'
+import { useEventStore } from '@/stores/events'
+import { useRecordStore } from '@/stores/records'
+import { useToastStore } from '@/stores/toast'
+
+import { useRouter } from 'vue-router'
 
 const { t } = useI18n()
+const eventStore = useEventStore()
+const recordStore = useRecordStore()
+const toastStore = useToastStore()
+const router = useRouter()
 
 const props = defineProps<{
   rankings: RankingRow[]
@@ -66,6 +75,25 @@ const highlightStyle = computed(() => ({
   height: `${highlightHeight.value}px`,
   opacity: highlightVisible.value ? 1 : 0
 }))
+
+async function banTeam(teamNumber: number) {
+  if (!confirm(`Are you sure you want to ban team ${teamNumber}? Scouters will be warned not to record them.`)) {
+    return
+  }
+  try {
+    if (eventStore.currentEvent?.id) {
+      await recordStore.banTeam(eventStore.currentEvent.id, teamNumber)
+      toastStore.showToast(`Team ${teamNumber} has been banned`, 'success')
+    }
+  } catch (e: any) {
+    toastStore.showToast(e.message || 'Failed to ban team', 'error')
+  }
+}
+function viewTeamDetails(teamNumber: number) {
+  if (eventStore.currentEvent?.id) {
+    router.push(`/event/${eventStore.currentEvent.id}/team/${teamNumber}`)
+  }
+}
 </script>
 
 <template>
@@ -85,6 +113,9 @@ const highlightStyle = computed(() => ({
             <th @click="setSort('matchCount')" class="sortable">
               {{ t('rankings.matches') }}<span class="material-icons" style="font-size: 18px; vertical-align: middle;">{{ sortIndicator('matchCount') }}</span>
             </th>
+            <th @click="setSort('brokenCount')" class="sortable">
+              {{ t('rankings.breakdown') }}<span class="material-icons" style="font-size: 18px; vertical-align: middle;">{{ sortIndicator('brokenCount') }}</span>
+            </th>
             <th @click="setSort('avgAutoScore')" class="sortable">
               {{ t('rankings.avg_auto') }}<span class="material-icons" style="font-size: 18px; vertical-align: middle;">{{ sortIndicator('avgAutoScore') }}</span>
             </th>
@@ -101,12 +132,18 @@ const highlightStyle = computed(() => ({
               {{ t('rankings.rating') }}<span class="material-icons" style="font-size: 18px; vertical-align: middle;">{{ sortIndicator('avgRating') }}</span>
             </th>
             <th>{{ t('rankings.trend') }}</th>
+            <th>{{ t('rankings.details') }}</th>
+            <th v-if="eventStore.isHost">{{ t('rankings.actions') }}</th>
           </tr>
         </thead>
         <tbody>
           <tr v-for="row in sorted" :key="row.teamNumber" @mouseenter="onRowEnter">
-            <td class="team-cell">{{ row.teamNumber }}</td>
+            <td class="team-cell">
+              {{ row.teamNumber }}
+              <span v-if="recordStore.bannedTeams.includes(row.teamNumber)" class="banned-badge">BANNED</span>
+            </td>
             <td>{{ row.matchCount }}</td>
+            <td :class="{'high-breakdown': row.brokenCount > 0 && row.brokenCount / row.matchCount >= 0.5}">{{ row.brokenCount }} / {{ row.matchCount }}</td>
             <td>{{ row.avgAutoScore.toFixed(1) }}</td>
             <td>{{ row.avgTeleopScore.toFixed(1) }}</td>
             <td>{{ row.avgEndgameScore.toFixed(1) }}</td>
@@ -117,6 +154,21 @@ const highlightStyle = computed(() => ({
               <span v-else-if="row.trend === 'down'" style="color: var(--status-error); font-weight: bold;">↘</span>
               <span v-else-if="row.trend === 'stable'" style="color: var(--muted-foreground);">➡</span>
               <span v-else style="color: var(--muted-foreground)">-</span>
+            </td>
+            <td>
+              <button class="details-btn" @click="viewTeamDetails(row.teamNumber)" :title="t('rankings.details')">
+                <span class="material-icons" style="font-size: 16px;">visibility</span>
+              </button>
+            </td>
+            <td v-if="eventStore.isHost">
+              <button 
+                v-if="row.matchCount >= 3 && !recordStore.bannedTeams.includes(row.teamNumber)" 
+                class="ban-btn" 
+                @click="banTeam(row.teamNumber)"
+                :title="t('rankings.ban_team')"
+              >
+                {{ t('rankings.ban_team') }}
+              </button>
             </td>
           </tr>
         </tbody>
@@ -193,6 +245,54 @@ tbody td {
 .total-cell {
   font-weight: 700;
   color: var(--primary);
+}
+
+.high-breakdown {
+  color: var(--status-error);
+  font-weight: bold;
+}
+
+.ban-btn {
+  background: var(--status-error);
+  color: white;
+  border: none;
+  border-radius: 4px;
+  padding: 4px 8px;
+  font-size: 12px;
+  cursor: pointer;
+  transition: opacity 0.2s;
+}
+
+.ban-btn:hover {
+  opacity: 0.8;
+}
+
+.details-btn {
+  background: var(--card);
+  color: var(--primary);
+  border: 1px solid var(--primary);
+  border-radius: 4px;
+  padding: 4px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  transition: all 0.2s;
+}
+
+.details-btn:hover {
+  background: var(--primary);
+  color: var(--primary-foreground);
+}
+
+.banned-badge {
+  background: var(--status-error);
+  color: white;
+  font-size: 10px;
+  padding: 2px 4px;
+  border-radius: 4px;
+  margin-left: 8px;
+  vertical-align: middle;
 }
 </style>
 

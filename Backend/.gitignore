@@ -42,3 +42,6 @@ jcef-bundle
 
 app_data.mv.db
 app_data.trace.db
+
+### Frontend build artifacts ###
+src/main/resources/public/

@@ -4,35 +4,35 @@
 
 @font-face {
   font-family: 'Manrope';
-  src: url('./fonts/Manrope-VariableFont_wght.ttf') format('truetype');
+  src: url('/assets/Manrope-VariableFont_wght-0N3pECc_.ttf') format('truetype');
   font-weight: 200 800;
   font-style: normal;
 }
 
 @font-face {
   font-family: 'Orbitron';
-  src: url('./fonts/Orbitron-VariableFont_wght.ttf') format('truetype');
+  src: url('/assets/Orbitron-VariableFont_wght-CYB_IVAf.ttf') format('truetype');
   font-weight: 400 900;
   font-style: normal;
 }
 
 @font-face {
   font-family: 'ZCOOLQingKeHuangYou';
-  src: url('./fonts/ZCOOLQingKeHuangYou-Regular.ttf') format('truetype');
+  src: url('/assets/ZCOOLQingKeHuangYou-Regular-C5lFiYTK.ttf') format('truetype');
   font-weight: normal;
   font-style: normal;
 }
 
 @font-face {
   font-family: 'ZCOOLXiaoWei';
-  src: url('./fonts/ZCOOLXiaoWei-Regular.ttf') format('truetype');
+  src: url('/assets/ZCOOLXiaoWei-Regular-BW1UGiix.ttf') format('truetype');
   font-weight: normal;
   font-style: normal;
 }
 
 @font-face {
   font-family: 'PinyonScript';
-  src: url('./fonts/PinyonScript-Regular.ttf') format('truetype');
+  src: url('/assets/PinyonScript-Regular-D0mG6oOT.ttf') format('truetype');
   font-weight: normal;
   font-style: normal;
 }

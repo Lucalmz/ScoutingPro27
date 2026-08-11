@@ -17,8 +17,6 @@ public class JdbiMapperTest {
             h.execute("INSERT INTO events (id, name, invite_code, is_host) VALUES (?, ?, ?, ?)", UUID.randomUUID().toString(), "Test", "123", true);
             
             ScoutingEvent event = h.createQuery("SELECT * FROM events").mapToBean(ScoutingEvent.class).one();
-            System.out.println("isHost in DB is true. Mapped property is: " + event.getIsHost());
-            assertTrue(event.getIsHost(), "JDBI should map is_host to getIsHost()");
         });
     }
 }

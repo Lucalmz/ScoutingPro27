@@ -21,6 +21,12 @@ const router = createRouter({
       component: () => import('@/views/EventView.vue'),
       props: true,
     },
+    {
+      path: '/event/:eventId/team/:teamNumber',
+      name: 'team-detail',
+      component: () => import('@/views/TeamDetailView.vue'),
+      props: true,
+    },
   ],
 })
 

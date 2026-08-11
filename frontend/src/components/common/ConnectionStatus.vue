@@ -51,6 +51,12 @@ const { t } = useI18n()
   color: var(--status-error);
 }
 
+.connection-status.degraded {
+  background: var(--card);
+  color: var(--status-warning);
+  border: 1px solid var(--status-warning);
+}
+
 .connection-status.waiting {
   background: var(--card);
   color: var(--primary);

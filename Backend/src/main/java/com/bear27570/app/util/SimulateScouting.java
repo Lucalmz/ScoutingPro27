@@ -109,6 +109,7 @@ public class SimulateScouting {
             });
 
             int recordCount = 0;
+            int globalScoutIndex = 0;
             for (JsonElement matchElement : matches) {
                 JsonObject match = matchElement.getAsJsonObject();
                 int matchNum = match.get("matchNum").getAsInt();
@@ -117,7 +118,6 @@ public class SimulateScouting {
                 
                 if (scores == null || teams == null) continue;
 
-                int teamIndex = 0;
                 for (JsonElement teamElement : teams) {
                     JsonObject team = teamElement.getAsJsonObject();
                     int teamNumber = team.get("teamNumber").getAsInt();
@@ -129,9 +129,9 @@ public class SimulateScouting {
                     int officialTotal = allianceScore.get("totalPointsNp").getAsInt();
                     int teamTotal = officialTotal / 2;
                     
-                    // Assign to one of the 4 scouters
-                    int sIndex = teamIndex % 4;
-                    String scouterId = "scout-" + sIndex + "-id";
+                    // Assign to one of the 4 scouters on a rotating basis
+                    int sIndex = globalScoutIndex % 4;
+                    String scouterId = scouterIds[sIndex];
                     String scouterName = "Scouter " + (char)('A' + sIndex);
                     
                     // Add variance to simulate real life
@@ -142,6 +142,8 @@ public class SimulateScouting {
                     } else if (sIndex == 2) {
                         teamTotal = Math.max(0, teamTotal - 2); // Scouter C is slightly off
                     }
+                    
+                    globalScoutIndex++;
                     
                     int autoScore = (int) (teamTotal * 0.3);
                     int endgameScore = (int) (teamTotal * 0.2);
@@ -167,7 +169,6 @@ public class SimulateScouting {
 
                     recordDao.upsert(record);
                     recordCount++;
-                    teamIndex++;
                 }
             }
 

@@ -37,6 +37,7 @@ class ApiRoutesTest {
     @Test
     void testLogin() {
         JavalinTest.test(app, (server, client) -> {
+            client.post("/api/user/register", "{\"username\":\"alice\", \"password\":\"secret\"}");
             var response = client.post("/api/user/login", "{\"username\":\"alice\", \"password\":\"secret\"}");
             assertThat(response.code()).isEqualTo(200);
             assertThat(response.body().string()).contains("alice");
@@ -46,7 +47,13 @@ class ApiRoutesTest {
     @Test
     void testCreateEvent() {
         JavalinTest.test(app, (server, client) -> {
-            var response = client.post("/api/events", "{\"name\":\"Championship\"}");
+            var regResponse = client.post("/api/user/register", "{\"username\":\"bob\", \"password\":\"secret\"}");
+            String body = regResponse.body().string();
+            String token = body.split("\"token\":\"")[1].split("\"")[0];
+            
+            var response = client.post("/api/events", "{\"name\":\"Championship\"}", builder -> {
+                builder.header("Authorization", "Bearer " + token);
+            });
             assertThat(response.code()).isEqualTo(200);
             assertThat(response.body().string()).contains("inviteCode");
         });

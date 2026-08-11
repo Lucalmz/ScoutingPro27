@@ -94,6 +94,14 @@ export function updateEventFtcConfig(eventId: string, ftcYear: number, ftcEventC
   return request<void>('PUT', `/events/${eventId}/ftc-config`, { ftcYear, ftcEventCode })
 }
 
+export function fetchBannedTeams(eventId: string): Promise<number[]> {
+  return request<number[]>('GET', `/events/${eventId}/banned-teams`)
+}
+
+export function banTeam(eventId: string, teamNumber: number): Promise<void> {
+  return request<void>('POST', `/events/${eventId}/banned-teams`, { teamNumber })
+}
+
 // --- Records ---
 export function listRecords(eventId: string): Promise<ScoutingRecord[]> {
   return request<ScoutingRecord[]>('GET', `/records?eventId=${encodeURIComponent(eventId)}`)

@@ -10,8 +10,30 @@ import { useInboxStore } from '@/stores/inbox'
 
 const STUN_SERVERS: RTCConfiguration = {
   iceServers: [
-    { urls: 'stun:stun.cloudflare.com:3478' },
-  ],
+    {
+      urls: "stun:stun.relay.metered.ca:80",
+    },
+    {
+      urls: "turn:global.relay.metered.ca:80",
+      username: "ac2f17ce5be760e70209a1da",
+      credential: "hnCbsBr54qxItqgo",
+    },
+    {
+      urls: "turn:global.relay.metered.ca:80?transport=tcp",
+      username: "ac2f17ce5be760e70209a1da",
+      credential: "hnCbsBr54qxItqgo",
+    },
+    {
+      urls: "turn:global.relay.metered.ca:443",
+      username: "ac2f17ce5be760e70209a1da",
+      credential: "hnCbsBr54qxItqgo",
+    },
+    {
+      urls: "turns:global.relay.metered.ca:443?transport=tcp",
+      username: "ac2f17ce5be760e70209a1da",
+      credential: "hnCbsBr54qxItqgo",
+    }
+  ]
 }
 
 /**
@@ -70,8 +92,8 @@ class SignalingChannel {
         // 如果指定了 target 且不是自己，忽略
         if (msg.target && msg.target !== this.clientId) return
         
-        // 校验载荷结构：必须包含 offer/answer/candidate 之一
-        if (!msg.offer && !msg.answer && !msg.candidate) return
+        // 校验载荷结构：必须包含 offer/answer/candidate 或 特定指令
+        if (!msg.offer && !msg.answer && !msg.candidate && msg.type !== 'host_hello') return
         this.messageCallback?.(msg)
       } catch {
         // ignore malformed
@@ -105,6 +127,7 @@ export type WebRtcCallbacks = {
   onRecordsReceived: (records: ScoutingRecord[], senderId?: string) => void
   onAckReceived: (recordIds: string[]) => void
   onRequestSync: (lastSyncTime: string, senderId?: string) => void
+  onClientConnected?: (userId: string, userName: string) => void
 }
 
 export function createWebRtcService(callbacks: WebRtcCallbacks) {
@@ -117,6 +140,7 @@ export function createWebRtcService(callbacks: WebRtcCallbacks) {
   let clientPc: RTCPeerConnection | null = null
   let clientDc: RTCDataChannel | null = null
   let clientPendingCandidates: RTCIceCandidateInit[] = []
+  let clientHostSenderId: string | undefined = undefined
 
   // Host mode state
   const clients = new Map<string, { pc: RTCPeerConnection, dc?: RTCDataChannel, pendingCandidates: RTCIceCandidateInit[] }>()
@@ -192,6 +216,9 @@ export function createWebRtcService(callbacks: WebRtcCallbacks) {
       case 'REQUEST_SYNC':
         if (msg.senderUserId && senderId) {
           scoutIdToClientId.set(msg.senderUserId, senderId)
+          if (msg.senderUserName) {
+            callbacks.onClientConnected?.(msg.senderUserId, msg.senderUserName)
+          }
           const pending = offlineMessages.get(msg.senderUserId)
           if (pending && pending.length > 0) {
             pending.forEach(m => sendMessage(m, senderId))
@@ -238,12 +265,19 @@ export function createWebRtcService(callbacks: WebRtcCallbacks) {
     const peer = new RTCPeerConnection(STUN_SERVERS)
 
     peer.onicecandidate = (ev) => {
-      if (ev.candidate && signaling) {
-        signaling.send({ candidate: ev.candidate }, targetSender)
+      if (ev.candidate) {
+        console.log(`[WebRTC] ICE Candidate: type=${ev.candidate.type}, protocol=${ev.candidate.protocol}, address=${ev.candidate.address}`);
+        if (signaling) {
+          const target = isHostMode ? targetSender : clientHostSenderId;
+          signaling.send({ candidate: ev.candidate }, target)
+        }
+      } else {
+        console.log(`[WebRTC] ICE Gathering Complete (null candidate)`);
       }
     }
 
     peer.onconnectionstatechange = () => {
+      console.log(`[WebRTC] Connection state changed: ${peer.connectionState}`);
       if (isHostMode) {
         if (['disconnected', 'failed', 'closed'].includes(peer.connectionState) && targetSender) {
           peer.close()
@@ -253,7 +287,9 @@ export function createWebRtcService(callbacks: WebRtcCallbacks) {
       } else {
         switch (peer.connectionState) {
           case 'connected':
-            setStatus('connected')
+            if (clientDc && clientDc.readyState === 'open') {
+              setStatus('connected')
+            }
             break
           case 'disconnected':
           case 'failed':
@@ -265,6 +301,49 @@ export function createWebRtcService(callbacks: WebRtcCallbacks) {
             setStatus('connecting')
         }
       }
+    }
+
+    let iceTimeout: NodeJS.Timeout | null = null
+
+    peer.oniceconnectionstatechange = async () => {
+      console.log(`[WebRTC] ICE Connection state: ${peer.iceConnectionState}`);
+      
+      if (peer.iceConnectionState === 'checking' || peer.iceConnectionState === 'disconnected') {
+        if (!iceTimeout) {
+          iceTimeout = setTimeout(() => {
+            if (peer.iceConnectionState === 'checking' || peer.iceConnectionState === 'disconnected' || peer.iceConnectionState === 'failed') {
+              console.log('[WebRTC] Connection degraded (timeout)');
+              setStatus('degraded')
+            }
+          }, 15000);
+        }
+      } else if (peer.iceConnectionState === 'connected' || peer.iceConnectionState === 'completed') {
+        if (iceTimeout) {
+          clearTimeout(iceTimeout);
+          iceTimeout = null;
+        }
+        try {
+          const stats = await peer.getStats();
+          let activePair: any = null;
+          stats.forEach(report => {
+            if (report.type === 'candidate-pair' && report.state === 'succeeded') {
+              activePair = report;
+            }
+          });
+          if (activePair) {
+            const local = stats.get(activePair.localCandidateId);
+            const remote = stats.get(activePair.remoteCandidateId);
+            console.log(`[WebRTC] Active Pair: Local(${local?.candidateType || 'unknown'}) <-> Remote(${remote?.candidateType || 'unknown'})`);
+          }
+        } catch(e) {}
+      } else if (peer.iceConnectionState === 'failed') {
+        console.log('[WebRTC] Connection failed');
+        setStatus('degraded')
+      }
+    }
+
+    peer.onicegatheringstatechange = () => {
+      console.log(`[WebRTC] ICE Gathering state: ${peer.iceGatheringState}`);
     }
 
     return peer
@@ -283,6 +362,7 @@ export function createWebRtcService(callbacks: WebRtcCallbacks) {
     signaling.connect({
       onConnect: () => {
         updateHostStatus()
+        signaling!.send({ type: 'host_hello' })
       },
       onError: () => {
         updateHostStatus()
@@ -360,27 +440,37 @@ export function createWebRtcService(callbacks: WebRtcCallbacks) {
     signaling = new SignalingChannel(inviteCode)
     await signaling.initTopic()
     
-    clientPendingCandidates = []
-    clientPc = createPeerConnection()
+    async function setupClientConnection() {
+      clientPendingCandidates = []
+      if (clientPc) {
+        clientPc.close()
+      }
+      if (clientDc) {
+        clientDc.close()
+      }
+      
+      clientPc = createPeerConnection()
 
-    clientDc = clientPc.createDataChannel('scoutingpro-data')
-    clientDc.onmessage = (e) => handleChannelMessage(e)
-    clientDc.onopen = () => setStatus('connected')
-    clientDc.onclose = () => setStatus('offline')
+      clientDc = clientPc.createDataChannel('scoutingpro-data')
+      clientDc.onmessage = (e) => handleChannelMessage(e)
+      clientDc.onopen = () => setStatus('connected')
+      clientDc.onclose = () => setStatus('offline')
+
+      try {
+        const offer = await clientPc.createOffer()
+        await clientPc.setLocalDescription(offer)
+        signaling!.send({ offer })
+      } catch (err) {
+        console.error('Error creating offer:', err)
+        if (status !== 'connected' && (!clientPc || clientPc.connectionState !== 'connected')) {
+          setStatus('offline')
+        }
+      }
+    }
 
     signaling.connect({
       onConnect: async () => {
-        if (!clientPc) return
-        try {
-          const offer = await clientPc.createOffer()
-          await clientPc.setLocalDescription(offer)
-          signaling!.send({ offer })
-        } catch (err) {
-          console.error('Error creating offer:', err)
-          if (status !== 'connected' && (!clientPc || clientPc.connectionState !== 'connected')) {
-            setStatus('offline')
-          }
-        }
+        await setupClientConnection()
       },
       onError: () => {
         if (status !== 'connected' && (!clientPc || clientPc.connectionState !== 'connected')) {
@@ -388,8 +478,13 @@ export function createWebRtcService(callbacks: WebRtcCallbacks) {
         }
       },
       onMessage: async (data: any) => {
-        if (data.answer && clientPc) {
+        if (data.type === 'host_hello') {
+          // Host just came online, we need to restart our connection process
+          clientHostSenderId = data.sender
+          await setupClientConnection()
+        } else if (data.answer && clientPc) {
           try {
+            clientHostSenderId = data.sender
             await clientPc.setRemoteDescription(new RTCSessionDescription(data.answer))
             for (const c of clientPendingCandidates) {
               await clientPc.addIceCandidate(new RTCIceCandidate(c))
@@ -399,6 +494,10 @@ export function createWebRtcService(callbacks: WebRtcCallbacks) {
             console.error('Error setting remote description:', err)
           }
         } else if (data.candidate && clientPc) {
+          // Only process candidate if it comes from the host
+          if (clientHostSenderId && data.sender !== clientHostSenderId) {
+            return
+          }
           try {
             await clientPc.addIceCandidate(new RTCIceCandidate(data.candidate))
           } catch {
@@ -410,8 +509,8 @@ export function createWebRtcService(callbacks: WebRtcCallbacks) {
   }
 
   // --- request a sync from the connected peer ---
-  function requestSync(lastSyncTime: string, authCode?: string, senderUserId?: string) {
-    sendMessage({ type: 'REQUEST_SYNC', lastSyncTime, authCode: authCode || currentInviteCode, senderUserId })
+  function requestSync(lastSyncTime: string, authCode?: string, senderUserId?: string, senderUserName?: string) {
+    sendMessage({ type: 'REQUEST_SYNC', lastSyncTime, authCode: authCode || currentInviteCode, senderUserId, senderUserName })
   }
 
   // --- push records to the connected peer ---

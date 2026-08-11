@@ -17,13 +17,13 @@ public interface RecordDao {
             id, event_id, scout_id, scout_name,
             match_number, team_number,
             auto_score, teleop_score, endgame_score, total_score,
-            notes, raw_data, sync_status,
+            notes, raw_data, sync_status, is_broken,
             created_at, updated_at
         ) KEY(id) VALUES (
             :id, :eventId, :scoutId, :scoutName,
             :matchNumber, :teamNumber,
             :autoScore, :teleopScore, :endgameScore, :totalScore,
-            :notes, :rawData, :syncStatus,
+            :notes, :rawData, :syncStatus, :isBroken,
             COALESCE((SELECT created_at FROM scouting_records WHERE id = :id), COALESCE(:createdAt, CURRENT_TIMESTAMP)), COALESCE(:updatedAt, CURRENT_TIMESTAMP)
         )
     """)

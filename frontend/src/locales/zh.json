@@ -79,7 +79,11 @@
     "blue": "蓝方",
     "none": "白板",
     "team_1": "队伍 1",
-    "team_2": "队伍 2"
+    "team_2": "队伍 2",
+    "banned_warning": "此队伍已被标记为弱队，可以跳过不记。",
+    "is_broken": "车坏了 (Is Broken)",
+    "notes": "比赛评价/备注",
+    "notes_placeholder": "请记录对该队这场的表现评价..."
   },
   "history": {
     "loading": "正在加载历史记录...",
@@ -106,10 +110,24 @@
     "avg_endgame": "均终局",
     "max": "最高",
     "rating": "当场评分",
-    "trend": "近期状态"
+    "trend": "近期状态",
+    "breakdown": "损坏率",
+    "actions": "操作",
+    "details": "详情",
+    "ban_team": "Ban 队"
+  },
+  "team_detail": {
+    "title": "队伍 {team} 详情",
+    "back": "返回",
+    "match": "场次",
+    "performance": "表现数据",
+    "comments": "评价记录",
+    "no_records": "该队伍暂无记录。",
+    "is_broken": "车坏了"
   },
   "connection": {
     "offline": "离线",
+    "degraded": "已离线 (数据保存在本地)",
     "connecting": "连接中...",
     "host_online": "主机在线",
     "connected": "已连接 (P2P)"
@@ -121,6 +139,8 @@
     "passwords_mismatch": "两次输入的密码不一致",
     "server_error": "服务器内部错误，请稍后重试",
     "network_error": "网络请求失败，请检查连接",
-    "welcome_back": "欢迎回来 {name}"
+    "welcome_back": "欢迎回来 {name}",
+    "conflict_error": "保存失败：你已经为 Match {match} - Team {team} 提交过数据，无法把当前记录改到这个场次。",
+    "conflict_badge": "[冲突! 请核对场次/队伍]"
   }
 }

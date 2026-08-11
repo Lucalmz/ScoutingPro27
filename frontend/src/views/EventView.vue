@@ -91,6 +91,9 @@ async function setupWebRTC() {
       if (recordsToSync.length > 0) {
         connStore.pushRecords(recordsToSync, senderId)
       }
+    },
+    onClientConnected: (userId: string, userName: string) => {
+      connStore.addConnectedScout(userId, userName)
     }
   })
 
@@ -112,7 +115,14 @@ watch(() => connStore.status, (status) => {
   const evt = eventStore.currentEvent
   if (status === 'connected' && evt && !eventStore.isHost) {
     // Client connected, request sync for new records
-    connStore.requestSync(new Date(0).toISOString(), undefined, userStore.userId)
+    connStore.requestSync(new Date(0).toISOString(), undefined, userStore.userId, userStore.username)
+    
+    // Push ALL my records to the host to ensure the host has them
+    // (in case they were submitted while WebRTC was disconnected)
+    const myRecs = recordStore.myRecords(userStore.userId)
+    if (myRecs.length > 0) {
+      connStore.pushRecords(myRecs)
+    }
   }
 })
 
@@ -133,13 +143,18 @@ async function onRecordSubmitted(recordOrRecords: ScoutingRecord | ScoutingRecor
   const records = Array.isArray(recordOrRecords) ? recordOrRecords : [recordOrRecords]
   
   let anyOk = false
+  const allToPush: ScoutingRecord[] = []
+  
   for (const rec of records) {
-    const ok = await recordStore.addRecord(rec)
-    if (ok) anyOk = true
+    const { success, recordsToPush } = await recordStore.addRecord(rec)
+    if (success) anyOk = true
+    if (recordsToPush && recordsToPush.length > 0) {
+      allToPush.push(...recordsToPush)
+    }
   }
 
-  if (anyOk && connStore.isConnected) {
-    connStore.pushRecords(records)
+  if (anyOk) {
+    connStore.pushIfNeeded(allToPush)
   }
   editingRecord.value = null // clear edit state after submit
 }
@@ -147,6 +162,7 @@ async function onRecordSubmitted(recordOrRecords: ScoutingRecord | ScoutingRecor
 function goBack() {
   connStore.rtcService?.disconnect()
   connStore.setRtcService(null)
+  connStore.clearConnectedScouts()
   eventStore.setCurrentEvent(null)
   router.push('/dashboard')
 }
@@ -158,6 +174,13 @@ const uniqueScouts = computed(() => {
       scouts.set(r.scoutId, { id: r.scoutId, name: r.scoutName, recordCount: 0 })
     }
     scouts.get(r.scoutId)!.recordCount++
+  }
+  for (const s of connStore.connectedScouts) {
+    if (!scouts.has(s.id)) {
+      scouts.set(s.id, { id: s.id, name: s.name, recordCount: 0 })
+    } else {
+      scouts.get(s.id)!.name = s.name
+    }
   }
   return Array.from(scouts.values())
 })

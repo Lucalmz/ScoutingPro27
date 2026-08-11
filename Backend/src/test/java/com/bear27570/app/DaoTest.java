@@ -48,12 +48,18 @@ class DaoTest {
 
     @Test
     void testEventDao() {
+        jdbi.useExtension(UserDao.class, dao -> {
+            User host = new User("host1", "hostuser");
+            host.setPassword("pass");
+            dao.upsert(host);
+        });
+
         jdbi.useExtension(EventDao.class, dao -> {
             ScoutingEvent e = new ScoutingEvent();
             e.setId("e1");
             e.setName("Test Event");
             e.setInviteCode("CODE1");
-            e.setIsHost(true);
+            e.setHostId("host1");
             dao.insert(e);
 
             ScoutingEvent found = dao.findById("e1");
@@ -67,13 +73,19 @@ class DaoTest {
 
     @Test
     void testRecordDao() {
+        jdbi.useExtension(UserDao.class, dao -> {
+            User host = new User("host1", "hostuser");
+            host.setPassword("pass");
+            dao.upsert(host);
+        });
+
         // 先插入 event（外键依赖）
         jdbi.useExtension(EventDao.class, dao -> {
             ScoutingEvent e = new ScoutingEvent();
             e.setId("e1");
             e.setName("FK Event");
             e.setInviteCode("ZZZZZZ");
-            e.setIsHost(true);
+            e.setHostId("host1");
             dao.insert(e);
         });
 
@@ -91,7 +103,7 @@ class DaoTest {
             List<ScoutingRecord> pending = dao.findPendingByEventId("e1");
             assertThat(pending).hasSize(1);
 
-            dao.markSynced("r1");
+            dao.markSynced("r1", "scout1");
             List<ScoutingRecord> pendingAfter = dao.findPendingByEventId("e1");
             assertThat(pendingAfter).isEmpty();
         });

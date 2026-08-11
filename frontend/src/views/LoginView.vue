@@ -84,7 +84,7 @@ async function handleLogin() {
       <div class="logo-area">
         <span class="material-icons logo-icon">hive</span>
         <h1>ScoutingPro 27</h1>
-        <p class="powered-by">powered by 27570 B.E.A.R. and 25787 TechBY</p>
+        <p class="powered-by">developed by 27570 B.E.A.R. and 25787 TechBY</p>
       </div>
 
       <form @submit.prevent="handleLogin">

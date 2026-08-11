@@ -57,7 +57,7 @@ function syncTooltip(status: string): string {
 }
 
 function startEdit(record: ScoutingRecord) {
-  if (record.syncStatus === 'SYNCED') return // can't edit synced
+  if (record.syncStatus === 'SYNCED' && !record.isConflict) return // can't edit synced unless conflicted
   emit('editRecord', record)
 }
 
@@ -107,8 +107,8 @@ const highlightStyle = computed(() => ({
         :id="'history-card-' + rec.id"
         class="history-card"
         :class="{ 
-          'low-reliability-record': recordStore.scoutReliability[rec.scoutId] === 'low',
-          'highlight-conflict': isConflictHighlighted(rec)
+          'highlight-conflict': isConflictHighlighted(rec),
+          'is-conflict-card': rec.isConflict
         }"
         @mouseenter="onCardEnter"
       >
@@ -120,6 +120,12 @@ const highlightStyle = computed(() => ({
             <span class="card-date">{{ formatDate(rec.createdAt) }}</span>
           </div>
           <div class="card-right">
+            <span
+              v-if="recordStore.scoutReliability[rec.scoutId] === 'low'"
+              class="material-icons"
+              style="font-size: 18px; color: #ef4444; margin-right: 4px;"
+              title="Low Reliability: High deviation from official scores"
+            >warning</span>
             <span class="card-score">{{ rec.totalScore }} {{ t('history.pts') }}</span>
             <span
               class="sync-badge material-icons"
@@ -129,6 +135,10 @@ const highlightStyle = computed(() => ({
           </div>
         </div>
 
+        <div v-if="rec.isConflict" class="conflict-badge">
+          <span class="material-icons">error_outline</span> {{ t('toast.conflict_badge') }}
+        </div>
+
         <!-- Quick detail -->
         <div class="card-detail">
           <span>{{ t('history.auto') }}: {{ rec.autoScore }} {{ t('history.pts') }}</span>
@@ -136,10 +146,11 @@ const highlightStyle = computed(() => ({
           <span>{{ t('history.endgame') }}: {{ rec.endgameScore }} {{ t('history.pts') }}</span>
         </div>
 
-        <!-- Edit button for PENDING records -->
-        <div v-if="rec.syncStatus === 'PENDING'" class="card-actions">
+        <!-- Edit button for PENDING records or conflicted records -->
+        <div v-if="rec.syncStatus === 'PENDING' || rec.isConflict" class="card-actions">
           <button
             class="btn-edit"
+            :class="{ 'btn-edit-conflict': rec.isConflict }"
             @click="startEdit(rec)"
           >
             <span class="material-icons" style="font-size: 16px; margin-right: 4px;">edit</span> {{ t('history.btn_edit') }}
@@ -188,21 +199,43 @@ const highlightStyle = computed(() => ({
   border-radius: 14px;
 }
 
-.history-card.low-reliability-record {
-  border-color: #ef4444 !important;
-  background: rgba(239, 68, 68, 0.05);
-}
 
-.history-card.highlight-conflict {
+
+.history-card.highlight-conflict,
+.history-card.is-conflict-card {
   border-color: #ef4444 !important;
   box-shadow: 0 0 15px rgba(239, 68, 68, 0.4);
   animation: pulse-conflict 2s infinite;
+  background-color: rgba(239, 68, 68, 0.05);
 }
 
 @keyframes pulse-conflict {
   0% { box-shadow: 0 0 10px rgba(239, 68, 68, 0.3); }
   50% { box-shadow: 0 0 20px rgba(239, 68, 68, 0.7); }
   100% { box-shadow: 0 0 10px rgba(239, 68, 68, 0.3); }
+}
+
+.conflict-badge {
+  color: #ef4444;
+  font-weight: 700;
+  font-size: 13px;
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  margin-top: 10px;
+}
+
+.conflict-badge .material-icons {
+  font-size: 16px;
+}
+
+.btn-edit-conflict {
+  background: #ef4444 !important;
+  color: white !important;
+}
+
+.btn-edit-conflict:hover {
+  background: #dc2626 !important;
 }
 
 .history-card.editing {

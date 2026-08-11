@@ -34,6 +34,8 @@ interface TeamScoutData {
   gatesTriggered: number
   baseScore: number
   supportMultiplier: number
+  isBroken: boolean
+  notes: string
 }
 
 function createEmptyTeam(): TeamScoutData {
@@ -47,7 +49,9 @@ function createEmptyTeam(): TeamScoutData {
     teleopOverflow: 0,
     gatesTriggered: 0,
     baseScore: 5,
-    supportMultiplier: 0
+    supportMultiplier: 0,
+    isBroken: false,
+    notes: ''
   }
 }
 
@@ -88,7 +92,9 @@ watch(() => props.editRecord, (rec: ScoutingRecord | null | undefined) => {
       teleopOverflow: raw.teleopOverflow ?? 0,
       gatesTriggered: raw.gatesTriggered ?? 0,
       baseScore: raw.baseScore ?? 5,
-      supportMultiplier: raw.supportMultiplier ?? 0
+      supportMultiplier: raw.supportMultiplier ?? 0,
+      isBroken: raw.isBroken ?? false,
+      notes: rec.notes || ''
     }]
   }
 }, { immediate: true })
@@ -126,14 +132,20 @@ async function handleSubmit() {
   const recordStore = useRecordStore()
   const activeTeams = scoutMode.value === 'single' ? teamsData.value.slice(0, 1) : teamsData.value
 
-  if (!props.editRecord) {
-    for (const team of activeTeams) {
-      if (recordStore.records.some(r => r.matchNumber === parseInt(matchNumber.value) && r.teamNumber === parseInt(team.teamNumber))) {
-        submitStatus.value = 'error'
-        submitErrorMsg.value = `Duplicate: Match ${matchNumber.value}, Team ${team.teamNumber}`
-        setTimeout(() => { submitStatus.value = 'none' }, 2000)
-        return
-      }
+  for (const team of activeTeams) {
+    const matchNum = parseInt(matchNumber.value)
+    const teamNum = parseInt(team.teamNumber)
+    const existing = recordStore.records.find(r => 
+      r.matchNumber === matchNum && 
+      r.teamNumber === teamNum && 
+      r.scoutId === props.scoutId &&
+      (!props.editRecord || r.id !== props.editRecord.id)
+    )
+    if (existing) {
+      submitStatus.value = 'error'
+      submitErrorMsg.value = t('toast.conflict_error', { match: matchNum, team: teamNum })
+      setTimeout(() => { submitStatus.value = 'none' }, 4000)
+      return
     }
   }
 
@@ -159,7 +171,8 @@ async function handleSubmit() {
         teleopOverflow: team.teleopOverflow,
         gatesTriggered: team.gatesTriggered,
         baseScore: team.baseScore,
-        supportMultiplier: team.supportMultiplier
+        supportMultiplier: team.supportMultiplier,
+        isBroken: team.isBroken
       }
 
       return {
@@ -173,11 +186,12 @@ async function handleSubmit() {
         teleopScore: teleop,
         endgameScore: endgame,
         totalScore: total,
-        notes: '',
+        notes: team.notes,
         rawData: JSON.stringify(formData),
         syncStatus: 'PENDING',
         createdAt: props.editRecord ? props.editRecord.createdAt : new Date().toISOString(),
         updatedAt: new Date().toISOString(),
+        isBroken: team.isBroken
       }
     })
 
@@ -221,6 +235,8 @@ const wrapperClass = computed(() => {
     `status-${submitStatus.value}`
   ]
 })
+
+const recordStore = useRecordStore()
 </script>
 
 <template>
@@ -270,6 +286,10 @@ const wrapperClass = computed(() => {
               <label class="field">
                 <span>{{ t('scouting.team_number') }}</span>
                 <input v-model="team.teamNumber" type="text" inputmode="numeric" placeholder="e.g. 12345" :class="{ 'invalid-field': isInvalidFormat(team.teamNumber) }" />
+                <span v-if="recordStore.bannedTeams.includes(parseInt(team.teamNumber))" class="banned-warning">
+                  <span class="material-icons" style="font-size: 14px; vertical-align: middle;">warning</span> 
+                  {{ t('scouting.banned_warning') }}
+                </span>
               </label>
             </div>
           </section>
@@ -358,6 +378,20 @@ const wrapperClass = computed(() => {
               <input v-model="team.supportMultiplier" :true-value="1" :false-value="0" type="checkbox" />
               <span>{{ t('scouting.support') }}</span>
             </label>
+            <label class="toggle" style="margin-top: 10px; color: var(--status-error);">
+              <input v-model="team.isBroken" type="checkbox" />
+              <span style="color: var(--status-error); font-weight: bold;">{{ t('scouting.is_broken') }}</span>
+            </label>
+            
+            <div class="field" style="margin-top: 16px;">
+              <span>{{ t('scouting.notes') }}</span>
+              <textarea 
+                v-model="team.notes" 
+                class="notes-input" 
+                :placeholder="t('scouting.notes_placeholder')"
+                rows="2"
+              ></textarea>
+            </div>
           </section>
           
           <div class="total-score-inline">
@@ -767,5 +801,34 @@ input.invalid-field {
 .btn-cancel:hover {
   background: var(--card);
   color: var(--foreground);
+}
+
+.banned-warning {
+  color: #ef4444;
+  font-size: 12px;
+  font-weight: 600;
+  margin-top: 4px;
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.notes-input {
+  padding: 10px 12px;
+  background: var(--background);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  color: var(--foreground);
+  font-size: 14px;
+  outline: none;
+  width: 100%;
+  box-sizing: border-box;
+  resize: vertical;
+  min-height: 60px;
+  transition: border-color 0.3s;
+}
+
+.notes-input:focus {
+  border-color: var(--primary);
 }
 </style>

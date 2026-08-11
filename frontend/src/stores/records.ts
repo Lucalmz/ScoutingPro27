@@ -1,15 +1,72 @@
 import { defineStore } from 'pinia'
-import { ref, computed } from 'vue'
-import { listRecords, saveRecord, syncRecords, markRecordsSynced } from '@/services/api'
+import { ref, computed, watch } from 'vue'
+import { listRecords, saveRecord, syncRecords, markRecordsSynced, fetchBannedTeams as apiFetchBannedTeams, banTeam as apiBanTeam } from '@/services/api'
 import { fetchEventMatches } from '@/services/graphql'
 import { useInboxStore } from '@/stores/inbox'
+import { useToastStore } from '@/stores/toast'
 import type { ScoutingRecord, RankingRow, OfficialMatch } from '@/types'
 
+function loadFromStorage<T>(key: string, defaultVal: T): T {
+  try {
+    const item = localStorage.getItem(key)
+    return item ? JSON.parse(item) : defaultVal
+  } catch (e) {
+    console.error(`Failed to parse ${key} from localStorage`, e)
+    return defaultVal
+  }
+}
+
 export const useRecordStore = defineStore('records', () => {
-  const records = ref<ScoutingRecord[]>([])
-  const officialMatches = ref<OfficialMatch[]>([])
+  const records = ref<ScoutingRecord[]>(loadFromStorage('scoutingpro_records', []))
+  const officialMatches = ref<OfficialMatch[]>(loadFromStorage('scoutingpro_officialMatches', []))
+  const bannedTeams = ref<number[]>(loadFromStorage('scoutingpro_bannedTeams', []))
   const loading = ref(false)
   const error = ref<string | null>(null)
+
+  function saveToStorage(key: string, val: any) {
+    try {
+      localStorage.setItem(key, JSON.stringify(val))
+    } catch (e) {
+      console.error(`Failed to save ${key} to localStorage (Quota exceeded?)`, e)
+      error.value = 'Local storage quota exceeded. Please clear some space.'
+      useToastStore().showToast('本地存储空间不足，数据可能丢失！', 'error')
+    }
+  }
+
+  function flushStorage() {
+    saveToStorage('scoutingpro_records', records.value)
+    saveToStorage('scoutingpro_officialMatches', officialMatches.value)
+    saveToStorage('scoutingpro_bannedTeams', bannedTeams.value)
+  }
+
+  // Debounced watch
+  let saveTimeout: any = null
+  watch([records, officialMatches, bannedTeams], () => {
+    if (saveTimeout) clearTimeout(saveTimeout)
+    saveTimeout = setTimeout(() => {
+      flushStorage()
+      saveTimeout = null
+    }, 500)
+  }, { deep: true })
+
+  window.addEventListener('beforeunload', () => {
+    if (saveTimeout) {
+      clearTimeout(saveTimeout)
+      flushStorage()
+    }
+  })
+
+  // Cross-tab sync
+  window.addEventListener('storage', (e) => {
+    if (e.key === 'scoutingpro_records' && e.newValue) {
+      try { records.value = JSON.parse(e.newValue) } catch {}
+    } else if (e.key === 'scoutingpro_officialMatches' && e.newValue) {
+      try { officialMatches.value = JSON.parse(e.newValue) } catch {}
+    } else if (e.key === 'scoutingpro_bannedTeams' && e.newValue) {
+      try { bannedTeams.value = JSON.parse(e.newValue) } catch {}
+    }
+  })
+
 
   const scoutReliability = computed<Record<string, 'low'|'high'>>(() => {
     const matchAlliances: Record<string, { officialTotal: number, scouts: { scoutId: string, score: number }[] }> = {}
@@ -46,9 +103,11 @@ export const useRecordStore = defineStore('records', () => {
     for (const data of Object.values(matchAlliances)) {
       if (data.scouts.length < 2) continue; // single record or no records, skip
       
-      const scoutTotal = data.scouts.reduce((sum, s) => sum + s.score, 0);
       const officialToCompare = data.officialTotal;
-      const deviation = Math.abs(scoutTotal - officialToCompare) / (officialToCompare || 1);
+      if (officialToCompare <= 0) continue; // Skip matches with 0 official score to prevent huge deviation
+
+      const scoutTotal = data.scouts.reduce((sum, s) => sum + s.score, 0);
+      const deviation = Math.abs(scoutTotal - officialToCompare) / officialToCompare;
       
       for (const s of data.scouts) {
         let stat = scoutStats[s.scoutId];
@@ -63,7 +122,7 @@ export const useRecordStore = defineStore('records', () => {
 
     const reliability: Record<string, 'low'|'high'> = {}
     for (const [scoutId, stat] of Object.entries(scoutStats)) {
-      reliability[scoutId] = (stat.totalDeviation / stat.count > 0.20) ? 'low' : 'high'
+      reliability[scoutId] = (stat.totalDeviation / stat.count > 0.30) ? 'low' : 'high'
     }
     return reliability
   })
@@ -93,8 +152,14 @@ export const useRecordStore = defineStore('records', () => {
       let totalWeightedScore = 0;
       let realMaxScore = 0;
       let totalRealScoreForTrend: number[] = [];
+      let brokenCount = 0;
 
       for (const r of sortedRecs) {
+        if (r.isBroken) {
+          brokenCount++;
+          continue; // Ignore broken matches in calculations
+        }
+
         const weight = scoutReliability.value[r.scoutId] === 'low' ? 0.5 : 1.0;
         weightSum += weight;
 
@@ -153,6 +218,7 @@ export const useRecordStore = defineStore('records', () => {
         avgEndgameScore: Math.round(avgEndgameScore * 10) / 10,
         maxScore: realMaxScore,
         avgRating: Math.round(avgRating * 10) / 10,
+        brokenCount,
         trend
       })
     }
@@ -182,6 +248,7 @@ export const useRecordStore = defineStore('records', () => {
       } else {
         officialMatches.value = []
       }
+      bannedTeams.value = await apiFetchBannedTeams(eventId).catch(() => [])
     } catch (e: any) {
       error.value = e.message ?? 'Failed to load records'
     } finally {
@@ -189,67 +256,109 @@ export const useRecordStore = defineStore('records', () => {
     }
   }
 
-  function checkAndClearResolvedConflicts() {
-    const inboxStore = useInboxStore()
-    const conflicts = inboxStore.messages.filter(m => m.type === 'conflict' && !m.read)
-    for (const msg of conflicts) {
-      if (msg.conflictMatchNumber !== undefined && msg.conflictTeamNumber !== undefined) {
-        const count = records.value.filter(r => r.matchNumber === msg.conflictMatchNumber && r.teamNumber === msg.conflictTeamNumber).length
-        if (count <= 1) {
-          inboxStore.markRead(msg.id)
+  function reassessConflicts(matchNumber: number, teamNumber: number): ScoutingRecord[] {
+    const coordsRecords = records.value.filter(r => r.matchNumber === matchNumber && r.teamNumber === teamNumber)
+    const uniqueScouts = new Set(coordsRecords.map(r => r.scoutId))
+    const updatedRecords: ScoutingRecord[] = []
+    
+    if (uniqueScouts.size <= 1) {
+      for (const r of coordsRecords) {
+        if (r.isConflict) {
+          r.isConflict = false
+          const nowMs = Date.now()
+          const localMs = new Date(r.updatedAt).getTime()
+          r.updatedAt = new Date(nowMs <= localMs ? localMs + 1 : nowMs).toISOString()
+          r.syncStatus = 'PENDING'
+          updatedRecords.push(r)
         }
       }
     }
+    return updatedRecords
   }
 
   // --- save a new record locally ---
-  async function addRecord(record: ScoutingRecord): Promise<boolean> {
+  async function addRecord(record: ScoutingRecord): Promise<{ success: boolean, recordsToPush: ScoutingRecord[] }> {
+    const idx = records.value.findIndex(r => r.id === record.id)
+    const oldMatch = idx >= 0 ? records.value[idx]?.matchNumber ?? null : null
+    const oldTeam = idx >= 0 ? records.value[idx]?.teamNumber ?? null : null
+
+    // Users explicit edits ALWAYS update the timestamp and status
+    record.updatedAt = new Date().toISOString()
+    record.syncStatus = 'PENDING'
+
+    if (idx >= 0) {
+      records.value[idx] = record
+    } else {
+      records.value.push(record)
+    }
+
+    const recordsToPush: ScoutingRecord[] = [record]
+
+    if (oldMatch !== null && oldTeam !== null && (oldMatch !== record.matchNumber || oldTeam !== record.teamNumber)) {
+      recordsToPush.push(...reassessConflicts(oldMatch, oldTeam))
+    }
+    recordsToPush.push(...reassessConflicts(record.matchNumber, record.teamNumber))
+
     try {
       await saveRecord(record)
-      const idx = records.value.findIndex(r => r.id === record.id)
-      if (idx >= 0) {
-        records.value[idx] = record
-      } else {
-        records.value.push(record)
-      }
-      checkAndClearResolvedConflicts()
-      return true
+      record.syncStatus = 'SYNCED'
+      return { success: true, recordsToPush }
     } catch (e: any) {
       error.value = e.message ?? 'Failed to save record'
-      return false
+      // It's still successfully stored locally, will be synced via WebRTC
+      return { success: true, recordsToPush }
     }
   }
 
   // --- bulk upsert from peer sync ---
   async function bulkSync(incoming: ScoutingRecord[]) {
-    const inboxStore = useInboxStore()
-    // Merge into local state first to ensure they aren't lost if sync fails
+    const recordsToBroadcast: ScoutingRecord[] = []
+    
     for (const inc of incoming) {
-      const conflictRecord = records.value.find(r => r.matchNumber === inc.matchNumber && r.teamNumber === inc.teamNumber && r.scoutId !== inc.scoutId)
-      if (conflictRecord) {
-        const conflictTitle = 'Sync Conflict'
-        const conflictBody = `Submission conflict for Match ${inc.matchNumber}, Team ${inc.teamNumber}`
-        if (!inboxStore.messages.some(m => m.title === conflictTitle && m.body === conflictBody && !m.read)) {
-          inboxStore.addMessage({
-            title: conflictTitle,
-            body: conflictBody,
-            type: 'conflict',
-            conflictMatchNumber: inc.matchNumber,
-            conflictTeamNumber: inc.teamNumber
-          })
-        }
-      }
-
       const idx = records.value.findIndex((r) => r.id === inc.id)
+      let savedLocal: ScoutingRecord | null = null
+
       if (idx >= 0) {
         const local = records.value[idx]
         if (local && new Date(inc.updatedAt) > new Date(local.updatedAt)) {
           records.value[idx] = inc
+          savedLocal = records.value[idx]
         }
       } else {
         records.value.push(inc)
+        savedLocal = inc
+      }
+
+      if (savedLocal) {
+        // Detect conflict
+        const conflictRecords = records.value.filter(r => r.matchNumber === savedLocal!.matchNumber && r.teamNumber === savedLocal!.teamNumber && r.scoutId !== savedLocal!.scoutId)
+        if (conflictRecords.length > 0) {
+          const allConflicting = [savedLocal, ...conflictRecords]
+          let flipped = false
+          for (const r of allConflicting) {
+            if (!r.isConflict) {
+              r.isConflict = true
+              const nowMs = Date.now()
+              const localMs = new Date(r.updatedAt).getTime()
+              r.updatedAt = new Date(nowMs <= localMs ? localMs + 1 : nowMs).toISOString()
+              r.syncStatus = 'PENDING'
+              recordsToBroadcast.push(r)
+              flipped = true
+            }
+          }
+        }
       }
     }
+
+    if (recordsToBroadcast.length > 0) {
+      import('@/stores/connection').then(({ useConnectionStore }) => {
+        const connStore = useConnectionStore()
+        if (connStore.isConnected) {
+          connStore.pushRecords(recordsToBroadcast)
+        }
+      })
+    }
+
     try {
       await syncRecords(incoming)
     } catch (e: any) {
@@ -271,14 +380,22 @@ export const useRecordStore = defineStore('records', () => {
   }
 
   // --- update a pending record (local edit) ---
-  async function updateRecord(record: ScoutingRecord): Promise<boolean> {
+  async function updateRecord(record: ScoutingRecord): Promise<{ success: boolean, recordsToPush: ScoutingRecord[] }> {
     // Re-save via the same POST endpoint (upsert by id)
     return addRecord(record)
+  }
+
+  async function banTeam(eventId: string, teamNumber: number) {
+    if (!bannedTeams.value.includes(teamNumber)) {
+      bannedTeams.value.push(teamNumber)
+    }
+    await apiBanTeam(eventId, teamNumber)
   }
 
   return {
     records,
     officialMatches,
+    bannedTeams,
     scoutReliability,
     loading,
     error,
@@ -290,5 +407,6 @@ export const useRecordStore = defineStore('records', () => {
     bulkSync,
     markSynced,
     updateRecord,
+    banTeam,
   }
 })

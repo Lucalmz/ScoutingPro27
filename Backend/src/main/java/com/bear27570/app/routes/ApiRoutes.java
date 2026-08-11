@@ -237,6 +237,37 @@ public class ApiRoutes {
             ctx.status(200).result("OK");
         });
 
+        routes.get("/api/events/{id}/banned-teams", ctx -> {
+            String eventId = ctx.pathParam("id");
+            List<Integer> bannedTeams = jdbi.withExtension(com.bear27570.app.dao.BannedTeamDao.class, dao -> dao.getBannedTeams(eventId));
+            ctx.result(gson.toJson(bannedTeams)).contentType("application/json");
+        });
+
+        routes.post("/api/events/{id}/banned-teams", ctx -> {
+            String eventId = ctx.pathParam("id");
+            @SuppressWarnings("unchecked")
+            Map<String, Object> body = gson.fromJson(ctx.body(), Map.class);
+            if (body == null || body.get("teamNumber") == null) {
+                ctx.status(400).result("Invalid JSON body");
+                return;
+            }
+            int teamNumber = ((Number) body.get("teamNumber")).intValue();
+            String userId = ctx.attribute("userId");
+            jdbi.useTransaction(handle -> {
+                EventDao eventDao = handle.attach(EventDao.class);
+                ScoutingEvent e = eventDao.findById(eventId);
+                if (e == null) {
+                    throw new io.javalin.http.NotFoundResponse("Event not found");
+                }
+                if (!userId.equals(e.getHostId())) {
+                    throw new io.javalin.http.ForbiddenResponse("Only the host can ban teams");
+                }
+                com.bear27570.app.dao.BannedTeamDao bannedDao = handle.attach(com.bear27570.app.dao.BannedTeamDao.class);
+                bannedDao.banTeam(eventId, teamNumber);
+            });
+            ctx.status(200).result("OK");
+        });
+
         // ==================== Records ====================
 
         routes.get("/api/records", ctx -> {
@@ -286,7 +317,9 @@ public class ApiRoutes {
                         if (r.getMatchNumber() <= 0 || r.getTeamNumber() <= 0 || r.getEventId() == null) {
                             throw new IllegalArgumentException("Invalid record detected in batch sync");
                         }
-                        r.setScoutId(userId);
+                        if (r.getScoutId() == null || r.getScoutId().isBlank()) {
+                            r.setScoutId(userId); // only fallback to host ID if missing
+                        }
                         r.setSyncStatus("SYNCED");
                         dao.upsert(r);
                     }

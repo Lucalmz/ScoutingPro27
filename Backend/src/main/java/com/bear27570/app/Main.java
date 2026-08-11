@@ -20,12 +20,25 @@ import java.io.File;
 public class Main {
 
     public static void main(String[] args) {
-        // 1. 先在 EDT 上把启动动画显示出来
-        SplashScreen splash = new SplashScreen();
-        SwingUtilities.invokeLater(() -> splash.setVisible(true));
+        boolean headless = false;
+        for (String arg : args) {
+            if ("--headless".equals(arg)) {
+                headless = true;
+                break;
+            }
+        }
 
-        // 2. 真正耗时的初始化放到后台线程，避免卡住 EDT 导致动画卡帧/掉帧
-        new Thread(() -> initAndRun(args, splash), "app-init").start();
+        if (headless) {
+            System.setProperty("java.awt.headless", "true");
+            initAndRun(args, null);
+        } else {
+            // 1. 先在 EDT 上把启动动画显示出来
+            SplashScreen splash = new SplashScreen();
+            SwingUtilities.invokeLater(() -> splash.setVisible(true));
+
+            // 2. 真正耗时的初始化放到后台线程，避免卡住 EDT 导致动画卡帧/掉帧
+            new Thread(() -> initAndRun(args, splash), "app-init").start();
+        }
     }
 
     private static void initAndRun(String[] args, SplashScreen splash) {
@@ -33,7 +46,7 @@ public class Main {
             // ==========================================
             // 数据库配置 + 迁移
             // ==========================================
-            splash.updateProgress(10, "Preparing database...");
+            if (splash != null) splash.updateProgress(10, "Preparing database...");
             String dbUrl = "jdbc:h2:./app_data;AUTO_SERVER=TRUE";
             String dbUser = "sa";
             String dbPassword = "";
@@ -47,7 +60,7 @@ public class Main {
             flyway.repair();
             flyway.migrate();
 
-            splash.updateProgress(35, "Connecting to database...");
+            if (splash != null) splash.updateProgress(35, "Connecting to database...");
             System.out.println("连接 JDBI...");
             Jdbi jdbi = JdbiConfig.create(dbUrl, dbUser, dbPassword);
 
@@ -68,13 +81,18 @@ public class Main {
             // ==========================================
             // 启动 Javalin（Javalin 7：路由在 config.routes 中注册）
             // ==========================================
-            splash.updateProgress(55, "Starting local server...");
+            if (splash != null) splash.updateProgress(55, "Starting local server...");
             ApiRoutes apiRoutes = new ApiRoutes(jdbi);
 
             Javalin app = Javalin.create(config -> {
                 config.staticFiles.add(staticFiles -> {
                     staticFiles.hostedPath = "/";
                     staticFiles.directory = "/public";
+                    staticFiles.location = Location.CLASSPATH;
+                });
+                config.staticFiles.add(staticFiles -> {
+                    staticFiles.hostedPath = "/assets";
+                    staticFiles.directory = "/assets";
                     staticFiles.location = Location.CLASSPATH;
                 });
                 // CORS
@@ -87,11 +105,24 @@ public class Main {
 
             String localUrl = "http://localhost:" + app.port() + "/index.html";
             System.out.println("Javalin 运行在: " + localUrl);
+            
+            boolean headless = false;
+            for (String arg : args) {
+                if ("--headless".equals(arg)) {
+                    headless = true;
+                    break;
+                }
+            }
+            
+            if (headless) {
+                System.out.println("运行在 Headless 模式，已跳过 JCEF UI 的启动。");
+                return;
+            }
 
             // ==========================================
             // 配置 JCEF 浏览器
             // ==========================================
-            splash.updateProgress(70, "Initializing browser engine...");
+            if (splash != null) splash.updateProgress(70, "Initializing browser engine...");
             CefAppBuilder builder = new CefAppBuilder();
             builder.setInstallDir(new File("jcef-bundle"));
             builder.getCefSettings().windowless_rendering_enabled = false;
@@ -104,11 +135,11 @@ public class Main {
             CefApp cefApp = builder.build();
             CefClient cefClient = cefApp.createClient();
 
-            splash.updateProgress(88, "Loading interface...");
+            if (splash != null) splash.updateProgress(88, "Loading interface...");
             CefBrowser browser = cefClient.createBrowser(localUrl, false, false);
             Component browserUI = browser.getUIComponent();
 
-            splash.updateProgress(100, "Ready");
+            if (splash != null) splash.updateProgress(100, "Ready");
 
             // ==========================================
             // 切回 EDT：显示主窗口，动画淡出关闭
@@ -133,15 +164,21 @@ public class Main {
 
                 // 动画满足最短展示时长后自动淡出，回调里再显示主窗口，
                 // 这样视觉上是“动画放完 -> 主界面出现”，衔接不会有空档或闪烁。
-                splash.closeSmoothly(() -> frame.setVisible(true));
+                if (splash != null) {
+                    splash.closeSmoothly(() -> frame.setVisible(true));
+                } else {
+                    frame.setVisible(true);
+                }
             });
 
         } catch (Exception e) {
             e.printStackTrace();
-            SwingUtilities.invokeLater(() -> {
-                splash.dispose();
-                JOptionPane.showMessageDialog(null, "Startup failed: " + e.getMessage());
-            });
+            if (splash != null) {
+                SwingUtilities.invokeLater(() -> {
+                    splash.dispose();
+                    JOptionPane.showMessageDialog(null, "Startup failed: " + e.getMessage());
+                });
+            }
             System.exit(1);
         }
     }

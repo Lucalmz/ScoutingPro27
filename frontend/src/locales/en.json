@@ -79,7 +79,11 @@
     "blue": "Blue",
     "none": "White",
     "team_1": "Team 1",
-    "team_2": "Team 2"
+    "team_2": "Team 2",
+    "banned_warning": "This team is marked as weak, you can skip recording.",
+    "is_broken": "Robot is Broken",
+    "notes": "Comments / Evaluation",
+    "notes_placeholder": "Write your evaluation of the team's performance..."
   },
   "history": {
     "loading": "Loading history...",
@@ -106,10 +110,24 @@
     "avg_endgame": "Avg End",
     "max": "Max",
     "rating": "Rating",
-    "trend": "Trend"
+    "trend": "Trend",
+    "breakdown": "Breakdown",
+    "actions": "Actions",
+    "details": "Details",
+    "ban_team": "Ban Team"
+  },
+  "team_detail": {
+    "title": "Team {team} Details",
+    "back": "Back",
+    "match": "Match",
+    "performance": "Performance",
+    "comments": "Comments",
+    "no_records": "No records for this team yet.",
+    "is_broken": "Broken"
   },
   "connection": {
     "offline": "Offline",
+    "degraded": "Offline (Data saved locally)",
     "connecting": "Connecting...",
     "host_online": "Host Online",
     "connected": "Connected (P2P)"
@@ -121,6 +139,8 @@
     "passwords_mismatch": "Passwords do not match",
     "server_error": "Internal Server Error",
     "network_error": "Network error, please check connection",
-    "welcome_back": "Welcome back {name}"
+    "welcome_back": "Welcome back {name}",
+    "conflict_error": "Save failed: You have already submitted data for Match {match} - Team {team}.",
+    "conflict_badge": "[CONFLICT! Please check match/team]"
   }
 }
