@@ -18,13 +18,16 @@ public interface RecordDao {
             match_number, team_number,
             auto_score, teleop_score, endgame_score, total_score,
             notes, raw_data, sync_status, is_broken,
-            created_at, updated_at
+            created_at, updated_at,
+            version, host_seq
         ) KEY(id) VALUES (
             :id, :eventId, :scoutId, :scoutName,
             :matchNumber, :teamNumber,
             :autoScore, :teleopScore, :endgameScore, :totalScore,
             :notes, :rawData, :syncStatus, :isBroken,
-            COALESCE((SELECT created_at FROM scouting_records WHERE id = :id), COALESCE(:createdAt, CURRENT_TIMESTAMP)), COALESCE(:updatedAt, CURRENT_TIMESTAMP)
+            COALESCE((SELECT created_at FROM scouting_records WHERE id = :id), COALESCE(:createdAt, CURRENT_TIMESTAMP)), COALESCE(:updatedAt, CURRENT_TIMESTAMP),
+            GREATEST(COALESCE((SELECT version FROM scouting_records WHERE id = :id), 0), :version),
+            :hostSeq
         )
     """)
     void upsert(@BindBean ScoutingRecord record);

@@ -25,31 +25,37 @@ async function delay(ms) {
 }
 
 async function robustLogin(page, username) {
+  // 1. 填用户名
   await page.waitForSelector('#username');
   await page.type('#username', username);
-  await page.focus('#password');
-  await page.type('#password', 'password123');
-  
-  await delay(1000);
-  
-  const confirmPasswordExists = await page.$('#confirmPassword');
-  if (confirmPasswordExists) {
-    await page.type('#confirmPassword', 'password123');
-  }
-  
+
+  // 2. 触发 blur 让后端检查用户是否存在（checkUserExists）
+  await page.evaluate(() => {
+    const el = document.querySelector('#username');
+    if (el) el.dispatchEvent(new Event('blur'));
+  });
+
+  // 3. 等后端 checkUserExists 响应完成（本地服务器很快，1.5s 足够）
+  await delay(1500);
+
+  // 4. 填密码
   await page.waitForSelector('#password', { visible: true, timeout: 10000 });
   await page.type('#password', 'e2etestpass');
-  
-  await page.waitForSelector('#confirmPassword', { visible: true, timeout: 10000 });
-  await page.type('#confirmPassword', 'e2etestpass');
-  
+
+  // 5. 如果是新用户，#confirmPassword 会出现
+  const confirmPasswordEl = await page.$('#confirmPassword');
+  if (confirmPasswordEl) {
+    await page.type('#confirmPassword', 'e2etestpass');
+  }
+
+  // 6. 等提交按钮可点击
   await page.waitForFunction(() => {
     const btn = document.querySelector('button[type="submit"]');
     return btn && !btn.disabled;
   }, { timeout: 10000 });
-  
+
   await page.click('button[type="submit"]');
-  await page.waitForSelector('.action-btn', { timeout: 10000 });
+  await page.waitForSelector('.action-btn', { timeout: 15000 });
 }
 
 function killProcessTree(pid) {
@@ -96,12 +102,13 @@ async function runTest() {
   const backendProcess = spawn(mavenCmd, [
     'exec:java', 
     '-Dexec.mainClass=com.bear27570.app.Main', 
-    '-Dexec.args=--headless'
+    '-Dexec.args=--headless',
+    '-DENABLE_TEST_CLEANUP=true'
   ], {
     cwd: path.join(__dirname, '../../Backend'),
     detached: os.platform() !== 'win32',
     shell: os.platform() === 'win32',
-    env: { ...process.env, DEV_PORT: '7070' }
+    env: { ...process.env, DEV_PORT: '7070', ENABLE_TEST_CLEANUP: 'true' }
   });
 
   await new Promise((resolve, reject) => {
@@ -126,7 +133,7 @@ async function runTest() {
   const getLaunchOptions = (index) => {
     // 3 windows side-by-side: 600px width each, with a 20px gap
     const width = 600;
-    const height = 1000;
+    const height = 800;
     const x = index * 620; 
     const y = 0;
     
@@ -152,6 +159,8 @@ async function runTest() {
   }
 
   let pageHost, pageClient1, pageClient2;
+  let client1Session = null;
+  const trackedUsers = [];
 
   try {
     pageHost = await browserHost.newPage();
@@ -166,23 +175,34 @@ async function runTest() {
     await forceRelay(pageClient1);
     await forceRelay(pageClient2);
 
+    const hostUser = `HostUser${Date.now()}`;
+    trackedUsers.push(hostUser);
+
     console.log('\n=== Step 1: Host creates event ===');
+    console.time('Step 1 Duration');
     await pageHost.goto(BASE_URL);
-    await robustLogin(pageHost, `HostUser${Date.now()}`);
+    await robustLogin(pageHost, hostUser);
     await pageHost.waitForSelector('.action-btn.primary');
+    // 等页面 View Transition 动画结束，否则 click 会落在冻结快照层上被吃掉
+    await pageHost.waitForFunction(() => !document.documentElement.dataset.direction, { timeout: 5000 }).catch(() => {});
     await pageHost.click('.action-btn.primary');
     await pageHost.waitForSelector('.modal-overlay input');
     await pageHost.type('.modal-overlay input', `RELAY_TEST_${Date.now()}`);
     await pageHost.click('.btn-confirm');
     await pageHost.waitForSelector('.event-meta strong');
+
     const eventCode = (await pageHost.$eval('.event-meta strong', el => el.textContent)).trim();
     console.log(`🎉 Event Created! Code: ${eventCode}`);
+    console.timeEnd('Step 1 Duration');
 
     console.log('\n=== Step 2: Clients join event ===');
-    const joinEvent = async (page) => {
+    console.time('Step 2 Duration');
+    const joinEvent = async (page, username) => {
       await page.goto(BASE_URL);
-      await robustLogin(page, `ClientUser${Math.random()}`);
+      await robustLogin(page, username);
       await page.waitForSelector('.action-btn.secondary');
+      // 等 View Transition 结束再点击
+      await page.waitForFunction(() => !document.documentElement.dataset.direction, { timeout: 5000 }).catch(() => {});
       await page.click('.action-btn.secondary');
       await page.waitForSelector('.modal-overlay input');
       await page.type('.modal-overlay input', eventCode);
@@ -190,10 +210,17 @@ async function runTest() {
       await page.waitForSelector('.connection-status.connected', { timeout: 30000 });
     };
 
-    await Promise.all([joinEvent(pageClient1), joinEvent(pageClient2)]);
+
+    const client1User = `ClientUser${Math.random()}`;
+    const client2User = `ClientUser${Math.random()}`;
+    trackedUsers.push(client1User, client2User);
+
+    await Promise.all([joinEvent(pageClient1, client1User), joinEvent(pageClient2, client2User)]);
     console.log(`✅ Clients successfully joined Event and connected via Relay WebRTC`);
+    console.timeEnd('Step 2 Duration');
 
     console.log('\n=== Step 3: All 3 browsers submit the SAME Match 1 Team 9999 ===');
+    console.time('Step 3 Duration');
     const submitRecord = async (page) => {
       await page.waitForSelector('input[placeholder="1-999"]');
       await page.evaluate(() => {
@@ -220,8 +247,10 @@ async function runTest() {
     await submitRecord(pageClient1);
     await submitRecord(pageClient2);
     console.log('✅ Form submitted by all three!');
+    console.timeEnd('Step 3 Duration');
 
     console.log('\n=== Step 4: Verify Conflicts Appears ===');
+    console.time('Step 4 Duration');
     // Give it a moment to sync and detect conflicts
     await delay(3000);
     // Go to history tab on Client1 to see if conflict badge is there
@@ -249,11 +278,16 @@ async function runTest() {
     } else {
       console.log('✅ Conflict successfully detected on Client1!');
     }
+    console.timeEnd('Step 4 Duration');
     
     // Continue test anyway
     
     console.log('\n=== Step 5: Simulate Client1 Disconnect (Network Offline) ===');
-    const client1Session = await pageClient1.target().createCDPSession();
+    console.time('Step 5 Duration');
+    
+    // CDP Network.emulateNetworkConditions does NOT affect WebRTC ICE/TURN connections,
+    // so we must disconnect at the application level to truly simulate going offline.
+    client1Session = await pageClient1.target().createCDPSession();
     await client1Session.send('Network.emulateNetworkConditions', {
       offline: true,
       latency: 0,
@@ -261,14 +295,25 @@ async function runTest() {
       uploadThroughput: -1
     });
     
-    // Wait for the app to detect offline and transition to disconnected
-    await pageClient1.waitForSelector('.connection-status.offline, .connection-status.degraded', { timeout: 15000 }).catch(() => {
-        console.log('[Warn] Client1 did not transition to offline/degraded UI in time, but network is offline.');
+    // Close only the WebRTC peer/data channel (simulating a network drop),
+    // but keep the MQTT signaling channel alive so auto-reconnect works in Step 7.
+    // Calling __rtcDisconnect() would close signaling too, preventing reconnection.
+    await pageClient1.evaluate(() => {
+      if (window.__rtcSimulateNetworkDrop) {
+        window.__rtcSimulateNetworkDrop();
+      }
     });
     
-    await delay(2000);
+    // Wait for UI to reflect disconnect (client enters 'connecting' from auto-reconnect logic)
+    await pageClient1.waitForSelector('.connection-status:not(.connected):not(.waiting)', { timeout: 5000 }).catch(() => {
+        console.log('[Warn] Client1 did not transition away from connected UI in time.');
+    });
+    
+    await delay(1000);
+    console.timeEnd('Step 5 Duration');
     
     console.log('\n=== Step 6: Host and Client2 correct their records while Client1 is offline ===');
+    console.time('Step 6 Duration');
     const correctRecord = async (page, newTeamNumber) => {
       // Assuming already on History tab
       await page.evaluate(() => {
@@ -295,8 +340,10 @@ async function runTest() {
     await correctRecord(pageHost, '8888');
     await correctRecord(pageClient2, '7777');
     console.log('✅ Host and Client2 corrected their records.');
+    console.timeEnd('Step 6 Duration');
     
     console.log('\n=== Step 7: Client1 Reconnects and Receives Updated State ===');
+    console.time('Step 7 Duration');
     // We restore network. We DO NOT reload the page. The background auto-reconnect should pick this up.
     await client1Session.send('Network.emulateNetworkConditions', {
       offline: false,
@@ -322,6 +369,7 @@ async function runTest() {
     } else {
       console.log('🚀 SUCCESS: Client1 conflict automatically cleared after syncing from Host!');
     }
+    console.timeEnd('Step 7 Duration');
 
   } catch (err) {
     console.error('Test encountered an error:', err);
@@ -329,15 +377,45 @@ async function runTest() {
   } finally {
     console.log('\n=== Cleanup ===');
     
+    if (trackedUsers.length > 0) {
+      try {
+        console.log(`Sending cleanup request for ${trackedUsers.length} test users...`);
+        const resp = await fetch('http://localhost:7070/api/test/cleanup', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(trackedUsers)
+        });
+        if (resp.ok) {
+          console.log('✅ Server successfully cleaned up test data.');
+        } else {
+          console.error('❌ Failed to clean up test data on server:', await resp.text());
+        }
+      } catch (err) {
+        console.error('❌ Error sending cleanup request:', err);
+      }
+    }
+
+    // Restore Client1's network before disconnecting (CDP offline blocks MQTT close)
+    if (client1Session) {
+      try {
+        await client1Session.send('Network.emulateNetworkConditions', {
+          offline: false, latency: 0, downloadThroughput: -1, uploadThroughput: -1
+        });
+      } catch (e) { /* session may be dead */ }
+    }
+
     // Explicitly disconnect each page to clear timers and MQTT connections
     const disconnectPage = async (page) => {
       if (!page) return;
       try {
-        await page.evaluate(() => {
-          if (window.__rtcDisconnect) {
-            window.__rtcDisconnect();
-          }
-        });
+        await Promise.race([
+          page.evaluate(() => {
+            if (window.__rtcDisconnect) {
+              window.__rtcDisconnect();
+            }
+          }),
+          new Promise(resolve => setTimeout(resolve, 3000)) // safety timeout
+        ]);
       } catch (e) {
         // Ignore if page is already dead
       }

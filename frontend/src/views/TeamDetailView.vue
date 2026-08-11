@@ -55,7 +55,7 @@ async function saveComment(match: ScoutingRecord) {
 
 <template>
   <div class="team-detail-view">
-    <header class="app-header">
+    <header class="app-header" :style="{ viewTransitionName: `team-card-${teamNumber}` }">
       <button class="btn-back" @click="router.back()">
         <span class="material-icons">arrow_back</span>
         {{ t('team_detail.back') }}

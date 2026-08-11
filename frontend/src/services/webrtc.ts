@@ -124,9 +124,11 @@ class SignalingChannel {
 
 export type WebRtcCallbacks = {
   onStatusChange: (status: ConnectionStatus) => void
-  onRecordsReceived: (records: ScoutingRecord[], senderId?: string) => void
-  onAckReceived: (recordIds: string[]) => void
-  onRequestSync: (lastSyncTime: string, senderId?: string) => void
+  /** 返回真正被接受写入本地的记录，Host 用此打 hostSeq */
+  onRecordsReceived: (records: ScoutingRecord[], senderId?: string) => Promise<ScoutingRecord[]>
+  onAckReceived: (recordIds: string[], stampedRecords?: ScoutingRecord[]) => void
+  /** sinceVersion: 0 或缺失表示全量请求；>0 表示增量请求 */
+  onRequestSync: (sinceVersion: number, senderId?: string) => void
   onClientConnected?: (userId: string, userName: string) => void
 }
 
@@ -148,6 +150,9 @@ export function createWebRtcService(callbacks: WebRtcCallbacks) {
   const hostQueues = new Map<string, Promise<void>>()
   const scoutIdToClientId = new Map<string, string>()
   const offlineMessages = new Map<string, WebRtcDirectMessage[]>()
+
+  // 增量同步：Host 全局序列号计数器。重启前应先通过 initHostSeq 从已持久化记录的最大 hostSeq 恢复
+  let hostSeqCounter = 0
 
   function enqueueHostTask(sender: string, task: () => Promise<void>) {
     const q = hostQueues.get(sender) || Promise.resolve()
@@ -201,7 +206,7 @@ export function createWebRtcService(callbacks: WebRtcCallbacks) {
   }
 
   // --- handle incoming data-channel messages ---
-  function handleChannelMessage(ev: MessageEvent, senderId?: string) {
+  async function handleChannelMessage(ev: MessageEvent, senderId?: string) {
     let msg: WebRtcMessage
     try {
       msg = JSON.parse(ev.data) as WebRtcMessage
@@ -227,26 +232,46 @@ export function createWebRtcService(callbacks: WebRtcCallbacks) {
             offlineMessages.delete(msg.senderUserId)
           }
         }
-        callbacks.onRequestSync(msg.lastSyncTime || '', senderId)
+        callbacks.onRequestSync(msg.sinceVersion ?? 0, senderId)
         break
-      case 'SYNC_DATA':
-        callbacks.onRecordsReceived(msg.records, senderId)
-        // Auto-ack
-        sendMessage({
-          type: 'ACK_SYNC',
-          recordIds: msg.records.map((r) => r.id),
-          authCode: currentInviteCode
-        }, senderId)
-        if (isHostMode) {
+      case 'SYNC_DATA': {
+        // onRecordsReceived 返回真正被接受的记录
+        const accepted = await callbacks.onRecordsReceived(msg.records, senderId)
+        if (isHostMode && accepted.length > 0) {
+          // 步骤 1：只对真正被接受的记录打 hostSeq（允许序列号空洞，以简单为优先）
+          for (const r of accepted) {
+            r.hostSeq = ++hostSeqCounter
+          }
+          // 步骤 2：ACK 回传给原始推送者，带上 stamped 记录，供其更新本地 hostSeq + lastHostSeq
+          sendMessage({
+            type: 'ACK_SYNC',
+            recordIds: accepted.map(r => r.id),
+            stampedRecords: accepted,
+            authCode: currentInviteCode
+          }, senderId)
+          // 步骤 3：将带 hostSeq 的最终版本广播给所有其他 Client
+          const relayPayload = JSON.stringify({
+            type: 'SYNC_DATA',
+            records: accepted,
+            authCode: currentInviteCode
+          })
           clients.forEach((c, id) => {
             if (id !== senderId && c.dc && c.dc.readyState === 'open') {
-              c.dc.send(JSON.stringify({ ...msg, authCode: currentInviteCode }))
+              c.dc.send(relayPayload)
             }
           })
+        } else {
+          // 没有被接受的记录（全部被拘绝），仅发空 ACK
+          sendMessage({
+            type: 'ACK_SYNC',
+            recordIds: msg.records.map(r => r.id),
+            authCode: currentInviteCode
+          }, senderId)
         }
         break
+      }
       case 'ACK_SYNC':
-        callbacks.onAckReceived(msg.recordIds)
+        callbacks.onAckReceived(msg.recordIds, msg.stampedRecords)
         break
       case 'DIRECT_MESSAGE':
         // As a host, direct messages are sent BY the host via sendDirectMessage,
@@ -575,8 +600,15 @@ export function createWebRtcService(callbacks: WebRtcCallbacks) {
   }
 
   // --- request a sync from the connected peer ---
-  function requestSync(lastSyncTime: string, authCode?: string, senderUserId?: string, senderUserName?: string) {
-    sendMessage({ type: 'REQUEST_SYNC', lastSyncTime, authCode: authCode || currentInviteCode, senderUserId, senderUserName })
+  function requestSync(sinceVersion: number, authCode?: string, senderUserId?: string, senderUserName?: string) {
+    sendMessage({
+      type: 'REQUEST_SYNC',
+      lastSyncTime: '',  // 保留字段兼容旧版本协议
+      sinceVersion,
+      authCode: authCode || currentInviteCode,
+      senderUserId,
+      senderUserName
+    })
   }
 
   // --- push records to the connected peer ---
@@ -646,6 +678,20 @@ export function createWebRtcService(callbacks: WebRtcCallbacks) {
     setStatus('offline')
   }
 
+  // --- Host 序列号管理 ---
+  /** 重启后从记录最大 hostSeq 恢复计数器，保证单调递增 */
+  function initHostSeq(maxSeq: number) {
+    hostSeqCounter = maxSeq
+  }
+
+  /** 对记录数组打上 hostSeq（递增），返回同一数组供链式调用 */
+  function stampHostSeq(records: ScoutingRecord[]): ScoutingRecord[] {
+    for (const r of records) {
+      r.hostSeq = ++hostSeqCounter
+    }
+    return records
+  }
+
   return {
     host,
     join,
@@ -654,6 +700,8 @@ export function createWebRtcService(callbacks: WebRtcCallbacks) {
     ackRecords,
     sendDirectMessage,
     disconnect,
+    initHostSeq,
+    stampHostSeq,
     getStatus: () => status,
     getDataChannel: () => isHostMode ? (clients.values().next().value?.dc || null) : clientDc,
   }

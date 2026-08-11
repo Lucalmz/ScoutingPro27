@@ -89,9 +89,15 @@ async function banTeam(teamNumber: number) {
     toastStore.showToast(e.message || 'Failed to ban team', 'error')
   }
 }
+import { transitionState } from '@/utils/transitionState'
+import { nextTick } from 'vue'
+
 function viewTeamDetails(teamNumber: number) {
   if (eventStore.currentEvent?.id) {
-    router.push(`/event/${eventStore.currentEvent.id}/team/${teamNumber}`)
+    transitionState.startSharedTransition(`team-card-${teamNumber}`)
+    nextTick(() => {
+      router.push(`/event/${eventStore.currentEvent!.id}/team/${teamNumber}`)
+    })
   }
 }
 </script>
@@ -137,10 +143,20 @@ function viewTeamDetails(teamNumber: number) {
           </tr>
         </thead>
         <tbody>
-          <tr v-for="row in sorted" :key="row.teamNumber" @mouseenter="onRowEnter">
+          <tr 
+            v-for="row in sorted" 
+            :key="row.teamNumber" 
+            @mouseenter="onRowEnter"
+          >
             <td class="team-cell">
-              {{ row.teamNumber }}
-              <span v-if="recordStore.bannedTeams.includes(row.teamNumber)" class="banned-badge">BANNED</span>
+              <div 
+                class="team-cell-content" 
+                style="display: block; width: 100%;"
+                :style="{ viewTransitionName: transitionState.sharedElementId === `team-card-${row.teamNumber}` ? `team-card-${row.teamNumber}` : 'none' }"
+              >
+                {{ row.teamNumber }}
+                <span v-if="recordStore.bannedTeams.includes(row.teamNumber)" class="banned-badge">BANNED</span>
+              </div>
             </td>
             <td>{{ row.matchCount }}</td>
             <td :class="{'high-breakdown': row.brokenCount > 0 && row.brokenCount / row.matchCount >= 0.5}">{{ row.brokenCount }} / {{ row.matchCount }}</td>

@@ -242,7 +242,9 @@ export const useRecordStore = defineStore('records', () => {
     loading.value = true
     error.value = null
     try {
-      records.value = await listRecords(eventId)
+      const fetched = await listRecords(eventId)
+      // 旧数据升迁：version 缺失的记录赋为 1，避免被 version=0 的传入覆盖
+      records.value = fetched.map(r => ({ ...r, version: r.version || 1 }))
       if (ftcYear && ftcEventCode) {
         officialMatches.value = await fetchEventMatches(ftcYear, ftcEventCode)
       } else {
@@ -265,9 +267,8 @@ export const useRecordStore = defineStore('records', () => {
       for (const r of coordsRecords) {
         if (r.isConflict) {
           r.isConflict = false
-          const nowMs = Date.now()
-          const localMs = new Date(r.updatedAt).getTime()
-          r.updatedAt = new Date(nowMs <= localMs ? localMs + 1 : nowMs).toISOString()
+          r.updatedAt = new Date().toISOString()
+          r.version = (r.version || 0) + 1  // 冲突状态变更也要递增 version
           r.syncStatus = 'PENDING'
           updatedRecords.push(r)
         }
@@ -282,9 +283,10 @@ export const useRecordStore = defineStore('records', () => {
     const oldMatch = idx >= 0 ? records.value[idx]?.matchNumber ?? null : null
     const oldTeam = idx >= 0 ? records.value[idx]?.teamNumber ?? null : null
 
-    // Users explicit edits ALWAYS update the timestamp and status
+    // 用户显式编辑永远更新时间戳和状态
     record.updatedAt = new Date().toISOString()
     record.syncStatus = 'PENDING'
+    record.version = (record.version || 0) + 1  // 每次编辑递增版本号
 
     if (idx >= 0) {
       records.value[idx] = record
@@ -311,8 +313,12 @@ export const useRecordStore = defineStore('records', () => {
   }
 
   // --- bulk upsert from peer sync ---
-  async function bulkSync(incoming: ScoutingRecord[]) {
+  // 返回真正被接受（写入本地）的记录，供 Host 专项打 hostSeq 后广播
+  async function bulkSync(incoming: ScoutingRecord[]): Promise<ScoutingRecord[]> {
     const recordsToBroadcast: ScoutingRecord[] = []
+    const acceptedRecords: ScoutingRecord[] = []  // 真正写入本地的记录
+    // 跟踪所有需要冲突重评的坐标
+    const coordsToReassess = new Set<string>()
     
     for (const inc of incoming) {
       const idx = records.value.findIndex((r) => r.id === inc.id)
@@ -320,9 +326,18 @@ export const useRecordStore = defineStore('records', () => {
 
       if (idx >= 0) {
         const local = records.value[idx]
-        if (local && new Date(inc.updatedAt) > new Date(local.updatedAt)) {
-          records.value[idx] = inc
-          savedLocal = records.value[idx]
+        if (local) {
+          const incV = inc.version || 0
+          const localV = local.version || 0
+          // LWW： version 大的胜出；相等时以 updatedAt 内指针（不同节点并发编辑极少出现）
+          const shouldAccept = incV > localV ||
+            (incV === localV && inc.updatedAt > local.updatedAt)
+          if (shouldAccept) {
+            // 追踪覆写前的旧坐标（冲突可能在旧坐标处消失）
+            coordsToReassess.add(`${local.matchNumber}:${local.teamNumber}`)
+            records.value[idx] = inc
+            savedLocal = records.value[idx]
+          }
         }
       } else {
         records.value.push(inc)
@@ -330,24 +345,36 @@ export const useRecordStore = defineStore('records', () => {
       }
 
       if (savedLocal) {
-        // Detect conflict
-        const conflictRecords = records.value.filter(r => r.matchNumber === savedLocal!.matchNumber && r.teamNumber === savedLocal!.teamNumber && r.scoutId !== savedLocal!.scoutId)
+        acceptedRecords.push(savedLocal)
+        // 追踪新坐标
+        coordsToReassess.add(`${savedLocal.matchNumber}:${savedLocal.teamNumber}`)
+        
+        // 冲突检测
+        const conflictRecords = records.value.filter(r =>
+          r.matchNumber === savedLocal!.matchNumber &&
+          r.teamNumber === savedLocal!.teamNumber &&
+          r.scoutId !== savedLocal!.scoutId
+        )
         if (conflictRecords.length > 0) {
           const allConflicting = [savedLocal, ...conflictRecords]
-          let flipped = false
           for (const r of allConflicting) {
             if (!r.isConflict) {
               r.isConflict = true
-              const nowMs = Date.now()
-              const localMs = new Date(r.updatedAt).getTime()
-              r.updatedAt = new Date(nowMs <= localMs ? localMs + 1 : nowMs).toISOString()
+              r.updatedAt = new Date().toISOString()
+              r.version = (r.version || 0) + 1  // 冲突状态变更也要递增 version
               r.syncStatus = 'PENDING'
               recordsToBroadcast.push(r)
-              flipped = true
             }
           }
         }
       }
+    }
+
+    // 重评所有受影响坐标，清除已不成立的冲突标志
+    for (const key of coordsToReassess) {
+      const [matchStr, teamStr] = key.split(':')
+      const cleared = reassessConflicts(Number(matchStr), Number(teamStr))
+      recordsToBroadcast.push(...cleared)
     }
 
     if (recordsToBroadcast.length > 0) {
@@ -364,6 +391,8 @@ export const useRecordStore = defineStore('records', () => {
     } catch (e: any) {
       error.value = e.message ?? 'Failed to sync records'
     }
+
+    return acceptedRecords
   }
 
   // --- mark records as synced locally ---

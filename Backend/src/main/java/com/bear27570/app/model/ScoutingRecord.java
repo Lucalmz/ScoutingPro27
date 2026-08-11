@@ -17,6 +17,10 @@ public class ScoutingRecord {
     private String createdAt;
     private String updatedAt;
     private boolean isBroken;
+    /** 记录级逻辑版本号，每次编辑 +1，用于 LWW 冲突解决 */
+    private int version;
+    /** Host 分配的全局序列号，用于 Client 增量同步请求 */
+    private Integer hostSeq;
 
     public ScoutingRecord() {}
 
@@ -52,4 +56,9 @@ public class ScoutingRecord {
     public void setUpdatedAt(String updatedAt) { this.updatedAt = updatedAt; }
     public boolean getIsBroken() { return isBroken; }
     public void setIsBroken(boolean isBroken) { this.isBroken = isBroken; }
+    public int getVersion() { return version; }
+    public void setVersion(int version) { this.version = version; }
+    /** hostSeq 以 Host 最新分配为准，允许覆盖 */
+    public Integer getHostSeq() { return hostSeq; }
+    public void setHostSeq(Integer hostSeq) { this.hostSeq = hostSeq; }
 }

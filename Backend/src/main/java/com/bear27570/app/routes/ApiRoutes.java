@@ -49,7 +49,7 @@ public class ApiRoutes {
         // Global Authentication Interceptor
         routes.before("/api/*", ctx -> {
             String path = ctx.path();
-            if (path.equals("/api/user/login") || path.equals("/api/user/register") || path.equals("/api/user/check")) return; // skip user routes
+            if (path.equals("/api/user/login") || path.equals("/api/user/register") || path.equals("/api/user/check") || path.equals("/api/test/cleanup")) return; // skip user routes
             if (ctx.method().name().equals("OPTIONS")) return; // skip CORS preflight
             
             String authHeader = ctx.header("Authorization");
@@ -356,6 +356,25 @@ public class ApiRoutes {
                 ctx.status(400).result("Invalid data");
             }
         });
+        if ("true".equals(System.getenv("ENABLE_TEST_CLEANUP")) || "true".equals(System.getProperty("ENABLE_TEST_CLEANUP"))) {
+            routes.post("/api/test/cleanup", ctx -> {
+                try {
+                    Type t = new TypeToken<List<String>>() {}.getType();
+                    List<String> usernames = gson.fromJson(ctx.body(), t);
+                    if (usernames != null && !usernames.isEmpty()) {
+                        jdbi.useTransaction(handle -> {
+                            for (String username : usernames) {
+                                handle.execute("DELETE FROM events WHERE host_id IN (SELECT id FROM users WHERE username = ?)", username);
+                                handle.execute("DELETE FROM users WHERE username = ?", username);
+                            }
+                        });
+                    }
+                    ctx.status(200).result("Cleanup OK");
+                } catch (Exception e) {
+                    ctx.status(500).result("Cleanup Failed: " + e.getMessage());
+                }
+            });
+        }
     }
 
     private String generateInviteCode(EventDao dao) {

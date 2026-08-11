@@ -54,11 +54,17 @@ async function handleJoin() {
   }
 }
 
+import { transitionState } from '@/utils/transitionState'
+import { nextTick } from 'vue'
+
 function enterEvent(evt: { id: string }) {
   enteringEventId.value = evt.id
-  setTimeout(() => {
+  transitionState.startSharedTransition(`event-card-${evt.id}`)
+  
+  nextTick(() => {
+    // Navigate immediately after the DOM has the inline style
     router.push(`/event/${evt.id}`)
-  }, 350)
+  })
 }
 
 function handleLogout() {
@@ -103,6 +109,7 @@ function handleLogout() {
           :key="evt.id"
           class="event-card"
           :class="{ 'slide-out-right': enteringEventId === evt.id }"
+          :style="{ viewTransitionName: transitionState.sharedElementId === `event-card-${evt.id}` ? `event-card-${evt.id}` : 'none' }"
           @click="enterEvent(evt)"
         >
           <div class="event-info">

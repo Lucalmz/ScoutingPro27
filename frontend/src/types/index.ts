@@ -55,6 +55,10 @@ export interface ScoutingRecord {
   updatedAt: string
   isBroken: boolean
   isConflict?: boolean
+  /** 记录级逻辑版本号，每次该记录被任何节点编辑就 +1，用于 LWW 冲突解决（替代 updatedAt 比较）*/
+  version: number
+  /** Host 分配的全局单调序列号，用于客户端增量同步请求（sinceVersion 过滤）*/
+  hostSeq?: number
 }
 
 // --- 前端表单数据（序列化后放入 rawData）---
@@ -132,6 +136,8 @@ export interface WebRtcDirectMessage {
 export interface WebRtcRequestSync {
   type: 'REQUEST_SYNC'
   lastSyncTime: string
+  /** 增量同步：只请求 hostSeq > sinceVersion 的记录；0 或缺失表示全量请求 */
+  sinceVersion?: number
   authCode?: string
   senderUserId?: string
   senderUserName?: string
@@ -146,6 +152,8 @@ export interface WebRtcSyncData {
 export interface WebRtcAckSync {
   type: 'ACK_SYNC'
   recordIds: string[]
+  /** Host 回传给原始推送者的、已打上 hostSeq 的记录，供其更新本地 hostSeq 和 lastHostSeq */
+  stampedRecords?: ScoutingRecord[]
   authCode?: string
 }
 

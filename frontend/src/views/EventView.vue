@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref, onMounted, onUnmounted, watch, computed } from 'vue'
+import { ref, reactive, onMounted, onUnmounted, watch, computed } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { useUserStore } from '@/stores/user'
 import { useEventStore } from '@/stores/events'
@@ -36,7 +36,21 @@ const tabs = computed(() => {
 })
 
 const eventId = computed(() => route.params.eventId as string)
-const event = computed(() => eventStore.currentEvent)
+
+// Compute the event synchronously from either currentEvent or the loaded events list
+// This guarantees that the header text renders correctly on frame 0, which is critical 
+// for the View Transitions shared element morph to capture the correct snapshot.
+const event = computed(() => {
+  if (eventStore.currentEvent?.id === eventId.value) {
+    return eventStore.currentEvent
+  }
+  return eventStore.events.find((e) => e.id === eventId.value) || null
+})
+
+const state = reactive({
+  loading: true,
+  error: null as Error | null
+})
 
 onMounted(async () => {
   if (!userStore.isLoggedIn) {
@@ -44,21 +58,31 @@ onMounted(async () => {
     return
   }
 
-  // Find event in store
-  let evt = eventStore.events.find((e) => e.id === eventId.value)
-  if (!evt) {
-    await eventStore.fetchEvents(userStore.userId)
-    evt = eventStore.events.find((e) => e.id === eventId.value)
+  try {
+    state.loading = true
+    let evt = eventStore.events.find((e) => e.id === eventId.value)
     if (!evt) {
+      await eventStore.fetchEvents(userStore.userId)
+      evt = eventStore.events.find((e) => e.id === eventId.value)
+    }
+    
+    if (evt) {
+      eventStore.setCurrentEvent(evt)
+    } else {
       router.replace('/dashboard')
       return
     }
+  } catch (e: any) {
+    state.error = e
+  } finally {
+    state.loading = false
   }
 
-  eventStore.setCurrentEvent(evt)
-
   // Load records
-  await recordStore.fetchRecords(eventId.value, evt.ftcYear, evt.ftcEventCode)
+  const evt = event.value
+  if (evt) {
+    await recordStore.fetchRecords(eventId.value, evt.ftcYear, evt.ftcEventCode)
+  }
 
   if (route.query.tab === 'history') {
     activeTab.value = 'history'
@@ -66,6 +90,12 @@ onMounted(async () => {
 
   // Set up WebRTC
   setupWebRTC()
+
+  // Host：从已持久化记录的最大 hostSeq 恢复计数器，保证重启后单调递增
+  if (eventStore.isHost) {
+    const maxSeq = recordStore.records.reduce((m, r) => Math.max(m, r.hostSeq || 0), 0)
+    connStore.initHostSeq(maxSeq)
+  }
   
   if (eventStore.isHost) {
     window.addEventListener('beforeunload', handleBeforeUnload)
@@ -92,19 +122,38 @@ async function setupWebRTC() {
 
   const rtc = createWebRtcService({
     onStatusChange: (s) => connStore.setStatus(s),
-    onRecordsReceived: async (records: ScoutingRecord[], senderId?: string) => {
-      await recordStore.bulkSync(records)
+
+    // 返回真正被接受的记录，Host 端用此打 hostSeq + 广播
+    onRecordsReceived: async (records: ScoutingRecord[], senderId?: string): Promise<ScoutingRecord[]> => {
+      return await recordStore.bulkSync(records)
     },
-    onAckReceived: (ids: string[]) => {
+
+    // Host 回传的 ACK 内含 stamped 记录，Client 用此更新本地 hostSeq + lastHostSeq
+    onAckReceived: (ids: string[], stampedRecords?: ScoutingRecord[]) => {
       recordStore.markSynced(ids)
+      if (stampedRecords && stampedRecords.length > 0 && !eventStore.isHost) {
+        for (const stamped of stampedRecords) {
+          const local = recordStore.records.find(r => r.id === stamped.id)
+          if (local && stamped.hostSeq) {
+            local.hostSeq = stamped.hostSeq
+            if (stamped.hostSeq > lastHostSeq.value) {
+              lastHostSeq.value = stamped.hostSeq
+            }
+          }
+        }
+      }
     },
-    onRequestSync: (lastSyncTime: string, senderId?: string) => {
-      // The peer requested sync, send all records we have
-      const recordsToSync = recordStore.records
+
+    // Host 收到增量请求，根据 sinceVersion 过滤记录
+    onRequestSync: (sinceVersion: number, senderId?: string) => {
+      const recordsToSync = sinceVersion > 0
+        ? recordStore.records.filter(r => (r.hostSeq || 0) > sinceVersion)
+        : recordStore.records  // sinceVersion=0 → 全量同步（首次连接）
       if (recordsToSync.length > 0) {
         connStore.pushRecords(recordsToSync, senderId)
       }
     },
+
     onClientConnected: (userId: string, userName: string) => {
       connStore.addConnectedScout(userId, userName)
     }
@@ -124,17 +173,22 @@ async function setupWebRTC() {
   }
 }
 
+// Client 端：持久化最后一次从 Host 收到的最大 hostSeq，用于重连后增量请求
+// 按 eventId 分筒，避免不同赛事之间混混
+ const lastHostSeqKey = computed(() => `sp27_lastHostSeq_${eventId.value}`)
+const lastHostSeq = ref<number>(parseInt(localStorage.getItem(lastHostSeqKey.value) ?? '0') || 0)
+watch(lastHostSeq, v => localStorage.setItem(lastHostSeqKey.value, String(v)))
+
 watch(() => connStore.status, (status, oldStatus) => {
   const evt = eventStore.currentEvent
   console.log(`[EventView] connStore.status changed: ${oldStatus} -> ${status}`)
   
   if (status === 'connected' && evt && !eventStore.isHost) {
-    // Client connected, request sync for new records
-    connStore.requestSync(new Date(0).toISOString(), undefined, userStore.userId, userStore.username)
+    // Client 连接／重连：用 lastHostSeq 做增量请求（=0 时全量）
+    connStore.requestSync(lastHostSeq.value, undefined, userStore.userId, userStore.username)
     
-    // Push ALL my records to the host to ensure the host has them
-    // (in case they were submitted while WebRTC was disconnected)
-    const myRecs = recordStore.myRecords(userStore.userId)
+    // 只推送本地尚未同步到 Host 的记录
+    const myRecs = recordStore.myRecords(userStore.userId).filter(r => r.syncStatus === 'PENDING')
     if (myRecs.length > 0) {
       connStore.pushRecords(myRecs)
     }
@@ -168,7 +222,9 @@ async function onRecordSubmitted(recordOrRecords: ScoutingRecord | ScoutingRecor
     }
   }
 
-  if (anyOk) {
+  if (anyOk && allToPush.length > 0) {
+    // Host 本地写入也要打 hostSeq，确保 Client 重连后能增量同步到 Host 的改动
+    if (eventStore.isHost) connStore.stampHostSeq(allToPush)
     connStore.pushIfNeeded(allToPush)
   }
   editingRecord.value = null // clear edit state after submit
@@ -244,7 +300,7 @@ async function saveEventSettings() {
     <header class="topbar">
       <div class="topbar-left">
         <button class="btn-back" @click="goBack" style="display: flex; align-items: center; gap: 4px;"><span class="material-icons" style="font-size: 18px;">arrow_back</span>{{ t('event.back') }}</button>
-        <div class="event-title">
+        <div class="event-title" :style="{ viewTransitionName: `event-card-${eventId}` }">
           <span class="event-name">{{ event?.name ?? t('event.event') }}</span>
           <span v-if="event" class="event-code">
             {{ t('event.code') }}: <strong>{{ event.inviteCode }}</strong>

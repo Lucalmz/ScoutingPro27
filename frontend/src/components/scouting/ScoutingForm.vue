@@ -191,7 +191,9 @@ async function handleSubmit() {
         syncStatus: 'PENDING',
         createdAt: props.editRecord ? props.editRecord.createdAt : new Date().toISOString(),
         updatedAt: new Date().toISOString(),
-        isBroken: team.isBroken
+        isBroken: team.isBroken,
+        version: props.editRecord ? (props.editRecord.version || 0) : 0,  // addRecord 会将其 +1
+        hostSeq: props.editRecord ? props.editRecord.hostSeq : undefined,
       }
     })
 

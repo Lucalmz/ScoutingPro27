@@ -38,6 +38,12 @@ export const useConnectionStore = defineStore('connection', () => {
     rtcService.value = svc
     if (typeof window !== 'undefined') {
       ;(window as any).__rtcDisconnect = () => svc?.disconnect()
+      // Test helper: close only the data channel (simulates network drop)
+      // without closing signaling, so auto-reconnect can work.
+      ;(window as any).__rtcSimulateNetworkDrop = () => {
+        const dc = svc?.getDataChannel()
+        if (dc) dc.close()
+      }
     }
   }
 
@@ -52,8 +58,18 @@ export const useConnectionStore = defineStore('connection', () => {
     }
   }
 
-  function requestSync(lastSyncTime: string, authCode?: string, senderUserId?: string, senderUserName?: string) {
-    rtcService.value?.requestSync(lastSyncTime, authCode, senderUserId, senderUserName)
+  function requestSync(sinceVersion: number, authCode?: string, senderUserId?: string, senderUserName?: string) {
+    rtcService.value?.requestSync(sinceVersion, authCode, senderUserId, senderUserName)
+  }
+
+  /** Host：对记录数组打 hostSeq（本地写入前调用） */
+  function stampHostSeq(records: ScoutingRecord[]): ScoutingRecord[] {
+    return rtcService.value?.stampHostSeq(records) ?? records
+  }
+
+  /** Host：重启后从记录最大 hostSeq 恢复计数器 */
+  function initHostSeq(maxSeq: number) {
+    rtcService.value?.initHostSeq(maxSeq)
   }
 
   function addConnectedScout(id: string, name: string) {
@@ -77,6 +93,8 @@ export const useConnectionStore = defineStore('connection', () => {
     pushRecords,
     pushIfNeeded,
     requestSync,
+    stampHostSeq,
+    initHostSeq,
     connectedScouts,
     addConnectedScout,
     clearConnectedScouts,
