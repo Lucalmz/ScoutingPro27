@@ -128,6 +128,7 @@
   "connection": {
     "offline": "离线",
     "degraded": "已离线 (数据保存在本地)",
+    "unstable": "网络不稳定...",
     "connecting": "连接中...",
     "host_online": "主机在线",
     "connected": "已连接 (P2P)"

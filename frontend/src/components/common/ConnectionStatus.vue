@@ -57,6 +57,15 @@ const { t } = useI18n()
   border: 1px solid var(--status-warning);
 }
 
+.connection-status.unstable {
+  background: var(--card);
+  color: var(--status-warning);
+  box-shadow: 0 0 8px rgba(234, 179, 8, 0.4);
+}
+.connection-status.unstable .status-icon {
+  animation: pulse 1s infinite;
+}
+
 .connection-status.waiting {
   background: var(--card);
   color: var(--primary);

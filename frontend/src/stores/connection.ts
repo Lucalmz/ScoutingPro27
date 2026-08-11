@@ -19,6 +19,8 @@ export const useConnectionStore = defineStore('connection', () => {
         return 'wifi_off'
       case 'degraded':
         return 'signal_wifi_bad'
+      case 'unstable':
+        return 'network_check'
       case 'connecting':
         return 'sync'
       case 'waiting':
@@ -34,6 +36,9 @@ export const useConnectionStore = defineStore('connection', () => {
 
   function setRtcService(svc: WebRtcService | null) {
     rtcService.value = svc
+    if (typeof window !== 'undefined') {
+      ;(window as any).__rtcDisconnect = () => svc?.disconnect()
+    }
   }
 
   // --- helpers ---

@@ -165,7 +165,7 @@ export function createWebRtcService(callbacks: WebRtcCallbacks) {
     if (!isHostMode) return
     let active = 0
     clients.forEach(c => {
-      if (c.pc.connectionState === 'connected') active++
+      if (c.dc && c.dc.readyState === 'open') active++
     })
     if (active > 0) {
       setStatus('connected')
@@ -178,6 +178,7 @@ export function createWebRtcService(callbacks: WebRtcCallbacks) {
 
   // --- send a JSON message over the data channel ---
   function sendMessage(msg: WebRtcMessage, targetId?: string) {
+    console.log(`[WebRTC] Sending message ${msg.type} to ${targetId || 'all'}`);
     const payload = JSON.stringify(msg)
     if (isHostMode) {
       if (targetId) {
@@ -204,6 +205,7 @@ export function createWebRtcService(callbacks: WebRtcCallbacks) {
     let msg: WebRtcMessage
     try {
       msg = JSON.parse(ev.data) as WebRtcMessage
+      console.log(`[WebRTC] Received message ${msg.type} from ${senderId || 'unknown'}`);
     } catch {
       return
     }
@@ -311,6 +313,7 @@ export function createWebRtcService(callbacks: WebRtcCallbacks) {
       if (peer.iceConnectionState === 'checking') {
          // do nothing
       } else if (peer.iceConnectionState === 'disconnected' || peer.iceConnectionState === 'failed') {
+        setStatus('unstable') // Immediately inform UI
         if (!iceTimeout) {
           iceTimeout = setTimeout(() => {
             if (peer.iceConnectionState === 'disconnected' || peer.iceConnectionState === 'failed') {
@@ -321,13 +324,21 @@ export function createWebRtcService(callbacks: WebRtcCallbacks) {
                 setStatus('degraded')
               }
             }
-          }, 1000); // 1s tolerance for transient network shifts
+          }, 15000); // 15s tolerance before full offline fallback logic
         }
       } else if (peer.iceConnectionState === 'connected' || peer.iceConnectionState === 'completed') {
         if (iceTimeout) {
           clearTimeout(iceTimeout);
           iceTimeout = null;
         }
+        if (isHostMode) {
+          updateHostStatus()
+        } else {
+          if (clientDc && clientDc.readyState === 'open') {
+            setStatus('connected') // Recovered from unstable
+          }
+        }
+        
         try {
           const stats = await peer.getStats();
           let activePair: any = null;
@@ -400,7 +411,6 @@ export function createWebRtcService(callbacks: WebRtcCallbacks) {
             }
 
             const pc = clientData.pc
-            setStatus('connecting')
             await pc.setRemoteDescription(new RTCSessionDescription(data.offer))
             const answer = await pc.createAnswer()
             await pc.setLocalDescription(answer)

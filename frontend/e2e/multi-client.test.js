@@ -76,6 +76,21 @@ async function forceRelay(page) {
 }
 
 async function runTest() {
+  if (process.env.SKIP_BUILD !== '1') {
+    console.log('Building frontend and backend before testing (set SKIP_BUILD=1 to skip)...');
+    try {
+      console.log('Running npm run build in frontend...');
+      execSync('npm run build', { cwd: __dirname + '/..', stdio: 'inherit' });
+      
+      console.log('Running mvn package in backend...');
+      const mavenCmd = os.platform() === 'win32' ? 'mvn.cmd' : 'mvn';
+      execSync(`${mavenCmd} package -DskipTests`, { cwd: path.join(__dirname, '../../Backend'), stdio: 'inherit' });
+    } catch (e) {
+      console.error('Build failed. Aborting test.', e);
+      process.exit(1);
+    }
+  }
+
   console.log('Starting Java backend on port 7070...');
   const mavenCmd = os.platform() === 'win32' ? 'mvn.cmd' : 'mvn';
   const backendProcess = spawn(mavenCmd, [
@@ -108,16 +123,29 @@ async function runTest() {
   });
 
   console.log(`Launching Puppeteer (SHOW_UI=${SHOW_UI})...`);
-  const launchOptions = {
-    executablePath: CHROME_PATH,
-    headless: SHOW_UI ? false : 'new',
-    args: ['--no-sandbox', '--disable-setuid-sandbox', '--window-size=1280,800'],
-    defaultViewport: { width: 1280, height: 800 }
+  const getLaunchOptions = (index) => {
+    // 3 windows side-by-side: 600px width each, with a 20px gap
+    const width = 600;
+    const height = 1000;
+    const x = index * 620; 
+    const y = 0;
+    
+    return {
+      executablePath: CHROME_PATH,
+      headless: SHOW_UI ? false : 'new',
+      args: [
+        '--no-sandbox', 
+        '--disable-setuid-sandbox', 
+        `--window-size=${width},${height}`,
+        ...(SHOW_UI ? [`--window-position=${x},${y}`] : [])
+      ],
+      defaultViewport: { width, height }
+    };
   };
 
-  const browserHost = await puppeteer.launch(launchOptions);
-  const browserClient1 = await puppeteer.launch(launchOptions);
-  const browserClient2 = await puppeteer.launch(launchOptions);
+  const browserHost = await puppeteer.launch(getLaunchOptions(0));
+  const browserClient1 = await puppeteer.launch(getLaunchOptions(1));
+  const browserClient2 = await puppeteer.launch(getLaunchOptions(2));
 
   function attachLogs(page, name) {
     page.on('console', msg => console.log(`[${name}] ${msg.text()}`));
@@ -300,14 +328,36 @@ async function runTest() {
     process.exitCode = 1;
   } finally {
     console.log('\n=== Cleanup ===');
-    // We exit the process aggressively to avoid dangling timers in Puppeteer contexts
     
-    // Give it a brief moment to clear timeouts
+    // Explicitly disconnect each page to clear timers and MQTT connections
+    const disconnectPage = async (page) => {
+      if (!page) return;
+      try {
+        await page.evaluate(() => {
+          if (window.__rtcDisconnect) {
+            window.__rtcDisconnect();
+          }
+        });
+      } catch (e) {
+        // Ignore if page is already dead
+      }
+    };
+
+    await Promise.all([
+      disconnectPage(pageHost),
+      disconnectPage(pageClient1),
+      disconnectPage(pageClient2)
+    ]);
+
+    // Give it a brief moment for async disconnections to flush
     await delay(500);
 
-    await browserHost.close();
-    await browserClient1.close();
-    await browserClient2.close();
+    // Close browsers concurrently
+    await Promise.all([
+      browserHost?.close().catch(() => {}),
+      browserClient1?.close().catch(() => {}),
+      browserClient2?.close().catch(() => {})
+    ]);
     if (backendProcess) {
       killProcessTree(backendProcess.pid);
     }
