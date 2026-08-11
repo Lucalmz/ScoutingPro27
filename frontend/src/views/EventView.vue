@@ -99,8 +99,8 @@ async function setupWebRTC() {
       recordStore.markSynced(ids)
     },
     onRequestSync: (lastSyncTime: string, senderId?: string) => {
-      // The peer requested sync, send all records we have
-      const recordsToSync = recordStore.records
+      // The peer requested sync, send only records updated after their lastSyncTime
+      const recordsToSync = recordStore.records.filter(r => r.updatedAt > lastSyncTime)
       if (recordsToSync.length > 0) {
         connStore.pushRecords(recordsToSync, senderId)
       }
@@ -129,8 +129,13 @@ watch(() => connStore.status, (status, oldStatus) => {
   console.log(`[EventView] connStore.status changed: ${oldStatus} -> ${status}`)
   
   if (status === 'connected' && evt && !eventStore.isHost) {
-    // Client connected, request sync for new records
-    connStore.requestSync(new Date(0).toISOString(), undefined, userStore.userId, userStore.username)
+    // Client connected, request sync for new records incrementally
+    let latestUpdatedAt = new Date(0).toISOString()
+    if (recordStore.records.length > 0) {
+      latestUpdatedAt = recordStore.records.reduce((latest, r) => 
+        r.updatedAt > latest ? r.updatedAt : latest, latestUpdatedAt)
+    }
+    connStore.requestSync(latestUpdatedAt, undefined, userStore.userId, userStore.username)
     
     // Push ALL my records to the host to ensure the host has them
     // (in case they were submitted while WebRTC was disconnected)
