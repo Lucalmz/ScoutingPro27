@@ -76,9 +76,18 @@ ScoutingPro27 是一款专为 FIRST Tech Challenge (FTC) 打造的离线优先�
 ### 9. 现代化的 UI 交互体验 (View Transitions API & 3D Hover)
 
 为了提供桌面级原生的极佳质感，前端页面进行了深度的视觉与交互定制：
+
 - **View Transitions 空间动画**：深入应用原生 View Transitions API，在页面切换时提供各个页面模块的定制飞行轨迹（如表格上浮、顶部栏下滑、侧边栏飞入等）。结合 Shared Element 机制，实现了卡片大标题在进入和退出页面时的无缝缩放与形态变换（Morphing）。
 - **Same-Document 方向性滑动**：在赛事内部的 Tab 切换中，使用带有动态控制方向的 View Transitions 实现原生级别滑动（向右点则内容右侧推入，反之左侧推入）。针对高频快速点击的极端边缘情况（Edge Cases），设计了 `skipTransition()` 动画并发中断与保底降级的容错机制，确保 UI 状态永不卡死。
 - **3D 透视交互卡片**：主面板中的赛事卡片可通过监听鼠标移动轨迹，实时计算 X/Y 轴的透视旋转角度（Perspective Tilt），赋予虚拟卡片极强的物理重力感与反馈。
+
+### 10. 全局一致性的增量同步机制 (Incremental Sync)
+
+针对大规模数据和弱网环境，从原先低效的全量推送升级为基于逻辑时钟的增量同步：
+
+- **Host 全局单调序列**：摒弃了跨时区、跨设备极易出错的本地时间戳，改由 Host 统一下发全局唯一且单调递增的 `hostSeq` 作为同步游标。
+- **持久化与断线恢复**：增量游标深度整合至 Java 后端 (H2 数据库) 及前端 `localStorage`。Client 重连时只需声明自身的 `lastHostSeq`，Host 即可精准过滤并仅下发增量记录，大幅节约了弱网环境下的带宽。
+- **基于 Version 的 LWW 冲突解决**：在记录级别引入严格自增的 `version` 字段，替代时间戳解决分布式环境下的并发写冲突，并由后端 `GREATEST` 机制兜底，确保多客户端与主机之间数据最终一致。
 
 ---
 
