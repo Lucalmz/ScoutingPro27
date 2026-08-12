@@ -1,5 +1,14 @@
 # ScoutingPro27 🚀
 
+<p align="left">
+  <img src="https://img.shields.io/badge/Vue.js-35495E?style=for-the-badge&logo=vue.js&logoColor=4FC08D" alt="Vue.js" />
+  <img src="https://img.shields.io/badge/TypeScript-007ACC?style=for-the-badge&logo=typescript&logoColor=white" alt="TypeScript" />
+  <img src="https://img.shields.io/badge/Java-ED8B00?style=for-the-badge&logo=openjdk&logoColor=white" alt="Java" />
+  <img src="https://img.shields.io/badge/WebRTC-333333?style=for-the-badge&logo=webrtc&logoColor=white" alt="WebRTC" />
+  <img src="https://img.shields.io/badge/MQTT-660066?style=for-the-badge&logo=mqtt&logoColor=white" alt="MQTT" />
+  <img src="https://img.shields.io/badge/H2_Database-003545?style=for-the-badge&logo=databricks&logoColor=white" alt="H2 Database" />
+</p>
+
 ScoutingPro27 是一款专为 FIRST Tech Challenge (FTC) 打造的离线优先赛事侦察与数据分析桌面应用，目标是在赛场网络条件不稳定的环境下，为车队提供可靠的数据同步与队伍战力分析。
 
 数据完全存储在本地（内嵌 H2 数据库），设备之间通过 WebRTC 建立点对点连接同步数据。这意味着不需要自建或租用后端服务器、不需要 Docker，双击启动即可使用。**但请注意**：设备发现和 NAT 穿透依赖公共的免费信令服务（MQTT broker）和免费额度的 TURN 中继服务，这两者本身是外部第三方服务，存在限流或服务变更的可能——详见下方「已知限制」一节。
