@@ -279,4 +279,36 @@ watch(() => inboxStore.messages.length, (newLen, oldLen) => {
     opacity: 0;
   }
 }
+
+/* ----------------------------------------------------
+   Tab Switching View Transitions
+   ---------------------------------------------------- */
+[data-transition-type='tab-switch']::view-transition-group(root) {
+  animation: none !important;
+}
+[data-transition-type='tab-switch']::view-transition-old(root),
+[data-transition-type='tab-switch']::view-transition-new(root) {
+  animation: none !important;
+}
+
+[data-transition-type='tab-switch']::view-transition-old(event-content),
+[data-transition-type='tab-switch']::view-transition-new(event-content) {
+  animation-duration: 0.35s;
+  animation-timing-function: cubic-bezier(0.25, 1, 0.5, 1);
+  animation-fill-mode: both;
+}
+
+[data-transition-type='tab-switch'][data-tab-direction='slide-left']::view-transition-old(event-content) {
+  animation-name: slide-to-left-fade-out;
+}
+[data-transition-type='tab-switch'][data-tab-direction='slide-left']::view-transition-new(event-content) {
+  animation-name: slide-from-right-fade-in;
+}
+
+[data-transition-type='tab-switch'][data-tab-direction='slide-right']::view-transition-old(event-content) {
+  animation-name: slide-to-right-fade-out;
+}
+[data-transition-type='tab-switch'][data-tab-direction='slide-right']::view-transition-new(event-content) {
+  animation-name: slide-from-left-fade-in;
+}
 </style>

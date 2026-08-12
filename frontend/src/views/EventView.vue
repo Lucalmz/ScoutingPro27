@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref, reactive, onMounted, onUnmounted, watch, computed } from 'vue'
+import { ref, reactive, onMounted, onUnmounted, watch, computed, nextTick } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { useUserStore } from '@/stores/user'
 import { useEventStore } from '@/stores/events'
@@ -209,11 +209,63 @@ watch(() => route.query, (newQuery) => {
   }
 })
 
-const editingRecord = ref<ScoutingRecord | null>(null)
+const editingRecord = ref<any | null>(null)
 
-function handleEditRecord(record: ScoutingRecord) {
+const isViewTransitionSupported = 'startViewTransition' in document
+
+function handleEditRecord(record: any) {
   editingRecord.value = record
   activeTab.value = 'scout'
+}
+
+let currentTabTransition: any = null
+
+function switchTab(newTabKey: any) {
+  if (activeTab.value === newTabKey) return
+  
+  if (!document.startViewTransition) {
+    activeTab.value = newTabKey as any
+    return
+  }
+  
+  if (currentTabTransition) {
+    currentTabTransition.skipTransition()
+  }
+  
+  const currentIndex = tabs.value.findIndex(t => t.key === activeTab.value)
+  const newIndex = tabs.value.findIndex(t => t.key === newTabKey)
+  const direction = newIndex > currentIndex ? 'slide-left' : 'slide-right'
+  
+  document.documentElement.dataset.transitionType = 'tab-switch'
+  document.documentElement.dataset.tabDirection = direction
+  document.documentElement.removeAttribute('data-direction')
+  
+  try {
+    currentTabTransition = document.startViewTransition(() => {
+      activeTab.value = newTabKey as any
+      return nextTick()
+    })
+    
+    currentTabTransition.finished.finally(() => {
+      currentTabTransition = null
+    })
+  } catch (e) {
+    activeTab.value = newTabKey as any
+  }
+}
+
+async function goBack() {
+
+
+  connStore.rtcService?.disconnect()
+  connStore.setRtcService(null)
+  connStore.clearConnectedScouts()
+  
+  if (event.value) {
+    transitionState.startSharedTransition(`event-card-${event.value.id}`)
+  }
+  
+  router.push('/dashboard')
 }
 
 async function onRecordSubmitted(recordOrRecords: ScoutingRecord | ScoutingRecord[]) {
@@ -238,21 +290,6 @@ async function onRecordSubmitted(recordOrRecords: ScoutingRecord | ScoutingRecor
   editingRecord.value = null // clear edit state after submit
 }
 
-
-
-async function goBack() {
-
-
-  connStore.rtcService?.disconnect()
-  connStore.setRtcService(null)
-  connStore.clearConnectedScouts()
-  
-  if (event.value) {
-    transitionState.startSharedTransition(`event-card-${event.value.id}`)
-  }
-  
-  router.push('/dashboard')
-}
 
 const uniqueScouts = computed(() => {
   const scouts = new Map<string, { id: string, name: string, recordCount: number }>()
@@ -340,7 +377,7 @@ async function saveEventSettings() {
         :key="tab.key"
         class="tab-btn"
         :class="{ active: activeTab === tab.key }"
-        @click="activeTab = tab.key"
+        @click="switchTab(tab.key)"
       >
         {{ tab.label }}
       </button>
@@ -348,7 +385,11 @@ async function saveEventSettings() {
 
     <!-- Tab Content -->
     <main ref="contentRef" class="tab-content" :style="{ viewTransitionName: 'event-content' }">
-      <Transition name="fade" mode="out-in">
+      <Transition 
+        name="fade" 
+        :mode="isViewTransitionSupported ? undefined : 'out-in'"
+        :css="!isViewTransitionSupported"
+      >
         <ScoutingForm
           v-if="activeTab === 'scout'"
           :event-id="eventId"

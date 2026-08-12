@@ -86,7 +86,7 @@ function handleMessageClick(msg: SystemMessage) {
   width: 56px;
   height: 56px;
   border-radius: 50%;
-  background: var(--color-primary, #007bff);
+  background: var(--primary, #39ff14);
   box-shadow: 0 4px 6px rgba(0,0,0,0.1);
   overflow: hidden;
   transition: width 0.6s cubic-bezier(0.25, 1, 0.5, 1), 
@@ -113,15 +113,15 @@ function handleMessageClick(msg: SystemMessage) {
 }
 
 @keyframes bg-morph-open {
-  0% { background: var(--color-primary, #007bff); }
-  50% { background: #80bfff; }
+  0% { background: var(--primary, #39ff14); }
+  50% { background: #8eff73; }
   100% { background: white; }
 }
 
 @keyframes bg-morph-close {
   0% { background: white; }
-  50% { background: #80bfff; }
-  100% { background: var(--color-primary, #007bff); }
+  50% { background: #8eff73; }
+  100% { background: var(--primary, #39ff14); }
 }
 
 .inbox-btn-content {
@@ -130,7 +130,7 @@ function handleMessageClick(msg: SystemMessage) {
   display: flex;
   align-items: center;
   justify-content: center;
-  color: white;
+  color: #000000;
   position: absolute;
   top: 0;
   left: 0;

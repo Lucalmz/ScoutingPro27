@@ -105,6 +105,28 @@ function handleLogout() {
   userStore.logout()
   router.replace('/')
 }
+
+function onCardMouseMove(e: MouseEvent) {
+  const card = e.currentTarget as HTMLElement
+  const rect = card.getBoundingClientRect()
+  const x = e.clientX - rect.left
+  const y = e.clientY - rect.top
+  
+  const centerX = rect.width / 2
+  const centerY = rect.height / 2
+  
+  const rotateX = ((y - centerY) / centerY) * -6
+  const rotateY = ((x - centerX) / centerX) * 6
+  
+  card.style.transition = 'none' // Remove transition for instant mouse tracking
+  card.style.transform = `perspective(1000px) rotateX(${rotateX}deg) rotateY(${rotateY}deg) scale3d(1.02, 1.02, 1.02)`
+}
+
+function onCardMouseLeave(e: MouseEvent) {
+  const card = e.currentTarget as HTMLElement
+  card.style.transition = 'transform 0.4s cubic-bezier(0.25, 1, 0.5, 1)'
+  card.style.transform = 'perspective(1000px) rotateX(0deg) rotateY(0deg) scale3d(1, 1, 1)'
+}
 </script>
 
 <template>
@@ -155,6 +177,8 @@ function handleLogout() {
           class="event-card"
           :class="{ 'slide-out-right': enteringEventId === evt.id }"
           @click="enterEvent(evt)"
+          @mousemove="onCardMouseMove"
+          @mouseleave="onCardMouseLeave"
         >
           <div class="event-info">
             <span class="event-name" :style="{ viewTransitionName: transitionState.sharedElementId === `event-card-${evt.id}` ? 'event-card-title' : 'none' }">{{ evt.name }}</span>
