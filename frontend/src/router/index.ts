@@ -38,6 +38,12 @@ const router = createRouter({
 
 let currentTransition: any = null // Use any if ViewTransition type is missing in older TS
 
+router.beforeEach((to, from) => {
+  if (to.name === 'dashboard' && from.name === 'event') {
+    transitionState.startSharedTransition(`event-card-${from.params.eventId}`)
+  }
+})
+
 router.beforeResolve((to, from, next) => {
   if (to.path === from.path || !document.startViewTransition) {
     if (transitionState.activeToken) {
@@ -66,9 +72,16 @@ router.beforeResolve((to, from, next) => {
   // Capture the transaction token assigned by the click
   const token = transitionState.activeToken
 
-  currentTransition = document.startViewTransition(async () => {
-    next()
-    await nextTick()
+  currentTransition = document.startViewTransition(() => {
+    return new Promise<void>(resolve => {
+      const unregister = router.afterEach(() => {
+        unregister()
+        nextTick(() => {
+          setTimeout(resolve, 10)
+        })
+      })
+      next()
+    })
   })
 
   // Cleanup reliably after transition finishes or is interrupted

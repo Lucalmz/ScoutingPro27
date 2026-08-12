@@ -91,6 +91,36 @@ const highlightStyle = computed(() => ({
   height: `${highlightHeight.value}px`,
   opacity: highlightVisible.value ? 1 : 0
 }))
+
+// Staggered Entrance Handlers
+function beforeEnter(el: Element) {
+  const htmlEl = el as HTMLElement
+  htmlEl.style.opacity = '0'
+  htmlEl.style.transform = 'translateY(20px)'
+}
+
+function enter(el: Element, done: () => void) {
+  const htmlEl = el as HTMLElement
+  
+  // Force browser to paint the initial opacity: 0 state before animating
+  // eslint-disable-next-line no-unused-expressions
+  htmlEl.offsetHeight
+  
+  const index = parseInt(htmlEl.dataset.index || '0', 10)
+  const delay = Math.min(index, 10) * 50
+  
+  setTimeout(() => {
+    htmlEl.style.setProperty('transition', 'all 0.4s cubic-bezier(0.25, 1, 0.5, 1)', 'important')
+    htmlEl.style.opacity = '1'
+    htmlEl.style.transform = 'translateY(0)'
+    
+    // Clean up inline !important transition after animation so :active feedback is restored
+    setTimeout(() => {
+      htmlEl.style.removeProperty('transition')
+      done()
+    }, 400)
+  }, delay)
+}
 </script>
 
 <template>
@@ -99,11 +129,24 @@ const highlightStyle = computed(() => ({
     <div v-else-if="records.length === 0" class="empty-state">
       <p>{{ t('history.no_data') }}</p>
     </div>
-    <div v-else class="history-list" style="position: relative;" @mouseleave="onListLeave">
-      <div class="hover-highlight" :style="highlightStyle"></div>
+    <transition-group 
+      v-else 
+      class="history-list" 
+      tag="div" 
+      appear 
+      :css="false"
+      @before-enter="beforeEnter" 
+      @enter="enter" 
+      @before-appear="beforeEnter"
+      @appear="enter"
+      style="position: relative;" 
+      @mouseleave="onListLeave"
+    >
+      <div class="hover-highlight" :style="highlightStyle" key="highlight-bg"></div>
       <div
-        v-for="rec in records"
+        v-for="(rec, index) in records"
         :key="rec.id"
+        :data-index="index"
         :id="'history-card-' + rec.id"
         class="history-card"
         :class="{ 
@@ -157,7 +200,7 @@ const highlightStyle = computed(() => ({
           </button>
         </div>
       </div>
-    </div>
+    </transition-group>
   </div>
 </template>
 

@@ -1,12 +1,23 @@
 <script setup lang="ts">
-import { ref, computed } from 'vue'
+import { ref, computed, defineComponent, toRef, h, nextTick } from 'vue'
 import { useI18n } from 'vue-i18n'
 import type { RankingRow } from '@/types'
 import { useEventStore } from '@/stores/events'
 import { useRecordStore } from '@/stores/records'
 import { useToastStore } from '@/stores/toast'
-
 import { useRouter } from 'vue-router'
+import { transitionState } from '@/utils/transitionState'
+import { useTween } from '@/composables/useTween'
+
+// Inline component for animated numbers
+const AnimatedNumber = defineComponent({
+  props: { value: { type: Number, required: true } },
+  setup(props) {
+    const valRef = toRef(props, 'value')
+    const tweened = useTween(valRef, 800)
+    return () => h('span', tweened.value.toFixed(1))
+  }
+})
 
 const { t } = useI18n()
 const eventStore = useEventStore()
@@ -89,8 +100,6 @@ async function banTeam(teamNumber: number) {
     toastStore.showToast(e.message || 'Failed to ban team', 'error')
   }
 }
-import { transitionState } from '@/utils/transitionState'
-import { nextTick } from 'vue'
 
 function viewTeamDetails(teamNumber: number) {
   if (eventStore.currentEvent?.id) {
@@ -108,8 +117,7 @@ function viewTeamDetails(teamNumber: number) {
     <div v-else-if="rankings.length === 0" class="empty-state">
       <p>{{ t('rankings.no_data') }}</p>
     </div>
-    <div v-else class="table-wrapper" style="position: relative;" @mouseleave="onTableLeave">
-      <div class="hover-highlight" :style="highlightStyle"></div>
+    <div v-else class="table-wrapper">
       <table>
         <thead>
           <tr>
@@ -142,10 +150,11 @@ function viewTeamDetails(teamNumber: number) {
             <th v-if="eventStore.isHost">{{ t('rankings.actions') }}</th>
           </tr>
         </thead>
-        <tbody>
+        <transition-group tag="tbody" name="list" appear>
           <tr 
-            v-for="row in sorted" 
+            v-for="(row, index) in sorted" 
             :key="row.teamNumber" 
+            :data-index="index"
             @mouseenter="onRowEnter"
           >
             <td class="team-cell">
@@ -160,11 +169,11 @@ function viewTeamDetails(teamNumber: number) {
             </td>
             <td>{{ row.matchCount }}</td>
             <td :class="{'high-breakdown': row.brokenCount > 0 && row.brokenCount / row.matchCount >= 0.5}">{{ row.brokenCount }} / {{ row.matchCount }}</td>
-            <td>{{ row.avgAutoScore.toFixed(1) }}</td>
-            <td>{{ row.avgTeleopScore.toFixed(1) }}</td>
-            <td>{{ row.avgEndgameScore.toFixed(1) }}</td>
-            <td>{{ row.maxScore }}</td>
-            <td class="total-cell">{{ row.avgRating.toFixed(1) }}</td>
+            <td><AnimatedNumber :value="row.avgAutoScore" /></td>
+            <td><AnimatedNumber :value="row.avgTeleopScore" /></td>
+            <td><AnimatedNumber :value="row.avgEndgameScore" /></td>
+            <td><AnimatedNumber :value="row.maxScore" /></td>
+            <td class="total-cell"><AnimatedNumber :value="row.avgRating" /></td>
             <td class="trend-cell">
               <span v-if="row.trend === 'up'" style="color: var(--status-success); font-weight: bold;">↗</span>
               <span v-else-if="row.trend === 'down'" style="color: var(--status-error); font-weight: bold;">↘</span>
@@ -187,13 +196,30 @@ function viewTeamDetails(teamNumber: number) {
               </button>
             </td>
           </tr>
-        </tbody>
+        </transition-group>
       </table>
     </div>
   </div>
 </template>
 
 <style scoped>
+/* FLIP Animations */
+.list-move,
+.list-enter-active,
+.list-leave-active {
+  transition: all 0.5s cubic-bezier(0.25, 1, 0.5, 1);
+}
+
+.list-leave-active {
+  position: absolute;
+}
+
+.list-enter-from,
+.list-leave-to {
+  opacity: 0;
+  transform: translateX(30px);
+}
+
 .rankings-panel {
   max-width: 800px;
   margin: 0 auto;

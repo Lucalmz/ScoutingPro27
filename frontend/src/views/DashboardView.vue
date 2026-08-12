@@ -57,6 +57,40 @@ async function handleJoin() {
 import { transitionState } from '@/utils/transitionState'
 import { nextTick } from 'vue'
 
+function beforeEnter(el: Element) {
+  if (transitionState.sharedElementId) return
+  const htmlEl = el as HTMLElement
+  htmlEl.style.opacity = '0'
+  htmlEl.style.transform = 'translateY(20px)'
+}
+
+function enter(el: Element, done: () => void) {
+  if (transitionState.sharedElementId) {
+    done()
+    return
+  }
+  const htmlEl = el as HTMLElement
+  
+  // Force browser to paint the initial opacity: 0 state before animating
+  // eslint-disable-next-line no-unused-expressions
+  htmlEl.offsetHeight
+  
+  const index = parseInt(htmlEl.dataset.index || '0', 10)
+  const delay = Math.min(index, 15) * 40
+  
+  setTimeout(() => {
+    htmlEl.style.setProperty('transition', 'all 0.4s cubic-bezier(0.25, 1, 0.5, 1)', 'important')
+    htmlEl.style.opacity = '1'
+    htmlEl.style.transform = 'translateY(0)'
+    
+    // Clean up inline !important transition after animation so :active feedback is restored
+    setTimeout(() => {
+      htmlEl.style.removeProperty('transition')
+      done()
+    }, 400)
+  }, delay)
+}
+
 function enterEvent(evt: { id: string }) {
   enteringEventId.value = evt.id
   transitionState.startSharedTransition(`event-card-${evt.id}`)
@@ -98,22 +132,32 @@ function handleLogout() {
       </div>
 
       <!-- Event List -->
-      <div v-if="eventStore.loading" class="loading-msg">Loading events...</div>
-      <p v-else-if="eventStore.error" class="error-msg">{{ eventStore.error }}</p>
+      <div v-if="eventStore.loading && eventStore.events.length === 0" class="loading-msg">Loading events...</div>
+      <p v-else-if="eventStore.error && eventStore.events.length === 0" class="error-msg">{{ eventStore.error }}</p>
       <div v-else-if="eventStore.events.length === 0" class="empty-state">
         <p>{{ t('dashboard.no_events') }}</p>
       </div>
-      <div v-else class="event-list">
+      <transition-group 
+        v-else 
+        class="event-list"
+        tag="div"
+        appear
+        :css="false"
+        @before-enter="beforeEnter"
+        @enter="enter"
+        @before-appear="beforeEnter"
+        @appear="enter"
+      >
         <div
-          v-for="evt in eventStore.events"
+          v-for="(evt, index) in eventStore.events"
           :key="evt.id"
+          :data-index="index"
           class="event-card"
           :class="{ 'slide-out-right': enteringEventId === evt.id }"
-          :style="{ viewTransitionName: transitionState.sharedElementId === `event-card-${evt.id}` ? `event-card-${evt.id}` : 'none' }"
           @click="enterEvent(evt)"
         >
           <div class="event-info">
-            <span class="event-name">{{ evt.name }}</span>
+            <span class="event-name" :style="{ viewTransitionName: transitionState.sharedElementId === `event-card-${evt.id}` ? 'event-card-title' : 'none' }">{{ evt.name }}</span>
             <span class="event-meta">
               {{ t('event.code') }}: <strong>{{ evt.inviteCode }}</strong>
               - {{ evt.hostId === userStore.userId ? t('event.host') : t('event.client') }}
@@ -121,7 +165,7 @@ function handleLogout() {
           </div>
           <span class="event-arrow material-icons" style="font-size: 20px;">arrow_forward</span>
         </div>
-      </div>
+      </transition-group>
     </main>
 
     <!-- Create Event Modal -->
@@ -295,6 +339,21 @@ h2 {
 .event-name {
   font-weight: 600;
   font-size: 16px;
+}
+
+.event-info h3 {
+  margin: 0 0 4px 0;
+  font-size: 1.1rem;
+  color: var(--color-text-primary, #333);
+}
+
+.event-name {
+  display: inline-block;
+  font-size: 1.1rem;
+  font-weight: bold;
+  color: var(--foreground);
+  margin-bottom: 4px;
+  width: fit-content;
 }
 
 .event-meta {

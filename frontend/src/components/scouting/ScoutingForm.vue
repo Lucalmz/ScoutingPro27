@@ -2,6 +2,7 @@
 import { ref, computed, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { useRecordStore } from '@/stores/records'
+import { hapticFeedback } from '@/utils/haptics'
 import type { ScoutingRecord, ScoutingFormData } from '@/types'
 
 const { t } = useI18n()
@@ -56,6 +57,20 @@ function createEmptyTeam(): TeamScoutData {
 }
 
 const teamsData = ref<TeamScoutData[]>([createEmptyTeam()])
+
+function decrement(team: any, field: keyof TeamScoutData) {
+  if (typeof team[field] === 'number' && (team[field] as number) > 0) {
+    (team[field] as number)--
+    hapticFeedback(10)
+  }
+}
+
+function increment(team: any, field: keyof TeamScoutData, max: number = 99) {
+  if (typeof team[field] === 'number' && (team[field] as number) < max) {
+    (team[field] as number)++
+    hapticFeedback(10)
+  }
+}
 
 watch(scoutMode, (mode) => {
   if (mode === 'alliance' && teamsData.value.length === 1) {
@@ -304,31 +319,25 @@ const recordStore = useRecordStore()
                 <span>{{ t('scouting.movement') }}</span>
                 <input v-model="team.autoMovementScore" type="text" inputmode="numeric" placeholder="0" :class="{ 'invalid-field': isInvalidFormat(team.autoMovementScore) }" />
               </label>
-              <div class="counter-field" style="flex: 1">
-                <span>{{ t('scouting.patterns') }}</span>
-                <div class="counter">
-                  <button type="button" class="counter-btn" @click="team.autoPatterns > 0 && team.autoPatterns--">-</button>
-                  <span class="counter-val">{{ team.autoPatterns }}</span>
-                  <button type="button" class="counter-btn" @click="team.autoPatterns < 99 && team.autoPatterns++">+</button>
-                </div>
+              <div class="counter-group">
+                <label>{{ t('scouting.patterns') }}</label>
+                <button type="button" class="counter-btn" @click="decrement(team, 'autoPatterns')">-</button>
+                <span class="counter-val">{{ team.autoPatterns }}</span>
+                <button type="button" class="counter-btn" @click="increment(team, 'autoPatterns')">+</button>
               </div>
             </div>
-            <div class="field-row" style="margin-top: 12px">
-              <div class="counter-field" style="flex: 1">
-                <span>{{ t('scouting.classified') }}</span>
-                <div class="counter">
-                  <button type="button" class="counter-btn" @click="team.autoClassified > 0 && team.autoClassified--">-</button>
-                  <span class="counter-val">{{ team.autoClassified }}</span>
-                  <button type="button" class="counter-btn" @click="team.autoClassified < 99 && team.autoClassified++">+</button>
-                </div>
+            <div class="field-row split" style="margin-top: 12px">
+              <div class="counter-group">
+                <label>{{ t('scouting.classified') }}</label>
+                <button type="button" class="counter-btn" @click="decrement(team, 'autoClassified')">-</button>
+                <span class="counter-val">{{ team.autoClassified }}</span>
+                <button type="button" class="counter-btn" @click="increment(team, 'autoClassified')">+</button>
               </div>
-              <div class="counter-field" style="flex: 1">
-                <span>{{ t('scouting.overflow') }}</span>
-                <div class="counter">
-                  <button type="button" class="counter-btn" @click="team.autoOverflow > 0 && team.autoOverflow--">-</button>
-                  <span class="counter-val">{{ team.autoOverflow }}</span>
-                  <button type="button" class="counter-btn" @click="team.autoOverflow < 99 && team.autoOverflow++">+</button>
-                </div>
+              <div class="counter-group">
+                <label>{{ t('scouting.overflow') }}</label>
+                <button type="button" class="counter-btn" @click="decrement(team, 'autoOverflow')">-</button>
+                <span class="counter-val">{{ team.autoOverflow }}</span>
+                <button type="button" class="counter-btn" @click="increment(team, 'autoOverflow')">+</button>
               </div>
             </div>
           </section>
@@ -337,31 +346,25 @@ const recordStore = useRecordStore()
           <section class="form-section">
             <h3><span class="material-icons">sports_esports</span> {{ t('scouting.teleop') }}</h3>
             <div class="field-row">
-              <div class="counter-field" style="flex: 1">
-                <span>{{ t('scouting.gates') }}</span>
-                <div class="counter">
-                  <button type="button" class="counter-btn" @click="team.gatesTriggered > 0 && team.gatesTriggered--">-</button>
-                  <span class="counter-val">{{ team.gatesTriggered }}</span>
-                  <button type="button" class="counter-btn" @click="team.gatesTriggered < 99 && team.gatesTriggered++">+</button>
-                </div>
+              <div class="counter-group">
+                <label>{{ t('scouting.gates') }}</label>
+                <button type="button" class="counter-btn" @click="decrement(team, 'gatesTriggered')">-</button>
+                <span class="counter-val">{{ team.gatesTriggered }}</span>
+                <button type="button" class="counter-btn" @click="increment(team, 'gatesTriggered')">+</button>
               </div>
             </div>
-            <div class="field-row" style="margin-top: 12px">
-              <div class="counter-field" style="flex: 1">
-                <span>{{ t('scouting.classified') }}</span>
-                <div class="counter">
-                  <button type="button" class="counter-btn" @click="team.teleopClassified > 0 && team.teleopClassified--">-</button>
-                  <span class="counter-val">{{ team.teleopClassified }}</span>
-                  <button type="button" class="counter-btn" @click="team.teleopClassified < 99 && team.teleopClassified++">+</button>
-                </div>
+            <div class="field-row split" style="margin-top: 12px">
+              <div class="counter-group">
+                <label>{{ t('scouting.classified') }}</label>
+                <button type="button" class="counter-btn" @click="decrement(team, 'teleopClassified')">-</button>
+                <span class="counter-val">{{ team.teleopClassified }}</span>
+                <button type="button" class="counter-btn" @click="increment(team, 'teleopClassified')">+</button>
               </div>
-              <div class="counter-field" style="flex: 1">
-                <span>{{ t('scouting.overflow') }}</span>
-                <div class="counter">
-                  <button type="button" class="counter-btn" @click="team.teleopOverflow > 0 && team.teleopOverflow--">-</button>
-                  <span class="counter-val">{{ team.teleopOverflow }}</span>
-                  <button type="button" class="counter-btn" @click="team.teleopOverflow < 99 && team.teleopOverflow++">+</button>
-                </div>
+              <div class="counter-group">
+                <label>{{ t('scouting.overflow') }}</label>
+                <button type="button" class="counter-btn" @click="decrement(team, 'teleopOverflow')">-</button>
+                <span class="counter-val">{{ team.teleopOverflow }}</span>
+                <button type="button" class="counter-btn" @click="increment(team, 'teleopOverflow')">+</button>
               </div>
             </div>
           </section>

@@ -26,7 +26,10 @@ watch(() => inboxStore.messages.length, (newLen, oldLen) => {
   <ToastProvider />
   <InboxWidget v-if="userStore.isLoggedIn" />
   <router-view v-slot="{ Component }">
-    <transition :name="isViewTransitionSupported ? 'none' : 'page'" mode="out-in">
+    <transition 
+      :name="isViewTransitionSupported ? 'none' : 'page'" 
+      :css="!isViewTransitionSupported"
+      :mode="isViewTransitionSupported ? undefined : 'out-in'">
       <component :is="Component" />
     </transition>
   </router-view>
@@ -37,24 +40,25 @@ watch(() => inboxStore.messages.length, (newLen, oldLen) => {
 
 .page-enter-active,
 .page-leave-active {
-  transition: opacity 0.4s cubic-bezier(0.4, 0, 0.2, 1), transform 0.4s cubic-bezier(0.4, 0, 0.2, 1);
+  transition: opacity 0.5s cubic-bezier(0.25, 1, 0.5, 1), transform 0.5s cubic-bezier(0.25, 1, 0.5, 1);
 }
 
 .page-enter-from {
   opacity: 0;
-  transform: translateX(100px);
+  transform: translateX(80px);
 }
 
 .page-leave-to {
   opacity: 0;
-  transform: translateX(-100px);
+  transform: translateX(-80px);
 }
 
 /* View Transitions API Animations */
-::view-transition-old(root),
-::view-transition-new(root) {
-  animation-duration: 0.4s;
-  animation-timing-function: cubic-bezier(0.4, 0, 0.2, 1);
+::view-transition-group(*),
+::view-transition-old(*),
+::view-transition-new(*) {
+  animation-duration: 0.6s;
+  animation-timing-function: cubic-bezier(0.25, 1, 0.5, 1);
 }
 
 [data-direction='forward']::view-transition-new(root) {
@@ -77,15 +81,18 @@ watch(() => inboxStore.messages.length, (newLen, oldLen) => {
 }
 
 /* If a shared element is transitioning, tone down the root transition */
-[data-transition-type='shared']::view-transition-old(root),
+[data-transition-type='shared']::view-transition-old(root) {
+  animation-name: fade-out;
+  animation-duration: 0.4s;
+}
 [data-transition-type='shared']::view-transition-new(root) {
-  animation-name: fade-out; /* Use simple fade or none to avoid visual noise */
-  animation-duration: 0.2s;
+  animation-name: fade-in;
+  animation-duration: 0.4s;
 }
 
 @keyframes slide-from-right {
   from {
-    transform: translateX(30px) scale(0.98);
+    transform: translateX(80px) scale(0.98);
     filter: blur(4px);
     opacity: 0;
   }
@@ -93,7 +100,7 @@ watch(() => inboxStore.messages.length, (newLen, oldLen) => {
 
 @keyframes slide-to-left {
   to {
-    transform: translateX(-30px) scale(0.98);
+    transform: translateX(-80px) scale(0.98);
     filter: blur(4px);
     opacity: 0;
   }
@@ -101,7 +108,7 @@ watch(() => inboxStore.messages.length, (newLen, oldLen) => {
 
 @keyframes slide-from-left {
   from {
-    transform: translateX(-30px) scale(0.98);
+    transform: translateX(-80px) scale(0.98);
     filter: blur(4px);
     opacity: 0;
   }
@@ -109,7 +116,7 @@ watch(() => inboxStore.messages.length, (newLen, oldLen) => {
 
 @keyframes slide-to-right {
   to {
-    transform: translateX(30px) scale(0.98);
+    transform: translateX(80px) scale(0.98);
     filter: blur(4px);
     opacity: 0;
   }
@@ -130,6 +137,146 @@ watch(() => inboxStore.messages.length, (newLen, oldLen) => {
   ::view-transition-old(*),
   ::view-transition-new(*) {
     animation: none !important;
+  }
+}
+
+/* EventView Staggered Entrance and Exit (Native View Transitions) */
+::view-transition-new(event-topbar),
+::view-transition-new(event-tabs),
+::view-transition-new(event-content),
+::view-transition-new(event-status),
+::view-transition-old(event-topbar),
+::view-transition-old(event-tabs),
+::view-transition-old(event-content),
+::view-transition-old(event-status) {
+  animation-duration: 0.65s;
+  animation-timing-function: cubic-bezier(0.25, 1, 0.5, 1);
+  animation-fill-mode: both;
+}
+
+::view-transition-group(event-card-title) {
+  z-index: 9999;
+}
+
+[data-direction='forward']::view-transition-new(event-topbar) {
+  animation-name: slide-down-fade-in;
+  animation-delay: 0.15s;
+}
+[data-direction='forward']::view-transition-new(event-status) {
+  animation-name: slide-from-left-fade-in;
+  animation-delay: 0.25s;
+}
+[data-direction='forward']::view-transition-new(event-tabs) {
+  animation-name: slide-from-right-fade-in;
+  animation-delay: 0.35s;
+}
+[data-direction='forward']::view-transition-new(event-content) {
+  animation-name: slide-up-fade-in;
+  animation-delay: 0.45s;
+}
+
+[data-direction='back']::view-transition-old(event-topbar) {
+  animation-name: slide-up-fade-out;
+  animation-delay: 0s;
+}
+[data-direction='back']::view-transition-old(event-status) {
+  animation-name: slide-to-left-fade-out;
+  animation-delay: 0.1s;
+}
+[data-direction='back']::view-transition-old(event-tabs) {
+  animation-name: slide-to-right-fade-out;
+  animation-delay: 0.2s;
+}
+[data-direction='back']::view-transition-old(event-content) {
+  animation-name: slide-down-fade-out;
+  animation-delay: 0.3s;
+}
+
+@keyframes slide-down-fade-in {
+  from {
+    transform: translateY(-60px);
+    opacity: 0;
+  }
+  to {
+    transform: translateY(0);
+    opacity: 1;
+  }
+}
+
+@keyframes slide-up-fade-in {
+  from {
+    transform: translateY(60px);
+    opacity: 0;
+  }
+  to {
+    transform: translateY(0);
+    opacity: 1;
+  }
+}
+
+@keyframes slide-from-left-fade-in {
+  from {
+    transform: translateX(-120px);
+    opacity: 0;
+  }
+  to {
+    transform: translateX(0);
+    opacity: 1;
+  }
+}
+
+@keyframes slide-from-right-fade-in {
+  from {
+    transform: translateX(120px);
+    opacity: 0;
+  }
+  to {
+    transform: translateX(0);
+    opacity: 1;
+  }
+}
+
+@keyframes slide-up-fade-out {
+  from {
+    transform: translateY(0);
+    opacity: 1;
+  }
+  to {
+    transform: translateY(-60px);
+    opacity: 0;
+  }
+}
+
+@keyframes slide-down-fade-out {
+  from {
+    transform: translateY(0);
+    opacity: 1;
+  }
+  to {
+    transform: translateY(60px);
+    opacity: 0;
+  }
+}
+
+@keyframes slide-to-left-fade-out {
+  from {
+    transform: translateX(0);
+    opacity: 1;
+  }
+  to {
+    transform: translateX(-120px);
+    opacity: 0;
+  }
+}
+
+@keyframes slide-to-right-fade-out {
+  from {
+    transform: translateX(0);
+    opacity: 1;
+  }
+  to {
+    transform: translateX(120px);
+    opacity: 0;
   }
 }
 </style>

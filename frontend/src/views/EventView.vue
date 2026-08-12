@@ -13,6 +13,7 @@ import ScoutingForm from '@/components/scouting/ScoutingForm.vue'
 import RankingsTable from '@/components/rankings/RankingsTable.vue'
 import HistoryList from '@/components/history/HistoryList.vue'
 import { updateEventFtcConfig } from '@/services/api'
+import { transitionState } from '@/utils/transitionState'
 
 const route = useRoute()
 const router = useRouter()
@@ -21,6 +22,11 @@ const eventStore = useEventStore()
 const recordStore = useRecordStore()
 const connStore = useConnectionStore()
 const { t } = useI18n()
+
+// Entrance animation refs
+const headerRef = ref<HTMLElement | null>(null)
+const tabBarRef = ref<HTMLElement | null>(null)
+const contentRef = ref<HTMLElement | null>(null)
 
 const activeTab = ref<'scout' | 'rankings' | 'history' | 'scouts'>('scout')
 const tabs = computed(() => {
@@ -57,6 +63,8 @@ onMounted(async () => {
     router.replace('/')
     return
   }
+
+
 
   try {
     state.loading = true
@@ -230,11 +238,19 @@ async function onRecordSubmitted(recordOrRecords: ScoutingRecord | ScoutingRecor
   editingRecord.value = null // clear edit state after submit
 }
 
-function goBack() {
+
+
+async function goBack() {
+
+
   connStore.rtcService?.disconnect()
   connStore.setRtcService(null)
   connStore.clearConnectedScouts()
-  eventStore.setCurrentEvent(null)
+  
+  if (event.value) {
+    transitionState.startSharedTransition(`event-card-${event.value.id}`)
+  }
+  
   router.push('/dashboard')
 }
 
@@ -297,24 +313,24 @@ async function saveEventSettings() {
 <template>
   <div class="event-view">
     <!-- Header -->
-    <header class="topbar">
+    <header ref="headerRef" class="topbar" :style="{ viewTransitionName: 'event-topbar' }">
       <div class="topbar-left">
         <button class="btn-back" @click="goBack" style="display: flex; align-items: center; gap: 4px;"><span class="material-icons" style="font-size: 18px;">arrow_back</span>{{ t('event.back') }}</button>
-        <div class="event-title" :style="{ viewTransitionName: `event-card-${eventId}` }">
-          <span class="event-name">{{ event?.name ?? t('event.event') }}</span>
+        <div class="event-title">
+          <span class="event-name" :style="{ viewTransitionName: 'event-card-title' }">{{ event?.name ?? t('event.event') }}</span>
           <span v-if="event" class="event-code">
             {{ t('event.code') }}: <strong>{{ event.inviteCode }}</strong>
             - {{ eventStore.isHost ? t('event.host') : t('event.client') }}
           </span>
         </div>
       </div>
-      <div class="topbar-right">
+      <div class="topbar-right" :style="{ viewTransitionName: 'event-status' }">
         <ConnectionStatus />
       </div>
     </header>
 
     <!-- Tab Bar -->
-    <nav class="tab-bar" :style="{ '--indicator-width': 100 / tabs.length + '%' }">
+    <nav ref="tabBarRef" class="tab-bar" :style="{ '--indicator-width': 100 / tabs.length + '%', viewTransitionName: 'event-tabs' }">
       <div 
         class="tab-indicator"
         :style="{ transform: `translateX(${tabs.findIndex(t => t.key === activeTab) * 100}%)` }"
@@ -331,7 +347,7 @@ async function saveEventSettings() {
     </nav>
 
     <!-- Tab Content -->
-    <main class="tab-content">
+    <main ref="contentRef" class="tab-content" :style="{ viewTransitionName: 'event-content' }">
       <Transition name="fade" mode="out-in">
         <ScoutingForm
           v-if="activeTab === 'scout'"
@@ -428,8 +444,10 @@ async function saveEventSettings() {
 }
 
 .event-name {
+  display: inline-block;
+  font-size: 1.2rem;
   font-weight: 700;
-  font-size: 16px;
+  width: fit-content;
 }
 
 .event-code {
