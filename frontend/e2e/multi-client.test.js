@@ -8,7 +8,7 @@ import { fileURLToPath } from 'url';
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 const SHOW_UI = process.env.SHOW_UI === '1';
-const PORT = 7070;
+const PORT = 7071;
 const BASE_URL = `http://localhost:${PORT}/index.html`;
 
 function getChromeExecutablePath() {
@@ -22,6 +22,14 @@ const CHROME_PATH = getChromeExecutablePath();
 
 async function delay(ms) {
   return new Promise(resolve => setTimeout(resolve, ms));
+}
+
+async function waitForTransition(page) {
+  await page.waitForFunction(() => {
+    return !document.documentElement.hasAttribute('data-direction') && 
+           !document.documentElement.hasAttribute('data-transition-type');
+  }, { timeout: 5000 }).catch(() => {});
+  await delay(50);
 }
 
 async function robustLogin(page, username) {
@@ -97,7 +105,7 @@ async function runTest() {
     }
   }
 
-  console.log('Starting Java backend on port 7070...');
+  console.log('Starting Java backend on port 7071...');
   const mavenCmd = os.platform() === 'win32' ? 'mvn.cmd' : 'mvn';
   const backendProcess = spawn(mavenCmd, [
     'exec:java', 
@@ -108,7 +116,7 @@ async function runTest() {
     cwd: path.join(__dirname, '../../Backend'),
     detached: os.platform() !== 'win32',
     shell: os.platform() === 'win32',
-    env: { ...process.env, DEV_PORT: '7070', ENABLE_TEST_CLEANUP: 'true' }
+    env: { ...process.env, DEV_PORT: '7071', ENABLE_TEST_CLEANUP: 'true' }
   });
 
   await new Promise((resolve, reject) => {
@@ -184,7 +192,7 @@ async function runTest() {
     await robustLogin(pageHost, hostUser);
     await pageHost.waitForSelector('.action-btn.primary');
     // 等页面 View Transition 动画结束，否则 click 会落在冻结快照层上被吃掉
-    await pageHost.waitForFunction(() => !document.documentElement.dataset.direction, { timeout: 5000 }).catch(() => {});
+    await waitForTransition(pageHost);
     await pageHost.click('.action-btn.primary');
     await pageHost.waitForSelector('.modal-overlay input');
     await pageHost.type('.modal-overlay input', `RELAY_TEST_${Date.now()}`);
@@ -202,7 +210,7 @@ async function runTest() {
       await robustLogin(page, username);
       await page.waitForSelector('.action-btn.secondary');
       // 等 View Transition 结束再点击
-      await page.waitForFunction(() => !document.documentElement.dataset.direction, { timeout: 5000 }).catch(() => {});
+      await waitForTransition(page);
       await page.click('.action-btn.secondary');
       await page.waitForSelector('.modal-overlay input');
       await page.type('.modal-overlay input', eventCode);
@@ -258,6 +266,7 @@ async function runTest() {
       const tabs = document.querySelectorAll('.tab-btn');
       if (tabs.length >= 3) tabs[2].click(); // History Tab
     });
+    await waitForTransition(pageClient1);
     
     let hasConflict = false;
     for (let i = 0; i < 20; i++) {
@@ -320,6 +329,7 @@ async function runTest() {
         const tabs = document.querySelectorAll('.tab-btn');
         tabs[2].click();
       });
+      await waitForTransition(page);
       await page.waitForSelector('.btn-edit-conflict');
       await page.click('.btn-edit-conflict');
       
@@ -380,7 +390,7 @@ async function runTest() {
     if (trackedUsers.length > 0) {
       try {
         console.log(`Sending cleanup request for ${trackedUsers.length} test users...`);
-        const resp = await fetch('http://localhost:7070/api/test/cleanup', {
+        const resp = await fetch('http://localhost:7071/api/test/cleanup', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify(trackedUsers)

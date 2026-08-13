@@ -43,5 +43,7 @@ jcef-bundle
 app_data.mv.db
 app_data.trace.db
 
+Backend/jcef-bundle/
+Backend/src/main/resources/jcef-bundle.zip
 ### Frontend build artifacts ###
 src/main/resources/public/

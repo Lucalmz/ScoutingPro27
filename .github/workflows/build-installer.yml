@@ -1,0 +1,89 @@
+name: Build Installers
+
+on:
+  push:
+    tags:
+      - 'v*'
+  workflow_dispatch:
+
+jobs:
+  build:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: windows-latest
+            os-name: windows
+            jpackage-type: msi
+          - os: macos-latest      # Apple Silicon
+            os-name: mac-arm64
+            jpackage-type: dmg
+          - os: macos-13          # Intel
+            os-name: mac-x64
+            jpackage-type: dmg
+
+    runs-on: ${{ matrix.os }}
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '21'
+
+      # ---------- 前端 ----------
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+
+      - name: Build frontend
+        working-directory: Frontend        # 改成你前端目录实际名字
+        run: |
+          npm ci
+          npm run build
+
+      - name: Copy frontend build into backend resources
+        shell: bash
+        run: |
+          rm -rf Backend/src/main/resources/public
+          mkdir -p Backend/src/main/resources/public
+          cp -r Frontend/dist/* Backend/src/main/resources/public/
+
+      # ---------- 第一次打包：只为了拿到能跑的 jar 去预热 JCEF ----------
+      - name: Build fat jar (pass 1, for prewarm)
+        working-directory: Backend
+        run: mvn -B clean package -DskipTests
+
+      - name: Prewarm JCEF native bundle (real download for this OS)
+        working-directory: Backend
+        run: java -jar target/ScoutingPro27.jar --jcef-prewarm
+
+      - name: Package jcef bundle as a resource (cross-platform via jar tool)
+        shell: bash
+        working-directory: Backend
+        run: |
+          jar --create --file=src/main/resources/jcef-bundle.zip -C jcef-bundle .
+
+      # ---------- 第二次打包：这次 jar 里已经内嵌了离线原生库 ----------
+      - name: Build fat jar (pass 2, with embedded jcef bundle)
+        working-directory: Backend
+        run: mvn -B clean package -DskipTests
+
+      # ---------- jpackage ----------
+      - name: Run jpackage
+        working-directory: Backend
+        run: >
+          jpackage
+          --type ${{ matrix.jpackage-type }}
+          --name ScoutingPro27
+          --app-version 1.0.0
+          --input target
+          --main-jar ScoutingPro27.jar
+          --main-class com.bear27570.app.Main
+          --dest dist
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: installer-${{ matrix.os-name }}
+          path: Backend/dist/*

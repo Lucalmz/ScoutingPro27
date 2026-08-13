@@ -248,9 +248,13 @@ function switchTab(newTabKey: any) {
     
     currentTabTransition.finished.finally(() => {
       currentTabTransition = null
+      document.documentElement.removeAttribute('data-transition-type')
+      document.documentElement.removeAttribute('data-tab-direction')
     })
   } catch (e) {
     activeTab.value = newTabKey as any
+    document.documentElement.removeAttribute('data-transition-type')
+    document.documentElement.removeAttribute('data-tab-direction')
   }
 }
 

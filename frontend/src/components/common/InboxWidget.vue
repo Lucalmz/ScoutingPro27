@@ -77,6 +77,7 @@ function handleMessageClick(msg: SystemMessage) {
   bottom: 2rem;
   right: 2rem;
   z-index: 1000;
+  view-transition-name: inbox-widget;
 }
 
 .inbox-morph-container {

@@ -16,12 +16,19 @@ import java.awt.*;
 import java.awt.event.WindowAdapter;
 import java.awt.event.WindowEvent;
 import java.io.File;
+import java.io.FileOutputStream;
+import java.io.IOException;
+import java.io.InputStream;
 
 public class Main {
-
+    private static final String JCEF_BUNDLE_RESOURCE = "/jcef-bundle.zip";
     public static void main(String[] args) {
         boolean headless = false;
         for (String arg : args) {
+            if ("--jcef-prewarm".equals(arg)) {
+                prewarmJcef();
+                return;
+            }
             if ("--headless".equals(arg)) {
                 headless = true;
                 break;
@@ -40,7 +47,54 @@ public class Main {
             new Thread(() -> initAndRun(args, splash), "app-init").start();
         }
     }
-
+    /** 仅供 CI 使用：触发 jcefmaven 真实下载解压当前平台的原生库到 ./jcef-bundle，然后退出 */
+    private static void prewarmJcef() {
+        try {
+            File installDir = new File("jcef-bundle");
+            CefAppBuilder builder = new CefAppBuilder();
+            builder.setInstallDir(installDir);
+            CefApp cefApp = builder.build();
+            cefApp.dispose();
+            System.out.println("JCEF 原生库预热完成: " + installDir.getAbsolutePath());
+            System.exit(0);
+        } catch (Exception e) {
+            e.printStackTrace();
+            System.exit(1);
+        }
+    }
+    /** 运行时优先使用内嵌的离线原生库，没有就退回 jcefmaven 默认联网下载 */
+    private static File ensureJcefBundle() throws IOException {
+        File targetDir = new File(System.getProperty("user.home"), ".scoutingpro27/jcef-bundle");
+        File marker = new File(targetDir, ".extracted_ok");
+        if (marker.exists()) {
+            return targetDir;
+        }
+        try (InputStream in = Main.class.getResourceAsStream(JCEF_BUNDLE_RESOURCE)) {
+            if (in == null) {
+                // 开发环境没打包这个资源，走原来的联网下载
+                return targetDir;
+            }
+            targetDir.mkdirs();
+            try (java.util.zip.ZipInputStream zis = new java.util.zip.ZipInputStream(in)) {
+                java.util.zip.ZipEntry entry;
+                byte[] buf = new byte[8192];
+                while ((entry = zis.getNextEntry()) != null) {
+                    File outFile = new File(targetDir, entry.getName());
+                    if (entry.isDirectory()) {
+                        outFile.mkdirs();
+                    } else {
+                        outFile.getParentFile().mkdirs();
+                        try (FileOutputStream fos = new FileOutputStream(outFile)) {
+                            int len;
+                            while ((len = zis.read(buf)) > 0) fos.write(buf, 0, len);
+                        }
+                    }
+                }
+            }
+            new FileOutputStream(marker).close();
+        }
+        return targetDir;
+    }
     private static void initAndRun(String[] args, SplashScreen splash) {
         try {
             // ==========================================
@@ -124,7 +178,7 @@ public class Main {
             // ==========================================
             if (splash != null) splash.updateProgress(70, "Initializing browser engine...");
             CefAppBuilder builder = new CefAppBuilder();
-            builder.setInstallDir(new File("jcef-bundle"));
+            builder.setInstallDir(ensureJcefBundle());
             builder.getCefSettings().windowless_rendering_enabled = false;
 
             // 为每个实例分配独立的缓存目录，防止多开时互相锁死崩溃
