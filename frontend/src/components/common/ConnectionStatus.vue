@@ -4,16 +4,41 @@ import { useI18n } from 'vue-i18n'
 
 const conn = useConnectionStore()
 const { t } = useI18n()
+
+async function handleReconnect() {
+  await conn.reconnectNow()
+}
 </script>
 
 <template>
-  <div class="connection-status" :class="conn.status">
-    <span class="material-icons status-icon">{{ conn.statusIcon }}</span>
-    <span class="status-label">{{ t('connection.' + (conn.status === 'waiting' ? 'host_online' : conn.status)) }}</span>
+  <div class="status-container">
+    <div class="connection-status" :class="conn.status">
+      <span class="material-icons status-icon">{{ conn.statusIcon }}</span>
+      <span class="status-label">{{ t('connection.' + (conn.status === 'waiting' ? 'host_online' : conn.status)) }}</span>
+    </div>
+
+    <!-- Long Offline Reconnect Button -->
+    <button
+      v-if="conn.isLongOffline || conn.isOffline"
+      class="reconnect-btn"
+      :disabled="conn.isReconnecting"
+      @click="handleReconnect"
+    >
+      <span class="material-icons btn-icon" :class="{ spinning: conn.isReconnecting }">
+        {{ conn.isReconnecting ? 'sync' : 'refresh' }}
+      </span>
+      <span>{{ t('connection.reconnect_now') }}</span>
+    </button>
   </div>
 </template>
 
 <style scoped>
+.status-container {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
 .connection-status {
   display: flex;
   align-items: center;
@@ -51,6 +76,13 @@ const { t } = useI18n()
   color: var(--status-error);
 }
 
+.connection-status.long_offline {
+  background: var(--card);
+  color: #f97316;
+  border: 1px solid rgba(249, 115, 22, 0.4);
+  box-shadow: 0 0 8px rgba(249, 115, 22, 0.3);
+}
+
 .connection-status.degraded {
   background: var(--card);
   color: var(--status-warning);
@@ -73,6 +105,39 @@ const { t } = useI18n()
 }
 .connection-status.waiting .status-icon {
   animation: pulse 2s infinite;
+}
+
+.reconnect-btn {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  padding: 5px 12px;
+  border-radius: 6px;
+  font-size: 12px;
+  font-weight: 600;
+  background: rgba(249, 115, 22, 0.15);
+  color: #f97316;
+  border: 1px solid rgba(249, 115, 22, 0.35);
+  cursor: pointer;
+  transition: all 0.2s ease;
+}
+
+.reconnect-btn:hover:not(:disabled) {
+  background: rgba(249, 115, 22, 0.25);
+  border-color: #f97316;
+}
+
+.reconnect-btn:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+}
+
+.btn-icon {
+  font-size: 14px;
+}
+
+.spinning {
+  animation: spin 1s linear infinite;
 }
 
 @keyframes spin {

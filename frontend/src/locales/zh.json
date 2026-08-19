@@ -127,8 +127,11 @@
   },
   "connection": {
     "offline": "离线",
+    "long_offline": "长时间离线",
+    "reconnect_now": "立即重连",
+    "congested_banner": "网络传输缓慢，数据正在排队同步中...",
     "degraded": "已离线 (数据保存在本地)",
-    "unstable": "网络不稳定...",
+    "unstable": "网络拥塞...",
     "connecting": "连接中...",
     "host_online": "主机在线",
     "connected": "已连接 (P2P)"

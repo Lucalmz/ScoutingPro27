@@ -27,23 +27,33 @@ export async function fetchEventMatches(season: number, eventCode: string): Prom
     }
   `;
 
+  const controller = new AbortController()
+  const timeoutId = setTimeout(() => controller.abort(), 8000)
+
   try {
     const res = await fetch('https://api.ftcscout.org/graphql', {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
       },
+      signal: controller.signal,
       body: JSON.stringify({
         query,
         variables: { season, code: eventCode }
       })
     });
+    clearTimeout(timeoutId);
 
     const json = await res.json();
     console.log("GraphQL Response:", JSON.stringify(json, null, 2));
     return json.data?.eventByCode?.matches || [];
-  } catch (e) {
-    console.error('Failed to fetch event matches', e);
+  } catch (e: any) {
+    clearTimeout(timeoutId);
+    if (e && (e.name === 'AbortError' || e.code === 20)) {
+      console.warn('[GraphQL] Request to https://api.ftcscout.org timed out after 8000ms, returning empty matches');
+    } else {
+      console.error('Failed to fetch event matches', e);
+    }
     return [];
   }
 }

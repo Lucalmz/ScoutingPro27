@@ -55,7 +55,7 @@ async function saveComment(match: ScoutingRecord) {
 
 <template>
   <div class="team-detail-view">
-    <header class="app-header" :style="{ viewTransitionName: `team-card-${teamNumber}` }">
+    <header class="app-header">
       <button class="btn-back" @click="router.back()">
         <span class="material-icons">arrow_back</span>
         {{ t('team_detail.back') }}
@@ -138,10 +138,15 @@ async function saveComment(match: ScoutingRecord) {
 
 <style scoped>
 .team-detail-view {
-  min-height: 100vh;
+  height: calc(100vh - 20px);
+  margin-top: 20px;
+  border-radius: 20px 20px 0 0;
+  overflow: hidden;
   background: var(--background);
   display: flex;
   flex-direction: column;
+  view-transition-name: modal-sheet;
+  box-shadow: 0 -10px 40px rgba(0,0,0,0.5);
 }
 
 .app-header {

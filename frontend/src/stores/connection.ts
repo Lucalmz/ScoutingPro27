@@ -2,21 +2,25 @@ import { defineStore } from 'pinia'
 import { ref, computed } from 'vue'
 import type { ConnectionStatus, ScoutingRecord } from '@/types'
 import type { WebRtcService } from '@/services/webrtc'
+import { probePublicConnectivity } from '@/services/webrtc'
 
 export const useConnectionStore = defineStore('connection', () => {
   const status = ref<ConnectionStatus>('offline')
   const rtcService = ref<WebRtcService | null>(null)
   const connectedScouts = ref<{ id: string, name: string }[]>([])
+  const isReconnecting = ref(false)
 
   const isConnected = computed(() => status.value === 'connected')
   const isOffline = computed(() => status.value === 'offline')
-
-  // removed unused statusLabel
+  const isLongOffline = computed(() => status.value === 'long_offline')
+  const isCongested = computed(() => status.value === 'unstable')
 
   const statusIcon = computed(() => {
     switch (status.value) {
       case 'offline':
         return 'wifi_off'
+      case 'long_offline':
+        return 'cloud_off'
       case 'degraded':
         return 'signal_wifi_bad'
       case 'unstable':
@@ -47,6 +51,19 @@ export const useConnectionStore = defineStore('connection', () => {
     }
   }
 
+  async function reconnectNow(): Promise<boolean> {
+    if (isReconnecting.value) return false
+    isReconnecting.value = true
+    try {
+      if (rtcService.value) {
+        return await rtcService.value.reconnectNow()
+      }
+      return false
+    } finally {
+      isReconnecting.value = false
+    }
+  }
+
   // --- helpers ---
   function pushRecords(records: ScoutingRecord[], targetId?: string) {
     rtcService.value?.pushRecords(records, targetId)
@@ -58,8 +75,8 @@ export const useConnectionStore = defineStore('connection', () => {
     }
   }
 
-  function requestSync(sinceVersion: number, authCode?: string, senderUserId?: string, senderUserName?: string) {
-    rtcService.value?.requestSync(sinceVersion, authCode, senderUserId, senderUserName)
+  function requestSync(sinceVersion: number, authCode?: string, senderUserId?: string, senderUserName?: string, token?: string) {
+    rtcService.value?.requestSync(sinceVersion, authCode, senderUserId, senderUserName, token)
   }
 
   /** Host：对记录数组打 hostSeq（本地写入前调用） */
@@ -87,9 +104,14 @@ export const useConnectionStore = defineStore('connection', () => {
     rtcService,
     isConnected,
     isOffline,
+    isLongOffline,
+    isCongested,
+    isReconnecting,
     statusIcon,
     setStatus,
     setRtcService,
+    reconnectNow,
+    probePublicConnectivity,
     pushRecords,
     pushIfNeeded,
     requestSync,

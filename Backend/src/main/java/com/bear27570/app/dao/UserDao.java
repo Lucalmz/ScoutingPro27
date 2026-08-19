@@ -15,4 +15,7 @@ public interface UserDao {
 
     @SqlQuery("SELECT * FROM users WHERE username = :username")
     User findByUsername(@Bind("username") String username);
+
+    @SqlQuery("SELECT * FROM users WHERE id = :id")
+    User findById(@Bind("id") String id);
 }

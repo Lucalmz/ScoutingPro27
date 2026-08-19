@@ -73,6 +73,7 @@ export const useRecordStore = defineStore('records', () => {
     
     const uniqueRecords = new Map<string, ScoutingRecord>()
     for (const record of records.value) {
+      if (record.isDeleted) continue;
       const key = `${record.matchNumber}-${record.teamNumber}`
       const existing = uniqueRecords.get(key)
       if (!existing || new Date(record.updatedAt) > new Date(existing.updatedAt)) {
@@ -131,6 +132,7 @@ export const useRecordStore = defineStore('records', () => {
   const rankings = computed<RankingRow[]>(() => {
     const map = new Map<number, ScoutingRecord[]>()
     for (const r of records.value) {
+      if (r.isDeleted) continue;
       let teamRecs = map.get(r.teamNumber)
       if (!teamRecs) {
         teamRecs = []
@@ -237,6 +239,16 @@ export const useRecordStore = defineStore('records', () => {
     records.value.filter((r) => r.syncStatus === 'PENDING'),
   )
 
+  function purgeExpiredTombstones() {
+    const fourteenDaysAgo = Date.now() - 14 * 24 * 60 * 60 * 1000
+    records.value = records.value.filter(r => {
+      if (r.isDeleted && new Date(r.updatedAt).getTime() < fourteenDaysAgo) {
+        return false
+      }
+      return true
+    })
+  }
+
   // --- fetch ---
   async function fetchRecords(eventId: string, ftcYear?: number, ftcEventCode?: string) {
     loading.value = true
@@ -245,6 +257,7 @@ export const useRecordStore = defineStore('records', () => {
       const fetched = await listRecords(eventId)
       // 旧数据升迁：version 缺失的记录赋为 1，避免被 version=0 的传入覆盖
       records.value = fetched.map(r => ({ ...r, version: r.version || 1 }))
+      purgeExpiredTombstones()
       if (ftcYear && ftcEventCode) {
         officialMatches.value = await fetchEventMatches(ftcYear, ftcEventCode)
       } else {
@@ -259,7 +272,7 @@ export const useRecordStore = defineStore('records', () => {
   }
 
   function reassessConflicts(matchNumber: number, teamNumber: number): ScoutingRecord[] {
-    const coordsRecords = records.value.filter(r => r.matchNumber === matchNumber && r.teamNumber === teamNumber)
+    const coordsRecords = records.value.filter(r => !r.isDeleted && r.matchNumber === matchNumber && r.teamNumber === teamNumber)
     const uniqueScouts = new Set(coordsRecords.map(r => r.scoutId))
     const updatedRecords: ScoutingRecord[] = []
     
@@ -302,8 +315,16 @@ export const useRecordStore = defineStore('records', () => {
     recordsToPush.push(...reassessConflicts(record.matchNumber, record.teamNumber))
 
     try {
-      await saveRecord(record)
-      record.syncStatus = 'SYNCED'
+      const [{ useUserStore }, { useEventStore }] = await Promise.all([
+        import('@/stores/user'),
+        import('@/stores/events')
+      ])
+      const userStore = useUserStore()
+      const eventStore = useEventStore()
+      if (record.scoutId === userStore.userId || eventStore.isHost || !userStore.userId) {
+        await saveRecord(record)
+        record.syncStatus = 'SYNCED'
+      }
       return { success: true, recordsToPush }
     } catch (e: any) {
       error.value = e.message ?? 'Failed to save record'
@@ -312,8 +333,28 @@ export const useRecordStore = defineStore('records', () => {
     }
   }
 
+  // --- soft delete (tombstone) a record ---
+  async function deleteRecord(recordId: string): Promise<{ success: boolean, recordsToPush: ScoutingRecord[] }> {
+    const target = records.value.find(r => r.id === recordId)
+    if (!target) return { success: false, recordsToPush: [] }
+
+    target.isDeleted = true
+    target.updatedAt = new Date().toISOString()
+    target.version = (target.version || 0) + 1
+    target.syncStatus = 'PENDING'
+
+    const recordsToPush: ScoutingRecord[] = [target]
+    try {
+      await saveRecord(target)
+      target.syncStatus = 'SYNCED'
+    } catch {
+      // Keep pending for P2P sync
+    }
+    return { success: true, recordsToPush }
+  }
+
   // --- bulk upsert from peer sync ---
-  // 返回真正被接受（写入本地）的记录，供 Host 专项打 hostSeq 后广播
+  // 返回真正受影响（写入本地/冲突变更）的全部记录，供 Host 统一打 hostSeq、落库并广播
   async function bulkSync(incoming: ScoutingRecord[]): Promise<ScoutingRecord[]> {
     const recordsToBroadcast: ScoutingRecord[] = []
     const acceptedRecords: ScoutingRecord[] = []  // 真正写入本地的记录
@@ -329,7 +370,7 @@ export const useRecordStore = defineStore('records', () => {
         if (local) {
           const incV = inc.version || 0
           const localV = local.version || 0
-          // LWW： version 大的胜出；相等时以 updatedAt 内指针（不同节点并发编辑极少出现）
+          // LWW： version 大的胜出；相等时以 updatedAt 比较
           const shouldAccept = incV > localV ||
             (incV === localV && inc.updatedAt > local.updatedAt)
           if (shouldAccept) {
@@ -349,21 +390,24 @@ export const useRecordStore = defineStore('records', () => {
         // 追踪新坐标
         coordsToReassess.add(`${savedLocal.matchNumber}:${savedLocal.teamNumber}`)
         
-        // 冲突检测
-        const conflictRecords = records.value.filter(r =>
-          r.matchNumber === savedLocal!.matchNumber &&
-          r.teamNumber === savedLocal!.teamNumber &&
-          r.scoutId !== savedLocal!.scoutId
-        )
-        if (conflictRecords.length > 0) {
-          const allConflicting = [savedLocal, ...conflictRecords]
-          for (const r of allConflicting) {
-            if (!r.isConflict) {
-              r.isConflict = true
-              r.updatedAt = new Date().toISOString()
-              r.version = (r.version || 0) + 1  // 冲突状态变更也要递增 version
-              r.syncStatus = 'PENDING'
-              recordsToBroadcast.push(r)
+        // 冲突检测 (非删除记录才检测冲突)
+        if (!savedLocal.isDeleted) {
+          const conflictRecords = records.value.filter(r =>
+            !r.isDeleted &&
+            r.matchNumber === savedLocal!.matchNumber &&
+            r.teamNumber === savedLocal!.teamNumber &&
+            r.scoutId !== savedLocal!.scoutId
+          )
+          if (conflictRecords.length > 0) {
+            const allConflicting = [savedLocal, ...conflictRecords]
+            for (const r of allConflicting) {
+              if (!r.isConflict) {
+                r.isConflict = true
+                r.updatedAt = new Date().toISOString()
+                r.version = (r.version || 0) + 1  // 冲突状态变更也要递增 version
+                r.syncStatus = 'PENDING'
+                recordsToBroadcast.push(r)
+              }
             }
           }
         }
@@ -377,22 +421,31 @@ export const useRecordStore = defineStore('records', () => {
       recordsToBroadcast.push(...cleared)
     }
 
-    if (recordsToBroadcast.length > 0) {
-      import('@/stores/connection').then(({ useConnectionStore }) => {
-        const connStore = useConnectionStore()
-        if (connStore.isConnected) {
-          connStore.pushRecords(recordsToBroadcast)
+    // 合并并去重所有受影响的记录（新进记录 + 冲突被改动的既有记录）
+    const allModifiedMap = new Map<string, ScoutingRecord>()
+    for (const r of acceptedRecords) allModifiedMap.set(r.id, r)
+    for (const r of recordsToBroadcast) allModifiedMap.set(r.id, r)
+    const allModified = Array.from(allModifiedMap.values())
+
+    // 非 Host 端（Client 本地独立模式）自存自己名下产生的新记录
+    const [{ useEventStore }, { useUserStore }] = await Promise.all([
+      import('@/stores/events'),
+      import('@/stores/user')
+    ])
+    const eventStore = useEventStore()
+    const userStore = useUserStore()
+    if (!eventStore.isHost && userStore.userId) {
+      const clientOwn = allModified.filter(r => r.scoutId === userStore.userId)
+      if (clientOwn.length > 0) {
+        try {
+          await syncRecords(clientOwn)
+        } catch (e: any) {
+          error.value = e.message ?? 'Failed to sync records'
         }
-      })
+      }
     }
 
-    try {
-      await syncRecords(incoming)
-    } catch (e: any) {
-      error.value = e.message ?? 'Failed to sync records'
-    }
-
-    return acceptedRecords
+    return allModified
   }
 
   // --- mark records as synced locally ---
@@ -433,9 +486,11 @@ export const useRecordStore = defineStore('records', () => {
     myRecords,
     fetchRecords,
     addRecord,
+    deleteRecord,
     bulkSync,
     markSynced,
     updateRecord,
     banTeam,
+    purgeExpiredTombstones,
   }
 })

@@ -68,6 +68,8 @@ router.beforeResolve((to, from, next) => {
   // Synchronously set dataset right before startViewTransition
   document.documentElement.dataset.direction = direction
   document.documentElement.dataset.transitionType = transitionState.sharedElementId ? 'shared' : 'root'
+  document.documentElement.dataset.toType = String(to.name)
+  document.documentElement.dataset.fromType = String(from.name)
 
   // Capture the transaction token assigned by the click
   const token = transitionState.activeToken
@@ -96,6 +98,8 @@ router.beforeResolve((to, from, next) => {
     if (transitionState.activeToken === null || transitionState.activeToken === token) {
       document.documentElement.removeAttribute('data-direction')
       document.documentElement.removeAttribute('data-transition-type')
+      document.documentElement.removeAttribute('data-to-type')
+      document.documentElement.removeAttribute('data-from-type')
     }
   })
 })

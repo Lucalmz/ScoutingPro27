@@ -12,6 +12,7 @@ export const useUserStore = defineStore('user', () => {
   const isLoggedIn = computed(() => user.value !== null)
   const userId = computed(() => user.value?.id ?? '')
   const username = computed(() => user.value?.username ?? '')
+  const token = computed(() => user.value?.token ?? '')
 
   // Try to restore from localStorage
   function restoreFromCache() {
@@ -72,5 +73,5 @@ export const useUserStore = defineStore('user', () => {
     logout()
   })
 
-  return { user, loading, error, isLoggedIn, userId, username, restoreFromCache, login, register, logout }
+  return { user, loading, error, isLoggedIn, userId, username, token, restoreFromCache, login, register, logout }
 })

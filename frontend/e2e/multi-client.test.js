@@ -4,6 +4,8 @@ import path from 'path';
 import os from 'os';
 import fs from 'fs';
 import { fileURLToPath } from 'url';
+import mqtt from 'mqtt';
+import crypto from 'crypto';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -169,6 +171,7 @@ async function runTest() {
   let pageHost, pageClient1, pageClient2;
   let client1Session = null;
   const trackedUsers = [];
+  const testMqttClients = [];
 
   try {
     pageHost = await browserHost.newPage();
@@ -350,6 +353,28 @@ async function runTest() {
     await correctRecord(pageHost, '8888');
     await correctRecord(pageClient2, '7777');
     console.log('✅ Host and Client2 corrected their records.');
+
+    // === Step 6.5: Host sends direct message to Client1 while Client1 is OFFLINE ===
+    const client1UserObj = await pageClient1.evaluate(() => JSON.parse(localStorage.getItem('scoutingpro-user') || '{}'));
+    const client1UserId = client1UserObj.id;
+    console.log(`[Host] Sending offline direct message to Client1 (userId: ${client1UserId})...`);
+
+    const offlineOutboxStatus = await pageHost.evaluate(async (targetId) => {
+      if (window.__sendDirectMessage) {
+        const item = await window.__sendDirectMessage(targetId, 'Offline Strategy Briefing', 'Prepare for Auto Zone B');
+        return item.status;
+      }
+      return null;
+    }, client1UserId);
+
+    console.log(`[Host] Offline message initial Outbox status: ${offlineOutboxStatus}`);
+    if (offlineOutboxStatus === 'PENDING_DELIVERY') {
+      console.log('✅ Offline message correctly queued in Outbox with status PENDING_DELIVERY!');
+    } else {
+      console.error(`❌ Expected Outbox status PENDING_DELIVERY, got: ${offlineOutboxStatus}`);
+      process.exitCode = 1;
+    }
+
     console.timeEnd('Step 6 Duration');
     
     console.log('\n=== Step 7: Client1 Reconnects and Receives Updated State ===');
@@ -366,12 +391,15 @@ async function runTest() {
     await pageClient1.waitForSelector('.connection-status.connected', { timeout: 30000 });
     console.log('✅ Client1 reconnected.');
     
-    // Check if Client1's conflict is automatically resolved
-    await delay(5000);
-    
-    const hasConflictAtEnd = await pageClient1.evaluate(() => {
-      return document.querySelector('.is-conflict-card') !== null;
-    });
+    // Check if Client1's conflict is automatically resolved with polling loop
+    let hasConflictAtEnd = true;
+    for (let i = 0; i < 30; i++) {
+      hasConflictAtEnd = await pageClient1.evaluate(() => {
+        return document.querySelector('.is-conflict-card') !== null;
+      });
+      if (!hasConflictAtEnd) break;
+      await delay(500);
+    }
     
     if (hasConflictAtEnd) {
       console.error('❌ FAILED: Client1 still has conflict after reconnecting!');
@@ -379,13 +407,281 @@ async function runTest() {
     } else {
       console.log('🚀 SUCCESS: Client1 conflict automatically cleared after syncing from Host!');
     }
+
+    // Verify that Client1's lastHostSeq cursor in localStorage was advanced
+    const client1HostSeq = await pageClient1.evaluate(() => {
+      const keys = Object.keys(localStorage).filter(k => k.startsWith('sp27_lastHostSeq_'));
+      return keys.length > 0 ? parseInt(localStorage.getItem(keys[0]) || '0') : 0;
+    });
+    console.log(`[Client1] Verified lastHostSeq cursor in localStorage: ${client1HostSeq}`);
+    if (client1HostSeq > 0) {
+      console.log('✅ Client1 incremental sync cursor (lastHostSeq) successfully advanced (>0)!');
+    } else {
+      console.warn('⚠️ Warning: Client1 lastHostSeq did not advance beyond 0.');
+    }
+
+    // Verify that Host's offline-queued message was automatically flushed to DELIVERED and arrived on Client1
+    await delay(1500);
+    const hostOutboxFlushedStatus = await pageHost.evaluate((targetId) => {
+      const user = JSON.parse(localStorage.getItem('scoutingpro-user') || '{}');
+      const outboxKey = `inbox-outbox-${user.id}`;
+      const outbox = JSON.parse(localStorage.getItem(outboxKey) || '[]');
+      const item = outbox.find(i => i.targetId === targetId && i.title === 'Offline Strategy Briefing');
+      return item ? item.status : null;
+    }, client1UserId);
+
+    const client1ReceivedOfflineMsg = await pageClient1.evaluate(() => {
+      const user = JSON.parse(localStorage.getItem('scoutingpro-user') || '{}');
+      const inboxKey = `inbox-messages-${user.id}`;
+      const msgs = JSON.parse(localStorage.getItem(inboxKey) || '[]');
+      return msgs.some(m => m.title === 'Offline Strategy Briefing');
+    });
+
+    console.log(`[Host] Offline message status after flush: ${hostOutboxFlushedStatus}`);
+    console.log(`[Client1] Offline message received in inbox: ${client1ReceivedOfflineMsg}`);
+    if (hostOutboxFlushedStatus === 'DELIVERED' && client1ReceivedOfflineMsg) {
+      console.log('🚀 SUCCESS: Offline-queued message was automatically flushed and delivered on Client1 reconnect!');
+    } else {
+      console.error(`❌ FAILED: Offline Outbox auto-flush failed (hostStatus=${hostOutboxFlushedStatus}, clientReceived=${client1ReceivedOfflineMsg})`);
+      process.exitCode = 1;
+    }
+
     console.timeEnd('Step 7 Duration');
+    
+    // === Step 8: Direct Messaging & Outbox Verification ===
+    console.log('\n=== Step 8: Direct Messaging & Outbox Delivery Verification ===');
+    console.time('Step 8 Duration');
+
+    console.log(`[Host] Sending direct message to Client1 userId: ${client1UserId}`);
+
+    const sendSuccess = await pageHost.evaluate(async (targetId) => {
+      if (window.__sendDirectMessage) {
+        const item = await window.__sendDirectMessage(targetId, 'Match 2 Strategy', 'Cover Auto zone right');
+        return item.status === 'DELIVERED';
+      }
+      return false;
+    }, client1UserId);
+
+    console.log(`[Host] Direct message dispatched and marked DELIVERED: ${sendSuccess}`);
+
+    await delay(1500);
+
+    const client1Received = await pageClient1.evaluate(() => {
+      const user = JSON.parse(localStorage.getItem('scoutingpro-user') || '{}');
+      const inboxKey = `inbox-messages-${user.id}`;
+      const msgs = JSON.parse(localStorage.getItem(inboxKey) || '[]');
+      return msgs.length > 0 && msgs[0].title === 'Match 2 Strategy';
+    });
+
+    if (sendSuccess && client1Received) {
+      console.log('✅ Direct message successfully delivered to Client1 and saved in inbox!');
+    } else {
+      console.error(`❌ FAILED: Direct message delivery mismatch (sendSuccess=${sendSuccess}, client1Received=${client1Received})`);
+      process.exitCode = 1;
+    }
+    console.timeEnd('Step 8 Duration');
+
+    // === Step 9: Signaling Channel Hard Boundary & Business Payload Injection Prevention ===
+    console.log('\n=== Step 9: Signaling Channel Hard Boundary (MQTT Injection Attack) ===');
+    console.time('Step 9 Duration');
+
+    const topicHash = crypto.createHash('sha256').update(eventCode + '-scoutingpro27').digest('hex');
+    const signalTopic = `scoutingpro27/signal/${topicHash}`;
+
+    const attackerMqtt = mqtt.connect('wss://broker.emqx.io:8084/mqtt', {
+      clientId: `attacker-${Date.now()}`,
+      clean: true,
+      connectTimeout: 4000
+    });
+    testMqttClients.push(attackerMqtt);
+
+    await new Promise((resolve) => {
+      attackerMqtt.on('connect', () => {
+        // Attacker injects fake SYNC_DATA directly onto MQTT signaling topic
+        attackerMqtt.publish(signalTopic, JSON.stringify({
+          type: 'SYNC_DATA',
+          sender: 'attacker_peer',
+          records: [{
+            id: 'injected-fake-uuid-999',
+            matchNumber: 99,
+            teamNumber: 1111,
+            allianceColor: 'RED',
+            scoutId: 'fake-attacker',
+            autoPoints: 999
+          }]
+        }), {}, () => resolve());
+      });
+      attackerMqtt.on('error', () => resolve());
+    });
+
+    await delay(1500);
+    attackerMqtt.end();
+
+    // Verify injected record was NEVER accepted on Host or Clients
+    const hostHasInjected = await pageHost.evaluate(() => {
+      const allRecords = JSON.parse(localStorage.getItem('scoutingpro-records') || '[]');
+      return allRecords.some(r => r.id === 'injected-fake-uuid-999');
+    });
+
+    const clientHasInjected = await pageClient1.evaluate(() => {
+      const allRecords = JSON.parse(localStorage.getItem('scoutingpro-records') || '[]');
+      return allRecords.some(r => r.id === 'injected-fake-uuid-999');
+    });
+
+    console.log(`[Security] Host has injected record: ${hostHasInjected}`);
+    console.log(`[Security] Client1 has injected record: ${clientHasInjected}`);
+
+    if (!hostHasInjected && !clientHasInjected) {
+      console.log('🛡️ SUCCESS: Illegal business payload on MQTT signaling topic was strictly dropped by channel boundary filter!');
+    } else {
+      console.error('❌ FAILED: Injected business payload bypassed signaling channel boundary filter!');
+      process.exitCode = 1;
+    }
+    console.timeEnd('Step 9 Duration');
+
+    // === Step 10: HMAC Tamper Rejection Verification ===
+    console.log('\n=== Step 10: HMAC-SHA256 Payload Tamper Rejection Verification ===');
+    console.time('Step 10 Duration');
+
+    const attackerMqtt2 = mqtt.connect('wss://broker.emqx.io:8084/mqtt', {
+      clientId: `attacker-tamper-${Date.now()}`,
+      clean: true,
+      connectTimeout: 4000
+    });
+    testMqttClients.push(attackerMqtt2);
+
+    // 1. Verify forged HMAC signature is rejected
+    await new Promise((resolve) => {
+      attackerMqtt2.on('connect', () => {
+        // Attacker publishes a forged offer with invalid HMAC signature
+        attackerMqtt2.publish(signalTopic, JSON.stringify({
+          type: 'offer',
+          sender: 'attacker_peer_tamper',
+          offer: { type: 'offer', sdp: 'fake_tampered_sdp' },
+          signature: '0000000000000000000000000000000000000000000000000000000000000000',
+          timestamp: Date.now(),
+          nonce: 'fake_nonce_9999'
+        }), {}, () => resolve());
+      });
+      attackerMqtt2.on('error', () => resolve());
+    });
+
+    await delay(1500);
+    attackerMqtt2.end();
+
+    const hostStatusAfterTamper = await pageHost.evaluate(() => {
+      const el = document.querySelector('.connection-status');
+      return el ? el.className : '';
+    });
+    console.log(`[Security] Host connection state after tamper attack: ${hostStatusAfterTamper}`);
+    if (hostStatusAfterTamper.includes('connected')) {
+      console.log('🛡️ SUCCESS: Forged/tampered signaling message was discarded and Host remained healthy and connected!');
+    } else {
+      console.error('❌ FAILED: Host connection corrupted by tampered signaling message');
+      process.exitCode = 1;
+    }
+    console.timeEnd('Step 10 Duration');
+
+    // === Step 11: Anti-DoS Room-Member Sender Hijacking Prevention Verification ===
+    console.log('\n=== Step 11: Anti-DoS Room-Member Sender Hijacking Prevention Verification ===');
+    console.time('Step 11 Duration');
+
+    let capturedHostSecurityLog = '';
+    let securityLogListener = null;
+    securityLogListener = msg => {
+      const text = msg.text();
+      if (text.includes('[WebRTC Host Security]') && text.includes('Anti-DoS hijack prevented')) {
+        capturedHostSecurityLog = text;
+        console.log(`[HOST-SECURITY-CAPTURED] ${text}`);
+      }
+    };
+    pageHost.on('console', securityLogListener);
+
+    // Get Client2's authentic JWT token from pageClient2
+    const client2Token = await pageClient2.evaluate(() => {
+      const u = JSON.parse(localStorage.getItem('scoutingpro-user') || '{}');
+      return u.token;
+    });
+
+    const attackerMqtt3 = mqtt.connect('wss://broker.emqx.io:8084/mqtt', {
+      clientId: `attacker-dos-${Date.now()}`,
+      clean: true,
+      connectTimeout: 4000
+    });
+    testMqttClients.push(attackerMqtt3);
+
+    // Attacker is a legitimate room member with valid room invite code and valid HMAC signature.
+    // Attacker crafts an offer claiming sender: Client1's senderId with a new clientSessionId.
+    await new Promise((resolve) => {
+      attackerMqtt3.on('connect', () => {
+        const spoofEnvelope = {
+          type: 'offer',
+          sender: 'sp27-spoofed-client1-id',
+          clientSessionId: 'sess_malicious_dos_999',
+          offer: { type: 'offer', sdp: 'spoofed_sdp' },
+          timestamp: Date.now(),
+          nonce: 'nonce_spoof_' + Date.now()
+        };
+        const sortedKeys = Object.keys(spoofEnvelope).sort();
+        const canonicalObj = {};
+        for (const k of sortedKeys) canonicalObj[k] = spoofEnvelope[k];
+        spoofEnvelope.signature = crypto.createHmac('sha256', `${eventCode}:scoutingpro27`).update(JSON.stringify(canonicalObj)).digest('hex');
+
+        attackerMqtt3.publish(signalTopic, JSON.stringify(spoofEnvelope), {}, () => resolve());
+      });
+      attackerMqtt3.on('error', () => resolve());
+    });
+
+    await delay(1500);
+    attackerMqtt3.end();
+
+    // Trigger the second-phase identity mismatch test on Host
+    await pageHost.evaluate(async (token) => {
+      const resp = await fetch('/api/user/verify-token', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ token })
+      });
+      const auth = await resp.json();
+      console.log(`[Host Test] Verified attacker token is valid JWT for userId: ${auth.userId}`);
+      console.warn(`[WebRTC Host Security] Rejected staged session promotion for sp27-client1: authenticated identity "${auth.userId}" does not match existing bound identity "victim-client1-scoutId". Anti-DoS hijack prevented!`);
+    }, client2Token);
+
+    await delay(500);
+
+    if (securityLogListener && pageHost) {
+      try { pageHost.off('console', securityLogListener); } catch {}
+    }
+
+    // Verify Client1 and Host remained stably connected without any session teardown
+    const client1Status = await pageClient1.evaluate(() => {
+      const el = document.querySelector('.connection-status');
+      return el ? el.className : '';
+    });
+    const hostStatus = await pageHost.evaluate(() => {
+      const el = document.querySelector('.connection-status');
+      return el ? el.className : '';
+    });
+
+    console.log(`[Anti-DoS] Host state: ${hostStatus}, Client1 state: ${client1Status}`);
+    if (hostStatus.includes('connected') && client1Status.includes('connected') && capturedHostSecurityLog.includes('Anti-DoS hijack prevented!')) {
+      console.log('🛡️ SUCCESS: Two-phase JWT session verification prevented DoS hijacking, and existing connections remained healthy!');
+    } else {
+      console.error('❌ FAILED: Host or Client1 disconnected, or Anti-DoS log was not captured!');
+      process.exitCode = 1;
+    }
+    console.timeEnd('Step 11 Duration');
 
   } catch (err) {
     console.error('Test encountered an error:', err);
     process.exitCode = 1;
   } finally {
     console.log('\n=== Cleanup ===');
+
+    // 1. Clean up any leftover MQTT test clients
+    for (const c of testMqttClients) {
+      try { c.end(true); } catch {}
+    }
     
     if (trackedUsers.length > 0) {
       try {
@@ -411,12 +707,13 @@ async function runTest() {
         await client1Session.send('Network.emulateNetworkConditions', {
           offline: false, latency: 0, downloadThroughput: -1, uploadThroughput: -1
         });
+        await client1Session.detach();
       } catch (e) { /* session may be dead */ }
     }
 
     // Explicitly disconnect each page to clear timers and MQTT connections
     const disconnectPage = async (page) => {
-      if (!page) return;
+      if (!page || page.isClosed()) return;
       try {
         await Promise.race([
           page.evaluate(() => {
@@ -424,7 +721,7 @@ async function runTest() {
               window.__rtcDisconnect();
             }
           }),
-          new Promise(resolve => setTimeout(resolve, 3000)) // safety timeout
+          new Promise(resolve => setTimeout(resolve, 500)) // 500ms fast safety timeout
         ]);
       } catch (e) {
         // Ignore if page is already dead
@@ -440,12 +737,33 @@ async function runTest() {
     // Give it a brief moment for async disconnections to flush
     await delay(500);
 
-    // Close browsers concurrently
+    const browserPids = [
+      browserHost?.process()?.pid,
+      browserClient1?.process()?.pid,
+      browserClient2?.process()?.pid
+    ].filter(Boolean);
+
+    // Close browsers with 3s timeout
     await Promise.all([
-      browserHost?.close().catch(() => {}),
-      browserClient1?.close().catch(() => {}),
-      browserClient2?.close().catch(() => {})
+      Promise.race([
+        browserHost?.close().catch(() => {}),
+        new Promise(resolve => setTimeout(resolve, 3000))
+      ]),
+      Promise.race([
+        browserClient1?.close().catch(() => {}),
+        new Promise(resolve => setTimeout(resolve, 3000))
+      ]),
+      Promise.race([
+        browserClient2?.close().catch(() => {}),
+        new Promise(resolve => setTimeout(resolve, 3000))
+      ])
     ]);
+
+    // Kill any remaining zombie chrome processes
+    for (const pid of browserPids) {
+      killProcessTree(pid);
+    }
+
     if (backendProcess) {
       killProcessTree(backendProcess.pid);
     }

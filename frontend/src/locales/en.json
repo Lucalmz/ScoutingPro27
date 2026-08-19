@@ -127,8 +127,11 @@
   },
   "connection": {
     "offline": "Offline",
+    "long_offline": "Long Offline",
+    "reconnect_now": "Reconnect",
+    "congested_banner": "Network is congested, data is queuing for sync...",
     "degraded": "Offline (Data saved locally)",
-    "unstable": "Unstable connection...",
+    "unstable": "Congested...",
     "connecting": "Connecting...",
     "host_online": "Host Online",
     "connected": "Connected (P2P)"

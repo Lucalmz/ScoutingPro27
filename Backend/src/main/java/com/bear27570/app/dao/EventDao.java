@@ -29,4 +29,11 @@ public interface EventDao {
 
     @SqlQuery("SELECT * FROM events WHERE invite_code = :code")
     ScoutingEvent findByInviteCode(@Bind("code") String code);
+
+    @SqlQuery("SELECT COUNT(*) > 0 FROM events e LEFT JOIN event_users eu ON e.id = eu.event_id WHERE e.id = :eventId AND (e.host_id = :userId OR eu.user_id = :userId)")
+    boolean isMember(@Bind("eventId") String eventId, @Bind("userId") String userId);
+
+    @SqlQuery("SELECT COUNT(*) > 0 FROM events WHERE id = :eventId AND host_id = :userId")
+    boolean isHost(@Bind("eventId") String eventId, @Bind("userId") String userId);
 }
+

@@ -12,6 +12,7 @@ import org.flywaydb.core.Flyway;
 import org.jdbi.v3.core.Jdbi;
 
 import javax.swing.*;
+import javax.swing.filechooser.FileNameExtensionFilter;
 import java.awt.*;
 import java.awt.event.WindowAdapter;
 import java.awt.event.WindowEvent;
@@ -155,6 +156,8 @@ public class Main {
                 });
                 // REST API 路由
                 apiRoutes.register(config.routes);
+                // 生命周期优雅停机钩子
+                config.events.serverStopped(apiRoutes::shutdown);
             }).start(port);
 
             String localUrl = "http://localhost:" + app.port() + "/index.html";
@@ -188,6 +191,25 @@ public class Main {
 
             CefApp cefApp = builder.build();
             CefClient cefClient = cefApp.createClient();
+            
+            // Handle file downloads (e.g. CSV exports)
+            cefClient.addDownloadHandler(new org.cef.handler.CefDownloadHandlerAdapter() {
+                @Override
+                public boolean onBeforeDownload(CefBrowser browser, org.cef.callback.CefDownloadItem downloadItem,
+                                                String suggestedName, org.cef.callback.CefBeforeDownloadCallback callback) {
+                    SwingUtilities.invokeLater(() -> {
+                        JFileChooser fileChooser = new JFileChooser();
+                        fileChooser.setSelectedFile(new File(suggestedName));
+                        int result = fileChooser.showSaveDialog(null);
+                        if (result == JFileChooser.APPROVE_OPTION) {
+                            callback.Continue(fileChooser.getSelectedFile().getAbsolutePath(), false);
+                        } else {
+                            callback.Continue("", false);
+                        }
+                    });
+                    return true;
+                }
+            });
 
             if (splash != null) splash.updateProgress(88, "Loading interface...");
             CefBrowser browser = cefClient.createBrowser(localUrl, false, false);

@@ -311,4 +311,70 @@ watch(() => inboxStore.messages.length, (newLen, oldLen) => {
 [data-transition-type='tab-switch'][data-tab-direction='slide-right']::view-transition-new(event-content) {
   animation-name: slide-from-left-fade-in;
 }
+
+/* ==============================================================
+   Team Detail: iOS Modal Sheet Transition
+   ============================================================== */
+
+/* Ensure the modal layers correctly: Detail View is ALWAYS on top */
+[data-to-type='team-detail']::view-transition-new(modal-sheet),
+[data-from-type='team-detail']::view-transition-old(modal-sheet) {
+  z-index: 2;
+  mix-blend-mode: normal;
+}
+
+[data-to-type='team-detail']::view-transition-old(root),
+[data-from-type='team-detail']::view-transition-new(root) {
+  z-index: 1;
+  mix-blend-mode: normal;
+  background: black;
+}
+
+/* Hide the root of the new page when entering (we only want the modal-sheet to animate) */
+[data-to-type='team-detail']::view-transition-new(root) {
+  animation: none !important;
+  opacity: 0 !important;
+}
+
+/* Hide the root of the old page when leaving */
+[data-from-type='team-detail']::view-transition-old(root) {
+  animation: none !important;
+  opacity: 0 !important;
+}
+
+/* Entering TeamDetailView */
+[data-to-type='team-detail']::view-transition-new(modal-sheet) {
+  animation: modal-slide-up 0.5s cubic-bezier(0.25, 1, 0.5, 1) both;
+}
+[data-to-type='team-detail']::view-transition-old(root) {
+  animation: modal-push-back 0.5s cubic-bezier(0.25, 1, 0.5, 1) both;
+}
+
+/* Leaving TeamDetailView */
+[data-from-type='team-detail']::view-transition-old(modal-sheet) {
+  animation: modal-slide-down 0.5s cubic-bezier(0.25, 1, 0.5, 1) both;
+}
+[data-from-type='team-detail']::view-transition-new(root) {
+  animation: modal-pull-forward 0.5s cubic-bezier(0.25, 1, 0.5, 1) both;
+}
+
+@keyframes modal-slide-up {
+  from { transform: translateY(100%); }
+  to { transform: translateY(0); }
+}
+
+@keyframes modal-slide-down {
+  from { transform: translateY(0); }
+  to { transform: translateY(100%); }
+}
+
+@keyframes modal-push-back {
+  from { transform: scale(1); filter: brightness(1); border-radius: 0; }
+  to { transform: scale(0.92); filter: brightness(0.6); border-radius: 16px; }
+}
+
+@keyframes modal-pull-forward {
+  from { transform: scale(0.92); filter: brightness(0.6); border-radius: 16px; }
+  to { transform: scale(1); filter: brightness(1); border-radius: 0; }
+}
 </style>

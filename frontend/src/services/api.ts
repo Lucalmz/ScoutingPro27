@@ -12,14 +12,26 @@ import type {
 
 const BASE = '/api'
 
+export class LocalApiTimeoutError extends Error {
+  constructor(path: string, timeoutMs: number) {
+    super(`应用响应异常（请求 ${path} 挂起超过 ${timeoutMs}ms），可能需要重启应用`)
+    this.name = 'LocalApiTimeoutError'
+  }
+}
+
 async function request<T>(
   method: string,
   path: string,
   body?: unknown,
+  timeoutMs = 8000
 ): Promise<T> {
+  const controller = new AbortController()
+  const timeoutId = setTimeout(() => controller.abort(), timeoutMs)
+
   const opts: RequestInit = {
     method,
     headers: { 'Content-Type': 'application/json' },
+    signal: controller.signal,
   }
   
   // Attach token if present
@@ -39,7 +51,19 @@ async function request<T>(
     opts.body = JSON.stringify(body)
   }
 
-  const res = await fetch(`${BASE}${path}`, opts)
+  let res: Response
+  try {
+    res = await fetch(`${BASE}${path}`, opts)
+  } catch (err: any) {
+    clearTimeout(timeoutId)
+    if (err && (err.name === 'AbortError' || err.code === 20)) {
+      throw new LocalApiTimeoutError(path, timeoutMs)
+    }
+    throw err
+  } finally {
+    clearTimeout(timeoutId)
+  }
+
   if (!res.ok) {
     if (res.status === 401) {
       // Clear token and force reload
@@ -75,6 +99,10 @@ export function login(body: LoginRequest): Promise<User> {
 
 export function register(body: LoginRequest): Promise<User> {
   return request<User>('POST', '/user/register', body)
+}
+
+export function verifyToken(token: string): Promise<{ valid: boolean; userId: string; username: string }> {
+  return request<{ valid: boolean; userId: string; username: string }>('POST', '/user/verify-token', { token })
 }
 
 // --- Events ---

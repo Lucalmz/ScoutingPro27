@@ -32,13 +32,13 @@ jobs:
           distribution: temurin
           java-version: '21'
 
-      # ---------- 前端 ----------
       - uses: actions/setup-node@v4
         with:
           node-version: 20
 
+      # ---------- 前端 ----------
       - name: Build frontend
-        working-directory: Frontend        # 改成你前端目录实际名字
+        working-directory: frontend
         run: |
           npm ci
           npm run build
@@ -48,7 +48,7 @@ jobs:
         run: |
           rm -rf Backend/src/main/resources/public
           mkdir -p Backend/src/main/resources/public
-          cp -r Frontend/dist/* Backend/src/main/resources/public/
+          cp -r frontend/dist/* Backend/src/main/resources/public/
 
       # ---------- 第一次打包：只为了拿到能跑的 jar 去预热 JCEF ----------
       - name: Build fat jar (pass 1, for prewarm)
@@ -59,13 +59,12 @@ jobs:
         working-directory: Backend
         run: java -jar target/ScoutingPro27.jar --jcef-prewarm
 
-      - name: Package jcef bundle as a resource (cross-platform via jar tool)
+      - name: Package jcef bundle as a resource
         shell: bash
         working-directory: Backend
-        run: |
-          jar --create --file=src/main/resources/jcef-bundle.zip -C jcef-bundle .
+        run: jar --create --file=src/main/resources/jcef-bundle.zip -C jcef-bundle .
 
-      # ---------- 第二次打包：这次 jar 里已经内嵌了离线原生库 ----------
+      # ---------- 第二次打包：这次内嵌了离线原生库 ----------
       - name: Build fat jar (pass 2, with embedded jcef bundle)
         working-directory: Backend
         run: mvn -B clean package -DskipTests

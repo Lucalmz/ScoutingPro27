@@ -1,8 +1,10 @@
 package com.bear27570.app.routes;
 
+import com.bear27570.app.dao.AiSettingsDao;
 import com.bear27570.app.dao.EventDao;
 import com.bear27570.app.dao.RecordDao;
 import com.bear27570.app.dao.UserDao;
+import com.bear27570.app.model.AiSettings;
 import com.bear27570.app.model.ScoutingEvent;
 import com.bear27570.app.model.ScoutingRecord;
 import com.bear27570.app.model.User;
@@ -15,7 +17,10 @@ import java.lang.reflect.Type;
 import java.util.List;
 import java.util.Map;
 import java.util.UUID;
+import java.util.concurrent.Executors;
+import java.util.concurrent.ScheduledExecutorService;
 import java.util.concurrent.ThreadLocalRandom;
+import java.util.concurrent.TimeUnit;
 
 /**
  * REST API 路由注册。
@@ -24,10 +29,32 @@ import java.util.concurrent.ThreadLocalRandom;
 public class ApiRoutes {
 
     private final Jdbi jdbi;
-    private final Gson gson = new Gson();
+    private final Gson gson = new com.google.gson.GsonBuilder().setDateFormat("yyyy-MM-dd'T'HH:mm:ss.SSSZ").create();
+    private final ScheduledExecutorService gcScheduler = Executors.newSingleThreadScheduledExecutor(r -> {
+        Thread t = new Thread(r, "tombstone-gc-thread");
+        t.setDaemon(true);
+        return t;
+    });
 
     public ApiRoutes(Jdbi jdbi) {
         this.jdbi = jdbi;
+        // 自动注册并启动 14 天过期墓碑后台周期性清理任务：服务启动后立即执行一次，随后每 24 小时自动巡检清理
+        gcScheduler.scheduleAtFixedRate(() -> {
+            try {
+                jdbi.useExtension(RecordDao.class, dao -> {
+                    int purged = dao.purgeExpiredTombstones();
+                    if (purged > 0) {
+                        System.out.println("[Tombstone GC] Cleaned up " + purged + " expired tombstones older than 14 days.");
+                    }
+                });
+            } catch (Exception e) {
+                System.err.println("[Tombstone GC] Periodic cleanup error: " + e.getMessage());
+            }
+        }, 0, 24, TimeUnit.HOURS);
+    }
+
+    public void shutdown() {
+        gcScheduler.shutdownNow();
     }
 
     public void register(RoutesConfig routes) {
@@ -49,7 +76,7 @@ public class ApiRoutes {
         // Global Authentication Interceptor
         routes.before("/api/*", ctx -> {
             String path = ctx.path();
-            if (path.equals("/api/user/login") || path.equals("/api/user/register") || path.equals("/api/user/check") || path.equals("/api/test/cleanup")) return; // skip user routes
+            if (path.equals("/api/user/login") || path.equals("/api/user/register") || path.equals("/api/user/check") || path.equals("/api/user/verify-token") || path.equals("/api/test/cleanup")) return; // skip user routes
             if (ctx.method().name().equals("OPTIONS")) return; // skip CORS preflight
             
             String authHeader = ctx.header("Authorization");
@@ -62,6 +89,31 @@ public class ApiRoutes {
                 throw new io.javalin.http.UnauthorizedResponse("Invalid or expired token");
             }
             ctx.attribute("userId", userId);
+        });
+
+        routes.post("/api/user/verify-token", ctx -> {
+            @SuppressWarnings("unchecked")
+            Map<String, String> body = gson.fromJson(ctx.body(), Map.class);
+            String tokenToVerify = body != null ? body.get("token") : null;
+            if (tokenToVerify == null || tokenToVerify.isBlank()) {
+                ctx.status(400).result("token required");
+                return;
+            }
+            String userId = com.bear27570.app.util.JwtUtil.verifyToken(tokenToVerify);
+            if (userId == null) {
+                ctx.status(401).result("Invalid token signature");
+                return;
+            }
+            User user = jdbi.withExtension(UserDao.class, dao -> dao.findById(userId));
+            if (user == null) {
+                ctx.status(404).result("User not found");
+                return;
+            }
+            ctx.result(gson.toJson(Map.of(
+                    "valid", true,
+                    "userId", user.getId(),
+                    "username", user.getUsername()
+            ))).contentType("application/json");
         });
 
         routes.post("/api/user/register", ctx -> {
@@ -272,6 +324,15 @@ public class ApiRoutes {
 
         routes.get("/api/records", ctx -> {
             String eventId = ctx.queryParam("eventId");
+            if (eventId == null || eventId.isBlank()) {
+                ctx.status(400).result("eventId required");
+                return;
+            }
+            String userId = ctx.attribute("userId");
+            boolean isMember = jdbi.withExtension(EventDao.class, dao -> dao.isMember(eventId, userId));
+            if (!isMember) {
+                throw new io.javalin.http.ForbiddenResponse("Not a member of this event");
+            }
             List<ScoutingRecord> records = jdbi.withExtension(RecordDao.class,
                 dao -> dao.findByEventId(eventId));
             ctx.result(gson.toJson(records)).contentType("application/json");
@@ -292,9 +353,43 @@ public class ApiRoutes {
                     ctx.status(400).result("Event ID cannot be blank");
                     return;
                 }
-                record.setScoutId(ctx.attribute("userId"));
-                jdbi.useExtension(RecordDao.class, dao -> dao.upsert(record));
+                String userId = ctx.attribute("userId");
+                
+                jdbi.useTransaction(handle -> {
+                    EventDao eventDao = handle.attach(EventDao.class);
+                    RecordDao recordDao = handle.attach(RecordDao.class);
+                    
+                    if (!eventDao.isMember(record.getEventId(), userId)) {
+                        throw new io.javalin.http.ForbiddenResponse("Not a member of this event");
+                    }
+                    
+                    ScoutingRecord existing = recordDao.findById(record.getId());
+                    if (existing == null) {
+                        // New record: forcefully bind scoutId to authenticated user
+                        record.setScoutId(userId);
+                        if (record.getScoutName() == null || record.getScoutName().isBlank()) {
+                            record.setScoutName(userId);
+                        }
+                    } else {
+                        // Existing record: only original author or event host can update
+                        boolean isHost = eventDao.isHost(record.getEventId(), userId);
+                        if (!existing.getScoutId().equals(userId) && !isHost) {
+                            throw new io.javalin.http.ForbiddenResponse("Cannot modify another scout's record");
+                        }
+                        if (!isHost) {
+                            // Non-host author cannot transfer record ownership to someone else
+                            record.setScoutId(userId);
+                        }
+                        if (record.getScoutName() == null || record.getScoutName().isBlank()) {
+                            record.setScoutName(existing.getScoutName() != null ? existing.getScoutName() : userId);
+                        }
+                    }
+                    
+                    recordDao.upsert(record);
+                });
                 ctx.status(200).result("OK");
+            } catch (io.javalin.http.HttpResponseException e) {
+                throw e;
             } catch (Exception e) {
                 ctx.status(400).result("Invalid data: " + e.getMessage());
             }
@@ -312,19 +407,48 @@ public class ApiRoutes {
                 
                 // Wrap in a transaction to prevent partial failure corruption
                 jdbi.useTransaction(handle -> {
-                    RecordDao dao = handle.attach(RecordDao.class);
+                    EventDao eventDao = handle.attach(EventDao.class);
+                    RecordDao recordDao = handle.attach(RecordDao.class);
+                    
                     for (ScoutingRecord r : records) {
-                        if (r.getMatchNumber() <= 0 || r.getTeamNumber() <= 0 || r.getEventId() == null) {
+                        if (r.getMatchNumber() <= 0 || r.getTeamNumber() <= 0 || r.getEventId() == null || r.getEventId().isBlank()) {
                             throw new IllegalArgumentException("Invalid record detected in batch sync");
                         }
-                        if (r.getScoutId() == null || r.getScoutId().isBlank()) {
-                            r.setScoutId(userId); // only fallback to host ID if missing
+                        if (!eventDao.isMember(r.getEventId(), userId)) {
+                            throw new io.javalin.http.ForbiddenResponse("Not a member of event: " + r.getEventId());
                         }
+                        
+                        boolean isHost = eventDao.isHost(r.getEventId(), userId);
+                        ScoutingRecord existing = recordDao.findById(r.getId());
+                        
+                        if (!isHost) {
+                            // Ordinary scouts can only sync their own records
+                            if (r.getScoutId() == null || r.getScoutId().isBlank()) {
+                                r.setScoutId(userId);
+                            } else if (!r.getScoutId().equals(userId)) {
+                                throw new io.javalin.http.ForbiddenResponse("Cannot sync records belonging to another scout");
+                            }
+                            
+                            if (existing != null && !existing.getScoutId().equals(userId)) {
+                                throw new io.javalin.http.ForbiddenResponse("Cannot modify another scout's record");
+                            }
+                        } else {
+                            if (r.getScoutId() == null || r.getScoutId().isBlank()) {
+                                r.setScoutId(userId);
+                            }
+                        }
+                        
+                        if (r.getScoutName() == null || r.getScoutName().isBlank()) {
+                            r.setScoutName(existing != null && existing.getScoutName() != null ? existing.getScoutName() : (r.getScoutId() != null ? r.getScoutId() : userId));
+                        }
+                        
                         r.setSyncStatus("SYNCED");
-                        dao.upsert(r);
+                        recordDao.upsert(r);
                     }
                 });
                 ctx.status(200).result("OK");
+            } catch (io.javalin.http.HttpResponseException e) {
+                throw e;
             } catch (Exception e) {
                 ctx.status(400).result("Sync failed: " + e.getMessage());
             }
@@ -332,9 +456,310 @@ public class ApiRoutes {
 
         routes.get("/api/records/pending", ctx -> {
             String eventId = ctx.queryParam("eventId");
+            if (eventId == null || eventId.isBlank()) {
+                ctx.status(400).result("eventId required");
+                return;
+            }
+            String userId = ctx.attribute("userId");
+            boolean isMember = jdbi.withExtension(EventDao.class, dao -> dao.isMember(eventId, userId));
+            if (!isMember) {
+                throw new io.javalin.http.ForbiddenResponse("Not a member of this event");
+            }
             List<ScoutingRecord> records = jdbi.withExtension(RecordDao.class,
                 dao -> dao.findPendingByEventId(eventId));
             ctx.result(gson.toJson(records)).contentType("application/json");
+        });
+
+        // ==================== AI Settings ====================
+
+        routes.get("/api/users/{userId}/ai-settings", ctx -> {
+            String pathUserId = ctx.pathParam("userId");
+            String sessionUserId = ctx.attribute("userId");
+            if (!pathUserId.equals(sessionUserId)) {
+                throw new io.javalin.http.ForbiddenResponse("Cannot access settings of another user");
+            }
+
+            List<com.bear27570.app.model.AiSettings> settings = jdbi.withExtension(
+                com.bear27570.app.dao.AiSettingsDao.class, 
+                dao -> dao.findByUserId(sessionUserId)
+            );
+
+            // Mask the API keys before sending to frontend
+            for (com.bear27570.app.model.AiSettings s : settings) {
+                try {
+                    String raw = com.bear27570.app.util.AESUtil.decrypt(s.getApiKeyEncrypted());
+                    if (raw != null && raw.length() > 6) {
+                        s.setApiKeyEncrypted(raw.substring(0, 2) + "****************" + raw.substring(raw.length() - 4));
+                    } else if (raw != null && !raw.isEmpty()) {
+                        s.setApiKeyEncrypted("****");
+                    }
+                } catch (com.bear27570.app.util.KeyDecryptionException e) {
+                    s.setApiKeyEncrypted("ERR_KEY_LOST");
+                }
+            }
+
+            ctx.result(gson.toJson(settings)).contentType("application/json");
+        });
+
+        routes.post("/api/users/{userId}/ai-settings", ctx -> {
+            String pathUserId = ctx.pathParam("userId");
+            String sessionUserId = ctx.attribute("userId");
+            if (!pathUserId.equals(sessionUserId)) {
+                throw new io.javalin.http.ForbiddenResponse("Cannot modify settings of another user");
+            }
+
+            com.bear27570.app.model.AiSettings newSettings;
+            try {
+                newSettings = gson.fromJson(ctx.body(), com.bear27570.app.model.AiSettings.class);
+            } catch (Exception e) {
+                ctx.status(400).result(gson.toJson(Map.of("error", "Invalid JSON body: " + e.getMessage()))).contentType("application/json");
+                return;
+            }
+
+            if (newSettings == null || newSettings.getProvider() == null || newSettings.getProvider().isBlank()) {
+                ctx.status(400).result(gson.toJson(Map.of("error", "Invalid JSON body or missing provider"))).contentType("application/json");
+                return;
+            }
+            newSettings.setUserId(sessionUserId);
+
+            try {
+                jdbi.useExtension(com.bear27570.app.dao.AiSettingsDao.class, dao -> {
+                    com.bear27570.app.model.AiSettings existing = dao.findByUserIdAndProvider(sessionUserId, newSettings.getProvider());
+                    
+                    String submittedKey = newSettings.getApiKeyEncrypted();
+                    if (submittedKey == null || submittedKey.trim().isEmpty() || submittedKey.contains("***")) {
+                        if (existing != null && existing.getApiKeyEncrypted() != null && !existing.getApiKeyEncrypted().isBlank()) {
+                            // Keep existing encrypted key
+                            newSettings.setApiKeyEncrypted(existing.getApiKeyEncrypted());
+                        } else {
+                            throw new IllegalArgumentException("API Key is required for new provider configuration");
+                        }
+                    } else {
+                        // Encrypt new raw key
+                        newSettings.setApiKeyEncrypted(com.bear27570.app.util.AESUtil.encrypt(submittedKey.trim()));
+                    }
+
+                    dao.upsert(newSettings);
+                });
+
+                ctx.status(200).result(gson.toJson(Map.of("success", true))).contentType("application/json");
+            } catch (IllegalArgumentException e) {
+                ctx.status(400).result(gson.toJson(Map.of("error", e.getMessage()))).contentType("application/json");
+            } catch (Exception e) {
+                ctx.status(500).result(gson.toJson(Map.of("error", "Failed to save settings: " + e.getMessage()))).contentType("application/json");
+            }
+        });
+
+        routes.get("/api/ai/test-connection", ctx -> {
+            String sessionUserId = ctx.attribute("userId");
+            String provider = ctx.queryParam("provider");
+            String proxyHost = ctx.queryParam("proxyHost");
+            String proxyPortStr = ctx.queryParam("proxyPort");
+            String customBaseUrl = ctx.queryParam("baseUrl");
+            String queryApiKey = ctx.queryParam("apiKey");
+            
+            if (provider == null || provider.isEmpty()) {
+                ctx.status(400).result(gson.toJson(Map.of("error", "Missing provider"))).contentType("application/json");
+                return;
+            }
+
+            // Determine API Key: passed in query (if not masked) OR decrypt from DB for current user
+            String rawApiKey = null;
+            if (queryApiKey != null && !queryApiKey.isBlank() && !queryApiKey.contains("***") && !queryApiKey.equals("****")) {
+                rawApiKey = queryApiKey.trim();
+            } else if (sessionUserId != null) {
+                try {
+                    AiSettings saved = jdbi.withExtension(AiSettingsDao.class, dao -> dao.findByUserIdAndProvider(sessionUserId, provider.toUpperCase()));
+                    if (saved != null && saved.getApiKeyEncrypted() != null && !saved.getApiKeyEncrypted().isBlank()) {
+                        rawApiKey = com.bear27570.app.util.AESUtil.decrypt(saved.getApiKeyEncrypted());
+                    }
+                } catch (Exception e) {
+                    // Ignore DB/decryption error, will fallback to anonymous ping
+                }
+            }
+
+            String testUrl;
+            if ("OPENAI".equalsIgnoreCase(provider)) {
+                if (customBaseUrl != null && !customBaseUrl.isBlank()) {
+                    String bUrl = customBaseUrl.trim();
+                    if (bUrl.endsWith("/")) bUrl = bUrl.substring(0, bUrl.length() - 1);
+                    testUrl = bUrl.endsWith("/models") ? bUrl : (bUrl.endsWith("/v1") ? bUrl + "/models" : bUrl + "/v1/models");
+                } else {
+                    testUrl = "https://api.openai.com/v1/models";
+                }
+            } else if ("GEMINI".equalsIgnoreCase(provider)) {
+                testUrl = "https://generativelanguage.googleapis.com/v1beta/models";
+            } else {
+                ctx.status(400).result(gson.toJson(Map.of("error", "Unsupported provider: " + provider))).contentType("application/json");
+                return;
+            }
+
+            java.net.Proxy proxy = java.net.Proxy.NO_PROXY;
+            if (proxyPortStr != null && !proxyPortStr.isEmpty()) {
+                try {
+                    int port = Integer.parseInt(proxyPortStr);
+                    String host = (proxyHost != null && !proxyHost.isEmpty()) ? proxyHost : "127.0.0.1";
+                    proxy = new java.net.Proxy(java.net.Proxy.Type.HTTP, new java.net.InetSocketAddress(host, port));
+                } catch (NumberFormatException e) {
+                    ctx.status(400).result(gson.toJson(Map.of("error", "Invalid proxy port"))).contentType("application/json");
+                    return;
+                }
+            }
+
+            long start = System.currentTimeMillis();
+            try {
+                java.net.URL url = new java.net.URL(testUrl);
+                java.net.HttpURLConnection conn = (java.net.HttpURLConnection) url.openConnection(proxy);
+                conn.setRequestMethod("GET");
+                conn.setConnectTimeout(8000);
+                conn.setReadTimeout(8000);
+                
+                boolean hasKey = (rawApiKey != null && !rawApiKey.isBlank());
+                if (hasKey) {
+                    if ("GEMINI".equalsIgnoreCase(provider)) {
+                        conn.setRequestProperty("x-goog-api-key", rawApiKey);
+                    } else {
+                        conn.setRequestProperty("Authorization", "Bearer " + rawApiKey);
+                    }
+                }
+                
+                int code = conn.getResponseCode();
+                long latency = System.currentTimeMillis() - start;
+                
+                boolean success;
+                String message;
+                if (code == 200) {
+                    success = true;
+                    message = hasKey ? "API Key and endpoint authenticated successfully! (200 OK)" : "Endpoint reached successfully! (200 OK)";
+                } else if (!hasKey && (code == 401 || code == 403)) {
+                    // Anonymous ping reached the server
+                    success = true;
+                    message = "Network connection is reachable (HTTP " + code + "). Please enter and save your API key to authenticate.";
+                } else {
+                    success = false;
+                    if (code == 401 || code == 403 || code == 400) {
+                        message = "Authentication failed (HTTP " + code + "): Invalid or unauthorized API key.";
+                    } else {
+                        message = "Endpoint returned HTTP " + code;
+                    }
+                }
+                
+                ctx.result(gson.toJson(Map.of("success", success, "statusCode", code, "latencyMs", latency, "message", message))).contentType("application/json");
+            } catch (Exception e) {
+                long latency = System.currentTimeMillis() - start;
+                ctx.result(gson.toJson(Map.of("success", false, "error", e.getMessage() != null ? e.getMessage() : e.toString(), "latencyMs", latency))).contentType("application/json");
+            }
+        });
+
+        routes.post("/api/ai/chat", ctx -> {
+            String sessionUserId = ctx.attribute("userId");
+            if (sessionUserId == null) {
+                throw new io.javalin.http.UnauthorizedResponse("Not logged in");
+            }
+
+            com.google.gson.JsonObject body;
+            try {
+                com.google.gson.JsonElement parsed = com.google.gson.JsonParser.parseString(ctx.body());
+                if (!parsed.isJsonObject()) {
+                    ctx.status(400).result(gson.toJson(Map.of("error", "Request body must be a JSON object"))).contentType("application/json");
+                    return;
+                }
+                body = parsed.getAsJsonObject();
+            } catch (Exception e) {
+                ctx.status(400).result(gson.toJson(Map.of("error", "Invalid JSON format: " + e.getMessage()))).contentType("application/json");
+                return;
+            }
+
+            String provider = body.has("provider") && !body.get("provider").isJsonNull() ? body.get("provider").getAsString() : null;
+            if (provider == null || provider.isEmpty()) {
+                ctx.status(400).result(gson.toJson(Map.of("error", "Missing provider"))).contentType("application/json");
+                return;
+            }
+
+            com.bear27570.app.model.AiSettings settings = jdbi.withExtension(
+                com.bear27570.app.dao.AiSettingsDao.class,
+                dao -> dao.findByUserIdAndProvider(sessionUserId, provider)
+            );
+
+            if (settings == null) {
+                ctx.status(400).result(gson.toJson(Map.of("error", "AI Settings not configured for provider: " + provider))).contentType("application/json");
+                return;
+            }
+
+            String sysPrompt = body.has("systemPrompt") && !body.get("systemPrompt").isJsonNull() ? body.get("systemPrompt").getAsString() : settings.getSystemPrompt();
+
+            java.util.List<java.util.Map<String, String>> msgList = new java.util.ArrayList<>();
+            if (body.has("messages") && body.get("messages").isJsonArray()) {
+                com.google.gson.JsonArray arr = body.getAsJsonArray("messages");
+                for (com.google.gson.JsonElement e : arr) {
+                    if (e.isJsonObject()) {
+                        com.google.gson.JsonObject msgObj = e.getAsJsonObject();
+                        java.util.Map<String, String> m = new java.util.HashMap<>();
+                        m.put("role", msgObj.has("role") && !msgObj.get("role").isJsonNull() ? msgObj.get("role").getAsString() : "user");
+                        m.put("content", msgObj.has("content") && !msgObj.get("content").isJsonNull() ? msgObj.get("content").getAsString() : "");
+                        msgList.add(m);
+                    }
+                }
+            }
+
+            try {
+                String reply = com.bear27570.app.util.AiClient.chat(settings, sysPrompt, msgList);
+                ctx.result(gson.toJson(java.util.Map.of("reply", reply))).contentType("application/json");
+            } catch (Exception e) {
+                ctx.status(500).result(gson.toJson(java.util.Map.of("error", e.getMessage()))).contentType("application/json");
+            }
+        });
+
+        routes.get("/api/events/{id}/ai-chat", ctx -> {
+            String eventId = ctx.pathParam("id");
+            String userId = ctx.attribute("userId");
+            if (userId == null) {
+                throw new io.javalin.http.UnauthorizedResponse("Not logged in");
+            }
+            com.bear27570.app.model.AiChatSession session = jdbi.withExtension(
+                com.bear27570.app.dao.AiChatSessionDao.class,
+                dao -> dao.findSession(userId, eventId)
+            );
+            if (session != null && session.getChatHistoryJson() != null) {
+                ctx.result(session.getChatHistoryJson()).contentType("application/json");
+            } else {
+                ctx.result("[]").contentType("application/json");
+            }
+        });
+
+        routes.put("/api/events/{id}/ai-chat", ctx -> {
+            String eventId = ctx.pathParam("id");
+            String userId = ctx.attribute("userId");
+            if (userId == null) {
+                throw new io.javalin.http.UnauthorizedResponse("Not logged in");
+            }
+            
+            // Validate JSON format roughly
+            String jsonBody = ctx.body();
+            try {
+                com.google.gson.JsonElement el = com.google.gson.JsonParser.parseString(jsonBody);
+                if (!el.isJsonArray()) {
+                    ctx.status(400).result(gson.toJson(Map.of("error", "Body must be a JSON array"))).contentType("application/json");
+                    return;
+                }
+            } catch (Exception e) {
+                ctx.status(400).result(gson.toJson(Map.of("error", "Invalid JSON"))).contentType("application/json");
+                return;
+            }
+
+            try {
+                com.bear27570.app.model.AiChatSession session = new com.bear27570.app.model.AiChatSession();
+                session.setUserId(userId);
+                session.setEventId(eventId);
+                session.setChatHistoryJson(jsonBody);
+
+                jdbi.useExtension(com.bear27570.app.dao.AiChatSessionDao.class, dao -> {
+                    dao.saveSession(session);
+                });
+                ctx.status(200).result(gson.toJson(Map.of("success", true))).contentType("application/json");
+            } catch (Exception e) {
+                ctx.status(500).result(gson.toJson(Map.of("error", "Failed to save session: " + e.getMessage()))).contentType("application/json");
+            }
         });
 
         routes.post("/api/records/mark-synced", ctx -> {

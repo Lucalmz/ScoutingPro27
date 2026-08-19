@@ -91,12 +91,89 @@ describe('Records Store', () => {
     expect(store.records[0].syncStatus).toBe('SYNCED')
   })
 
-  it('bulkSync', async () => {
+  it('bulkSync applies LWW and returns only modified records', async () => {
     const store = useRecordStore()
-    vi.mocked(api.syncRecords).mockResolvedValue(undefined)
-    const incoming = [createDummyRecord('rsync', 999, 5, 5, 5)]
-    await store.bulkSync(incoming)
-    expect(store.records).toHaveLength(1)
-    expect(store.records[0].id).toBe('rsync')
+    
+    // Initial record with version 2
+    store.records = [
+      { ...createDummyRecord('r1', 118, 10, 10, 10), version: 2, updatedAt: '2026-08-14T10:00:00.000Z' }
+    ]
+
+    // Incoming has an older version 1 for r1, and a new record r2 with version 1
+    const incoming = [
+      { ...createDummyRecord('r1', 118, 5, 5, 5), version: 1, updatedAt: '2026-08-14T09:00:00.000Z' },
+      { ...createDummyRecord('r2', 254, 20, 20, 20), version: 1, updatedAt: '2026-08-14T10:00:00.000Z' }
+    ]
+
+    const accepted = await store.bulkSync(incoming)
+    
+    // r1 should be rejected (kept version 2), r2 accepted
+    expect(accepted).toHaveLength(1)
+    expect(accepted[0].id).toBe('r2')
+    expect(store.records.find(r => r.id === 'r1')?.version).toBe(2)
+    expect(store.records.find(r => r.id === 'r1')?.totalScore).toBe(30)
+  })
+
+  it('bulkSync detects conflicts and returns both accepted incoming and updated existing records', async () => {
+    const store = useRecordStore()
+    
+    // Scout 1 submitted Match 1 Team 9999
+    store.records = [
+      { ...createDummyRecord('r1', 9999, 10, 10, 10, 'scout1'), version: 1 }
+    ]
+
+    // Scout 2 submits Match 1 Team 9999
+    const incoming = [
+      { ...createDummyRecord('r2', 9999, 15, 15, 15, 'scout2'), version: 1 }
+    ]
+
+    const modified = await store.bulkSync(incoming)
+
+    // Both records should be marked as conflict and returned for unified Host persistence & broadcast
+    expect(modified).toHaveLength(2)
+    const r1 = store.records.find(r => r.id === 'r1')
+    const r2 = store.records.find(r => r.id === 'r2')
+    expect(r1?.isConflict).toBe(true)
+    expect(r1?.version).toBe(2)
+    expect(r2?.isConflict).toBe(true)
+    expect(modified.map(m => m.id).sort()).toEqual(['r1', 'r2'])
+  })
+
+  it('handles soft-delete tombstone and excludes from rankings', async () => {
+    const store = useRecordStore()
+    vi.mocked(api.saveRecord).mockResolvedValue(undefined)
+
+    const rec1 = { ...createDummyRecord('r1', 27570, 50, 50, 50), version: 1 }
+    const rec2 = { ...createDummyRecord('r2', 118, 30, 30, 30), version: 1 }
+    store.records = [rec1, rec2]
+
+    expect(store.rankings).toHaveLength(2)
+
+    // Soft delete rec1
+    const { success } = await store.deleteRecord('r1')
+    expect(success).toBe(true)
+    expect(store.records.find(r => r.id === 'r1')?.isDeleted).toBe(true)
+    expect(store.records.find(r => r.id === 'r1')?.version).toBe(2)
+
+    // Rankings should now only include rec2 (team 118)
+    expect(store.rankings).toHaveLength(1)
+    expect(store.rankings[0].teamNumber).toBe(118)
+  })
+
+  it('purges local expired tombstones older than 14 days', () => {
+    const store = useRecordStore()
+    const now = Date.now()
+    const twentyDaysAgo = new Date(now - 20 * 24 * 60 * 60 * 1000).toISOString()
+    const twoDaysAgo = new Date(now - 2 * 24 * 60 * 60 * 1000).toISOString()
+
+    store.records = [
+      { ...createDummyRecord('active_1', 27570, 10, 10, 10), isDeleted: false, updatedAt: twentyDaysAgo },
+      { ...createDummyRecord('recent_del', 27570, 10, 10, 10), isDeleted: true, updatedAt: twoDaysAgo },
+      { ...createDummyRecord('old_del', 27570, 10, 10, 10), isDeleted: true, updatedAt: twentyDaysAgo }
+    ]
+
+    store.purgeExpiredTombstones()
+
+    expect(store.records.map(r => r.id)).toEqual(['active_1', 'recent_del'])
   })
 })

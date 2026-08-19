@@ -5,6 +5,7 @@ import { useUserStore } from '@/stores/user'
 import { useEventStore } from '@/stores/events'
 import { useRecordStore } from '@/stores/records'
 import { useConnectionStore } from '@/stores/connection'
+import { useInboxStore } from '@/stores/inbox'
 import { createWebRtcService } from '@/services/webrtc'
 import { useI18n } from 'vue-i18n'
 import type { ScoutingRecord, ScoutingEvent } from '@/types'
@@ -12,8 +13,10 @@ import ConnectionStatus from '@/components/common/ConnectionStatus.vue'
 import ScoutingForm from '@/components/scouting/ScoutingForm.vue'
 import RankingsTable from '@/components/rankings/RankingsTable.vue'
 import HistoryList from '@/components/history/HistoryList.vue'
-import { updateEventFtcConfig } from '@/services/api'
+import AiChatView from '@/components/ai/AiChatView.vue'
+import { updateEventFtcConfig, syncRecords } from '@/services/api'
 import { transitionState } from '@/utils/transitionState'
+import { downloadCSV } from '@/utils/csvExport'
 
 const route = useRoute()
 const router = useRouter()
@@ -21,6 +24,7 @@ const userStore = useUserStore()
 const eventStore = useEventStore()
 const recordStore = useRecordStore()
 const connStore = useConnectionStore()
+const inboxStore = useInboxStore()
 const { t } = useI18n()
 
 // Entrance animation refs
@@ -28,12 +32,13 @@ const headerRef = ref<HTMLElement | null>(null)
 const tabBarRef = ref<HTMLElement | null>(null)
 const contentRef = ref<HTMLElement | null>(null)
 
-const activeTab = ref<'scout' | 'rankings' | 'history' | 'scouts'>('scout')
+const activeTab = ref<'scout' | 'rankings' | 'history' | 'scouts' | 'ai'>('scout')
 const tabs = computed(() => {
-  const baseTabs: Array<{ key: 'scout' | 'rankings' | 'history' | 'scouts', label: string }> = [
+  const baseTabs: Array<{ key: 'scout' | 'rankings' | 'history' | 'scouts' | 'ai', label: string }> = [
     { key: 'scout' as const, label: t('event.tab_scout') },
     { key: 'rankings' as const, label: t('event.tab_rankings') },
     { key: 'history' as const, label: t('event.tab_history') },
+    { key: 'ai' as const, label: 'Chat with AI' },
   ]
   if (eventStore.isHost) {
     baseTabs.push({ key: 'scouts' as const, label: 'Scouts' })
@@ -58,13 +63,29 @@ const state = reactive({
   error: null as Error | null
 })
 
+// Client 端：持久化最后一次从 Host 收到的最大 hostSeq，用于重连后增量请求
+// 按 eventId 分筒，避免不同赛事之间混淆
+const lastHostSeqKey = computed(() => `sp27_lastHostSeq_${eventId.value}`)
+const lastHostSeq = ref<number>(0)
+watch(lastHostSeq, v => localStorage.setItem(lastHostSeqKey.value, String(v)))
+
+function advanceLastHostSeq(incomingRecords: ScoutingRecord[]) {
+  const validSeqs = incomingRecords
+    .map(r => r.hostSeq)
+    .filter((s): s is number => typeof s === 'number' && Number.isFinite(s) && s > 0)
+  if (validSeqs.length > 0) {
+    const maxIncoming = Math.max(...validSeqs)
+    if (maxIncoming > lastHostSeq.value) {
+      lastHostSeq.value = maxIncoming
+    }
+  }
+}
+
 onMounted(async () => {
   if (!userStore.isLoggedIn) {
     router.replace('/')
     return
   }
-
-
 
   try {
     state.loading = true
@@ -92,18 +113,24 @@ onMounted(async () => {
     await recordStore.fetchRecords(eventId.value, evt.ftcYear, evt.ftcEventCode)
   }
 
+  // 计算数据库和内存中已持久化记录的最大 hostSeq
+  const dbMaxSeq = recordStore.records.reduce((m, r) => Math.max(m, r.hostSeq || 0), 0)
+
+  // Host：从已持久化记录的最大 hostSeq 恢复计数器，保证重启后单调递增
+  if (eventStore.isHost) {
+    connStore.initHostSeq(dbMaxSeq)
+  } else {
+    // Client：多层兜底初始化 lastHostSeq，防止本地缓存缺失导致游标归零
+    const localStored = parseInt(localStorage.getItem(lastHostSeqKey.value) ?? '0') || 0
+    lastHostSeq.value = Math.max(dbMaxSeq, localStored)
+  }
+
   if (route.query.tab === 'history') {
     activeTab.value = 'history'
   }
 
   // Set up WebRTC
   setupWebRTC()
-
-  // Host：从已持久化记录的最大 hostSeq 恢复计数器，保证重启后单调递增
-  if (eventStore.isHost) {
-    const maxSeq = recordStore.records.reduce((m, r) => Math.max(m, r.hostSeq || 0), 0)
-    connStore.initHostSeq(maxSeq)
-  }
   
   if (eventStore.isHost) {
     window.addEventListener('beforeunload', handleBeforeUnload)
@@ -133,22 +160,28 @@ async function setupWebRTC() {
 
     // 返回真正被接受的记录，Host 端用此打 hostSeq + 广播
     onRecordsReceived: async (records: ScoutingRecord[], senderId?: string): Promise<ScoutingRecord[]> => {
-      return await recordStore.bulkSync(records)
+      const accepted = await recordStore.bulkSync(records)
+      if (!eventStore.isHost) {
+        advanceLastHostSeq(records)
+      }
+      return accepted
     },
 
     // Host 回传的 ACK 内含 stamped 记录，Client 用此更新本地 hostSeq + lastHostSeq
-    onAckReceived: (ids: string[], stampedRecords?: ScoutingRecord[]) => {
-      recordStore.markSynced(ids)
+    onAckReceived: (ids: string[], stampedRecords?: ScoutingRecord[], rejectedRecordIds?: string[]) => {
+      const rejectedSet = new Set(rejectedRecordIds || [])
+      const acceptedIds = ids.filter(id => !rejectedSet.has(id))
+      if (acceptedIds.length > 0) {
+        recordStore.markSynced(acceptedIds)
+      }
       if (stampedRecords && stampedRecords.length > 0 && !eventStore.isHost) {
         for (const stamped of stampedRecords) {
           const local = recordStore.records.find(r => r.id === stamped.id)
           if (local && stamped.hostSeq) {
             local.hostSeq = stamped.hostSeq
-            if (stamped.hostSeq > lastHostSeq.value) {
-              lastHostSeq.value = stamped.hostSeq
-            }
           }
         }
+        advanceLastHostSeq(stampedRecords)
       }
     },
 
@@ -164,10 +197,18 @@ async function setupWebRTC() {
 
     onClientConnected: (userId: string, userName: string) => {
       connStore.addConnectedScout(userId, userName)
+      if (connStore.rtcService) {
+        inboxStore.flushOutbox(connStore.rtcService, userId)
+      }
     }
   })
 
   connStore.setRtcService(rtc)
+  if (typeof window !== 'undefined') {
+    ;(window as any).__sendDirectMessage = (targetId: string, title: string, body: string) => {
+      return inboxStore.sendDirectMessage({ targetId, title, body }, rtc)
+    }
+  }
 
   try {
     if (eventStore.isHost) {
@@ -181,24 +222,24 @@ async function setupWebRTC() {
   }
 }
 
-// Client 端：持久化最后一次从 Host 收到的最大 hostSeq，用于重连后增量请求
-// 按 eventId 分筒，避免不同赛事之间混混
- const lastHostSeqKey = computed(() => `sp27_lastHostSeq_${eventId.value}`)
-const lastHostSeq = ref<number>(parseInt(localStorage.getItem(lastHostSeqKey.value) ?? '0') || 0)
-watch(lastHostSeq, v => localStorage.setItem(lastHostSeqKey.value, String(v)))
-
 watch(() => connStore.status, (status, oldStatus) => {
   const evt = eventStore.currentEvent
   console.log(`[EventView] connStore.status changed: ${oldStatus} -> ${status}`)
   
-  if (status === 'connected' && evt && !eventStore.isHost) {
-    // Client 连接／重连：用 lastHostSeq 做增量请求（=0 时全量）
-    connStore.requestSync(lastHostSeq.value, undefined, userStore.userId, userStore.username)
-    
-    // 只推送本地尚未同步到 Host 的记录
-    const myRecs = recordStore.myRecords(userStore.userId).filter(r => r.syncStatus === 'PENDING')
-    if (myRecs.length > 0) {
-      connStore.pushRecords(myRecs)
+  if (status === 'connected' && evt) {
+    if (connStore.rtcService) {
+      inboxStore.flushOutbox(connStore.rtcService)
+    }
+
+    if (!eventStore.isHost) {
+      // Client 连接／重连：用 lastHostSeq 做增量请求（=0 时全量）
+      connStore.requestSync(lastHostSeq.value, undefined, userStore.userId, userStore.username, userStore.token)
+      
+      // 只推送本地尚未同步到 Host 的记录
+      const myRecs = recordStore.myRecords(userStore.userId).filter(r => r.syncStatus === 'PENDING')
+      if (myRecs.length > 0) {
+        connStore.pushRecords(myRecs)
+      }
     }
   }
 })
@@ -287,9 +328,18 @@ async function onRecordSubmitted(recordOrRecords: ScoutingRecord | ScoutingRecor
   }
 
   if (anyOk && allToPush.length > 0) {
-    // Host 本地写入也要打 hostSeq，确保 Client 重连后能增量同步到 Host 的改动
-    if (eventStore.isHost) connStore.stampHostSeq(allToPush)
-    connStore.pushIfNeeded(allToPush)
+    // 按 id 严格去重，避免重复引用导致同一条记录多次自增 hostSeq
+    const deduplicatedRecords = Array.from(new Map(allToPush.map(r => [r.id, r])).values())
+    // Host 本地写入也要打 hostSeq 并持久化落库，确保重启后单调递增及 Client 重连能增量同步
+    if (eventStore.isHost) {
+      connStore.stampHostSeq(deduplicatedRecords)
+      try {
+        await syncRecords(deduplicatedRecords)
+      } catch (e) {
+        console.error('[EventView] Failed to sync stamped records to DB:', e)
+      }
+    }
+    connStore.pushIfNeeded(deduplicatedRecords)
   }
   editingRecord.value = null // clear edit state after submit
 }
@@ -313,11 +363,14 @@ const uniqueScouts = computed(() => {
   return Array.from(scouts.values())
 })
 
-function sendDirectMessage(scoutId: string) {
-  if (connStore.rtcService?.sendDirectMessage) {
-    const msg = prompt('Enter message to send:')
+async function sendDirectMessage(scoutId: string, scoutName?: string) {
+  if (connStore.rtcService) {
+    const msg = prompt(`Enter message to send to ${scoutName || scoutId}:`)
     if (msg) {
-      connStore.rtcService.sendDirectMessage({ targetId: scoutId, title: 'Message from Host', body: msg })
+      await inboxStore.sendDirectMessage(
+        { targetId: scoutId, targetName: scoutName, title: 'Message from Host', body: msg },
+        connStore.rtcService
+      )
     }
   } else {
     alert('Direct messaging not ready.')
@@ -328,6 +381,13 @@ function sendDirectMessage(scoutId: string) {
 const settingsYear = ref(event.value?.ftcYear ?? 2025)
 const settingsCode = ref(event.value?.ftcEventCode ?? '')
 const isSavingSettings = ref(false)
+
+watch(event, (newVal) => {
+  if (newVal) {
+    if (newVal.ftcYear) settingsYear.value = newVal.ftcYear
+    if (newVal.ftcEventCode) settingsCode.value = newVal.ftcEventCode
+  }
+}, { immediate: true })
 
 async function saveEventSettings() {
   if (!event.value) return
@@ -349,6 +409,44 @@ async function saveEventSettings() {
     isSavingSettings.value = false
   }
 }
+
+// --- Data Export ---
+function exportRankingsCSV() {
+  const headers = ['Team', 'Matches', 'Breakdown Count', 'Avg Auto', 'Avg Teleop', 'Avg Endgame', 'Max Score', 'Avg Rating', 'Trend']
+  const rows = recordStore.rankings.map(r => [
+    r.teamNumber,
+    r.matchCount,
+    r.brokenCount,
+    r.avgAutoScore,
+    r.avgTeleopScore,
+    r.avgEndgameScore,
+    r.maxScore,
+    r.avgRating,
+    r.trend
+  ])
+  const eventName = event.value?.name ? event.value.name.replace(/[^a-z0-9]/gi, '_') : 'event'
+  const timestamp = new Date().toISOString().replace(/[:.]/g, '-')
+  downloadCSV(`${eventName}_rankings_${timestamp}.csv`, headers, rows)
+}
+
+function exportRecordsCSV() {
+  const headers = ['Record ID', 'Match', 'Team', 'Scout', 'Auto', 'Teleop', 'Endgame', 'Total Score', 'Is Broken', 'Created At']
+  const rows = recordStore.records.map(r => [
+    r.id,
+    r.matchNumber,
+    r.teamNumber,
+    r.scoutName,
+    r.autoScore,
+    r.teleopScore,
+    r.endgameScore,
+    r.totalScore,
+    r.isBroken ? 'Yes' : 'No',
+    new Date(r.createdAt).toLocaleString()
+  ])
+  const eventName = event.value?.name ? event.value.name.replace(/[^a-z0-9]/gi, '_') : 'event'
+  const timestamp = new Date().toISOString().replace(/[:.]/g, '-')
+  downloadCSV(`${eventName}_records_${timestamp}.csv`, headers, rows)
+}
 </script>
 
 <template>
@@ -369,6 +467,12 @@ async function saveEventSettings() {
         <ConnectionStatus />
       </div>
     </header>
+
+    <!-- Network Congestion Banner -->
+    <div v-if="connStore.isCongested" class="congestion-banner">
+      <span class="material-icons banner-icon">warning</span>
+      <span>{{ t('connection.congested_banner') }}</span>
+    </div>
 
     <!-- Tab Bar -->
     <nav ref="tabBarRef" class="tab-bar" :style="{ '--indicator-width': 100 / tabs.length + '%', viewTransitionName: 'event-tabs' }">
@@ -414,6 +518,7 @@ async function saveEventSettings() {
           :loading="recordStore.loading"
           @editRecord="handleEditRecord"
         />
+        <AiChatView v-else-if="activeTab === 'ai'" :event-id="route.params.eventId as string" />
         <div v-else-if="activeTab === 'scouts'">
           <div class="settings-panel">
             <h2>Event Settings</h2>
@@ -432,11 +537,25 @@ async function saveEventSettings() {
             </div>
           </div>
 
+          <div class="settings-panel">
+            <h2>Data Export</h2>
+            <div class="settings-form" style="flex-direction: row; gap: 16px;">
+              <button class="btn-primary" @click="exportRankingsCSV" style="margin-top: 0;">
+                <span class="material-icons" style="font-size: 18px; vertical-align: text-bottom; margin-right: 4px;">download</span>
+                Export Rankings CSV
+              </button>
+              <button class="btn-primary" @click="exportRecordsCSV" style="margin-top: 0; background: var(--border); color: var(--foreground);">
+                <span class="material-icons" style="font-size: 18px; vertical-align: text-bottom; margin-right: 4px;">download</span>
+                Export All Records CSV
+              </button>
+            </div>
+          </div>
+
           <h2>Scouts</h2>
           <ul class="scouts-list">
             <li v-for="s in uniqueScouts" :key="s.id" class="scout-item">
               <span class="scout-info">{{ s.name }} (Records: {{ s.recordCount }})</span>
-              <button @click="sendDirectMessage(s.id)" class="btn-msg">Send Message</button>
+              <button @click="sendDirectMessage(s.id, s.name)" class="btn-msg">Send Message</button>
             </li>
           </ul>
         </div>
@@ -625,6 +744,23 @@ async function saveEventSettings() {
 .btn-primary:disabled {
   opacity: 0.6;
   cursor: not-allowed;
+}
+
+.congestion-banner {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  padding: 8px 16px;
+  background: rgba(234, 179, 8, 0.15);
+  color: #eab308;
+  border-bottom: 1px solid rgba(234, 179, 8, 0.3);
+  font-size: 13px;
+  font-weight: 500;
+}
+
+.banner-icon {
+  font-size: 16px;
 }
 </style>
 
