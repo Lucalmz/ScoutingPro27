@@ -82,7 +82,6 @@ function handleMessageClick(msg: SystemMessage) {
   bottom: 2rem;
   right: 2rem;
   z-index: 1000;
-  view-transition-name: inbox-widget;
 }
 
 .inbox-morph-container {
@@ -93,28 +92,42 @@ function handleMessageClick(msg: SystemMessage) {
   height: 56px;
   border-radius: 50%;
   background: var(--primary, #39ff14);
-  box-shadow: var(--glow-primary);
-  border: 1px solid transparent;
+  box-shadow: 0 4px 10px rgba(57, 255, 20, 0.35);
   overflow: hidden;
-  transition: width 0.4s cubic-bezier(0.25, 1, 0.5, 1), 
-              height 0.4s cubic-bezier(0.25, 1, 0.5, 1), 
-              border-radius 0.4s cubic-bezier(0.25, 1, 0.5, 1),
-              background 0.4s cubic-bezier(0.25, 1, 0.5, 1),
-              border-color 0.4s cubic-bezier(0.25, 1, 0.5, 1),
-              box-shadow 0.4s cubic-bezier(0.25, 1, 0.5, 1);
+  transition: width 0.6s cubic-bezier(0.25, 1, 0.5, 1), 
+              height 0.6s cubic-bezier(0.25, 1, 0.5, 1), 
+              border-radius 0.6s cubic-bezier(0.25, 1, 0.5, 1),
+              box-shadow 0.6s cubic-bezier(0.25, 1, 0.5, 1);
   cursor: pointer;
   display: flex;
   flex-direction: column;
+  view-transition-name: inbox-widget;
 }
 
 .inbox-widget.is-open .inbox-morph-container {
   width: 320px;
   height: 400px;
-  border-radius: 14px;
-  background: var(--card, #0a0a0a);
-  border-color: var(--border, #262626);
-  box-shadow: 0 10px 30px rgba(0, 0, 0, 0.8), 0 0 15px rgba(57, 255, 20, 0.1);
+  border-radius: 16px;
+  background: white;
+  box-shadow: 0 10px 25px rgba(0, 0, 0, 0.2);
   cursor: default;
+  animation: bg-morph-open 0.6s cubic-bezier(0.25, 1, 0.5, 1) forwards;
+}
+
+.inbox-widget:not(.is-open) .inbox-morph-container {
+  animation: bg-morph-close 0.6s cubic-bezier(0.25, 1, 0.5, 1) forwards;
+}
+
+@keyframes bg-morph-open {
+  0% { background: var(--primary, #39ff14); }
+  50% { background: #8eff73; }
+  100% { background: white; }
+}
+
+@keyframes bg-morph-close {
+  0% { background: white; }
+  50% { background: #8eff73; }
+  100% { background: var(--primary, #39ff14); }
 }
 
 .inbox-btn-content {
@@ -123,7 +136,7 @@ function handleMessageClick(msg: SystemMessage) {
   display: flex;
   align-items: center;
   justify-content: center;
-  color: var(--primary-foreground, #000000);
+  color: #000000;
   position: absolute;
   top: 0;
   left: 0;
@@ -133,7 +146,7 @@ function handleMessageClick(msg: SystemMessage) {
   position: absolute;
   top: 0;
   right: 0;
-  background: var(--destructive, #ef4444);
+  background: #ef4444;
   color: #ffffff;
   font-size: 11px;
   font-weight: 700;
@@ -155,14 +168,14 @@ function handleMessageClick(msg: SystemMessage) {
 /* Crossfade transitions for content */
 .fade-enter-active, .fade-leave-active,
 .fade-delay-enter-active, .fade-delay-leave-active {
-  transition: opacity 0.25s ease;
+  transition: opacity 0.3s ease;
 }
 
 .fade-delay-enter-active {
-  transition-delay: 0.2s;
+  transition-delay: 0.3s;
 }
 .fade-delay-leave-active {
-  transition-duration: 0.15s;
+  transition-duration: 0.2s;
 }
 
 .fade-enter-from, .fade-leave-to,
@@ -171,26 +184,25 @@ function handleMessageClick(msg: SystemMessage) {
 }
 
 .inbox-header {
-  padding: 12px 16px;
-  background: var(--popover, #111111);
-  border-bottom: 1px solid var(--border, #262626);
+  padding: 1rem;
+  background: #f8f9fa;
+  border-bottom: 1px solid #eee;
 }
 
 .inbox-header h3 {
   margin: 0;
-  font-size: 1rem;
+  font-size: 1.1rem;
   font-weight: 700;
-  font-family: 'Orbitron', sans-serif;
-  color: var(--foreground, #f1f5f9);
+  color: #333333;
 }
 
 .close-btn {
-  color: var(--muted-foreground, #a3a3a3);
+  color: #666666;
   transition: color 0.15s;
 }
 
 .close-btn:hover {
-  color: var(--primary, #39ff14);
+  color: #000000;
 }
 
 .inbox-list {
@@ -202,14 +214,14 @@ function handleMessageClick(msg: SystemMessage) {
 .empty {
   padding: 2rem;
   text-align: center;
-  color: var(--muted-foreground, #a3a3a3);
+  color: #888888;
   font-size: 0.9rem;
 }
 
 .inbox-item {
-  padding: 12px 16px;
-  border-bottom: 1px solid var(--border, #262626);
-  background: var(--popover, #111111);
+  padding: 1rem;
+  border-bottom: 1px solid #eee;
+  background: #ffffff;
   transition: background 0.15s;
 }
 
@@ -218,11 +230,11 @@ function handleMessageClick(msg: SystemMessage) {
 }
 
 .inbox-item.clickable:hover {
-  background: rgba(57, 255, 20, 0.08);
+  background: #f9f9f9;
 }
 
 .inbox-item.unread {
-  background: rgba(57, 255, 20, 0.05);
+  background: #f0f7ff;
   border-left: 3px solid var(--primary, #39ff14);
 }
 
@@ -230,34 +242,34 @@ function handleMessageClick(msg: SystemMessage) {
   display: flex;
   justify-content: space-between;
   align-items: center;
-  margin-bottom: 4px;
+  margin-bottom: 0.5rem;
 }
 
 .inbox-item-header h4 {
   margin: 0;
-  font-size: 0.9rem;
+  font-size: 1rem;
   font-weight: 600;
-  color: var(--foreground, #f1f5f9);
+  color: #333333;
 }
 
 .time {
-  font-size: 0.75rem;
-  color: var(--muted-foreground, #a3a3a3);
+  font-size: 0.8rem;
+  color: #888888;
 }
 
 .inbox-item p {
-  margin: 0 0 6px 0;
-  font-size: 0.82rem;
-  color: var(--muted-foreground, #a3a3a3);
+  margin: 0 0 0.5rem 0;
+  font-size: 0.9rem;
+  color: #555555;
   line-height: 1.4;
 }
 
 .mark-read {
   background: none;
   border: none;
-  color: var(--primary, #39ff14);
+  color: #007bff;
   cursor: pointer;
-  font-size: 0.78rem;
+  font-size: 0.8rem;
   font-weight: 600;
   padding: 0;
 }

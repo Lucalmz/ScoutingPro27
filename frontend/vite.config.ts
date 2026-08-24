@@ -17,7 +17,7 @@ export default defineConfig({
   },
   build: {
     // 将打包产物直接输出到 Java 后端的静态资源目录
-    outDir: '../backend/src/main/resources/public',
+    outDir: '../Backend/src/main/resources/public',
     emptyOutDir: true,
     chunkSizeWarningLimit: 1000,
     rollupOptions: {

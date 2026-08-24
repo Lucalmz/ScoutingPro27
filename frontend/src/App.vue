@@ -65,14 +65,18 @@ watch(() => inboxStore.messages.length, (newLen, oldLen) => {
   width: 100%;
 }
 
-/* InboxWidget: captured by View Transitions but stays completely static (no animation) */
+/* InboxWidget: captured by View Transitions but stays completely static and single-layered (zero glow-doubling) */
 ::view-transition-group(inbox-widget) {
   animation: none !important;
   z-index: 99999;
 }
-::view-transition-old(inbox-widget),
+::view-transition-old(inbox-widget) {
+  display: none !important;
+}
 ::view-transition-new(inbox-widget) {
   animation: none !important;
+  opacity: 1 !important;
+  mix-blend-mode: normal !important;
 }
 
 /* View Transitions API Animations */
