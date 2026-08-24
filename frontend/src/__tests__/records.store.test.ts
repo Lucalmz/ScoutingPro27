@@ -173,7 +173,48 @@ describe('Records Store', () => {
     ]
 
     store.purgeExpiredTombstones()
-
     expect(store.records.map(r => r.id)).toEqual(['active_1', 'recent_del'])
+  })
+
+  it('handles team tag CRUD and state updates', async () => {
+    const store = useRecordStore()
+    const dummyTag: TeamTagItem = {
+      id: 'tag-1',
+      eventId: 'e1',
+      teamNumber: 27570,
+      tag: 'preset.fast_cycle',
+      color: 'blue',
+      isPreset: true,
+      createdBy: 'user1'
+    }
+
+    // Apply tag update ADD
+    store.applyTagUpdate(dummyTag, 'ADD')
+    expect(store.teamTags).toHaveLength(1)
+    expect(store.getTagsForTeam(27570)).toEqual([dummyTag])
+
+    // Update existing tag (same eventId, teamNumber, tag) with different color
+    const updatedTag: TeamTagItem = { ...dummyTag, color: 'purple' }
+    store.applyTagUpdate(updatedTag, 'ADD')
+    expect(store.teamTags).toHaveLength(1)
+    expect(store.getTagsForTeam(27570)[0].color).toBe('purple')
+
+    // Apply tag update REMOVE
+    store.applyTagUpdate(dummyTag, 'REMOVE')
+    expect(store.teamTags).toHaveLength(0)
+    expect(store.getTagsForTeam(27570)).toEqual([])
+  })
+
+  it('handles applyTagsFullSync for full event sync', () => {
+    const store = useRecordStore()
+    const tags: TeamTagItem[] = [
+      { id: '1', eventId: 'e1', teamNumber: 27570, tag: 'fast', color: 'blue', isPreset: false },
+      { id: '2', eventId: 'e1', teamNumber: 19600, tag: 'defense', color: 'red', isPreset: false }
+    ]
+
+    store.applyTagsFullSync(tags)
+    expect(store.teamTags).toHaveLength(2)
+    expect(store.getTagsForTeam(27570)).toHaveLength(1)
+    expect(store.getTagsForTeam(19600)).toHaveLength(1)
   })
 })

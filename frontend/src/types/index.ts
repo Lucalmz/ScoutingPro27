@@ -146,6 +146,52 @@ export type WebRtcMessage =
   | WebRtcSyncData
   | WebRtcAckSync
   | WebRtcDirectMessage
+  | WebRtcTeamTagUpdate
+  | WebRtcRequestTagsSync
+  | WebRtcTagsFullSync
+
+export interface TeamTagItem {
+  id: string
+  eventId: string
+  teamNumber: number
+  tag: string
+  color: 'red' | 'orange' | 'green' | 'blue' | 'purple' | 'gray' | 'yellow'
+  isPreset: boolean
+  createdBy?: string
+  createdAt?: string
+  updatedAt?: string
+}
+
+export interface WebRtcTeamTagUpdate {
+  type: 'TEAM_TAGS_UPDATE'
+  eventId: string
+  teamNumber: number
+  tag: TeamTagItem
+  action: 'ADD' | 'REMOVE'
+  authCode?: string
+  senderUserId?: string
+  token?: string
+  hostSessionId?: string
+}
+
+export interface WebRtcRequestTagsSync {
+  type: 'REQUEST_TAGS_SYNC'
+  eventId: string
+  authCode?: string
+  senderUserId?: string
+  token?: string
+  hostSessionId?: string
+}
+
+export interface WebRtcTagsFullSync {
+  type: 'TAGS_FULL_SYNC'
+  eventId: string
+  tags: TeamTagItem[]
+  authCode?: string
+  senderUserId?: string
+  token?: string
+  hostSessionId?: string
+}
 
 export interface WebRtcDirectMessage {
   type: 'DIRECT_MESSAGE'

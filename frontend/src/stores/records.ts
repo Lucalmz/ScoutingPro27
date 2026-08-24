@@ -1,10 +1,20 @@
 import { defineStore } from 'pinia'
 import { ref, computed, watch } from 'vue'
-import { listRecords, saveRecord, syncRecords, markRecordsSynced, fetchBannedTeams as apiFetchBannedTeams, banTeam as apiBanTeam } from '@/services/api'
-import { fetchEventMatches } from '@/services/graphql'
+import {
+  listRecords,
+  saveRecord,
+  syncRecords,
+  markRecordsSynced,
+  fetchBannedTeams as apiFetchBannedTeams,
+  banTeam as apiBanTeam,
+  fetchEventTags as apiFetchEventTags,
+  addTeamTag as apiAddTeamTag,
+  deleteTeamTag as apiDeleteTeamTag
+} from '@/services/api'
+import { fetchEventMatches } from '@/services/ftcApi'
 import { useInboxStore } from '@/stores/inbox'
 import { useToastStore } from '@/stores/toast'
-import type { ScoutingRecord, RankingRow, OfficialMatch } from '@/types'
+import type { ScoutingRecord, RankingRow, OfficialMatch, TeamTagItem } from '@/types'
 
 function loadFromStorage<T>(key: string, defaultVal: T): T {
   try {
@@ -20,6 +30,7 @@ export const useRecordStore = defineStore('records', () => {
   const records = ref<ScoutingRecord[]>(loadFromStorage('scoutingpro_records', []))
   const officialMatches = ref<OfficialMatch[]>(loadFromStorage('scoutingpro_officialMatches', []))
   const bannedTeams = ref<number[]>(loadFromStorage('scoutingpro_bannedTeams', []))
+  const teamTags = ref<TeamTagItem[]>(loadFromStorage('scoutingpro_tags', []))
   const loading = ref(false)
   const error = ref<string | null>(null)
 
@@ -37,11 +48,12 @@ export const useRecordStore = defineStore('records', () => {
     saveToStorage('scoutingpro_records', records.value)
     saveToStorage('scoutingpro_officialMatches', officialMatches.value)
     saveToStorage('scoutingpro_bannedTeams', bannedTeams.value)
+    saveToStorage('scoutingpro_tags', teamTags.value)
   }
 
   // Debounced watch
   let saveTimeout: any = null
-  watch([records, officialMatches, bannedTeams], () => {
+  watch([records, officialMatches, bannedTeams, teamTags], () => {
     if (saveTimeout) clearTimeout(saveTimeout)
     saveTimeout = setTimeout(() => {
       flushStorage()
@@ -64,6 +76,8 @@ export const useRecordStore = defineStore('records', () => {
       try { officialMatches.value = JSON.parse(e.newValue) } catch {}
     } else if (e.key === 'scoutingpro_bannedTeams' && e.newValue) {
       try { bannedTeams.value = JSON.parse(e.newValue) } catch {}
+    } else if (e.key === 'scoutingpro_tags' && e.newValue) {
+      try { teamTags.value = JSON.parse(e.newValue) } catch {}
     }
   })
 
@@ -474,10 +488,89 @@ export const useRecordStore = defineStore('records', () => {
     await apiBanTeam(eventId, teamNumber)
   }
 
+  // --- Custom Team Tags ---
+  async function fetchTags(eventId: string) {
+    try {
+      const tags = await apiFetchEventTags(eventId)
+      if (Array.isArray(tags)) {
+        teamTags.value = tags
+      }
+    } catch (e: any) {
+      console.warn('Failed to fetch event tags from backend (using local cached tags):', e)
+    }
+  }
+
+  async function addTag(
+    eventId: string,
+    teamNumber: number,
+    tag: string,
+    color?: string,
+    isPreset?: boolean
+  ): Promise<{ success: boolean; tag?: TeamTagItem; error?: string }> {
+    try {
+      const saved = await apiAddTeamTag(eventId, teamNumber, tag, color, isPreset)
+      applyTagUpdate(saved, 'ADD')
+      import('@/stores/connection').then(({ useConnectionStore }) => {
+        useConnectionStore().broadcastTagUpdate(saved, 'ADD')
+      }).catch(() => {})
+      return { success: true, tag: saved }
+    } catch (e: any) {
+      console.error('Failed to add tag:', e)
+      return { success: false, error: e.message || 'Failed to add tag' }
+    }
+  }
+
+  async function removeTag(
+    eventId: string,
+    teamNumber: number,
+    tag: string
+  ): Promise<{ success: boolean; error?: string }> {
+    try {
+      await apiDeleteTeamTag(eventId, teamNumber, tag)
+      const tagItem: TeamTagItem = { id: '', eventId, teamNumber, tag, color: 'blue', isPreset: false }
+      applyTagUpdate(tagItem, 'REMOVE')
+      import('@/stores/connection').then(({ useConnectionStore }) => {
+        useConnectionStore().broadcastTagUpdate(tagItem, 'REMOVE')
+      }).catch(() => {})
+      return { success: true }
+    } catch (e: any) {
+      console.error('Failed to remove tag:', e)
+      return { success: false, error: e.message || 'Failed to remove tag' }
+    }
+  }
+
+  function applyTagUpdate(tag: TeamTagItem, action: 'ADD' | 'REMOVE') {
+    if (action === 'ADD') {
+      const idx = teamTags.value.findIndex(
+        t => t.eventId === tag.eventId && t.teamNumber === tag.teamNumber && t.tag === tag.tag
+      )
+      if (idx >= 0) {
+        teamTags.value[idx] = tag
+      } else {
+        teamTags.value.push(tag)
+      }
+    } else if (action === 'REMOVE') {
+      teamTags.value = teamTags.value.filter(
+        t => !(t.eventId === tag.eventId && t.teamNumber === tag.teamNumber && t.tag === tag.tag)
+      )
+    }
+  }
+
+  function applyTagsFullSync(tags: TeamTagItem[]) {
+    if (Array.isArray(tags)) {
+      teamTags.value = tags
+    }
+  }
+
+  const getTagsForTeam = (teamNumber: number): TeamTagItem[] => {
+    return teamTags.value.filter(t => t.teamNumber === teamNumber)
+  }
+
   return {
     records,
     officialMatches,
     bannedTeams,
+    teamTags,
     scoutReliability,
     loading,
     error,
@@ -491,6 +584,12 @@ export const useRecordStore = defineStore('records', () => {
     markSynced,
     updateRecord,
     banTeam,
+    fetchTags,
+    addTag,
+    removeTag,
+    applyTagUpdate,
+    applyTagsFullSync,
+    getTagsForTeam,
     purgeExpiredTombstones,
   }
 })

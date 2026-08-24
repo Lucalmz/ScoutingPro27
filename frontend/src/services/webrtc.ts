@@ -1,5 +1,5 @@
 import mqtt from 'mqtt'
-import type { WebRtcMessage, ScoutingRecord, ConnectionStatus, WebRtcDirectMessage } from '@/types'
+import type { WebRtcMessage, ScoutingRecord, ConnectionStatus, WebRtcDirectMessage, TeamTagItem } from '@/types'
 import { useInboxStore } from '@/stores/inbox'
 import { syncRecords, verifyToken } from '@/services/api'
 import { DataChannelSender } from '@/services/dataChannelSender'
@@ -181,7 +181,15 @@ class SignalingChannel {
       if (!msg) return
 
       // 硬隔离安全拦截：MQTT 信道严禁出现任何业务数据指令，防范旁路注入
-      const BUSINESS_TYPES = ['SYNC_DATA', 'DIRECT_MESSAGE', 'REQUEST_SYNC', 'ACK_SYNC']
+      const BUSINESS_TYPES = [
+        'SYNC_DATA',
+        'DIRECT_MESSAGE',
+        'REQUEST_SYNC',
+        'ACK_SYNC',
+        'TEAM_TAGS_UPDATE',
+        'REQUEST_TAGS_SYNC',
+        'TAGS_FULL_SYNC'
+      ]
       if (BUSINESS_TYPES.includes(msg.type)) {
         console.warn(`[Security] Dropped illegal business payload '${msg.type}' over public MQTT signaling channel.`)
         return
@@ -266,6 +274,9 @@ export type WebRtcCallbacks = {
   /** sinceVersion: 0 或缺失表示全量请求；>0 表示增量请求 */
   onRequestSync: (sinceVersion: number, senderId?: string) => void
   onClientConnected?: (userId: string, userName: string) => void
+  onTagUpdateReceived?: (tag: TeamTagItem, action: 'ADD' | 'REMOVE', eventId: string, teamNumber: number) => void
+  onRequestTagsSync?: (senderId?: string) => void
+  onTagsFullSyncReceived?: (tags: TeamTagItem[], eventId: string) => void
 }
 
 export type WebRtcService = ReturnType<typeof createWebRtcService>
@@ -671,6 +682,30 @@ export function createWebRtcService(callbacks: WebRtcCallbacks) {
           targetName: msg.targetName,
           deliveryStatus: 'DELIVERED'
         })
+        break
+      case 'TEAM_TAGS_UPDATE':
+        if (msg.eventId && msg.tag) {
+          callbacks.onTagUpdateReceived?.(msg.tag, msg.action, msg.eventId, msg.teamNumber)
+          // Host 广播给其他 Client
+          if (isHostMode && senderId) {
+            clients.forEach((c, cid) => {
+              if (cid !== senderId && c.dc && c.dc.readyState === 'open') {
+                if (!c.sender) c.sender = new DataChannelSender(c.dc)
+                c.sender.enqueueSend(JSON.stringify(msg))
+              }
+            })
+          }
+        }
+        break
+      case 'REQUEST_TAGS_SYNC':
+        if (isHostMode) {
+          callbacks.onRequestTagsSync?.(senderId)
+        }
+        break
+      case 'TAGS_FULL_SYNC':
+        if (!isHostMode && msg.eventId && Array.isArray(msg.tags)) {
+          callbacks.onTagsFullSyncReceived?.(msg.tags, msg.eventId)
+        }
         break
     }
   }
@@ -1437,6 +1472,47 @@ export function createWebRtcService(callbacks: WebRtcCallbacks) {
     return records
   }
 
+  // --- Tag 同步 ---
+  function broadcastTagUpdate(tag: TeamTagItem, action: 'ADD' | 'REMOVE', targetId?: string) {
+    const authToken = isHostMode ? undefined : getLocalAuthToken()
+    return sendMessage({
+      type: 'TEAM_TAGS_UPDATE',
+      eventId: tag.eventId,
+      teamNumber: tag.teamNumber,
+      tag,
+      action,
+      authCode: currentInviteCode,
+      senderUserId: isHostMode ? undefined : localUserId,
+      token: authToken,
+      hostSessionId: isHostMode ? hostSessionId : undefined
+    }, targetId)
+  }
+
+  function sendTagsFullSync(tags: TeamTagItem[], eventId: string, targetId?: string) {
+    const authToken = isHostMode ? undefined : getLocalAuthToken()
+    return sendMessage({
+      type: 'TAGS_FULL_SYNC',
+      eventId,
+      tags,
+      authCode: currentInviteCode,
+      senderUserId: isHostMode ? undefined : localUserId,
+      token: authToken,
+      hostSessionId: isHostMode ? hostSessionId : undefined
+    }, targetId)
+  }
+
+  function requestTagsSync(eventId: string) {
+    const authToken = isHostMode ? undefined : getLocalAuthToken()
+    return sendMessage({
+      type: 'REQUEST_TAGS_SYNC',
+      eventId,
+      authCode: currentInviteCode,
+      senderUserId: isHostMode ? undefined : localUserId,
+      token: authToken,
+      hostSessionId: isHostMode ? hostSessionId : undefined
+    })
+  }
+
   return {
     host,
     join,
@@ -1444,6 +1520,9 @@ export function createWebRtcService(callbacks: WebRtcCallbacks) {
     pushRecords,
     ackRecords,
     sendDirectMessage,
+    broadcastTagUpdate,
+    sendTagsFullSync,
+    requestTagsSync,
     reconnectNow,
     disconnect,
     initHostSeq,

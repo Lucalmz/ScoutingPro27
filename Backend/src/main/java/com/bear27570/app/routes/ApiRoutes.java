@@ -3,15 +3,19 @@ package com.bear27570.app.routes;
 import com.bear27570.app.dao.AiSettingsDao;
 import com.bear27570.app.dao.EventDao;
 import com.bear27570.app.dao.RecordDao;
+import com.bear27570.app.dao.TeamTagDao;
 import com.bear27570.app.dao.UserDao;
 import com.bear27570.app.model.AiSettings;
 import com.bear27570.app.model.ScoutingEvent;
 import com.bear27570.app.model.ScoutingRecord;
+import com.bear27570.app.model.TeamTag;
 import com.bear27570.app.model.User;
 import com.google.gson.Gson;
 import com.google.gson.reflect.TypeToken;
 import io.javalin.config.RoutesConfig;
 import org.jdbi.v3.core.Jdbi;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
 import java.lang.reflect.Type;
 import java.util.List;
@@ -28,16 +32,34 @@ import java.util.concurrent.TimeUnit;
  */
 public class ApiRoutes {
 
+    private static final Logger logger = LoggerFactory.getLogger(ApiRoutes.class);
     private final Jdbi jdbi;
+    private final com.bear27570.app.util.FtcApiClient ftcApiClient;
     private final Gson gson = new com.google.gson.GsonBuilder().setDateFormat("yyyy-MM-dd'T'HH:mm:ss.SSSZ").create();
     private final ScheduledExecutorService gcScheduler = Executors.newSingleThreadScheduledExecutor(r -> {
         Thread t = new Thread(r, "tombstone-gc-thread");
         t.setDaemon(true);
         return t;
     });
+    private final java.util.concurrent.ScheduledThreadPoolExecutor heartbeatScheduler = createHeartbeatScheduler();
+
+    private static java.util.concurrent.ScheduledThreadPoolExecutor createHeartbeatScheduler() {
+        java.util.concurrent.ScheduledThreadPoolExecutor executor = new java.util.concurrent.ScheduledThreadPoolExecutor(2, r -> {
+            Thread t = new Thread(r, "sse-heartbeat-thread");
+            t.setDaemon(true);
+            return t;
+        });
+        executor.setRemoveOnCancelPolicy(true);
+        return executor;
+    }
 
     public ApiRoutes(Jdbi jdbi) {
+        this(jdbi, new com.bear27570.app.util.FtcApiClient());
+    }
+
+    public ApiRoutes(Jdbi jdbi, com.bear27570.app.util.FtcApiClient ftcApiClient) {
         this.jdbi = jdbi;
+        this.ftcApiClient = ftcApiClient;
         // 自动注册并启动 14 天过期墓碑后台周期性清理任务：服务启动后立即执行一次，随后每 24 小时自动巡检清理
         gcScheduler.scheduleAtFixedRate(() -> {
             try {
@@ -55,9 +77,14 @@ public class ApiRoutes {
 
     public void shutdown() {
         gcScheduler.shutdownNow();
+        heartbeatScheduler.shutdownNow();
     }
 
     public void register(RoutesConfig routes) {
+
+        routes.exception(NullPointerException.class, (e, ctx) -> {
+            // Ignore Jetty 12 request recycling exception on client abort/disconnect
+        });
 
         // ==================== User ====================
 
@@ -320,6 +347,172 @@ public class ApiRoutes {
             ctx.status(200).result("OK");
         });
 
+        // ==================== Custom Team Tags ====================
+
+        routes.get("/api/events/{id}/tags", ctx -> {
+            String eventId = ctx.pathParam("id");
+            List<TeamTag> tags = jdbi.withExtension(TeamTagDao.class, dao -> dao.findByEvent(eventId));
+            ctx.result(gson.toJson(tags)).contentType("application/json");
+        });
+
+        routes.post("/api/events/{id}/teams/{teamNumber}/tags", ctx -> {
+            String eventId = ctx.pathParam("id");
+            int teamNumber;
+            try {
+                teamNumber = Integer.parseInt(ctx.pathParam("teamNumber"));
+            } catch (NumberFormatException e) {
+                ctx.status(400).result("Invalid teamNumber format");
+                return;
+            }
+
+            @SuppressWarnings("unchecked")
+            Map<String, Object> body = gson.fromJson(ctx.body(), Map.class);
+            if (body == null || body.get("tag") == null) {
+                ctx.status(400).result("tag required");
+                return;
+            }
+
+            String rawTag = String.valueOf(body.get("tag")).trim();
+            if (rawTag.isEmpty() || rawTag.length() > 30) {
+                ctx.status(400).result("Tag must be between 1 and 30 characters");
+                return;
+            }
+
+            boolean isPreset = Boolean.TRUE.equals(body.get("isPreset")) || "true".equalsIgnoreCase(String.valueOf(body.get("isPreset")));
+
+            // Normalization (V26)
+            String normalizedTag = rawTag;
+            if (normalizedTag.matches("^[A-Za-z0-9 _#-]+$")) {
+                normalizedTag = normalizedTag.toLowerCase();
+            }
+
+            // Safety check against preset key collision (V27) & characters whitelist (V15)
+            if (!isPreset) {
+                if (normalizedTag.contains(".")) {
+                    ctx.status(400).result("Custom tags cannot contain '.'");
+                    return;
+                }
+                if (!normalizedTag.matches("^[\\p{L}\\p{N} _#-]+$")) {
+                    ctx.status(400).result("Tag contains invalid characters");
+                    return;
+                }
+            }
+
+            String rawColor = body.get("color") != null ? String.valueOf(body.get("color")).toLowerCase().trim() : "blue";
+            java.util.Set<String> allowedColors = java.util.Set.of("red", "orange", "green", "blue", "purple", "gray", "yellow");
+            String color = allowedColors.contains(rawColor) ? rawColor : "blue";
+
+            String userId = ctx.attribute("userId");
+
+            final String finalTag = normalizedTag;
+            final String finalColor = color;
+            final boolean finalIsPreset = isPreset;
+
+            TeamTag savedTag = jdbi.inTransaction(handle -> {
+                EventDao eventDao = handle.attach(EventDao.class);
+                ScoutingEvent event = eventDao.findById(eventId);
+                if (event == null) {
+                    throw new io.javalin.http.NotFoundResponse("Event not found");
+                }
+
+                TeamTagDao tagDao = handle.attach(TeamTagDao.class);
+
+                // Limit check: <= 15 tags per team (V14)
+                int currentCount = tagDao.countByEventAndTeam(eventId, teamNumber);
+                TeamTag existing = tagDao.findSpecific(eventId, teamNumber, finalTag);
+                if (existing == null && currentCount >= 15) {
+                    throw new io.javalin.http.BadRequestResponse("Maximum 15 tags per team allowed");
+                }
+
+                String tagId = existing != null ? existing.getId() : UUID.randomUUID().toString();
+                TeamTag t = new TeamTag(tagId, eventId, teamNumber, finalTag, finalColor, finalIsPreset, userId);
+                tagDao.upsert(t);
+                return tagDao.findSpecific(eventId, teamNumber, finalTag);
+            });
+
+            ctx.status(200).result(gson.toJson(savedTag)).contentType("application/json");
+        });
+
+        routes.delete("/api/events/{id}/teams/{teamNumber}/tags/{tag}", ctx -> {
+            String eventId = ctx.pathParam("id");
+            int teamNumber;
+            try {
+                teamNumber = Integer.parseInt(ctx.pathParam("teamNumber"));
+            } catch (NumberFormatException e) {
+                ctx.status(400).result("Invalid teamNumber format");
+                return;
+            }
+            String tagValue = java.net.URLDecoder.decode(ctx.pathParam("tag"), java.nio.charset.StandardCharsets.UTF_8).trim();
+            String userId = ctx.attribute("userId");
+
+            jdbi.useTransaction(handle -> {
+                EventDao eventDao = handle.attach(EventDao.class);
+                ScoutingEvent event = eventDao.findById(eventId);
+                if (event == null) {
+                    throw new io.javalin.http.NotFoundResponse("Event not found");
+                }
+
+                TeamTagDao tagDao = handle.attach(TeamTagDao.class);
+                TeamTag existing = tagDao.findSpecific(eventId, teamNumber, tagValue);
+
+                if (existing != null) {
+                    // Permission check: only tag creator or event host can delete (V30)
+                    boolean isCreator = userId != null && userId.equals(existing.getCreatedBy());
+                    boolean isHost = userId != null && userId.equals(event.getHostId());
+                    if (!isCreator && !isHost) {
+                        throw new io.javalin.http.ForbiddenResponse("Only the tag creator or event host can delete this tag");
+                    }
+                    logger.info("[AUDIT] Tag deleted: eventId={}, teamNumber={}, tag={}, deletedBy={}", eventId, teamNumber, tagValue, userId);
+                    tagDao.delete(eventId, teamNumber, tagValue);
+                }
+                // If tag not found, idempotent success (V23)
+            });
+
+            ctx.status(200).result("OK");
+        });
+
+        // ==================== FTC Official API Proxy ====================
+
+        routes.get("/api/ftc/{season}/matches/{eventCode}", ctx -> {
+            int season;
+            try {
+                season = Integer.parseInt(ctx.pathParam("season"));
+            } catch (NumberFormatException e) {
+                ctx.status(400).result("Invalid season format");
+                return;
+            }
+            String eventCode = ctx.pathParam("eventCode");
+            String tournamentLevel = ctx.queryParam("tournamentLevel");
+
+            try {
+                var matches = ftcApiClient.fetchNormalizedMatches(season, eventCode, tournamentLevel);
+                ctx.result(gson.toJson(matches)).contentType("application/json");
+            } catch (Exception e) {
+                System.err.println("[FTC API Proxy] Error fetching matches: " + e.getMessage());
+                ctx.status(500).result(gson.toJson(Map.of("error", e.getMessage()))).contentType("application/json");
+            }
+        });
+
+        routes.get("/api/ftc/{season}/scores/{eventCode}", ctx -> {
+            int season;
+            try {
+                season = Integer.parseInt(ctx.pathParam("season"));
+            } catch (NumberFormatException e) {
+                ctx.status(400).result("Invalid season format");
+                return;
+            }
+            String eventCode = ctx.pathParam("eventCode");
+            String tournamentLevel = ctx.queryParam("tournamentLevel");
+
+            try {
+                var scores = ftcApiClient.fetchScoreBreakdown(season, eventCode, tournamentLevel);
+                ctx.result(gson.toJson(scores)).contentType("application/json");
+            } catch (Exception e) {
+                System.err.println("[FTC API Proxy] Error fetching scores: " + e.getMessage());
+                ctx.status(500).result(gson.toJson(Map.of("error", e.getMessage()))).contentType("application/json");
+            }
+        });
+
         // ==================== Records ====================
 
         routes.get("/api/records", ctx -> {
@@ -580,13 +773,7 @@ public class ApiRoutes {
 
             String testUrl;
             if ("OPENAI".equalsIgnoreCase(provider)) {
-                if (customBaseUrl != null && !customBaseUrl.isBlank()) {
-                    String bUrl = customBaseUrl.trim();
-                    if (bUrl.endsWith("/")) bUrl = bUrl.substring(0, bUrl.length() - 1);
-                    testUrl = bUrl.endsWith("/models") ? bUrl : (bUrl.endsWith("/v1") ? bUrl + "/models" : bUrl + "/v1/models");
-                } else {
-                    testUrl = "https://api.openai.com/v1/models";
-                }
+                testUrl = com.bear27570.app.util.AiClient.resolveOpenAiModelsEndpoint(customBaseUrl);
             } else if ("GEMINI".equalsIgnoreCase(provider)) {
                 testUrl = "https://generativelanguage.googleapis.com/v1beta/models";
             } else {
@@ -708,6 +895,141 @@ public class ApiRoutes {
             } catch (Exception e) {
                 ctx.status(500).result(gson.toJson(java.util.Map.of("error", e.getMessage()))).contentType("application/json");
             }
+        });
+
+        routes.post("/api/ai/chat/stream", ctx -> {
+            String sessionUserId = ctx.attribute("userId");
+            if (sessionUserId == null) {
+                throw new io.javalin.http.UnauthorizedResponse("Not logged in");
+            }
+
+            com.google.gson.JsonObject body;
+            try {
+                com.google.gson.JsonElement parsed = com.google.gson.JsonParser.parseString(ctx.body());
+                if (!parsed.isJsonObject()) {
+                    ctx.status(400).result(gson.toJson(Map.of("error", "Request body must be a JSON object"))).contentType("application/json");
+                    return;
+                }
+                body = parsed.getAsJsonObject();
+            } catch (Exception e) {
+                ctx.status(400).result(gson.toJson(Map.of("error", "Invalid JSON format: " + e.getMessage()))).contentType("application/json");
+                return;
+            }
+
+            String provider = body.has("provider") && !body.get("provider").isJsonNull() ? body.get("provider").getAsString() : null;
+            if (provider == null || provider.isEmpty()) {
+                ctx.status(400).result(gson.toJson(Map.of("error", "Missing provider"))).contentType("application/json");
+                return;
+            }
+
+            com.bear27570.app.model.AiSettings settings = jdbi.withExtension(
+                com.bear27570.app.dao.AiSettingsDao.class,
+                dao -> dao.findByUserIdAndProvider(sessionUserId, provider)
+            );
+
+            if (settings == null) {
+                ctx.status(400).result(gson.toJson(Map.of("error", "AI Settings not configured for provider: " + provider))).contentType("application/json");
+                return;
+            }
+
+            String sysPrompt = body.has("systemPrompt") && !body.get("systemPrompt").isJsonNull() ? body.get("systemPrompt").getAsString() : settings.getSystemPrompt();
+
+            java.util.List<java.util.Map<String, String>> msgList = new java.util.ArrayList<>();
+            if (body.has("messages") && body.get("messages").isJsonArray()) {
+                com.google.gson.JsonArray arr = body.getAsJsonArray("messages");
+                for (com.google.gson.JsonElement e : arr) {
+                    if (e.isJsonObject()) {
+                        com.google.gson.JsonObject msgObj = e.getAsJsonObject();
+                        java.util.Map<String, String> m = new java.util.HashMap<>();
+                        m.put("role", msgObj.has("role") && !msgObj.get("role").isJsonNull() ? msgObj.get("role").getAsString() : "user");
+                        m.put("content", msgObj.has("content") && !msgObj.get("content").isJsonNull() ? msgObj.get("content").getAsString() : "");
+                        msgList.add(m);
+                    }
+                }
+            }
+
+            // Configure SSE response headers
+            ctx.status(200);
+            ctx.result("");
+            ctx.contentType("text/event-stream; charset=UTF-8");
+            ctx.header("Cache-Control", "no-cache");
+            ctx.header("Connection", "keep-alive");
+            ctx.header("X-Accel-Buffering", "no");
+
+            ctx.async(() -> {
+                final Object streamLock = new Object();
+                final java.util.concurrent.atomic.AtomicBoolean isCancelled = new java.util.concurrent.atomic.AtomicBoolean(false);
+                final java.util.concurrent.atomic.AtomicBoolean isFinished = new java.util.concurrent.atomic.AtomicBoolean(false);
+                java.io.OutputStream out;
+                try {
+                    out = ctx.res().getOutputStream();
+                } catch (Exception e) {
+                    return;
+                }
+
+                // Periodic SSE heartbeat keep-alive (every 15s) to prevent idle timeouts
+                java.util.concurrent.ScheduledFuture<?> heartbeatTask = heartbeatScheduler.scheduleAtFixedRate(() -> {
+                    if (isCancelled.get() || isFinished.get()) return;
+                    synchronized (streamLock) {
+                        if (isCancelled.get() || isFinished.get()) return;
+                        try {
+                            out.write(": heartbeat\n\n".getBytes(java.nio.charset.StandardCharsets.UTF_8));
+                            out.flush();
+                        } catch (Exception e) {
+                            isCancelled.set(true);
+                        }
+                    }
+                }, 15, 15, java.util.concurrent.TimeUnit.SECONDS);
+
+                try {
+                    java.util.function.Consumer<String> chunkConsumer = textChunk -> {
+                        if (isCancelled.get() || isFinished.get()) {
+                            throw new RuntimeException("Stream cancelled by client");
+                        }
+                        synchronized (streamLock) {
+                            if (isCancelled.get() || isFinished.get()) {
+                                throw new RuntimeException("Stream cancelled by client");
+                            }
+                            try {
+                                String event = "data: " + gson.toJson(Map.of("text", textChunk)) + "\n\n";
+                                out.write(event.getBytes(java.nio.charset.StandardCharsets.UTF_8));
+                                out.flush();
+                            } catch (Exception e) {
+                                isCancelled.set(true);
+                                throw new RuntimeException("Client disconnected", e);
+                            }
+                        }
+                    };
+
+                    com.bear27570.app.util.AiClient.chatStream(settings, sysPrompt, msgList, chunkConsumer, isCancelled);
+
+                    if (!isCancelled.get() && !isFinished.get()) {
+                        synchronized (streamLock) {
+                            if (!isCancelled.get() && !isFinished.get()) {
+                                out.write("data: [DONE]\n\n".getBytes(java.nio.charset.StandardCharsets.UTF_8));
+                                out.flush();
+                            }
+                        }
+                    }
+                } catch (Throwable e) {
+                    if (!isCancelled.get() && !isFinished.get()) {
+                        synchronized (streamLock) {
+                            if (!isCancelled.get() && !isFinished.get()) {
+                                try {
+                                    String errEvent = "data: " + gson.toJson(Map.of("error", e.getMessage() != null ? e.getMessage() : e.toString())) + "\n\n";
+                                    out.write(errEvent.getBytes(java.nio.charset.StandardCharsets.UTF_8));
+                                    out.flush();
+                                } catch (Exception ignored) {
+                                    isCancelled.set(true);
+                                }
+                            }
+                        }
+                    }
+                } finally {
+                    isFinished.set(true);
+                    heartbeatTask.cancel(true);
+                }
+            });
         });
 
         routes.get("/api/events/{id}/ai-chat", ctx -> {

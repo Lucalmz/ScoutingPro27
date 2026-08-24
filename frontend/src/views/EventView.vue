@@ -6,6 +6,7 @@ import { useEventStore } from '@/stores/events'
 import { useRecordStore } from '@/stores/records'
 import { useConnectionStore } from '@/stores/connection'
 import { useInboxStore } from '@/stores/inbox'
+import { useToastStore } from '@/stores/toast'
 import { createWebRtcService } from '@/services/webrtc'
 import { useI18n } from 'vue-i18n'
 import type { ScoutingRecord, ScoutingEvent } from '@/types'
@@ -38,10 +39,10 @@ const tabs = computed(() => {
     { key: 'scout' as const, label: t('event.tab_scout') },
     { key: 'rankings' as const, label: t('event.tab_rankings') },
     { key: 'history' as const, label: t('event.tab_history') },
-    { key: 'ai' as const, label: 'Chat with AI' },
+    { key: 'ai' as const, label: t('event.tab_ai') },
   ]
   if (eventStore.isHost) {
-    baseTabs.push({ key: 'scouts' as const, label: 'Scouts' })
+    baseTabs.push({ key: 'scouts' as const, label: t('event.tab_scouts') })
   }
   return baseTabs
 })
@@ -107,10 +108,13 @@ onMounted(async () => {
     state.loading = false
   }
 
-  // Load records
+  // Load records and tags
   const evt = event.value
   if (evt) {
-    await recordStore.fetchRecords(eventId.value, evt.ftcYear, evt.ftcEventCode)
+    await Promise.all([
+      recordStore.fetchRecords(eventId.value, evt.ftcYear, evt.ftcEventCode),
+      recordStore.fetchTags(eventId.value)
+    ])
   }
 
   // 计算数据库和内存中已持久化记录的最大 hostSeq
@@ -192,6 +196,24 @@ async function setupWebRTC() {
         : recordStore.records  // sinceVersion=0 → 全量同步（首次连接）
       if (recordsToSync.length > 0) {
         connStore.pushRecords(recordsToSync, senderId)
+      }
+    },
+
+    onTagUpdateReceived: (tag, action, eventId) => {
+      if (eventId === eventStore.currentEvent?.id) {
+        recordStore.applyTagUpdate(tag, action)
+      }
+    },
+
+    onRequestTagsSync: (senderId) => {
+      if (eventStore.currentEvent?.id) {
+        rtc.sendTagsFullSync(recordStore.teamTags, eventStore.currentEvent.id, senderId)
+      }
+    },
+
+    onTagsFullSyncReceived: (tags, eventId) => {
+      if (eventId === eventStore.currentEvent?.id) {
+        recordStore.applyTagsFullSync(tags)
       }
     },
 
@@ -382,29 +404,39 @@ const settingsYear = ref(event.value?.ftcYear ?? 2025)
 const settingsCode = ref(event.value?.ftcEventCode ?? '')
 const isSavingSettings = ref(false)
 
-watch(event, (newVal) => {
-  if (newVal) {
-    if (newVal.ftcYear) settingsYear.value = newVal.ftcYear
-    if (newVal.ftcEventCode) settingsCode.value = newVal.ftcEventCode
-  }
-}, { immediate: true })
+const toastStore = useToastStore()
+
+watch(
+  () => [event.value?.ftcYear, event.value?.ftcEventCode],
+  ([newYear, newCode]) => {
+    if (newYear) settingsYear.value = Number(newYear)
+    if (newCode !== undefined && newCode !== null) settingsCode.value = String(newCode)
+  },
+  { immediate: true }
+)
 
 async function saveEventSettings() {
   if (!event.value) return
+  const code = settingsCode.value.trim()
+  if (!code) {
+    toastStore.showToast('请输入有效的 FTC 比赛代码 (例如: CNCMPLB, AUCMP)', 'error')
+    return
+  }
+
   isSavingSettings.value = true
   try {
-    await updateEventFtcConfig(event.value.id, settingsYear.value, settingsCode.value.trim())
+    const year = Number(settingsYear.value) || 2025
+    await updateEventFtcConfig(event.value.id, year, code)
     
-    // Update local store
-    event.value.ftcYear = settingsYear.value
-    event.value.ftcEventCode = settingsCode.value.trim()
+    // Update store state
+    eventStore.updateFtcConfig(event.value.id, year, code)
     
     // Re-fetch records/matches
-    await recordStore.fetchRecords(event.value.id, event.value.ftcYear, event.value.ftcEventCode)
+    await recordStore.fetchRecords(event.value.id, year, code)
     
-    alert('Settings saved and official matches synced successfully!')
+    toastStore.showToast(t('event.bind_success') || 'FTC 官方赛事代码绑定成功！', 'info')
   } catch (e: any) {
-    alert('Failed to save settings: ' + (e.message || String(e)))
+    toastStore.showToast((t('event.bind_failed') || '绑定设置失败: ') + (e.message || String(e)), 'error')
   } finally {
     isSavingSettings.value = false
   }
@@ -457,10 +489,20 @@ function exportRecordsCSV() {
         <button class="btn-back" @click="goBack" style="display: flex; align-items: center; gap: 4px;"><span class="material-icons" style="font-size: 18px;">arrow_back</span>{{ t('event.back') }}</button>
         <div class="event-title">
           <span class="event-name" :style="{ viewTransitionName: 'event-card-title' }">{{ event?.name ?? t('event.event') }}</span>
-          <span v-if="event" class="event-code">
-            {{ t('event.code') }}: <strong>{{ event.inviteCode }}</strong>
-            - {{ eventStore.isHost ? t('event.host') : t('event.client') }}
-          </span>
+          <div class="event-meta-row" v-if="event">
+            <span class="event-code">
+              {{ t('event.code') }}: <strong>{{ event.inviteCode }}</strong>
+              - {{ eventStore.isHost ? t('event.host') : t('event.client') }}
+            </span>
+            <span v-if="event.ftcEventCode" class="badge-ftc-bound" :title="t('event.ftc_bound_desc', { count: recordStore.officialMatches.length })">
+              <span class="material-icons ftc-badge-icon">verified</span>
+              FTC: <strong>{{ event.ftcEventCode }}</strong> ({{ event.ftcYear || 2025 }})
+            </span>
+            <span v-else-if="eventStore.isHost" class="badge-ftc-unbound" :title="t('event.ftc_unbound')">
+              <span class="material-icons ftc-badge-icon">link_off</span>
+              FTC: {{ t('event.ftc_unbound') }}
+            </span>
+          </div>
         </div>
       </div>
       <div class="topbar-right" :style="{ viewTransitionName: 'event-status' }">
@@ -521,18 +563,30 @@ function exportRecordsCSV() {
         <AiChatView v-else-if="activeTab === 'ai'" :event-id="route.params.eventId as string" />
         <div v-else-if="activeTab === 'scouts'">
           <div class="settings-panel">
-            <h2>Event Settings</h2>
+            <h2>{{ t('event.tab_scouts') }}</h2>
+
+            <!-- FTC Bound Status Banner -->
+            <div v-if="event?.ftcEventCode" class="ftc-bound-status-card">
+              <span class="material-icons status-icon">check_circle</span>
+              <div class="status-content">
+                <div class="status-title">{{ t('event.ftc_bound_title', { code: event.ftcEventCode, year: event.ftcYear || 2025 }) }}</div>
+                <div class="status-subtitle">{{ t('event.ftc_bound_desc', { count: recordStore.officialMatches.length }) }}</div>
+              </div>
+            </div>
+
             <div class="settings-form">
               <div class="form-group">
                 <label>FTC Season (Year)</label>
                 <input type="number" v-model="settingsYear" :disabled="isSavingSettings" />
               </div>
               <div class="form-group">
-                <label>Event Code</label>
-                <input type="text" v-model="settingsCode" placeholder="e.g. CNCMPLB" :disabled="isSavingSettings" />
+                <label>Event Code (FTC 比赛代码)</label>
+                <input type="text" v-model="settingsCode" placeholder="例如: CNCMPLB, AUCMP" :disabled="isSavingSettings" />
+                <small class="form-hint">{{ t('event.ftc_binding_hint') }}</small>
               </div>
-              <button class="btn-primary" @click="saveEventSettings" :disabled="isSavingSettings">
-                {{ isSavingSettings ? 'Saving...' : 'Save & Sync Official Data' }}
+              <button class="btn-primary" @click="saveEventSettings" :disabled="isSavingSettings" style="display: flex; align-items: center; justify-content: center; gap: 6px;">
+                <span class="material-icons" style="font-size: 18px;">{{ event?.ftcEventCode ? 'sync' : 'link' }}</span>
+                {{ isSavingSettings ? 'Saving...' : (event?.ftcEventCode ? t('event.btn_update_sync') : t('event.btn_bind_sync')) }}
               </button>
             </div>
           </div>
@@ -744,6 +798,86 @@ function exportRecordsCSV() {
 .btn-primary:disabled {
   opacity: 0.6;
   cursor: not-allowed;
+}
+
+.event-meta-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.badge-ftc-bound {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 11px;
+  font-weight: 600;
+  padding: 2px 8px;
+  border-radius: 9999px;
+  background: rgba(34, 197, 94, 0.15);
+  color: #22c55e;
+  border: 1px solid rgba(34, 197, 94, 0.3);
+}
+
+.badge-ftc-unbound {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 11px;
+  font-weight: 500;
+  padding: 2px 8px;
+  border-radius: 9999px;
+  background: rgba(148, 163, 184, 0.1);
+  color: var(--muted-foreground);
+  border: 1px solid var(--border);
+}
+
+.ftc-badge-icon {
+  font-size: 13px !important;
+}
+
+.ftc-bound-status-card {
+  display: flex;
+  align-items: flex-start;
+  gap: 12px;
+  padding: 14px 16px;
+  border-radius: 8px;
+  background: rgba(34, 197, 94, 0.1);
+  border: 1px solid rgba(34, 197, 94, 0.3);
+  margin-top: 10px;
+  margin-bottom: 12px;
+}
+
+.status-icon {
+  font-size: 22px;
+  color: #22c55e;
+  flex-shrink: 0;
+  margin-top: 1px;
+}
+
+.status-content {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.status-title {
+  font-size: 14px;
+  font-weight: 600;
+  color: #22c55e;
+}
+
+.status-subtitle {
+  font-size: 12px;
+  color: var(--foreground);
+  opacity: 0.85;
+}
+
+.form-hint {
+  font-size: 12px;
+  color: var(--muted-foreground);
+  margin-top: 2px;
 }
 
 .congestion-banner {

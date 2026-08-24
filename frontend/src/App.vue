@@ -4,11 +4,9 @@ import ToastProvider from '@/components/ToastProvider.vue'
 import InboxWidget from '@/components/common/InboxWidget.vue'
 import { useInboxStore } from '@/stores/inbox'
 import { useToastStore } from '@/stores/toast'
-import { useUserStore } from '@/stores/user'
 
 const inboxStore = useInboxStore()
 const toastStore = useToastStore()
-const userStore = useUserStore()
 
 const isViewTransitionSupported = 'startViewTransition' in document
 
@@ -24,15 +22,19 @@ watch(() => inboxStore.messages.length, (newLen, oldLen) => {
 
 <template>
   <ToastProvider />
-  <InboxWidget v-if="userStore.isLoggedIn" />
-  <router-view v-slot="{ Component }">
-    <transition 
-      :name="isViewTransitionSupported ? 'none' : 'page'" 
-      :css="!isViewTransitionSupported"
-      :mode="isViewTransitionSupported ? undefined : 'out-in'">
-      <component :is="Component" />
-    </transition>
-  </router-view>
+  <div class="router-view-container">
+    <router-view v-slot="{ Component }">
+      <transition 
+        :name="isViewTransitionSupported ? 'none' : 'page'" 
+        :css="!isViewTransitionSupported"
+        :mode="isViewTransitionSupported ? undefined : 'out-in'">
+        <component :is="Component" />
+      </transition>
+    </router-view>
+  </div>
+  <Teleport to="body">
+    <InboxWidget />
+  </Teleport>
 </template>
 
 <style>
@@ -53,6 +55,26 @@ watch(() => inboxStore.messages.length, (newLen, oldLen) => {
   transform: translateX(-80px);
 }
 
+:root {
+  view-transition-name: none;
+}
+
+.router-view-container {
+  view-transition-name: page-view;
+  min-height: 100vh;
+  width: 100%;
+}
+
+/* InboxWidget: captured by View Transitions but stays completely static (no animation) */
+::view-transition-group(inbox-widget) {
+  animation: none !important;
+  z-index: 99999;
+}
+::view-transition-old(inbox-widget),
+::view-transition-new(inbox-widget) {
+  animation: none !important;
+}
+
 /* View Transitions API Animations */
 ::view-transition-group(*),
 ::view-transition-old(*),
@@ -61,31 +83,31 @@ watch(() => inboxStore.messages.length, (newLen, oldLen) => {
   animation-timing-function: cubic-bezier(0.25, 1, 0.5, 1);
 }
 
-[data-direction='forward']::view-transition-new(root) {
+[data-direction='forward']::view-transition-new(page-view) {
   animation-name: slide-from-right;
 }
-[data-direction='forward']::view-transition-old(root) {
+[data-direction='forward']::view-transition-old(page-view) {
   animation-name: slide-to-left;
 }
-[data-direction='back']::view-transition-new(root) {
+[data-direction='back']::view-transition-new(page-view) {
   animation-name: slide-from-left;
 }
-[data-direction='back']::view-transition-old(root) {
+[data-direction='back']::view-transition-old(page-view) {
   animation-name: slide-to-right;
 }
-[data-direction='fade']::view-transition-old(root) {
+[data-direction='fade']::view-transition-old(page-view) {
   animation-name: fade-out;
 }
-[data-direction='fade']::view-transition-new(root) {
+[data-direction='fade']::view-transition-new(page-view) {
   animation-name: fade-in;
 }
 
-/* If a shared element is transitioning, tone down the root transition */
-[data-transition-type='shared']::view-transition-old(root) {
+/* If a shared element is transitioning, tone down the page-view transition */
+[data-transition-type='shared']::view-transition-old(page-view) {
   animation-name: fade-out;
   animation-duration: 0.4s;
 }
-[data-transition-type='shared']::view-transition-new(root) {
+[data-transition-type='shared']::view-transition-new(page-view) {
   animation-name: fade-in;
   animation-duration: 0.4s;
 }
@@ -283,11 +305,11 @@ watch(() => inboxStore.messages.length, (newLen, oldLen) => {
 /* ----------------------------------------------------
    Tab Switching View Transitions
    ---------------------------------------------------- */
-[data-transition-type='tab-switch']::view-transition-group(root) {
+[data-transition-type='tab-switch']::view-transition-group(page-view) {
   animation: none !important;
 }
-[data-transition-type='tab-switch']::view-transition-old(root),
-[data-transition-type='tab-switch']::view-transition-new(root) {
+[data-transition-type='tab-switch']::view-transition-old(page-view),
+[data-transition-type='tab-switch']::view-transition-new(page-view) {
   animation: none !important;
 }
 
@@ -323,21 +345,21 @@ watch(() => inboxStore.messages.length, (newLen, oldLen) => {
   mix-blend-mode: normal;
 }
 
-[data-to-type='team-detail']::view-transition-old(root),
-[data-from-type='team-detail']::view-transition-new(root) {
+[data-to-type='team-detail']::view-transition-old(page-view),
+[data-from-type='team-detail']::view-transition-new(page-view) {
   z-index: 1;
   mix-blend-mode: normal;
   background: black;
 }
 
-/* Hide the root of the new page when entering (we only want the modal-sheet to animate) */
-[data-to-type='team-detail']::view-transition-new(root) {
+/* Hide the page-view of the new page when entering (we only want the modal-sheet to animate) */
+[data-to-type='team-detail']::view-transition-new(page-view) {
   animation: none !important;
   opacity: 0 !important;
 }
 
-/* Hide the root of the old page when leaving */
-[data-from-type='team-detail']::view-transition-old(root) {
+/* Hide the page-view of the old page when leaving */
+[data-from-type='team-detail']::view-transition-old(page-view) {
   animation: none !important;
   opacity: 0 !important;
 }
@@ -346,7 +368,7 @@ watch(() => inboxStore.messages.length, (newLen, oldLen) => {
 [data-to-type='team-detail']::view-transition-new(modal-sheet) {
   animation: modal-slide-up 0.5s cubic-bezier(0.25, 1, 0.5, 1) both;
 }
-[data-to-type='team-detail']::view-transition-old(root) {
+[data-to-type='team-detail']::view-transition-old(page-view) {
   animation: modal-push-back 0.5s cubic-bezier(0.25, 1, 0.5, 1) both;
 }
 
@@ -354,7 +376,7 @@ watch(() => inboxStore.messages.length, (newLen, oldLen) => {
 [data-from-type='team-detail']::view-transition-old(modal-sheet) {
   animation: modal-slide-down 0.5s cubic-bezier(0.25, 1, 0.5, 1) both;
 }
-[data-from-type='team-detail']::view-transition-new(root) {
+[data-from-type='team-detail']::view-transition-new(page-view) {
   animation: modal-pull-forward 0.5s cubic-bezier(0.25, 1, 0.5, 1) both;
 }
 

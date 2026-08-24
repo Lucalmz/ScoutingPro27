@@ -150,4 +150,46 @@ describe('ScoutingForm', () => {
     expect(wrapper.vm.scoutMode).toBe('alliance')
     expect(wrapper.vm.teamsData).toHaveLength(2)
   })
+
+  describe('Team Tags Integration', () => {
+    it('renders TagPicker only when a valid positive teamNumber is entered', async () => {
+      const wrapper = mount(ScoutingForm, { props: defaultProps })
+      
+      // Initially teamNumber is empty -> no TagPicker
+      expect(wrapper.findComponent({ name: 'TagPicker' }).exists()).toBe(false)
+
+      // Enter invalid or non-numeric teamNumber
+      wrapper.vm.teamsData[0].teamNumber = '0'
+      await wrapper.vm.$nextTick()
+      expect(wrapper.findComponent({ name: 'TagPicker' }).exists()).toBe(false)
+
+      // Enter valid teamNumber
+      wrapper.vm.teamsData[0].teamNumber = '12345'
+      await wrapper.vm.$nextTick()
+      const tagPicker = wrapper.findComponent({ name: 'TagPicker' })
+      expect(tagPicker.exists()).toBe(true)
+      expect(tagPicker.props('eventId')).toBe('event-1')
+      expect(tagPicker.props('teamNumber')).toBe(12345)
+    })
+  })
+
+  describe('Counter Controls', () => {
+    it('increments and decrements patterns score using unbreakable counter controls', async () => {
+      const wrapper = mount(ScoutingForm, { props: defaultProps })
+      
+      expect(wrapper.vm.teamsData[0].autoPatterns).toBe(0)
+      
+      // Trigger increment
+      wrapper.vm.increment(wrapper.vm.teamsData[0], 'autoPatterns')
+      expect(wrapper.vm.teamsData[0].autoPatterns).toBe(1)
+
+      // Trigger decrement
+      wrapper.vm.decrement(wrapper.vm.teamsData[0], 'autoPatterns')
+      expect(wrapper.vm.teamsData[0].autoPatterns).toBe(0)
+
+      // Decrement below 0 is prevented
+      wrapper.vm.decrement(wrapper.vm.teamsData[0], 'autoPatterns')
+      expect(wrapper.vm.teamsData[0].autoPatterns).toBe(0)
+    })
+  })
 })

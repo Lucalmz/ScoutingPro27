@@ -39,4 +39,18 @@ describe('Events Store', () => {
     expect(store.events).toHaveLength(1)
     expect(store.currentEvent?.name).toBe('Joined Event')
   })
+
+  it('updateFtcConfig updates both events list and currentEvent', () => {
+    const store = useEventStore()
+    const evt = { id: 'evt-1', name: 'My Event', inviteCode: 'ABCDEF', hostId: 'u1' }
+    store.events = [evt]
+    store.currentEvent = evt
+
+    store.updateFtcConfig('evt-1', 2025, 'CNCMPLB')
+
+    expect(store.currentEvent?.ftcYear).toBe(2025)
+    expect(store.currentEvent?.ftcEventCode).toBe('CNCMPLB')
+    expect(store.events[0].ftcYear).toBe(2025)
+    expect(store.events[0].ftcEventCode).toBe('CNCMPLB')
+  })
 })

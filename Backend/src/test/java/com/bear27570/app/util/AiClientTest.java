@@ -106,4 +106,96 @@ class AiClientTest {
         assertEquals("user", normalized.get(2).get("role"));
         assertEquals("User query", normalized.get(2).get("content"));
     }
+
+    @Test
+    void testResolveOpenAiChatEndpoint_VariousProviders() {
+        // Default / null / empty
+        assertEquals("https://api.openai.com/v1/chat/completions", AiClient.resolveOpenAiChatEndpoint(null));
+        assertEquals("https://api.openai.com/v1/chat/completions", AiClient.resolveOpenAiChatEndpoint("   "));
+
+        // DeepSeek
+        assertEquals("https://api.deepseek.com/v1/chat/completions", AiClient.resolveOpenAiChatEndpoint("https://api.deepseek.com/v1"));
+        assertEquals("https://api.deepseek.com/v1/chat/completions", AiClient.resolveOpenAiChatEndpoint("https://api.deepseek.com"));
+        assertEquals("https://api.deepseek.com/v1/chat/completions", AiClient.resolveOpenAiChatEndpoint("https://api.deepseek.com/"));
+
+        // Zhipu GLM (v4 endpoint)
+        assertEquals("https://open.bigmodel.cn/api/paas/v4/chat/completions", AiClient.resolveOpenAiChatEndpoint("https://open.bigmodel.cn/api/paas/v4"));
+        assertEquals("https://open.bigmodel.cn/api/paas/v4/chat/completions", AiClient.resolveOpenAiChatEndpoint("https://open.bigmodel.cn/api/paas/v4/"));
+
+        // DashScope / Qwen compatible mode
+        assertEquals("https://dashscope.aliyuncs.com/compatible-mode/v1/chat/completions", AiClient.resolveOpenAiChatEndpoint("https://dashscope.aliyuncs.com/compatible-mode/v1"));
+
+        // SiliconFlow
+        assertEquals("https://api.siliconflow.cn/v1/chat/completions", AiClient.resolveOpenAiChatEndpoint("https://api.siliconflow.cn/v1"));
+
+        // Ollama Local
+        assertEquals("http://localhost:11434/v1/chat/completions", AiClient.resolveOpenAiChatEndpoint("http://localhost:11434/v1"));
+        assertEquals("http://localhost:11434/v1/chat/completions", AiClient.resolveOpenAiChatEndpoint("http://localhost:11434"));
+
+        // Direct full chat/completions path
+        assertEquals("https://my-custom-proxy.com/v1/chat/completions", AiClient.resolveOpenAiChatEndpoint("https://my-custom-proxy.com/v1/chat/completions"));
+    }
+
+    @Test
+    void testResolveOpenAiModelsEndpoint_VariousProviders() {
+        // Default / null / empty
+        assertEquals("https://api.openai.com/v1/models", AiClient.resolveOpenAiModelsEndpoint(null));
+        assertEquals("https://api.openai.com/v1/models", AiClient.resolveOpenAiModelsEndpoint(""));
+
+        // DeepSeek
+        assertEquals("https://api.deepseek.com/v1/models", AiClient.resolveOpenAiModelsEndpoint("https://api.deepseek.com/v1"));
+        assertEquals("https://api.deepseek.com/v1/models", AiClient.resolveOpenAiModelsEndpoint("https://api.deepseek.com"));
+
+        // Zhipu GLM
+        assertEquals("https://open.bigmodel.cn/api/paas/v4/models", AiClient.resolveOpenAiModelsEndpoint("https://open.bigmodel.cn/api/paas/v4"));
+
+        // Full endpoint with /chat/completions stripped
+        assertEquals("https://api.deepseek.com/v1/models", AiClient.resolveOpenAiModelsEndpoint("https://api.deepseek.com/v1/chat/completions"));
+    }
+
+    @Test
+    void testParseOpenAiSseLine_DeltaAndDone() {
+        // Normal text delta
+        String line1 = "data: {\"choices\":[{\"delta\":{\"content\":\"Hello \"}}]}";
+        assertEquals("Hello ", AiClient.parseOpenAiSseLine(line1));
+
+        // Done line
+        String doneLine = "data: [DONE]";
+        assertEquals("[DONE]", AiClient.parseOpenAiSseLine(doneLine));
+
+        // Empty delta
+        String emptyDelta = "data: {\"choices\":[{\"delta\":{}}]}";
+        assertNull(AiClient.parseOpenAiSseLine(emptyDelta));
+
+        // Heartbeat comment or empty line
+        assertNull(AiClient.parseOpenAiSseLine(": heartbeat"));
+        assertNull(AiClient.parseOpenAiSseLine(""));
+        assertNull(AiClient.parseOpenAiSseLine(null));
+
+        // Malformed line
+        assertNull(AiClient.parseOpenAiSseLine("data: not-json"));
+    }
+
+    @Test
+    void testParseGeminiSseLine_DeltaAndSafety() {
+        // Normal text candidate
+        String line1 = "data: {\"candidates\":[{\"content\":{\"parts\":[{\"text\":\"Gemini reply\"}]}}]}";
+        assertEquals("Gemini reply", AiClient.parseGeminiSseLine(line1));
+
+        // Multiple parts
+        String lineMulti = "data: {\"candidates\":[{\"content\":{\"parts\":[{\"text\":\"Part1 \"},{\"text\":\"Part2\"}]}}]}";
+        assertEquals("Part1 Part2", AiClient.parseGeminiSseLine(lineMulti));
+
+        // Safety filter triggered
+        String safetyLine = "data: {\"candidates\":[{\"finishReason\":\"SAFETY\"}]}";
+        assertEquals("[Blocked by Safety Filter]", AiClient.parseGeminiSseLine(safetyLine));
+
+        // Heartbeat comment or empty line
+        assertNull(AiClient.parseGeminiSseLine(": heartbeat"));
+        assertNull(AiClient.parseGeminiSseLine(""));
+        assertNull(AiClient.parseGeminiSseLine(null));
+
+        // Malformed line
+        assertNull(AiClient.parseGeminiSseLine("data: invalid-json"));
+    }
 }

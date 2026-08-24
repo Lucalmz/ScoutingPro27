@@ -4,6 +4,7 @@ import { useI18n } from 'vue-i18n'
 import { useRecordStore } from '@/stores/records'
 import { hapticFeedback } from '@/utils/haptics'
 import type { ScoutingRecord, ScoutingFormData } from '@/types'
+import TagPicker from '@/components/common/TagPicker.vue'
 
 const { t } = useI18n()
 
@@ -249,7 +250,8 @@ const wrapperClass = computed(() => {
   return [
     'scouting-wrapper',
     `color-${allianceColor.value}`,
-    `status-${submitStatus.value}`
+    `status-${submitStatus.value}`,
+    scoutMode.value === 'alliance' ? 'alliance-mode' : ''
   ]
 })
 
@@ -309,6 +311,18 @@ const recordStore = useRecordStore()
                 </span>
               </label>
             </div>
+
+            <!-- Team Tags Directly on Scouting Form -->
+            <div v-if="parseInt(team.teamNumber) > 0" class="team-tags-section">
+              <div class="team-tags-header">
+                <span class="material-icons" style="font-size: 15px;">label</span>
+                <span>{{ t('scouting.team_tags') }} (#{{ team.teamNumber }})</span>
+              </div>
+              <TagPicker
+                :event-id="props.eventId"
+                :team-number="parseInt(team.teamNumber)"
+              />
+            </div>
           </section>
 
           <!-- Autonomous -->
@@ -319,25 +333,31 @@ const recordStore = useRecordStore()
                 <span>{{ t('scouting.movement') }}</span>
                 <input v-model="team.autoMovementScore" type="text" inputmode="numeric" placeholder="0" :class="{ 'invalid-field': isInvalidFormat(team.autoMovementScore) }" />
               </label>
-              <div class="counter-group">
-                <label>{{ t('scouting.patterns') }}</label>
-                <button type="button" class="counter-btn" @click="decrement(team, 'autoPatterns')">-</button>
-                <span class="counter-val">{{ team.autoPatterns }}</span>
-                <button type="button" class="counter-btn" @click="increment(team, 'autoPatterns')">+</button>
+              <div class="counter-field">
+                <span class="counter-label">{{ t('scouting.patterns') }}</span>
+                <div class="counter-controls">
+                  <button type="button" class="counter-btn" @click="decrement(team, 'autoPatterns')">-</button>
+                  <span class="counter-val">{{ team.autoPatterns }}</span>
+                  <button type="button" class="counter-btn" @click="increment(team, 'autoPatterns')">+</button>
+                </div>
               </div>
             </div>
             <div class="field-row split" style="margin-top: 12px">
-              <div class="counter-group">
-                <label>{{ t('scouting.classified') }}</label>
-                <button type="button" class="counter-btn" @click="decrement(team, 'autoClassified')">-</button>
-                <span class="counter-val">{{ team.autoClassified }}</span>
-                <button type="button" class="counter-btn" @click="increment(team, 'autoClassified')">+</button>
+              <div class="counter-field">
+                <span class="counter-label">{{ t('scouting.classified') }}</span>
+                <div class="counter-controls">
+                  <button type="button" class="counter-btn" @click="decrement(team, 'autoClassified')">-</button>
+                  <span class="counter-val">{{ team.autoClassified }}</span>
+                  <button type="button" class="counter-btn" @click="increment(team, 'autoClassified')">+</button>
+                </div>
               </div>
-              <div class="counter-group">
-                <label>{{ t('scouting.overflow') }}</label>
-                <button type="button" class="counter-btn" @click="decrement(team, 'autoOverflow')">-</button>
-                <span class="counter-val">{{ team.autoOverflow }}</span>
-                <button type="button" class="counter-btn" @click="increment(team, 'autoOverflow')">+</button>
+              <div class="counter-field">
+                <span class="counter-label">{{ t('scouting.overflow') }}</span>
+                <div class="counter-controls">
+                  <button type="button" class="counter-btn" @click="decrement(team, 'autoOverflow')">-</button>
+                  <span class="counter-val">{{ team.autoOverflow }}</span>
+                  <button type="button" class="counter-btn" @click="increment(team, 'autoOverflow')">+</button>
+                </div>
               </div>
             </div>
           </section>
@@ -346,25 +366,31 @@ const recordStore = useRecordStore()
           <section class="form-section">
             <h3><span class="material-icons">sports_esports</span> {{ t('scouting.teleop') }}</h3>
             <div class="field-row">
-              <div class="counter-group">
-                <label>{{ t('scouting.gates') }}</label>
-                <button type="button" class="counter-btn" @click="decrement(team, 'gatesTriggered')">-</button>
-                <span class="counter-val">{{ team.gatesTriggered }}</span>
-                <button type="button" class="counter-btn" @click="increment(team, 'gatesTriggered')">+</button>
+              <div class="counter-field">
+                <span class="counter-label">{{ t('scouting.gates') }}</span>
+                <div class="counter-controls">
+                  <button type="button" class="counter-btn" @click="decrement(team, 'gatesTriggered')">-</button>
+                  <span class="counter-val">{{ team.gatesTriggered }}</span>
+                  <button type="button" class="counter-btn" @click="increment(team, 'gatesTriggered')">+</button>
+                </div>
               </div>
             </div>
             <div class="field-row split" style="margin-top: 12px">
-              <div class="counter-group">
-                <label>{{ t('scouting.classified') }}</label>
-                <button type="button" class="counter-btn" @click="decrement(team, 'teleopClassified')">-</button>
-                <span class="counter-val">{{ team.teleopClassified }}</span>
-                <button type="button" class="counter-btn" @click="increment(team, 'teleopClassified')">+</button>
+              <div class="counter-field">
+                <span class="counter-label">{{ t('scouting.classified') }}</span>
+                <div class="counter-controls">
+                  <button type="button" class="counter-btn" @click="decrement(team, 'teleopClassified')">-</button>
+                  <span class="counter-val">{{ team.teleopClassified }}</span>
+                  <button type="button" class="counter-btn" @click="increment(team, 'teleopClassified')">+</button>
+                </div>
               </div>
-              <div class="counter-group">
-                <label>{{ t('scouting.overflow') }}</label>
-                <button type="button" class="counter-btn" @click="decrement(team, 'teleopOverflow')">-</button>
-                <span class="counter-val">{{ team.teleopOverflow }}</span>
-                <button type="button" class="counter-btn" @click="increment(team, 'teleopOverflow')">+</button>
+              <div class="counter-field">
+                <span class="counter-label">{{ t('scouting.overflow') }}</span>
+                <div class="counter-controls">
+                  <button type="button" class="counter-btn" @click="decrement(team, 'teleopOverflow')">-</button>
+                  <span class="counter-val">{{ team.teleopOverflow }}</span>
+                  <button type="button" class="counter-btn" @click="increment(team, 'teleopOverflow')">+</button>
+                </div>
               </div>
             </div>
           </section>
@@ -529,8 +555,13 @@ const recordStore = useRecordStore()
 }
 
 .scouting-wrapper {
-  max-width: 800px;
+  max-width: 860px;
+  width: 100%;
   margin: 0 auto;
+}
+
+.scouting-wrapper.alliance-mode {
+  max-width: 1280px;
 }
 
 .scouting-form {
@@ -649,9 +680,10 @@ const recordStore = useRecordStore()
   grid-template-columns: 1fr;
   gap: 20px;
 }
-@media (min-width: 600px) {
+@media (min-width: 768px) {
   .alliance-grid {
     grid-template-columns: 1fr 1fr;
+    gap: 24px;
   }
 }
 
@@ -685,10 +717,112 @@ const recordStore = useRecordStore()
   gap: 8px;
 }
 
-.field-row { display: flex; gap: 12px; flex-wrap: wrap; }
-.field { display: flex; flex-direction: column; gap: 4px; flex: 1; min-width: 120px; }
-.field > span, .counter-field > span:first-child { font-size: 13px; color: var(--muted-foreground); }
-.counter-field { display: flex; align-items: center; justify-content: space-between; padding: 8px 0; flex: 1; min-width: 210px; gap: 8px; flex-wrap: wrap; }
+.field-row {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  flex-wrap: wrap;
+}
+
+.field-row.split {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 16px;
+}
+
+@media (max-width: 520px) {
+  .field-row.split {
+    grid-template-columns: 1fr;
+  }
+}
+
+.field {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  flex: 1;
+  min-width: 140px;
+}
+.field > span {
+  font-size: 13px;
+  color: var(--muted-foreground);
+}
+
+.counter-field {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  flex: 1;
+  min-width: 180px;
+  padding: 4px 0;
+}
+
+.counter-label {
+  font-size: 13px;
+  color: var(--muted-foreground);
+  font-weight: 500;
+  line-height: 1.3;
+}
+
+.counter-controls {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-shrink: 0;
+  white-space: nowrap;
+}
+
+.counter-btn {
+  width: 36px;
+  height: 36px;
+  border-radius: 8px;
+  border: 1px solid var(--input);
+  background: var(--border);
+  color: var(--foreground);
+  font-size: 18px;
+  font-weight: 700;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: all 0.15s ease;
+  user-select: none;
+}
+.counter-btn:hover {
+  background: var(--input);
+  border-color: var(--primary);
+}
+.counter-btn:active {
+  transform: scale(0.95);
+}
+
+.counter-val {
+  font-size: 20px;
+  font-weight: 700;
+  min-width: 30px;
+  text-align: center;
+  user-select: none;
+  font-variant-numeric: tabular-nums;
+}
+
+.team-tags-section {
+  margin-top: 14px;
+  padding-top: 12px;
+  border-top: 1px solid var(--border);
+}
+
+.team-tags-header {
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--muted-foreground);
+  margin-bottom: 8px;
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+}
 
 input[type='text'], input[type='number'], select {
   padding: 10px 12px;
@@ -723,16 +857,6 @@ input.invalid-field {
 }
 .toggle input[type='checkbox']:checked { background: var(--primary); box-shadow: var(--glow-primary); }
 .toggle input[type='checkbox']:checked::after { transform: translateX(20px); background: var(--primary-foreground); }
-
-/* .counter-field rule was moved up to be grouped with .field */
-.counter { display: flex; align-items: center; gap: 12px; }
-.counter-btn {
-  width: 36px; height: 36px; border-radius: 8px; border: 1px solid var(--input);
-  background: var(--border); color: var(--foreground); font-size: 20px; font-weight: 700;
-  cursor: pointer; display: flex; align-items: center; justify-content: center;
-}
-.counter-btn:hover { background: var(--input); }
-.counter-val { font-size: 22px; font-weight: 700; min-width: 32px; text-align: center; }
 
 .total-score-inline {
   display: flex;

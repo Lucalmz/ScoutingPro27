@@ -19,7 +19,7 @@ const AnimatedNumber = defineComponent({
   }
 })
 
-const { t } = useI18n()
+const { t, te } = useI18n()
 const eventStore = useEventStore()
 const recordStore = useRecordStore()
 const toastStore = useToastStore()
@@ -34,6 +34,23 @@ type SortKey = keyof RankingRow
 const sortKey = ref<SortKey>('avgRating')
 const sortDir = ref<'asc' | 'desc'>('desc')
 
+// 标签筛选
+const selectedTagFilter = ref<string | null>(null)
+
+const availableFilterTags = computed<string[]>(() => {
+  const all = recordStore.teamTags.map(t => t.tag)
+  return Array.from(new Set(all))
+})
+
+function formatTagLabel(tagKey?: string | null): string {
+  if (!tagKey) return ''
+  if (tagKey.startsWith('preset.')) {
+    const i18nKey = `tags.${tagKey}`
+    return te(i18nKey) ? t(i18nKey) : tagKey.replace(/^preset\./, '')
+  }
+  return tagKey
+}
+
 function setSort(key: SortKey) {
   if (sortKey.value === key) {
     sortDir.value = sortDir.value === 'asc' ? 'desc' : 'asc'
@@ -43,8 +60,21 @@ function setSort(key: SortKey) {
   }
 }
 
+const filteredRankings = computed<RankingRow[]>(() => {
+  let arr = [...props.rankings]
+  if (selectedTagFilter.value) {
+    const matchingTeams = new Set(
+      recordStore.teamTags
+        .filter(t => t.tag === selectedTagFilter.value)
+        .map(t => t.teamNumber)
+    )
+    arr = arr.filter(r => matchingTeams.has(r.teamNumber))
+  }
+  return arr
+})
+
 const sorted = computed<RankingRow[]>(() => {
-  const arr = [...props.rankings]
+  const arr = [...filteredRankings.value]
   arr.sort((a, b) => {
     const av = a[sortKey.value]
     const bv = b[sortKey.value]
@@ -118,6 +148,27 @@ function viewTeamDetails(teamNumber: number) {
       <p>{{ t('rankings.no_data') }}</p>
     </div>
     <div v-else class="table-wrapper">
+      <!-- 战术标签筛选栏 -->
+      <div v-if="availableFilterTags.length > 0" class="tag-filter-bar">
+        <span class="filter-title">{{ t('tags.filter_by_tag') }}:</span>
+        <button
+          class="filter-chip"
+          :class="{ active: selectedTagFilter === null }"
+          @click="selectedTagFilter = null"
+        >
+          {{ t('tags.all') }}
+        </button>
+        <button
+          v-for="tagKey in availableFilterTags"
+          :key="tagKey"
+          class="filter-chip"
+          :class="{ active: selectedTagFilter === tagKey }"
+          @click="selectedTagFilter = (selectedTagFilter === tagKey ? null : tagKey)"
+        >
+          {{ formatTagLabel(tagKey) }}
+        </button>
+      </div>
+
       <table>
         <thead>
           <tr>
@@ -163,8 +214,27 @@ function viewTeamDetails(teamNumber: number) {
                 style="display: block; width: 100%;"
                 :style="{ viewTransitionName: transitionState.sharedElementId === `team-card-${row.teamNumber}` ? `team-card-${row.teamNumber}` : 'none' }"
               >
-                {{ row.teamNumber }}
-                <span v-if="recordStore.bannedTeams.includes(row.teamNumber)" class="banned-badge">BANNED</span>
+                <div class="team-header-line">
+                  <span class="team-num">{{ row.teamNumber }}</span>
+                  <span v-if="recordStore.bannedTeams.includes(row.teamNumber)" class="banned-badge">BANNED</span>
+                </div>
+                <!-- 战术标签徽章 -->
+                <div v-if="recordStore.getTagsForTeam(row.teamNumber).length > 0" class="row-tags-list">
+                  <span
+                    v-for="tItem in recordStore.getTagsForTeam(row.teamNumber).slice(0, 3)"
+                    :key="tItem.id || tItem.tag"
+                    class="row-tag-badge"
+                    :class="`tag-${tItem.color || 'blue'}`"
+                  >
+                    {{ formatTagLabel(tItem.tag) }}
+                  </span>
+                  <span
+                    v-if="recordStore.getTagsForTeam(row.teamNumber).length > 3"
+                    class="row-tag-more"
+                  >
+                    +{{ recordStore.getTagsForTeam(row.teamNumber).length - 3 }}
+                  </span>
+                </div>
               </div>
             </td>
             <td>{{ row.matchCount }}</td>
@@ -175,10 +245,10 @@ function viewTeamDetails(teamNumber: number) {
             <td><AnimatedNumber :value="row.maxScore" /></td>
             <td class="total-cell"><AnimatedNumber :value="row.avgRating" /></td>
             <td class="trend-cell">
-              <span v-if="row.trend === 'up'" style="color: var(--status-success); font-weight: bold;">↗</span>
-              <span v-else-if="row.trend === 'down'" style="color: var(--status-error); font-weight: bold;">↘</span>
-              <span v-else-if="row.trend === 'stable'" style="color: var(--muted-foreground);">➡</span>
-              <span v-else style="color: var(--muted-foreground)">-</span>
+              <span v-if="row.trend === 'up'" class="material-icons" style="color: var(--status-success); font-size: 18px;" title="Trending Up">trending_up</span>
+              <span v-else-if="row.trend === 'down'" class="material-icons" style="color: var(--status-error); font-size: 18px;" title="Trending Down">trending_down</span>
+              <span v-else-if="row.trend === 'stable'" class="material-icons" style="color: var(--muted-foreground); font-size: 18px;" title="Stable">trending_flat</span>
+              <span v-else class="material-icons" style="color: var(--status-warning); font-size: 18px;" title="New">fiber_new</span>
             </td>
             <td>
               <button class="details-btn" @click="viewTeamDetails(row.teamNumber)" :title="t('rankings.details')">
@@ -308,6 +378,90 @@ tbody td {
 .ban-btn:hover {
   opacity: 0.8;
 }
+
+/* ── 战术标签筛选栏 ── */
+.tag-filter-bar {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-wrap: wrap;
+  padding: 10px 14px;
+  background: var(--card);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  margin-bottom: 12px;
+}
+
+.filter-title {
+  font-size: 0.75rem;
+  font-weight: 600;
+  color: var(--muted-foreground);
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  margin-right: 4px;
+}
+
+.filter-chip {
+  padding: 3px 9px;
+  border-radius: 12px;
+  font-size: 0.75rem;
+  background: rgba(255, 255, 255, 0.05);
+  border: 1px solid var(--border);
+  color: var(--muted-foreground);
+  cursor: pointer;
+  transition: all 0.15s ease;
+}
+
+.filter-chip:hover {
+  border-color: var(--primary);
+  color: var(--foreground);
+}
+
+.filter-chip.active {
+  background: var(--primary);
+  color: var(--primary-foreground);
+  border-color: var(--primary);
+  font-weight: 600;
+}
+
+/* ── 表格内队伍单元格标签展示 ── */
+.team-header-line {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.row-tags-list {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  flex-wrap: wrap;
+  margin-top: 3px;
+}
+
+.row-tag-badge {
+  display: inline-flex;
+  align-items: center;
+  padding: 1px 5px;
+  border-radius: 8px;
+  font-size: 0.68rem;
+  font-weight: 500;
+  border: 1px solid transparent;
+  line-height: 1.2;
+}
+
+.row-tag-more {
+  font-size: 0.65rem;
+  color: var(--muted-foreground);
+}
+
+.tag-green  { background: rgba(57, 255, 20, 0.12); color: #39ff14; border-color: rgba(57, 255, 20, 0.35); }
+.tag-blue   { background: rgba(56, 189, 248, 0.12); color: #38bdf8; border-color: rgba(56, 189, 248, 0.35); }
+.tag-purple { background: rgba(192, 132, 252, 0.12); color: #c084fc; border-color: rgba(192, 132, 252, 0.35); }
+.tag-orange { background: rgba(251, 146, 60, 0.12); color: #fb923c; border-color: rgba(251, 146, 60, 0.35); }
+.tag-red    { background: rgba(248, 113, 113, 0.12); color: #f87171; border-color: rgba(248, 113, 113, 0.35); }
+.tag-yellow { background: rgba(250, 204, 21, 0.12); color: #facc15; border-color: rgba(250, 204, 21, 0.35); }
+.tag-gray   { background: rgba(156, 163, 175, 0.12); color: #9ca3af; border-color: rgba(156, 163, 175, 0.35); }
 
 .details-btn {
   background: var(--card);

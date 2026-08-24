@@ -99,6 +99,12 @@ export const useConnectionStore = defineStore('connection', () => {
     connectedScouts.value = []
   }
 
+  function broadcastTagUpdate(tag: import('@/types').TeamTagItem, action: 'ADD' | 'REMOVE') {
+    if (isConnected.value && rtcService.value) {
+      rtcService.value.broadcastTagUpdate(tag, action)
+    }
+  }
+
   return {
     status,
     rtcService,
@@ -120,5 +126,6 @@ export const useConnectionStore = defineStore('connection', () => {
     connectedScouts,
     addConnectedScout,
     clearConnectedScouts,
+    broadcastTagUpdate,
   }
 })

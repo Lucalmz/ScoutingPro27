@@ -938,4 +938,29 @@ describe('webrtc service', () => {
     expect(callbacks.onStatusChange).not.toHaveBeenCalledWith('degraded')
     vi.useRealTimers()
   })
+
+  it('drops TEAM_TAGS_UPDATE, REQUEST_TAGS_SYNC, TAGS_FULL_SYNC over public MQTT signaling channel (V9)', async () => {
+    const callbacks = {
+      onStatusChange: vi.fn(),
+      onRecordsReceived: vi.fn(),
+      onAckReceived: vi.fn(),
+      onRequestSync: vi.fn(),
+      onTagUpdateReceived: vi.fn()
+    }
+    const service = createWebRtcService(callbacks)
+    await service.host('test-code')
+
+    const onMessage = mockMqttClient.on.mock.calls.find((c: any) => c[0] === 'message')?.[1]
+
+    // Send forbidden BUSINESS_TYPES over MQTT
+    for (const forbiddenType of ['TEAM_TAGS_UPDATE', 'REQUEST_TAGS_SYNC', 'TAGS_FULL_SYNC']) {
+      await onMessage('topic', new TextEncoder().encode(JSON.stringify({
+        type: forbiddenType,
+        sender: 'attacker',
+        tag: { id: 't1', tag: 'hack' }
+      })))
+    }
+
+    expect(callbacks.onTagUpdateReceived).not.toHaveBeenCalled()
+  })
 })

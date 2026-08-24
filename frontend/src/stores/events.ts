@@ -71,6 +71,21 @@ export const useEventStore = defineStore('events', () => {
     currentEvent.value = evt
   }
 
+  function updateFtcConfig(eventId: string, ftcYear: number, ftcEventCode: string) {
+    const target = events.value.find(e => e.id === eventId)
+    if (target) {
+      target.ftcYear = ftcYear
+      target.ftcEventCode = ftcEventCode
+    }
+    if (currentEvent.value && currentEvent.value.id === eventId) {
+      currentEvent.value = {
+        ...currentEvent.value,
+        ftcYear,
+        ftcEventCode
+      }
+    }
+  }
+
   function clearError() {
     error.value = null
   }
@@ -85,6 +100,8 @@ export const useEventStore = defineStore('events', () => {
     create,
     join,
     setCurrentEvent,
+    updateFtcConfig,
     clearError,
   }
 })
+

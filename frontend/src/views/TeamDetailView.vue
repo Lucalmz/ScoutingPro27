@@ -3,6 +3,7 @@ import { ref, computed } from 'vue'
 import { useRouter } from 'vue-router'
 import { useI18n } from 'vue-i18n'
 import { useRecordStore } from '@/stores/records'
+import TagPicker from '@/components/common/TagPicker.vue'
 import type { ScoutingRecord } from '@/types'
 
 const props = defineProps<{
@@ -66,6 +67,16 @@ async function saveComment(match: ScoutingRecord) {
     </header>
 
     <main class="content-area">
+      <!-- 战术标签卡片 -->
+      <div class="team-tags-card">
+        <h3>{{ t('tags.section_title') }}</h3>
+        <TagPicker
+          v-if="!isNaN(parseInt(teamNumber))"
+          :event-id="eventId"
+          :team-number="parseInt(teamNumber)"
+        />
+      </div>
+
       <div v-if="teamMatches.length === 0" class="empty-state">
         <p>{{ t('team_detail.no_records') }}</p>
       </div>
@@ -201,6 +212,21 @@ async function saveComment(match: ScoutingRecord) {
   width: 100%;
   margin: 0 auto;
   box-sizing: border-box;
+}
+
+.team-tags-card {
+  background: var(--card);
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  padding: 16px;
+  margin-bottom: 20px;
+}
+
+.team-tags-card h3 {
+  margin: 0 0 12px;
+  font-size: 15px;
+  font-weight: 600;
+  color: var(--foreground);
 }
 
 .empty-state {

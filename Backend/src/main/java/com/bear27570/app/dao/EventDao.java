@@ -35,5 +35,8 @@ public interface EventDao {
 
     @SqlQuery("SELECT COUNT(*) > 0 FROM events WHERE id = :eventId AND host_id = :userId")
     boolean isHost(@Bind("eventId") String eventId, @Bind("userId") String userId);
+
+    @SqlUpdate("DELETE FROM events WHERE id = :id")
+    void delete(@Bind("id") String id);
 }
 

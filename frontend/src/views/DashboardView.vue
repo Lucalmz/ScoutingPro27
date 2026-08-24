@@ -112,20 +112,8 @@ function onCardMouseMove(e: MouseEvent) {
   const x = e.clientX - rect.left
   const y = e.clientY - rect.top
   
-  const centerX = rect.width / 2
-  const centerY = rect.height / 2
-  
-  const rotateX = ((y - centerY) / centerY) * -6
-  const rotateY = ((x - centerX) / centerX) * 6
-  
-  card.style.transition = 'none' // Remove transition for instant mouse tracking
-  card.style.transform = `perspective(1000px) rotateX(${rotateX}deg) rotateY(${rotateY}deg) scale3d(1.02, 1.02, 1.02)`
-}
-
-function onCardMouseLeave(e: MouseEvent) {
-  const card = e.currentTarget as HTMLElement
-  card.style.transition = 'transform 0.4s cubic-bezier(0.25, 1, 0.5, 1)'
-  card.style.transform = 'perspective(1000px) rotateX(0deg) rotateY(0deg) scale3d(1, 1, 1)'
+  card.style.setProperty('--mouse-x', `${x}px`)
+  card.style.setProperty('--mouse-y', `${y}px`)
 }
 </script>
 
@@ -178,13 +166,15 @@ function onCardMouseLeave(e: MouseEvent) {
           :class="{ 'slide-out-right': enteringEventId === evt.id }"
           @click="enterEvent(evt)"
           @mousemove="onCardMouseMove"
-          @mouseleave="onCardMouseLeave"
         >
           <div class="event-info">
             <span class="event-name" :style="{ viewTransitionName: transitionState.sharedElementId === `event-card-${evt.id}` ? 'event-card-title' : 'none' }">{{ evt.name }}</span>
             <span class="event-meta">
               {{ t('event.code') }}: <strong>{{ evt.inviteCode }}</strong>
               - {{ evt.hostId === userStore.userId ? t('event.host') : t('event.client') }}
+              <span v-if="evt.ftcEventCode" style="margin-left: 8px; color: var(--primary); font-weight: 500;">
+                • FTC: {{ evt.ftcEventCode }}
+              </span>
             </span>
           </div>
           <span class="event-arrow material-icons" style="font-size: 20px;">arrow_forward</span>
@@ -334,6 +324,7 @@ h2 {
 }
 
 .event-card {
+  position: relative;
   display: flex;
   align-items: center;
   justify-content: space-between;
@@ -342,16 +333,42 @@ h2 {
   border-radius: 12px;
   padding: 16px 20px;
   cursor: pointer;
-  transition: border-color 0.2s, transform 0.4s cubic-bezier(0.4, 0, 0.2, 1), opacity 0.4s;
+  transition: border-color 0.25s ease, transform 0.4s cubic-bezier(0.4, 0, 0.2, 1), opacity 0.4s;
+}
+
+.event-card:hover {
+  border-color: rgba(57, 255, 20, 0.4);
+}
+
+.event-card::before {
+  content: '';
+  position: absolute;
+  inset: -1px;
+  border-radius: 12px;
+  padding: 1px;
+  background: radial-gradient(
+    160px circle at var(--mouse-x, -999px) var(--mouse-y, -999px),
+    #ffffff 0%,
+    rgba(255, 255, 255, 0.7) 20%,
+    rgba(57, 255, 20, 0.5) 50%,
+    transparent 80%
+  );
+  -webkit-mask: linear-gradient(#fff 0 0) content-box, linear-gradient(#fff 0 0);
+  -webkit-mask-composite: xor;
+  mask: linear-gradient(#fff 0 0) content-box, linear-gradient(#fff 0 0);
+  mask-composite: exclude;
+  pointer-events: none;
+  opacity: 0;
+  transition: opacity 0.3s ease;
+}
+
+.event-card:hover::before {
+  opacity: 1;
 }
 
 .event-card.slide-out-right {
   transform: translateX(150px);
   opacity: 0;
-}
-
-.event-card:hover {
-  border-color: var(--primary);
 }
 
 .event-info {

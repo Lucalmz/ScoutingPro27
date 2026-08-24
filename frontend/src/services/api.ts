@@ -8,6 +8,7 @@ import type {
   ScoutingRecord,
   LoginRequest,
   CreateEventResponse,
+  OfficialMatch,
 } from '@/types'
 
 const BASE = '/api'
@@ -150,3 +151,42 @@ export function getPendingRecords(eventId: string): Promise<ScoutingRecord[]> {
 export function markRecordsSynced(ids: string[]): Promise<void> {
   return request<void>('POST', '/records/mark-synced', ids)
 }
+
+// --- FTC Official API Proxy ---
+export function fetchFtcMatches(season: number, eventCode: string, tournamentLevel?: string): Promise<OfficialMatch[]> {
+  const query = tournamentLevel ? `?tournamentLevel=${encodeURIComponent(tournamentLevel)}` : ''
+  return request<OfficialMatch[]>('GET', `/ftc/${season}/matches/${encodeURIComponent(eventCode)}${query}`)
+}
+
+export function fetchFtcScores(season: number, eventCode: string, tournamentLevel?: string): Promise<any> {
+  const query = tournamentLevel ? `?tournamentLevel=${encodeURIComponent(tournamentLevel)}` : ''
+  return request<any>('GET', `/ftc/${season}/scores/${encodeURIComponent(eventCode)}${query}`)
+}
+
+// --- Custom Team Tags ---
+export function fetchEventTags(eventId: string): Promise<import('@/types').TeamTagItem[]> {
+  return request<import('@/types').TeamTagItem[]>('GET', `/events/${encodeURIComponent(eventId)}/tags`)
+}
+
+export function addTeamTag(
+  eventId: string,
+  teamNumber: number,
+  tag: string,
+  color?: string,
+  isPreset?: boolean
+): Promise<import('@/types').TeamTagItem> {
+  return request<import('@/types').TeamTagItem>(
+    'POST',
+    `/events/${encodeURIComponent(eventId)}/teams/${teamNumber}/tags`,
+    { tag, color, isPreset }
+  )
+}
+
+export function deleteTeamTag(eventId: string, teamNumber: number, tag: string): Promise<void> {
+  return request<void>(
+    'DELETE',
+    `/events/${encodeURIComponent(eventId)}/teams/${teamNumber}/tags/${encodeURIComponent(tag)}`
+  )
+}
+
+

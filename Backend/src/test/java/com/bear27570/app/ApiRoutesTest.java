@@ -371,4 +371,150 @@ class ApiRoutesTest {
             });
         });
     }
+
+    @Test
+    void testAiChatStreamEndpointValidation() {
+        JavalinTest.test(app, (server, client) -> {
+            // 1. Unauthenticated request -> 401
+            var unauthRes = client.post("/api/ai/chat/stream", "{\"provider\":\"OPENAI\"}");
+            assertThat(unauthRes.code()).isEqualTo(401);
+
+            // Register user and login
+            client.post("/api/user/register", "{\"username\":\"aichatuser\", \"password\":\"secret\"}");
+            var loginRes = client.post("/api/user/login", "{\"username\":\"aichatuser\", \"password\":\"secret\"}");
+            String token = loginRes.body().string().split("\"token\":\"")[1].split("\"")[0];
+
+            // 2. Missing provider -> 400
+            var missingProviderRes = client.post("/api/ai/chat/stream", "{}", b -> b.header("Authorization", "Bearer " + token));
+            assertThat(missingProviderRes.code()).isEqualTo(400);
+            assertThat(missingProviderRes.body().string()).contains("Missing provider");
+
+            // 3. Settings not configured -> 400
+            var notConfiguredRes = client.post("/api/ai/chat/stream", "{\"provider\":\"OPENAI\",\"messages\":[]}", b -> b.header("Authorization", "Bearer " + token));
+            assertThat(notConfiguredRes.code()).isEqualTo(400);
+            assertThat(notConfiguredRes.body().string()).contains("AI Settings not configured");
+        });
+    }
+
+    @Test
+    void testFtcMatchesProxyEndpoint() {
+        JavalinTest.test(app, (server, client) -> {
+            // 1. Unauthenticated request -> 401
+            var unauthRes = client.get("/api/ftc/2025/matches/TEST_CODE");
+            assertThat(unauthRes.code()).isEqualTo(401);
+
+            // Register user and login
+            client.post("/api/user/register", "{\"username\":\"ftcuser\", \"password\":\"secret\"}");
+            var loginRes = client.post("/api/user/login", "{\"username\":\"ftcuser\", \"password\":\"secret\"}");
+            String token = loginRes.body().string().split("\"token\":\"")[1].split("\"")[0];
+
+            // 2. Invalid season format -> 400
+            var badSeasonRes = client.get("/api/ftc/abc/matches/TEST_CODE", b -> b.header("Authorization", "Bearer " + token));
+            assertThat(badSeasonRes.code()).isEqualTo(400);
+
+            // 3. Valid authenticated request -> 200 (returns array)
+            var validRes = client.get("/api/ftc/2025/matches/TEST_NOT_FOUND", b -> b.header("Authorization", "Bearer " + token));
+            assertThat(validRes.code()).isEqualTo(200);
+            assertThat(validRes.body().string()).isEqualTo("[]");
+        });
+    }
+
+    @Test
+    void testTeamTagEndpoints() {
+        JavalinTest.test(app, (server, client) -> {
+            // 1. Setup host and event
+            client.post("/api/user/register", "{\"username\":\"taghost\", \"password\":\"secret\"}");
+            var hostLoginRes = client.post("/api/user/login", "{\"username\":\"taghost\", \"password\":\"secret\"}");
+            String hostToken = hostLoginRes.body().string().split("\"token\":\"")[1].split("\"")[0];
+
+            var eventRes = client.post("/api/events", "{\"name\":\"Tag Event\"}", b -> b.header("Authorization", "Bearer " + hostToken));
+            String eventId = eventRes.body().string().split("\"id\":\"")[1].split("\"")[0];
+
+            // 2. Setup second user (scout)
+            client.post("/api/user/register", "{\"username\":\"tagscout\", \"password\":\"secret\"}");
+            var scoutLoginRes = client.post("/api/user/login", "{\"username\":\"tagscout\", \"password\":\"secret\"}");
+            String scoutToken = scoutLoginRes.body().string().split("\"token\":\"")[1].split("\"")[0];
+
+            // 3. Add preset tag (by scout)
+            var addPresetRes = client.post(
+                "/api/events/" + eventId + "/teams/27570/tags",
+                "{\"tag\":\"preset.dual_motor_hang\", \"color\":\"green\", \"isPreset\":true}",
+                b -> b.header("Authorization", "Bearer " + scoutToken)
+            );
+            assertThat(addPresetRes.code()).isEqualTo(200);
+            assertThat(addPresetRes.body().string()).contains("preset.dual_motor_hang");
+
+            // 4. Add custom tag with normalization (trim + lowercase) (V26)
+            var addCustomRes = client.post(
+                "/api/events/" + eventId + "/teams/27570/tags",
+                "{\"tag\":\"  Fast_Intake  \", \"color\":\"orange\"}",
+                b -> b.header("Authorization", "Bearer " + scoutToken)
+            );
+            assertThat(addCustomRes.code()).isEqualTo(200);
+            assertThat(addCustomRes.body().string()).contains("fast_intake");
+
+            // 5. Validation: Custom tag containing '.' is rejected (V27)
+            var dotCustomRes = client.post(
+                "/api/events/" + eventId + "/teams/27570/tags",
+                "{\"tag\":\"invalid.tag.name\", \"color\":\"red\"}",
+                b -> b.header("Authorization", "Bearer " + scoutToken)
+            );
+            assertThat(dotCustomRes.code()).isEqualTo(400);
+
+            // 6. Validation: Tag > 30 chars is rejected (V15)
+            var longTagRes = client.post(
+                "/api/events/" + eventId + "/teams/27570/tags",
+                "{\"tag\":\"" + "a".repeat(35) + "\"}",
+                b -> b.header("Authorization", "Bearer " + scoutToken)
+            );
+            assertThat(longTagRes.code()).isEqualTo(400);
+
+            // 7. Get all tags for event
+            var getTagsRes = client.get("/api/events/" + eventId + "/tags", b -> b.header("Authorization", "Bearer " + scoutToken));
+            assertThat(getTagsRes.code()).isEqualTo(200);
+            assertThat(getTagsRes.body().string()).contains("preset.dual_motor_hang");
+            assertThat(getTagsRes.body().string()).contains("fast_intake");
+
+            // 8. Setup third user (unauthorized third-party scout)
+            client.post("/api/user/register", "{\"username\":\"other_scout\", \"password\":\"secret\"}");
+            var otherLoginRes = client.post("/api/user/login", "{\"username\":\"other_scout\", \"password\":\"secret\"}");
+            String otherToken = otherLoginRes.body().string().split("\"token\":\"")[1].split("\"")[0];
+
+            // 9. Unauthorized delete returns 403 (V30)
+            var unauthDeleteRes = client.delete(
+                "/api/events/" + eventId + "/teams/27570/tags/fast_intake",
+                null,
+                b -> b.header("Authorization", "Bearer " + otherToken)
+            );
+            assertThat(unauthDeleteRes.code()).isEqualTo(403);
+
+            // 10. Creator delete succeeds (V30)
+            var creatorDeleteRes = client.delete(
+                "/api/events/" + eventId + "/teams/27570/tags/fast_intake",
+                null,
+                b -> b.header("Authorization", "Bearer " + scoutToken)
+            );
+            assertThat(creatorDeleteRes.code()).isEqualTo(200);
+
+            // 11. Idempotent delete (deleting non-existent tag returns 200) (V23)
+            var idempotentDeleteRes = client.delete(
+                "/api/events/" + eventId + "/teams/27570/tags/non_existent_tag",
+                null,
+                b -> b.header("Authorization", "Bearer " + scoutToken)
+            );
+            assertThat(idempotentDeleteRes.code()).isEqualTo(200);
+
+            // 12. Host delete succeeds even if created by scout (V30)
+            var hostDeleteRes = client.delete(
+                "/api/events/" + eventId + "/teams/27570/tags/preset.dual_motor_hang",
+                null,
+                b -> b.header("Authorization", "Bearer " + hostToken)
+            );
+            assertThat(hostDeleteRes.code()).isEqualTo(200);
+
+            // 13. Verify all deleted
+            var finalTagsRes = client.get("/api/events/" + eventId + "/tags", b -> b.header("Authorization", "Bearer " + hostToken));
+            assertThat(finalTagsRes.body().string()).isEqualTo("[]");
+        });
+    }
 }

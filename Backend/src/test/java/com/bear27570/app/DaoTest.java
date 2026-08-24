@@ -285,4 +285,75 @@ class DaoTest {
             assertThat(dao.findById("old_deleted")).isNull(); // Purged!
         });
     }
+
+    @Test
+    void testTeamTagDao() {
+        // Setup User and Event
+        jdbi.useExtension(UserDao.class, dao -> {
+            User host = new User("host1", "hostuser");
+            host.setPassword("pass");
+            dao.upsert(host);
+        });
+
+        jdbi.useExtension(EventDao.class, dao -> {
+            ScoutingEvent e = new ScoutingEvent();
+            e.setId("e1");
+            e.setName("Test Event");
+            e.setInviteCode("ABC123");
+            e.setHostId("host1");
+            dao.insert(e);
+        });
+
+        jdbi.useExtension(com.bear27570.app.dao.TeamTagDao.class, dao -> {
+            // 1. Insert tags
+            com.bear27570.app.model.TeamTag t1 = new com.bear27570.app.model.TeamTag(
+                "tag1", "e1", 27570, "preset.dual_motor_hang", "green", true, "host1"
+            );
+            com.bear27570.app.model.TeamTag t2 = new com.bear27570.app.model.TeamTag(
+                "tag2", "e1", 27570, "fast_intake", "blue", false, "host1"
+            );
+            com.bear27570.app.model.TeamTag t3 = new com.bear27570.app.model.TeamTag(
+                "tag3", "e1", 19600, "tippy", "red", false, "host1"
+            );
+
+            dao.upsert(t1);
+            dao.upsert(t2);
+            dao.upsert(t3);
+
+            // 2. Query
+            List<com.bear27570.app.model.TeamTag> eventTags = dao.findByEvent("e1");
+            assertThat(eventTags).hasSize(3);
+
+            List<com.bear27570.app.model.TeamTag> teamTags = dao.findByEventAndTeam("e1", 27570);
+            assertThat(teamTags).hasSize(2);
+
+            assertThat(dao.countByEventAndTeam("e1", 27570)).isEqualTo(2);
+
+            com.bear27570.app.model.TeamTag specific = dao.findSpecific("e1", 27570, "preset.dual_motor_hang");
+            assertThat(specific).isNotNull();
+            assertThat(specific.isPreset()).isTrue();
+            assertThat(specific.getColor()).isEqualTo("green");
+
+            // 3. Idempotent upsert (update color)
+            com.bear27570.app.model.TeamTag t1Updated = new com.bear27570.app.model.TeamTag(
+                "tag1_new_id", "e1", 27570, "preset.dual_motor_hang", "purple", true, "host1"
+            );
+            dao.upsert(t1Updated);
+            assertThat(dao.countByEventAndTeam("e1", 27570)).isEqualTo(2);
+            assertThat(dao.findSpecific("e1", 27570, "preset.dual_motor_hang").getColor()).isEqualTo("purple");
+
+            // 4. Delete
+            dao.delete("e1", 27570, "fast_intake");
+            assertThat(dao.findByEventAndTeam("e1", 27570)).hasSize(1);
+        });
+
+        // 5. Cascade delete on event deletion (V28)
+        jdbi.useExtension(EventDao.class, dao -> {
+            dao.delete("e1");
+        });
+
+        jdbi.useExtension(com.bear27570.app.dao.TeamTagDao.class, dao -> {
+            assertThat(dao.findByEvent("e1")).isEmpty();
+        });
+    }
 }

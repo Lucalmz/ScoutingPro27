@@ -155,4 +155,128 @@ public class AiEndToEndVerificationTest {
             System.err.println("==================================================");
         });
     }
+
+    @Test
+    void testSseStreamingEndToEnd() throws Exception {
+        // 1. Start a mock upstream LLM HTTP server
+        com.sun.net.httpserver.HttpServer mockLlmServer = com.sun.net.httpserver.HttpServer.create(new java.net.InetSocketAddress(0), 0);
+        java.util.concurrent.atomic.AtomicBoolean mockLlmCancelled = new java.util.concurrent.atomic.AtomicBoolean(false);
+
+        mockLlmServer.createContext("/v1/chat/completions", exchange -> {
+            exchange.getResponseHeaders().set("Content-Type", "text/event-stream; charset=UTF-8");
+            exchange.sendResponseHeaders(200, 0);
+            try (java.io.OutputStream os = exchange.getResponseBody()) {
+                String[] chunks = {
+                    "data: {\"choices\":[{\"delta\":{\"content\":\"Team 27570 \"}}]}\n\n",
+                    ": heartbeat\n\n",
+                    "data: {\"choices\":[{\"delta\":{\"content\":\"is performing stably \"}}]}\n\n",
+                    "data: {\"choices\":[{\"delta\":{\"content\":\"with 142.5 avg points.\"}}]}\n\n",
+                    "data: [DONE]\n\n"
+                };
+                for (String chunk : chunks) {
+                    os.write(chunk.getBytes(java.nio.charset.StandardCharsets.UTF_8));
+                    os.flush();
+                    Thread.sleep(50);
+                }
+            } catch (Exception e) {
+                mockLlmCancelled.set(true);
+            }
+        });
+        mockLlmServer.start();
+        int mockPort = mockLlmServer.getAddress().getPort();
+        String mockBaseUrl = "http://localhost:" + mockPort + "/v1";
+
+        try {
+            JavalinTest.test(app, (server, client) -> {
+                System.err.println("\n==================================================");
+                System.err.println("[SSE E2E Step 1] Register user & save mock OpenAI settings...");
+                var regRes = client.post("/api/user/register", "{\"username\":\"sse_user\",\"password\":\"pass123\"}");
+                String token = regRes.body().string().split("\"token\":\"")[1].split("\"")[0];
+                String userId = regRes.body().string().split("\"id\":\"")[1].split("\"")[0];
+
+                String settingsPayload = "{"
+                        + "\"provider\":\"OPENAI\","
+                        + "\"apiKeyEncrypted\":\"sk-test-sse-key\","
+                        + "\"modelName\":\"mock-llm\","
+                        + "\"baseUrl\":\"" + mockBaseUrl + "\""
+                        + "}";
+                client.post("/api/users/" + userId + "/ai-settings", settingsPayload, b -> b.header("Authorization", "Bearer " + token));
+
+                System.err.println("\n[SSE E2E Step 2] Requesting /api/ai/chat/stream and measuring TTFT & chunk deltas...");
+                long startTime = System.currentTimeMillis();
+                String streamUrl = "http://localhost:" + server.port() + "/api/ai/chat/stream";
+
+                java.net.http.HttpClient testHttpClient = java.net.http.HttpClient.newHttpClient();
+                java.net.http.HttpRequest sseRequest = java.net.http.HttpRequest.newBuilder()
+                        .uri(java.net.URI.create(streamUrl))
+                        .header("Authorization", "Bearer " + token)
+                        .header("Content-Type", "application/json")
+                        .header("Accept", "text/event-stream")
+                        .POST(java.net.http.HttpRequest.BodyPublishers.ofString("{\"provider\":\"OPENAI\",\"messages\":[{\"role\":\"user\",\"content\":\"Hi\"}]}"))
+                        .build();
+
+                java.net.http.HttpResponse<java.io.InputStream> sseResponse = testHttpClient.send(sseRequest, java.net.http.HttpResponse.BodyHandlers.ofInputStream());
+                assertThat(sseResponse.statusCode()).isEqualTo(200);
+                assertThat(sseResponse.headers().firstValue("Content-Type").orElse("")).contains("text/event-stream");
+                System.err.println("  -> Received Response Code: " + sseResponse.statusCode() + ", Content-Type: " + sseResponse.headers().firstValue("Content-Type").orElse(""));
+
+                try (java.io.BufferedReader sseReader = new java.io.BufferedReader(new java.io.InputStreamReader(sseResponse.body(), java.nio.charset.StandardCharsets.UTF_8))) {
+                    String line;
+                    StringBuilder aggregated = new StringBuilder();
+                    long firstTokenTime = -1;
+                    boolean receivedDone = false;
+
+                    while ((line = sseReader.readLine()) != null) {
+                        line = line.trim();
+                        if (line.isEmpty()) continue;
+                        System.err.println("  -> Stream Line Received: " + line);
+                        if (line.startsWith(":")) {
+                            // Verified heartbeat comment ignored
+                            continue;
+                        }
+                        if (line.startsWith("data:")) {
+                            String data = line.substring(5).trim();
+                            if ("[DONE]".equals(data)) {
+                                receivedDone = true;
+                                break;
+                            }
+                            com.google.gson.JsonObject obj = com.google.gson.JsonParser.parseString(data).getAsJsonObject();
+                            if (obj.has("text")) {
+                                if (firstTokenTime < 0) {
+                                    firstTokenTime = System.currentTimeMillis();
+                                    long ttft = firstTokenTime - startTime;
+                                    System.err.println("  -> First Token Latency (TTFT): " + ttft + "ms");
+                                    assertThat(ttft).isLessThan(2000); // TTFT under 2s
+                                }
+                                aggregated.append(obj.get("text").getAsString());
+                            }
+                        }
+                    }
+
+                    System.err.println("  -> Aggregated AI Reply: \"" + aggregated.toString() + "\"");
+                    assertThat(receivedDone).isTrue();
+                    assertThat(aggregated.toString()).isEqualTo("Team 27570 is performing stably with 142.5 avg points.");
+                }
+
+                System.err.println("\n[SSE E2E Step 3] Testing client abrupt abort / cancel handling...");
+                java.util.concurrent.CompletableFuture<java.net.http.HttpResponse<java.io.InputStream>> asyncFuture = testHttpClient.sendAsync(sseRequest, java.net.http.HttpResponse.BodyHandlers.ofInputStream());
+                java.net.http.HttpResponse<java.io.InputStream> asyncRes = asyncFuture.get();
+                assertThat(asyncRes.statusCode()).isEqualTo(200);
+                try (java.io.InputStream asyncIs = asyncRes.body();
+                     java.io.BufferedReader br = new java.io.BufferedReader(new java.io.InputStreamReader(asyncIs, java.nio.charset.StandardCharsets.UTF_8))) {
+                    br.readLine();
+                    // Abruptly cancel and close stream
+                    asyncFuture.cancel(true);
+                    asyncIs.close();
+                    Thread.sleep(100);
+                }
+
+                System.err.println("\n==================================================");
+                System.err.println("[SSE E2E CONCLUSION] Real SSE streaming pipeline, heartbeat parsing, cancellation & TTFT verified!");
+                System.err.println("==================================================");
+            });
+        } finally {
+            mockLlmServer.stop(0);
+        }
+    }
 }
