@@ -6,6 +6,9 @@ on:
       - 'v*'
   workflow_dispatch:
 
+permissions:
+  contents: write
+
 jobs:
   build:
     strategy:
@@ -36,19 +39,12 @@ jobs:
         with:
           node-version: 20
 
-      # ---------- 前端 ----------
+      # ---------- 前端构建 (vite 会直接输出到 Backend/src/main/resources/public) ----------
       - name: Build frontend
         working-directory: frontend
         run: |
           npm ci
           npm run build
-
-      - name: Copy frontend build into backend resources
-        shell: bash
-        run: |
-          rm -rf Backend/src/main/resources/public
-          mkdir -p Backend/src/main/resources/public
-          cp -r frontend/dist/* Backend/src/main/resources/public/
 
       # ---------- 第一次打包：只为了拿到能跑的 jar 去预热 JCEF ----------
       - name: Build fat jar (pass 1, for prewarm)
@@ -69,6 +65,19 @@ jobs:
         working-directory: Backend
         run: mvn -B clean package -DskipTests
 
+      # ---------- 提取应用版本号 (如 v0.0.1 -> 0.0.1) ----------
+      - name: Determine App Version
+        shell: bash
+        run: |
+          if [[ "${{ github.ref }}" == refs/tags/v* ]]; then
+            RAW_VER="${GITHUB_REF_NAME#v}"
+            # 保证 jpackage 接收符合规范的数字版本号
+            CLEAN_VER=$(echo "$RAW_VER" | grep -oE '^[0-9]+(\.[0-9]+)*' || echo "0.0.1")
+            echo "APP_VERSION=$CLEAN_VER" >> $GITHUB_ENV
+          else
+            echo "APP_VERSION=0.0.1" >> $GITHUB_ENV
+          fi
+
       # ---------- jpackage ----------
       - name: Run jpackage
         working-directory: Backend
@@ -76,13 +85,47 @@ jobs:
           jpackage
           --type ${{ matrix.jpackage-type }}
           --name ScoutingPro27
-          --app-version 1.0.0
+          --app-version ${{ env.APP_VERSION }}
           --input target
           --main-jar ScoutingPro27.jar
           --main-class com.bear27570.app.Main
           --dest dist
 
+      # ---------- 重命名安装包以包含平台架构标识，防止 Mac 产物重名覆盖 ----------
+      - name: Rename installer with platform name
+        shell: bash
+        working-directory: Backend/dist
+        run: |
+          for f in *; do
+            if [ -f "$f" ]; then
+              ext="${f##*.}"
+              base="${f%.*}"
+              mv "$f" "${base}-${{ matrix.os-name }}.${ext}"
+            fi
+          done
+
       - uses: actions/upload-artifact@v4
         with:
           name: installer-${{ matrix.os-name }}
           path: Backend/dist/*
+
+  # ---------- 自动发布并挂载产物到 GitHub Release (Pre-release) ----------
+  release:
+    needs: build
+    if: startsWith(github.ref, 'refs/tags/v')
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - name: Download all build artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+          merge-multiple: true
+
+      - name: Create Release and Upload Assets
+        uses: softprops/action-gh-release@v2
+        with:
+          files: artifacts/*
+          generate_release_notes: true
+          prerelease: true
