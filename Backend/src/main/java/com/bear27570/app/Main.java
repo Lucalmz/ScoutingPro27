@@ -20,6 +20,7 @@ import java.io.File;
 import java.io.FileOutputStream;
 import java.io.IOException;
 import java.io.InputStream;
+import java.nio.file.Files;
 
 public class Main {
     private static final String JCEF_BUNDLE_RESOURCE = "/jcef-bundle.zip";
@@ -101,11 +102,26 @@ public class Main {
             // ==========================================
             // 数据库配置 + 迁移
             // ==========================================
-            if (splash != null) splash.updateProgress(10, "Preparing database...");
-            String dbUrl = "jdbc:h2:./app_data;AUTO_SERVER=TRUE";
+            File appDataDir = new File(System.getProperty("user.home"), ".scoutingpro27");
+            if (!appDataDir.exists()) {
+                appDataDir.mkdirs();
+            }
+            File legacyDb = new File("app_data.mv.db");
+            File targetDb = new File(appDataDir, "app_data.mv.db");
+            if (legacyDb.exists() && !targetDb.exists()) {
+                try {
+                    Files.copy(legacyDb.toPath(), targetDb.toPath());
+                    System.out.println("已自动将本地数据库迁移至用户主目录: " + targetDb.getAbsolutePath());
+                } catch (Exception e) {
+                    System.err.println("自动迁移本地数据库失败: " + e.getMessage());
+                }
+            }
+            File dbFile = new File(appDataDir, "app_data");
+            String dbUrl = System.getenv("DB_URL") != null ? System.getenv("DB_URL") : ("jdbc:h2:" + dbFile.getAbsolutePath().replace('\\', '/') + ";AUTO_SERVER=TRUE");
             String dbUser = "sa";
             String dbPassword = "";
 
+            if (splash != null) splash.updateProgress(10, "Preparing database...");
             System.out.println("执行数据库迁移...");
             Flyway flyway = Flyway.configure()
                     .dataSource(dbUrl, dbUser, dbPassword)

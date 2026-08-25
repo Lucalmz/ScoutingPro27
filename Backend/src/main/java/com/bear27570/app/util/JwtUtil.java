@@ -15,7 +15,7 @@ import java.util.Base64;
 import java.util.Date;
 
 public class JwtUtil {
-    private static final String SECRET_FILE_PATH = "./app_data/jwt.secret";
+    private static final String SECRET_FILE_PATH = System.getProperty("user.home") + File.separator + ".scoutingpro27" + File.separator + "jwt.secret";
     private static final long EXPIRATION_TIME_MS = 7L * 24 * 3600 * 1000; // 7 days
     private static Algorithm ALGORITHM;
 

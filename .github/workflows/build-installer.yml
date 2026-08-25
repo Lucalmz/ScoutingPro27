@@ -78,29 +78,60 @@ jobs:
             echo "APP_VERSION=0.0.1" >> $GITHUB_ENV
           fi
 
-      # ---------- jpackage ----------
-      - name: Run jpackage
+      # ---------- 准备纯净的打包输入目录（避免 target 内的非 jar 文件导致打包异常） ----------
+      - name: Prepare JPackage Input
+        shell: bash
+        working-directory: Backend
+        run: |
+          rm -rf dist-input
+          mkdir -p dist-input
+          cp target/ScoutingPro27.jar dist-input/
+
+      # ---------- jpackage (Windows: 添加快捷方式、开始菜单和安装目录选择向导) ----------
+      - name: Run jpackage (Windows)
+        if: runner.os == 'Windows'
         working-directory: Backend
         run: >
           jpackage
           --type ${{ matrix.jpackage-type }}
           --name ScoutingPro27
           --app-version ${{ env.APP_VERSION }}
-          --input target
+          --input dist-input
           --main-jar ScoutingPro27.jar
           --main-class com.bear27570.app.Main
           --dest dist
+          --win-dir-chooser
+          --win-shortcut
+          --win-menu
+          --win-menu-group ScoutingPro27
 
-      # ---------- 重命名安装包以包含平台架构标识，防止 Mac 产物重名覆盖 ----------
-      - name: Rename installer with platform name
+      # ---------- jpackage (macOS: 添加包标识) ----------
+      - name: Run jpackage (macOS)
+        if: runner.os == 'macOS'
+        working-directory: Backend
+        run: >
+          jpackage
+          --type ${{ matrix.jpackage-type }}
+          --name ScoutingPro27
+          --app-version ${{ env.APP_VERSION }}
+          --input dist-input
+          --main-jar ScoutingPro27.jar
+          --main-class com.bear27570.app.Main
+          --dest dist
+          --mac-package-identifier com.bear27570.app
+          --mac-package-name ScoutingPro27
+
+      # ---------- 重命名安装包为 ScoutingPro27-[OS]-[version] 形式 ----------
+      - name: Rename installer to ScoutingPro27-[OS]-[version]
         shell: bash
         working-directory: Backend/dist
         run: |
           for f in *; do
             if [ -f "$f" ]; then
               ext="${f##*.}"
-              base="${f%.*}"
-              mv "$f" "${base}-${{ matrix.os-name }}.${ext}"
+              target_name="ScoutingPro27-${{ matrix.os-name }}-${{ env.APP_VERSION }}.${ext}"
+              echo "Renaming $f -> $target_name"
+              mv "$f" "$target_name"
             fi
           done
 
