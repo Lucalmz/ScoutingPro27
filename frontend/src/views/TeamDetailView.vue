@@ -1,9 +1,13 @@
 <script setup lang="ts">
-import { ref, computed } from 'vue'
-import { useRouter } from 'vue-router'
+import { ref, computed, onMounted, onUnmounted } from 'vue'
+import { useRouter, onBeforeRouteLeave } from 'vue-router'
 import { useI18n } from 'vue-i18n'
 import { useRecordStore } from '@/stores/records'
+import { useConnectionStore } from '@/stores/connection'
 import TagPicker from '@/components/common/TagPicker.vue'
+import ConnectionStatus from '@/components/common/ConnectionStatus.vue'
+import { usePitScoutStore } from '@/stores/pitScout'
+import PitScoutFormDrawer from '@/components/pit/PitScoutFormDrawer.vue'
 import type { ScoutingRecord } from '@/types'
 
 const props = defineProps<{
@@ -14,9 +18,24 @@ const props = defineProps<{
 const router = useRouter()
 const { t } = useI18n()
 const recordStore = useRecordStore()
+const pitStore = usePitScoutStore()
+const isPitDrawerOpen = ref(false)
+
+const teamNumVal = computed(() => parseInt(props.teamNumber))
+const unifiedTeam = computed(() => isNaN(teamNumVal.value) ? undefined : pitStore.getUnifiedTeam(teamNumVal.value))
+
+const detailBragLabel = computed(() => {
+  const b = unifiedTeam.value?.bragInfo
+  if (!b) return '-'
+  const tierText = t(`pit_scout.brag_tiers.${b.tier}`) || b.label
+  let str = `${b.overallRatio}x ${tierText}`
+  if (b.hangVerified) str += ` (${t('pit_scout.hang_verified')})`
+  else if (b.hangPardoned) str += ` (${t('pit_scout.hang_pardoned')})`
+  return str
+})
 
 const teamMatches = computed<ScoutingRecord[]>(() => {
-  return recordStore.records
+  return recordStore.activeRecords
     .filter(r => r.teamNumber === parseInt(props.teamNumber))
     .sort((a, b) => a.matchNumber - b.matchNumber)
 })
@@ -34,6 +53,35 @@ function cancelEditComment() {
   editingMatchId.value = null
   editCommentText.value = ''
 }
+
+function handleBack() {
+  router.push(`/event/${props.eventId}`)
+}
+
+function onGlobalKeyDown(e: KeyboardEvent) {
+  if (e.key === 'Escape') {
+    handleBack()
+  }
+}
+
+onMounted(() => {
+  window.addEventListener('keydown', onGlobalKeyDown)
+})
+
+onUnmounted(() => {
+  window.removeEventListener('keydown', onGlobalKeyDown)
+})
+
+onBeforeRouteLeave((to) => {
+  // 仅在完全离开赛事页面时（如返回主面板、登出或跨赛事切换）切断长连接
+  if ((to.name !== 'event' && to.name !== 'team-detail') || to.params.eventId !== props.eventId) {
+    const connStore = useConnectionStore()
+    connStore.rtcService?.disconnect()
+    connStore.setRtcService(null)
+    connStore.clearConnectedScouts()
+    connStore.setStatus('offline')
+  }
+})
 
 async function saveComment(match: ScoutingRecord) {
   isSaving.value = true
@@ -55,18 +103,26 @@ async function saveComment(match: ScoutingRecord) {
 </script>
 
 <template>
-  <div class="team-detail-view">
-    <header class="app-header">
-      <button class="btn-back" @click="router.back()">
-        <span class="material-icons">arrow_back</span>
-        {{ t('team_detail.back') }}
-      </button>
-      <div class="header-title">
-        <h1>{{ t('team_detail.title', { team: teamNumber }) }}</h1>
-      </div>
-    </header>
+  <div class="team-detail-backdrop" @click.self="handleBack">
+    <div class="team-detail-view">
+      <div class="sheet-drag-handle" @click="handleBack" :title="t('team_drawer.close')"></div>
+      <header class="app-header">
+        <button class="btn-back" @click="handleBack">
+          <span class="material-icons">arrow_back</span>
+          {{ t('team_detail.back') }}
+        </button>
+        <div class="header-title">
+          <h1>{{ t('team_detail.title', { team: teamNumber }) }}</h1>
+        </div>
+        <div class="header-right">
+          <ConnectionStatus />
+          <button class="btn-close" @click="handleBack" :title="t('team_drawer.close')">
+            <span class="material-icons">close</span>
+          </button>
+        </div>
+      </header>
 
-    <main class="content-area">
+      <main class="content-area">
       <!-- 战术标签卡片 -->
       <div class="team-tags-card">
         <h3>{{ t('tags.section_title') }}</h3>
@@ -75,6 +131,57 @@ async function saveComment(match: ScoutingRecord) {
           :event-id="eventId"
           :team-number="parseInt(teamNumber)"
         />
+      </div>
+
+      <!-- 展位侦察档案与吹牛指数对账卡片 -->
+      <div class="team-tags-card pit-profile-card">
+        <div style="display: flex; align-items: center; justify-content: space-between; margin-bottom: 12px;">
+          <h3 style="margin: 0; display: flex; align-items: center; gap: 6px;">
+            <span class="material-icons" style="font-size: 18px; color: var(--primary, #39ff14);">precision_manufacturing</span>
+            {{ t('pit_scout.detail_card.title') }}
+          </h3>
+          <button
+            type="button"
+            class="user-tag-btn"
+            style="font-size: 12px; padding: 4px 12px;"
+            @click="isPitDrawerOpen = true"
+          >
+            {{ unifiedTeam?.hasPitRecord ? t('pit_scout.detail_card.btn_edit') : t('pit_scout.detail_card.btn_add') }}
+          </button>
+        </div>
+
+        <div v-if="unifiedTeam?.pitRecord" style="display: flex; flex-direction: column; gap: 12px;">
+          <div style="display: flex; flex-wrap: wrap; gap: 6px;">
+            <span class="spec-badge">{{ t('pit_scout.detail_card.spec_drivetrain', { val: t('pit_scout.drivetrain.' + unifiedTeam.pitRecord.drivetrainType) || unifiedTeam.pitRecord.drivetrainType }) }}</span>
+            <span v-if="unifiedTeam.pitRecord.weightLbs" class="spec-badge">{{ t('pit_scout.detail_card.spec_weight', { val: unifiedTeam.pitRecord.weightLbs }) }}</span>
+            <span class="spec-badge">{{ t('pit_scout.detail_card.spec_mechanism', { val: t('pit_scout.mechanism.' + unifiedTeam.pitRecord.mechanismType) || unifiedTeam.pitRecord.mechanismType }) }}</span>
+            <span class="spec-badge">{{ t('pit_scout.detail_card.spec_hang', { val: t('pit_scout.hang.' + unifiedTeam.pitRecord.hangType) || unifiedTeam.pitRecord.hangType }) }}</span>
+            <span class="spec-badge">{{ t('pit_scout.detail_card.spec_odometry', { val: t('pit_scout.odometry.' + unifiedTeam.pitRecord.odometryType) || unifiedTeam.pitRecord.odometryType }) }}</span>
+          </div>
+
+          <div style="display: grid; grid-template-columns: repeat(3, 1fr); gap: 10px; background: rgba(255, 255, 255, 0.02); border: 1px solid var(--border); border-radius: 8px; padding: 10px;">
+            <div style="display: flex; flex-direction: column; gap: 2px;">
+              <span style="font-size: 11px; color: var(--muted-foreground);">{{ t('pit_scout.detail_card.claimed_calc_total') }}</span>
+              <span style="font-size: 16px; font-weight: 700; color: var(--primary);">{{ unifiedTeam.pitRecord.claimedTotalScore }}</span>
+              <span style="font-size: 10px; color: var(--muted-foreground);">{{ t('pit_scout.detail_card.claimed_auto_teleop', { auto: unifiedTeam.pitRecord.claimedAutoScore, teleop: unifiedTeam.pitRecord.claimedTeleopScore }) }}</span>
+            </div>
+            <div style="display: flex; flex-direction: column; gap: 2px;">
+              <span style="font-size: 11px; color: var(--muted-foreground);">{{ t('pit_scout.detail_card.actual_max_total') }}</span>
+              <span style="font-size: 16px; font-weight: 700; color: var(--foreground);">{{ unifiedTeam.maxTotalScore ?? '-' }}</span>
+              <span style="font-size: 10px; color: var(--muted-foreground);">{{ t('pit_scout.detail_card.actual_avg', { avg: unifiedTeam.avgTotalScore ?? '-' }) }}</span>
+            </div>
+            <div style="display: flex; flex-direction: column; gap: 2px;">
+              <span style="font-size: 11px; color: var(--muted-foreground);">{{ t('pit_scout.detail_card.brag_rating') }}</span>
+              <span v-if="unifiedTeam.bragInfo" style="font-size: 12px; font-weight: 700;">
+                {{ detailBragLabel }}
+              </span>
+              <span v-else style="font-size: 12px; color: var(--muted-foreground);">-</span>
+            </div>
+          </div>
+        </div>
+        <div v-else style="font-size: 13px; color: var(--muted-foreground); padding: 8px 0;">
+          {{ t('pit_scout.detail_card.no_pit_data') }}
+        </div>
       </div>
 
       <div v-if="teamMatches.length === 0" class="empty-state">
@@ -144,32 +251,89 @@ async function saveComment(match: ScoutingRecord) {
         </div>
       </div>
     </main>
+    </div>
+    <PitScoutFormDrawer v-model="isPitDrawerOpen" :team-number="teamNumVal" />
   </div>
 </template>
 
 <style scoped>
+.team-detail-backdrop {
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.65);
+  backdrop-filter: blur(8px);
+  -webkit-backdrop-filter: blur(8px);
+  z-index: 1000;
+  display: flex;
+  justify-content: center;
+  align-items: flex-end;
+}
+
 .team-detail-view {
-  height: calc(100vh - 20px);
-  margin-top: 20px;
+  height: 92vh;
+  width: 100%;
+  max-width: 840px;
   border-radius: 20px 20px 0 0;
   overflow: hidden;
-  background: var(--background);
+  background: var(--card, #0a0a0a);
+  border: 1px solid var(--border, #262626);
+  border-bottom: none;
   display: flex;
   flex-direction: column;
   view-transition-name: modal-sheet;
-  box-shadow: 0 -10px 40px rgba(0,0,0,0.5);
+  box-shadow: 0 -12px 40px rgba(0, 0, 0, 0.8), 0 0 24px rgba(57, 255, 20, 0.08);
+}
+
+.sheet-drag-handle {
+  width: 40px;
+  height: 4px;
+  border-radius: 2px;
+  background: rgba(255, 255, 255, 0.25);
+  margin: 10px auto 4px;
+  cursor: pointer;
+  transition: background-color var(--motion-duration-fast) var(--motion-ease-out);
+}
+
+.sheet-drag-handle:hover {
+  background: var(--primary, #39ff14);
 }
 
 .app-header {
-  height: 60px;
-  background: var(--card);
-  border-bottom: 1px solid var(--border);
+  height: 56px;
+  background: var(--card, #0a0a0a);
+  border-bottom: 1px solid var(--border, #262626);
   display: flex;
   align-items: center;
+  justify-content: space-between;
   padding: 0 16px;
   position: sticky;
   top: 0;
   z-index: 100;
+}
+
+.header-right {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.btn-close {
+  background: transparent;
+  border: none;
+  color: var(--muted-foreground, #a3a3a3);
+  width: 36px;
+  height: 36px;
+  border-radius: 8px;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: all var(--motion-duration-fast) var(--motion-ease-out);
+}
+
+.btn-close:hover {
+  background: var(--input, #1a1a1a);
+  color: var(--foreground, #f1f5f9);
 }
 
 .btn-back {
@@ -184,7 +348,7 @@ async function saveComment(match: ScoutingRecord) {
   gap: 4px;
   padding: 8px;
   border-radius: 8px;
-  transition: all 0.2s;
+  transition: all var(--motion-duration-fast) var(--motion-ease-out);
 }
 
 .btn-back:hover {
@@ -195,7 +359,6 @@ async function saveComment(match: ScoutingRecord) {
 .header-title {
   flex: 1;
   text-align: center;
-  margin-right: 70px; /* Offset to center title visually against back button */
 }
 
 .header-title h1 {
@@ -207,11 +370,31 @@ async function saveComment(match: ScoutingRecord) {
 
 .content-area {
   flex: 1;
-  padding: 24px 16px;
+  min-height: 0;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  padding: 24px 16px 40px;
   max-width: 800px;
   width: 100%;
   margin: 0 auto;
   box-sizing: border-box;
+}
+
+.content-area::-webkit-scrollbar {
+  width: 6px;
+}
+
+.content-area::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+.content-area::-webkit-scrollbar-thumb {
+  background: var(--border, #333);
+  border-radius: 3px;
+}
+
+.content-area::-webkit-scrollbar-thumb:hover {
+  background: var(--muted-foreground, #666);
 }
 
 .team-tags-card {
@@ -424,5 +607,14 @@ async function saveComment(match: ScoutingRecord) {
   .score-grid {
     grid-template-columns: repeat(2, 1fr);
   }
+}
+
+.spec-badge {
+  font-size: 11px;
+  padding: 2px 8px;
+  border-radius: 6px;
+  background: var(--color-bg-subtle, #1f2937);
+  color: var(--color-text-secondary, #d1d5db);
+  border: 1px solid var(--color-border, #374151);
 }
 </style>

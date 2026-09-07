@@ -1,14 +1,17 @@
 <script setup lang="ts">
-import { ref, onMounted } from 'vue'
-import { useRouter } from 'vue-router'
+import { ref, computed, onMounted } from 'vue'
+import { useRouter, useRoute } from 'vue-router'
 import { useUserStore } from '@/stores/user'
+import { useEventStore } from '@/stores/events'
 import { useToastStore } from '@/stores/toast'
 import { checkUserExists } from '@/services/api'
 import { useI18n } from 'vue-i18n'
 import { switchLanguage } from '@/i18n'
 
 const router = useRouter()
+const route = useRoute()
 const userStore = useUserStore()
+const eventStore = useEventStore()
 const toastStore = useToastStore()
 const { t, locale } = useI18n()
 
@@ -19,9 +22,25 @@ const isNewUser = ref<boolean | null>(null)
 const checkingUser = ref(false)
 const submitted = ref(false)
 
-onMounted(() => {
+const pendingInviteCode = computed(() => {
+  const q = route.query.join || route.query.code
+  return typeof q === 'string' ? q.trim().toUpperCase() : ''
+})
+
+onMounted(async () => {
   userStore.restoreFromCache()
   if (userStore.isLoggedIn) {
+    if (pendingInviteCode.value) {
+      try {
+        const evt = await eventStore.join(pendingInviteCode.value, 'Joined Event')
+        if (evt) {
+          router.replace(`/event/${evt.id}`)
+          return
+        }
+      } catch (e) {
+        console.warn('[LoginView] Failed to auto-join with cached session:', e)
+      }
+    }
     router.replace('/dashboard')
   }
 })
@@ -53,7 +72,7 @@ async function handleLogin() {
   if (checkingUser.value) return
   if (!username.value.trim() || !password.value.trim()) return
   if (isNewUser.value && password.value !== confirmPassword.value) {
-    toastStore.showError("Passwords do not match")
+    toastStore.showError(t('login.password_mismatch'))
     return
   }
   submitted.value = true
@@ -66,6 +85,17 @@ async function handleLogin() {
   submitted.value = false
   if (ok) {
     toastStore.showToast(t('toast.welcome_back', { name: username.value.trim() }), 'success')
+    if (pendingInviteCode.value) {
+      try {
+        const evt = await eventStore.join(pendingInviteCode.value, 'Joined Event')
+        if (evt) {
+          router.push(`/event/${evt.id}`)
+          return
+        }
+      } catch (e) {
+        console.warn('[LoginView] Failed to auto-join after login:', e)
+      }
+    }
     router.push('/dashboard')
   }
 }
@@ -85,6 +115,14 @@ async function handleLogin() {
         <span class="material-icons logo-icon">hive</span>
         <h1>ScoutingPro 27</h1>
         <p class="powered-by">developed by 27570 B.E.A.R. and 25787 TechBY</p>
+      </div>
+
+      <div v-if="pendingInviteCode" class="invite-banner">
+        <span class="material-icons invite-icon">group_add</span>
+        <div class="invite-info">
+          <span class="invite-title">{{ t('login.joining_with_code') }}</span>
+          <span class="invite-code-text">{{ pendingInviteCode }}</span>
+        </div>
       </div>
 
       <form @submit.prevent="handleLogin">
@@ -109,21 +147,23 @@ async function handleLogin() {
           :disabled="submitted"
         />
 
-        <template v-if="isNewUser">
-          <label for="confirmPassword" style="margin-top: 16px;">{{ t('login.confirm_password') }}</label>
-          <input
-            id="confirmPassword"
-            v-model="confirmPassword"
-            type="password"
-            :placeholder="t('login.confirm_placeholder')"
-            autocomplete="off"
-            :disabled="submitted"
-          />
-        </template>
+        <Transition name="field-expand">
+          <div v-if="isNewUser" class="expandable-field">
+            <label for="confirmPassword" style="margin-top: 16px;">{{ t('login.confirm_password') }}</label>
+            <input
+              id="confirmPassword"
+              v-model="confirmPassword"
+              type="password"
+              :placeholder="t('login.confirm_placeholder')"
+              autocomplete="off"
+              :disabled="submitted"
+            />
+          </div>
+        </Transition>
 
         <button type="submit" :disabled="!!(submitted || checkingUser || !username.trim() || !password.trim() || (isNewUser && !confirmPassword.trim()))">
           <span v-if="submitted || checkingUser" class="spinner"></span>
-          {{ checkingUser ? t('login.checking_user') : (submitted ? t('login.signing_in') : (isNewUser ? t('login.register_start') : t('login.start_scouting'))) }}
+          {{ checkingUser ? t('login.checking_user') : (submitted ? t('login.signing_in') : (pendingInviteCode ? (isNewUser ? t('login.register_join') : t('login.login_join')) : (isNewUser ? t('login.register_start') : t('login.start_scouting')))) }}
         </button>
       </form>
     </div>
@@ -176,6 +216,72 @@ async function handleLogin() {
   width: 100%;
   max-width: 420px;
   box-shadow: 0 25px 50px rgba(0, 0, 0, 0.4);
+  animation: login-card-enter var(--motion-duration-slow) var(--motion-ease-out);
+}
+
+.invite-banner {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  background: rgba(59, 130, 246, 0.12);
+  border: 1px solid var(--primary);
+  border-radius: 10px;
+  padding: 12px 14px;
+  margin-bottom: 20px;
+}
+
+.invite-icon {
+  color: var(--primary);
+  font-size: 28px;
+}
+
+.invite-info {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.invite-title {
+  font-size: 12px;
+  color: var(--muted-foreground);
+}
+
+.invite-code-text {
+  font-size: 16px;
+  font-weight: 700;
+  color: var(--foreground);
+  letter-spacing: 0.5px;
+}
+
+@keyframes login-card-enter {
+  from {
+    opacity: 0;
+    transform: scale(0.96) translateY(20px);
+  }
+  to {
+    opacity: 1;
+    transform: scale(1) translateY(0);
+  }
+}
+
+.field-expand-enter-active,
+.field-expand-leave-active {
+  transition: all var(--motion-duration-moderate) var(--motion-ease-out);
+  overflow: hidden;
+}
+
+.field-expand-enter-from,
+.field-expand-leave-to {
+  opacity: 0;
+  max-height: 0;
+  transform: translateY(-8px);
+}
+
+.field-expand-enter-to,
+.field-expand-leave-from {
+  opacity: 1;
+  max-height: 120px;
+  transform: translateY(0);
 }
 
 .logo-area {

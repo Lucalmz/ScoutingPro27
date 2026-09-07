@@ -1,0 +1,346 @@
+.event-view {
+  min-height: 100vh;
+  background: var(--background);
+  color: var(--foreground);
+  display: flex;
+  flex-direction: column;
+}
+
+.topbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 12px 24px;
+  background: var(--card);
+  border-bottom: 1px solid var(--border);
+}
+
+.topbar-right {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.user-tag-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 6px 12px;
+  background: rgba(255, 255, 255, 0.06);
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  border-radius: 20px;
+  color: var(--foreground, #ffffff);
+  font-size: 13px;
+  cursor: pointer;
+  transition: all 0.34s ease;
+}
+
+.user-tag-btn:hover {
+  background: rgba(57, 255, 20, 0.12);
+  border-color: var(--primary, #39ff14);
+  color: var(--primary, #39ff14);
+  box-shadow: var(--glow-primary, 0 0 10px rgba(57, 255, 20, 0.35));
+}
+
+.user-tag-btn .edit-icon {
+  opacity: 0.6;
+  transition: opacity 0.34s;
+}
+
+.user-tag-btn:hover .edit-icon {
+  opacity: 1;
+}
+
+.topbar-left {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+}
+
+.btn-back {
+  background: var(--border);
+  border: none;
+  color: var(--muted-foreground);
+  padding: 8px 14px;
+  border-radius: 8px;
+  cursor: pointer;
+  font-size: 14px;
+}
+
+.btn-back:hover {
+  background: var(--input);
+}
+
+.event-title {
+  display: flex;
+  flex-direction: column;
+}
+
+.event-name {
+  display: inline-block;
+  font-size: 1.2rem;
+  font-weight: 700;
+  width: fit-content;
+}
+
+.event-code {
+  font-size: 12px;
+  color: var(--muted-foreground);
+}
+
+/* Tab Bar */
+.tab-bar {
+  display: flex;
+  background: var(--card);
+  border-bottom: 2px solid var(--border);
+  position: relative;
+}
+
+.tab-indicator {
+  position: absolute;
+  bottom: -2px;
+  left: 0;
+  width: var(--indicator-width, 33.333%);
+  height: 3px;
+  background: var(--primary);
+  transition: transform var(--motion-duration-moderate) var(--motion-ease-out);
+  z-index: 1;
+}
+
+.tab-btn {
+  flex: 1;
+  padding: 14px 0;
+  background: none;
+  border: none;
+  color: var(--muted-foreground);
+  font-size: 14px;
+  font-weight: 500;
+  cursor: pointer;
+  z-index: 2;
+  transition: color var(--motion-duration-fast) var(--motion-ease-out);
+}
+
+.tab-btn:hover {
+  color: var(--foreground);
+}
+
+.tab-btn.active {
+  color: var(--primary);
+}
+
+/* Tab Content */
+.tab-content {
+  flex: 1;
+  padding: 24px;
+  overflow-y: auto;
+}
+
+.scouts-list {
+  list-style: none;
+  padding: 0;
+  margin: 0;
+}
+
+.scout-item {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 12px;
+  background: var(--card);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  margin-bottom: 8px;
+}
+
+.scout-info {
+  font-weight: 500;
+}
+
+.btn-msg {
+  background: var(--primary);
+  color: var(--primary-foreground);
+  border: none;
+  border-radius: 6px;
+  padding: 6px 12px;
+  cursor: pointer;
+  font-size: 13px;
+  font-weight: 600;
+}
+
+.btn-msg:hover {
+  filter: brightness(1.1);
+}
+
+.settings-panel {
+  background: var(--card);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 16px;
+  margin-bottom: 24px;
+}
+.settings-form {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  margin-top: 12px;
+}
+.form-group {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.form-group label {
+  font-size: 14px;
+  font-weight: 500;
+}
+.form-group input {
+  padding: 8px;
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  background: var(--input);
+  color: var(--foreground);
+}
+.btn-primary {
+  background: var(--primary);
+  color: var(--primary-foreground);
+  border: none;
+  padding: 10px;
+  border-radius: 6px;
+  font-weight: 600;
+  cursor: pointer;
+  margin-top: 8px;
+}
+.btn-primary:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+}
+
+.event-meta-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.badge-ftc-bound {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 11px;
+  font-weight: 600;
+  padding: 2px 8px;
+  border-radius: 9999px;
+  background: rgba(34, 197, 94, 0.15);
+  color: #22c55e;
+  border: 1px solid rgba(34, 197, 94, 0.3);
+}
+
+.badge-ftc-unbound {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 11px;
+  font-weight: 500;
+  padding: 2px 8px;
+  border-radius: 9999px;
+  background: rgba(148, 163, 184, 0.1);
+  color: var(--muted-foreground);
+  border: 1px solid var(--border);
+}
+
+.ftc-badge-icon {
+  font-size: 13px !important;
+}
+
+.ftc-bound-status-card {
+  display: flex;
+  align-items: flex-start;
+  gap: 12px;
+  padding: 14px 16px;
+  border-radius: 8px;
+  background: rgba(34, 197, 94, 0.1);
+  border: 1px solid rgba(34, 197, 94, 0.3);
+  margin-top: 10px;
+  margin-bottom: 12px;
+}
+
+.status-icon {
+  font-size: 22px;
+  color: #22c55e;
+  flex-shrink: 0;
+  margin-top: 1px;
+}
+
+.status-content {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.status-title {
+  font-size: 14px;
+  font-weight: 600;
+  color: #22c55e;
+}
+
+.status-subtitle {
+  font-size: 12px;
+  color: var(--foreground);
+  opacity: 0.85;
+}
+
+.form-hint {
+  font-size: 12px;
+  color: var(--muted-foreground);
+  margin-top: 2px;
+}
+
+.congestion-banner {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  padding: 8px 16px;
+  background: rgba(234, 179, 8, 0.15);
+  color: #eab308;
+  border-bottom: 1px solid rgba(234, 179, 8, 0.3);
+  font-size: 13px;
+  font-weight: 500;
+}
+
+.banner-icon {
+  font-size: 16px;
+}
+
+@media (max-width: 768px) {
+  .tab-bar {
+    display: none !important;
+  }
+  .tab-content {
+    padding-bottom: 72px;
+  }
+  .topbar {
+    padding: 10px 14px;
+  }
+  .user-tag-btn.host-qr-btn .username-text {
+    display: none;
+  }
+}
+
+/* Tab brush-in transition (fall-through cascade like HistoryList) */
+.tab-brush-enter-active,
+.tab-brush-leave-active {
+  transition: opacity var(--motion-duration-moderate, 0.425s) var(--motion-ease-out, ease-out),
+              transform var(--motion-duration-moderate, 0.425s) var(--motion-ease-out, ease-out);
+}
+
+.tab-brush-enter-from {
+  opacity: 0;
+  transform: translateY(-24px) scale(0.995);
+}
+
+.tab-brush-leave-to {
+  opacity: 0;
+  transform: translateY(16px);
+}
+

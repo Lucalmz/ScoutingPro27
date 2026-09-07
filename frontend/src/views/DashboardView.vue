@@ -1,23 +1,46 @@
 <script setup lang="ts">
 import { ref, onMounted } from 'vue'
 import { useRouter } from 'vue-router'
+import { useI18n } from 'vue-i18n'
 import { useUserStore } from '@/stores/user'
 import { useEventStore } from '@/stores/events'
-import { useI18n } from 'vue-i18n'
+import { parseEventPackage } from '@/utils/offlineSync'
+import { useToastStore } from '@/stores/toast'
+import { isDesktopHost } from '@/services/photoStorage'
+import RenameModal from '@/components/common/RenameModal.vue'
 
 const { t } = useI18n()
-
+const toastStore = useToastStore()
 const router = useRouter()
 const userStore = useUserStore()
 const eventStore = useEventStore()
 
 const showCreateModal = ref(false)
 const showJoinModal = ref(false)
+const showRenameModal = ref(false)
+const eventFileInputRef = ref<HTMLInputElement | null>(null)
 const newEventName = ref('')
 const inviteCode = ref('')
 const creating = ref(false)
 const joining = ref(false)
 const enteringEventId = ref<string | null>(null)
+
+async function onEventFileSelected(e: Event) {
+  const file = (e.target as HTMLInputElement).files?.[0]
+  if (!file) return
+  try {
+    const pkg = parseEventPackage(await file.text())
+    const existing = eventStore.events.find((ev) => ev.id === pkg.event.id)
+    if (!existing) eventStore.events.push(pkg.event)
+    else Object.assign(existing, pkg.event)
+    toastStore.showToast(t('offline_sync.import_success_event'), 'info')
+    enterEvent(pkg.event)
+  } catch (err: any) {
+    toastStore.showToast(t('offline_sync.import_failed') + (err.message || ''), 'error')
+  } finally {
+    if (eventFileInputRef.value) eventFileInputRef.value.value = ''
+  }
+}
 
 onMounted(async () => {
   if (!userStore.isLoggedIn) {
@@ -79,7 +102,7 @@ function enter(el: Element, done: () => void) {
   const delay = Math.min(index, 15) * 40
   
   setTimeout(() => {
-    htmlEl.style.setProperty('transition', 'all 0.4s cubic-bezier(0.25, 1, 0.5, 1)', 'important')
+    htmlEl.style.setProperty('transition', 'all var(--motion-duration-normal) var(--motion-ease-out)', 'important')
     htmlEl.style.opacity = '1'
     htmlEl.style.transform = 'translateY(0)'
     
@@ -87,7 +110,7 @@ function enter(el: Element, done: () => void) {
     setTimeout(() => {
       htmlEl.style.removeProperty('transition')
       done()
-    }, 400)
+    }, 360)
   }, delay)
 }
 
@@ -115,6 +138,20 @@ function onCardMouseMove(e: MouseEvent) {
   card.style.setProperty('--mouse-x', `${x}px`)
   card.style.setProperty('--mouse-y', `${y}px`)
 }
+function handleOpenRenameModal() {
+  if (typeof document !== 'undefined' && 'startViewTransition' in document) {
+    document.documentElement.dataset.transitionType = 'user-profile'
+    const vt = document.startViewTransition(async () => {
+      showRenameModal.value = true
+      await nextTick()
+    })
+    vt.finished.finally(() => {
+      document.documentElement.removeAttribute('data-transition-type')
+    })
+  } else {
+    showRenameModal.value = true
+  }
+}
 </script>
 
 <template>
@@ -124,7 +161,19 @@ function onCardMouseMove(e: MouseEvent) {
         <span class="brand" style="display: flex; align-items: center; gap: 8px;"><span class="material-icons">explore</span> ScoutingPro 27</span>
       </div>
       <div class="topbar-right">
-        <span class="user-tag" style="display: flex; align-items: center;"><span class="material-icons" style="font-size: 18px; margin-right: 4px;">account_circle</span> {{ userStore.username }}</span>
+        <button
+          class="user-tag-btn"
+          @click="handleOpenRenameModal"
+          :title="t('user.edit_nickname')"
+          :style="{ viewTransitionName: !showRenameModal ? 'user-profile-box' : 'none' }"
+        >
+          <span class="material-icons" style="font-size: 18px; margin-right: 4px;">account_circle</span>
+          <span
+            class="username-text"
+            :style="{ viewTransitionName: !showRenameModal ? 'user-profile-text' : 'none' }"
+          >{{ userStore.username }}</span>
+          <span class="material-icons edit-icon" style="font-size: 14px; margin-left: 4px;">edit</span>
+        </button>
         <button class="btn-logout" @click="handleLogout">{{ t('dashboard.logout') }}</button>
       </div>
     </header>
@@ -133,16 +182,27 @@ function onCardMouseMove(e: MouseEvent) {
       <h2>{{ t('dashboard.welcome') }}</h2>
 
       <div class="action-buttons">
-        <button class="action-btn primary" @click="showCreateModal = true">
+        <button v-if="isDesktopHost()" class="action-btn primary" @click="showCreateModal = true">
           {{ t('dashboard.create_event') }}
         </button>
-        <button class="action-btn secondary" @click="showJoinModal = true">
+        <button class="action-btn" :class="{ primary: !isDesktopHost(), secondary: isDesktopHost() }" @click="showJoinModal = true">
           {{ t('dashboard.join_event') }}
         </button>
+        <button v-if="isDesktopHost()" class="action-btn secondary" @click="eventFileInputRef?.click()">
+          <span class="material-icons" style="font-size: 18px; margin-right: 4px; vertical-align: text-bottom;">file_download</span>
+          {{ t('offline_sync.import_event_btn') }}
+        </button>
+        <input
+          ref="eventFileInputRef"
+          type="file"
+          accept=".event,.json"
+          style="display: none;"
+          @change="onEventFileSelected"
+        />
       </div>
 
       <!-- Event List -->
-      <div v-if="eventStore.loading && eventStore.events.length === 0" class="loading-msg">Loading events...</div>
+      <div v-if="eventStore.loading && eventStore.events.length === 0" class="loading-msg">{{ t('dashboard.loading') }}</div>
       <p v-else-if="eventStore.error && eventStore.events.length === 0" class="error-msg">{{ eventStore.error }}</p>
       <div v-else-if="eventStore.events.length === 0" class="empty-state">
         <p>{{ t('dashboard.no_events') }}</p>
@@ -228,289 +288,11 @@ function onCardMouseMove(e: MouseEvent) {
         </div>
       </div>
     </Transition>
+
+    <!-- Rename User Modal -->
+    <RenameModal v-model:visible="showRenameModal" />
   </div>
 </template>
 
-<style scoped>
-.dashboard {
-  min-height: 100vh;
-  background: var(--background);
-  color: var(--foreground);
-}
-
-.topbar {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  padding: 14px 24px;
-  background: var(--card);
-  border-bottom: 1px solid var(--border);
-}
-
-.brand {
-  font-weight: 700;
-  font-size: 18px;
-}
-
-.user-tag {
-  color: var(--muted-foreground);
-  margin-right: 12px;
-}
-
-.btn-logout {
-  background: transparent;
-  border: 1px solid var(--input);
-  color: var(--muted-foreground);
-  padding: 6px 14px;
-  border-radius: 8px;
-  cursor: pointer;
-  font-size: 13px;
-}
-
-.btn-logout:hover {
-  background: var(--border);
-}
-
-.main-content {
-  max-width: 720px;
-  margin: 0 auto;
-  padding: 32px 24px;
-}
-
-h2 {
-  font-size: 22px;
-  margin: 0 0 20px;
-}
-
-.action-buttons {
-  display: flex;
-  gap: 12px;
-  margin-bottom: 28px;
-}
-
-.action-btn {
-  flex: 1;
-  padding: 14px;
-  border-radius: 12px;
-  font-size: 15px;
-  font-weight: 600;
-  cursor: pointer;
-  border: none;
-  transition: background 0.2s;
-}
-
-.action-btn.primary {
-  background: var(--primary);
-  color: var(--primary-foreground);
-}
-
-.action-btn.primary:hover {
-  background: var(--primary);
-}
-
-.action-btn.secondary {
-  background: var(--border);
-  color: var(--foreground);
-}
-
-.action-btn.secondary:hover {
-  background: var(--input);
-}
-
-.event-list {
-  display: flex;
-  flex-direction: column;
-  gap: 10px;
-}
-
-.event-card {
-  position: relative;
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  background: var(--card);
-  border: 1px solid var(--border);
-  border-radius: 12px;
-  padding: 16px 20px;
-  cursor: pointer;
-  transition: border-color 0.25s ease, transform 0.4s cubic-bezier(0.4, 0, 0.2, 1), opacity 0.4s;
-}
-
-.event-card:hover {
-  border-color: rgba(57, 255, 20, 0.4);
-}
-
-.event-card::before {
-  content: '';
-  position: absolute;
-  inset: -1px;
-  border-radius: 12px;
-  padding: 1px;
-  background: radial-gradient(
-    160px circle at var(--mouse-x, -999px) var(--mouse-y, -999px),
-    #ffffff 0%,
-    rgba(255, 255, 255, 0.7) 20%,
-    rgba(57, 255, 20, 0.5) 50%,
-    transparent 80%
-  );
-  -webkit-mask: linear-gradient(#fff 0 0) content-box, linear-gradient(#fff 0 0);
-  -webkit-mask-composite: xor;
-  mask: linear-gradient(#fff 0 0) content-box, linear-gradient(#fff 0 0);
-  mask-composite: exclude;
-  pointer-events: none;
-  opacity: 0;
-  transition: opacity 0.3s ease;
-}
-
-.event-card:hover::before {
-  opacity: 1;
-}
-
-.event-card.slide-out-right {
-  transform: translateX(150px);
-  opacity: 0;
-}
-
-.event-info {
-  display: flex;
-  flex-direction: column;
-  gap: 4px;
-}
-
-.event-name {
-  font-weight: 600;
-  font-size: 16px;
-}
-
-.event-info h3 {
-  margin: 0 0 4px 0;
-  font-size: 1.1rem;
-  color: var(--color-text-primary, #333);
-}
-
-.event-name {
-  display: inline-block;
-  font-size: 1.1rem;
-  font-weight: bold;
-  color: var(--foreground);
-  margin-bottom: 4px;
-  width: fit-content;
-}
-
-.event-meta {
-  font-size: 13px;
-  color: var(--muted-foreground);
-}
-
-.event-arrow {
-  font-size: 20px;
-  color: var(--muted-foreground);
-}
-
-.loading-msg,
-.error-msg,
-.empty-state {
-  text-align: center;
-  padding: 40px;
-  color: var(--muted-foreground);
-}
-
-.error-msg {
-  color: var(--status-error);
-}
-
-/* Modal */
-.modal-overlay {
-  position: fixed;
-  inset: 0;
-  background: rgba(0, 0, 0, 0.6);
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  z-index: 100;
-}
-
-.modal-card {
-  background: var(--card);
-  border: 1px solid var(--border);
-  border-radius: 16px;
-  padding: 28px;
-  width: 100%;
-  max-width: 400px;
-}
-
-.modal-card h3 {
-  margin: 0 0 16px;
-  font-size: 18px;
-}
-
-.modal-card label {
-  display: block;
-  font-size: 13px;
-  color: var(--muted-foreground);
-  margin-bottom: 4px;
-}
-
-.modal-card input {
-  width: 100%;
-  padding: 10px 14px;
-  background: var(--background);
-  border: 1px solid var(--border);
-  border-radius: 10px;
-  color: var(--foreground);
-  font-size: 16px;
-  outline: none;
-  box-sizing: border-box;
-}
-
-.modal-card input:focus {
-  border-color: var(--primary);
-}
-
-.hint {
-  font-size: 12px;
-  color: var(--muted-foreground);
-  margin: 6px 0 0;
-}
-
-.modal-actions {
-  display: flex;
-  gap: 10px;
-  margin-top: 20px;
-  justify-content: flex-end;
-}
-
-.btn-cancel,
-.btn-confirm {
-  padding: 10px 20px;
-  border-radius: 10px;
-  font-size: 14px;
-  font-weight: 600;
-  cursor: pointer;
-  border: none;
-}
-
-.btn-cancel {
-  background: var(--border);
-  color: var(--muted-foreground);
-}
-
-.btn-cancel:hover {
-  background: var(--input);
-}
-
-.btn-confirm {
-  background: var(--primary);
-  color: var(--primary-foreground);
-}
-
-.btn-confirm:hover:not(:disabled) {
-  background: var(--primary);
-}
-
-.btn-confirm:disabled {
-  opacity: 0.5;
-  cursor: not-allowed;
-}
-</style>
+<style scoped src="./DashboardView.css"></style>
 

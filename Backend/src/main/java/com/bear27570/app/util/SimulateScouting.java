@@ -1,5 +1,6 @@
 package com.bear27570.app.util;
 
+import com.bear27570.app.db.AppConfig;
 import com.bear27570.app.db.JdbiConfig;
 import com.google.gson.JsonArray;
 import com.google.gson.JsonElement;
@@ -15,15 +16,40 @@ public class SimulateScouting {
     public static void main(String[] args) {
         String eventCode = "CNCMPLB";
         int seasonYear = 2025;
+        boolean forceProduction = false;
 
-        if (args.length > 0) {
-            eventCode = args[0].trim().toUpperCase();
+        for (String arg : args) {
+            String trimmed = arg.trim();
+            if ("--force-production".equalsIgnoreCase(trimmed) ||
+                "--force-production-i-know-what-i-am-doing".equalsIgnoreCase(trimmed)) {
+                forceProduction = true;
+            } else if (!trimmed.startsWith("--") && !trimmed.isEmpty()) {
+                eventCode = trimmed.toUpperCase();
+            }
         }
 
         final String finalEventCode = eventCode;
-        System.out.println("=== 开始为赛事 [" + finalEventCode + "] (赛季: " + seasonYear + ") 模拟 Mock 比赛数据 ===");
+        String dbUrl = JdbiConfig.resolveAppDbUrl();
+        boolean isProdDb = AppConfig.isProd() || dbUrl.contains(".scoutingpro27");
 
-        String dbUrl = "jdbc:h2:./app_data;AUTO_SERVER=TRUE";
+        System.out.println("==================================================================");
+        System.out.println("  ScoutingPro27 数据模拟器 (SimulateScouting)");
+        System.out.println("  目标环境    : " + AppConfig.getEnvironment());
+        System.out.println("  目标数据库  : " + dbUrl);
+        System.out.println("  目标赛事代码: " + finalEventCode + " (赛季: " + seasonYear + ")");
+        System.out.println("==================================================================");
+
+        // 生产环境安全熔断：防止误将 Mock 数据与全量清空操作作用于真实生产数据库
+        if (isProdDb && !forceProduction) {
+            System.err.println("!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!");
+            System.err.println("【FATAL SAFETY ERROR】SimulateScouting 拒绝向生产环境写入 Mock 数据！");
+            System.err.println("当前解析目标数据库: " + dbUrl);
+            System.err.println("当前检测环境: " + AppConfig.getEnvironment());
+            System.err.println("若确实需要向生产环境写入 Mock 数据，必须显式附加参数: --force-production");
+            System.err.println("!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!");
+            throw new IllegalStateException("SimulateScouting blocked: Refusing to wipe/mock production database: " + dbUrl);
+        }
+
         System.out.println("正在连接数据库并执行迁移: " + dbUrl);
         Flyway.configure().dataSource(dbUrl, "sa", "").locations("classpath:db").load().migrate();
 
@@ -137,16 +163,62 @@ public class SimulateScouting {
 
                         globalScoutIndex++;
 
+                        // 1. 拟合 2026 DECODE 赛规的真实动作细分项，确保前端编辑表单联动精准
                         int autoScore = (int) (teamTotal * 0.35);
                         int endgameScore = (int) (teamTotal * 0.20);
                         int teleopScore = teamTotal - autoScore - endgameScore;
                         boolean isBroken = (teamTotal < 20);
 
+                        // Endgame: baseScore (5 或 10) + supportMultiplier * 18
+                        int baseScore = 5;
+                        int supportMultiplier = 0;
+                        if (endgameScore >= 25) {
+                            baseScore = 10;
+                            supportMultiplier = 1;
+                        } else if (endgameScore >= 18) {
+                            baseScore = 5;
+                            supportMultiplier = 1;
+                        } else if (endgameScore >= 8) {
+                            baseScore = 10;
+                            supportMultiplier = 0;
+                        } else {
+                            baseScore = 5;
+                            supportMultiplier = 0;
+                        }
+                        int finalEndgameScore = baseScore + (supportMultiplier * 18);
+
+                        // Auto: (3 * autoClassified) + (1 * autoOverflow) + (2 * autoPatterns) + autoMovementScore
+                        int autoMovementScore = autoScore >= 10 ? 3 : 0;
+                        int remAuto = Math.max(0, autoScore - autoMovementScore);
+                        int autoPatterns = Math.min(4, remAuto / 6);
+                        remAuto -= (autoPatterns * 2);
+                        int autoClassified = remAuto / 3;
+                        int autoOverflow = remAuto % 3;
+                        int finalAutoScore = (3 * autoClassified) + (1 * autoOverflow) + (2 * autoPatterns) + autoMovementScore;
+
+                        // TeleOp: (3 * teleopClassified) + (1 * teleopOverflow) + (1.5 * gatesTriggered)
+                        int gatesTriggered = Math.min(6, (teleopScore / 12) * 2);
+                        int remTeleop = Math.max(0, teleopScore - (int) (gatesTriggered * 1.5));
+                        int teleopClassified = remTeleop / 3;
+                        int teleopOverflow = remTeleop % 3;
+                        int finalTeleopScore = (3 * teleopClassified) + (1 * teleopOverflow) + (int) (gatesTriggered * 1.5);
+
+                        int finalTeamTotal = finalAutoScore + finalTeleopScore + finalEndgameScore;
+
                         JsonObject rawJson = new JsonObject();
+                        rawJson.addProperty("matchNumber", matchNum);
+                        rawJson.addProperty("teamNumber", teamNumber);
                         rawJson.addProperty("allianceColor", alliance);
-                        rawJson.addProperty("autoScore", autoScore);
-                        rawJson.addProperty("teleopScore", teleopScore);
-                        rawJson.addProperty("endgameScore", endgameScore);
+                        rawJson.addProperty("autoClassified", autoClassified);
+                        rawJson.addProperty("autoOverflow", autoOverflow);
+                        rawJson.addProperty("autoPatterns", autoPatterns);
+                        rawJson.addProperty("autoMovementScore", autoMovementScore);
+                        rawJson.addProperty("teleopClassified", teleopClassified);
+                        rawJson.addProperty("teleopOverflow", teleopOverflow);
+                        rawJson.addProperty("gatesTriggered", gatesTriggered);
+                        rawJson.addProperty("baseScore", baseScore);
+                        rawJson.addProperty("supportMultiplier", supportMultiplier);
+                        rawJson.addProperty("isBroken", isBroken);
 
                         handle.createUpdate("""
                             INSERT INTO scouting_records (
@@ -169,10 +241,10 @@ public class SimulateScouting {
                         .bind(3, scouterName)
                         .bind(4, matchNum)
                         .bind(5, teamNumber)
-                        .bind(6, autoScore)
-                        .bind(7, teleopScore)
-                        .bind(8, endgameScore)
-                        .bind(9, teamTotal)
+                        .bind(6, finalAutoScore)
+                        .bind(7, finalTeleopScore)
+                        .bind(8, finalEndgameScore)
+                        .bind(9, finalTeamTotal)
                         .bind(10, "2025 " + finalEventCode + " Match " + matchNum + " 现场模拟打分")
                         .bind(11, rawJson.toString())
                         .bind(12, isBroken)
@@ -185,12 +257,12 @@ public class SimulateScouting {
 
                 System.out.println("正在为参赛队伍随机生成战术标签...");
                 int totalTagCount = 0;
+                // 纯用户手填自定义标签池（包含常见赛场中文与英文观察标签）
                 String[] candidateTags = {
-                    "fast_cycle", "defense_specialist", "reliable_intake", "dual_motor_hang",
-                    "auto_4_sample", "swerve_drive", "aluminum_chassis", "climb_level3",
-                    "high_accuracy", "driver_skill_high", "autonomous_consistent",
-                    "tippy_robot", "penalties_prone", "great_partner", "speedy_transfer",
-                    "stable_lift", "heavy_defense", "vision_auto_align"
+                    "极速循环", "底盘稳健", "双电机挂杆", "高命中率", "防守专家",
+                    "配合默契", "快速吸取", "麦轮底盘", "自动4样本", "易吃犯规",
+                    "机械臂稳定", "掉电翻车", "传动顺畅", "fast_cycle", "defense",
+                    "swerve_drive", "reliable_intake", "good_partner"
                 };
 
                 String[] colorPalette = {
@@ -205,11 +277,11 @@ public class SimulateScouting {
                     for (int t = 0; t < tagsForThisTeam; t++) {
                         String tag = shuffled.get(t);
                         String color = colorPalette[rng.nextInt(colorPalette.length)];
-                        if (tag.equals("tippy_robot") || tag.equals("penalties_prone")) {
+                        if (tag.equals("掉电翻车") || tag.equals("易吃犯规")) {
                             color = "red";
-                        } else if (tag.equals("fast_cycle") || tag.equals("great_partner") || tag.equals("auto_4_sample")) {
+                        } else if (tag.equals("极速循环") || tag.equals("配合默契") || tag.equals("自动4样本")) {
                             color = "green";
-                        } else if (tag.equals("swerve_drive") || tag.equals("dual_motor_hang")) {
+                        } else if (tag.equals("麦轮底盘") || tag.equals("双电机挂杆") || tag.equals("swerve_drive")) {
                             color = "blue";
                         }
 
@@ -225,7 +297,7 @@ public class SimulateScouting {
                         .bind(2, teamNumber)
                         .bind(3, tag)
                         .bind(4, color)
-                        .bind(5, "Lucalmz")
+                        .bind(5, hId) // 绑定真实的 Host 用户 UUID
                         .execute();
 
                         totalTagCount++;

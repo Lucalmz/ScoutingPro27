@@ -14,4 +14,16 @@ public class JdbiConfig {
         jdbi.installPlugin(new SqlObjectPlugin());
         return jdbi;
     }
+
+    /**
+     * 统一解析开发与生产环境下的 H2 数据库文件。
+     * 委托给 AppConfig 统一管理。
+     */
+    public static java.io.File resolveAppDbFile() {
+        return AppConfig.resolveAppDbFile();
+    }
+
+    public static String resolveAppDbUrl() {
+        return AppConfig.resolveAppDbUrl();
+    }
 }

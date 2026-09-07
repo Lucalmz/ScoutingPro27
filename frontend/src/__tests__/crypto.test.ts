@@ -10,7 +10,8 @@ import {
   importEcdhPublicKey,
   deriveSharedAesKey,
   encryptSignalingData,
-  decryptSignalingData
+  decryptSignalingData,
+  computeSecurityFingerprint
 } from '../utils/crypto'
 
 describe('Crypto & Signaling Security Utils', () => {
@@ -164,6 +165,53 @@ describe('Crypto & Signaling Security Utils', () => {
         ciphertext: 'ff' + encrypted.ciphertext.slice(2)
       }
       await expect(decryptSignalingData(aliceAesKey, tampered)).rejects.toThrow()
+    })
+  })
+
+  describe('computeSecurityFingerprint (SAS / Short Authentication String)', () => {
+    it('is symmetric regardless of key argument order', async () => {
+      const pubA = '04a1b2c3d4e5f67890abcdef1234567890abcdef1234567890abcdef1234567890abcdef1234567890abcdef1234567890abcdef1234567890abcdef1234567890abcdef'
+      const pubB = '04fedcba0987654321fedcba0987654321fedcba0987654321fedcba0987654321fedcba0987654321fedcba0987654321fedcba0987654321fedcba0987654321'
+      const room = 'EVENT_ROOM_99'
+
+      const sas1 = await computeSecurityFingerprint(pubA, pubB, room)
+      const sas2 = await computeSecurityFingerprint(pubB, pubA, room)
+
+      expect(sas1).toBeDefined()
+      expect(sas1.length).toBe(9) // e.g. "ABCD-EF01"
+      expect(sas1).toMatch(/^[0-9A-F]{4}-[0-9A-F]{4}$/)
+      expect(sas1).toBe(sas2)
+    })
+
+    it('is case-insensitive with hex public keys', async () => {
+      const pubA = '04A1B2C3D4E5'
+      const pubB = '04fedcba0987'
+      const room = 'EVENT_ROOM_99'
+
+      const sasUpper = await computeSecurityFingerprint(pubA, pubB, room)
+      const sasLower = await computeSecurityFingerprint(pubA.toLowerCase(), pubB.toUpperCase(), room)
+
+      expect(sasUpper).toBe(sasLower)
+    })
+
+    it('produces different fingerprints if public key or room code differs (MITM alert)', async () => {
+      const pubAlice = '041111111111'
+      const pubBob = '042222222222'
+      const pubEve = '049999999999' // Attacker substituting key
+      const room = 'ROOM1'
+
+      const legitFingerprint = await computeSecurityFingerprint(pubAlice, pubBob, room)
+      const mitmAliceEve = await computeSecurityFingerprint(pubAlice, pubEve, room)
+      const mitmBobEve = await computeSecurityFingerprint(pubBob, pubEve, room)
+
+      expect(legitFingerprint).not.toBe(mitmAliceEve)
+      expect(legitFingerprint).not.toBe(mitmBobEve)
+      expect(mitmAliceEve).not.toBe(mitmBobEve)
+    })
+
+    it('returns empty string if either key is missing', async () => {
+      expect(await computeSecurityFingerprint('', '04abc', 'ROOM')).toBe('')
+      expect(await computeSecurityFingerprint('04abc', '', 'ROOM')).toBe('')
     })
   })
 })

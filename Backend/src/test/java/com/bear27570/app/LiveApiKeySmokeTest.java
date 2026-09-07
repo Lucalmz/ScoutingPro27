@@ -1,6 +1,7 @@
 package com.bear27570.app;
 
 import com.bear27570.app.dao.AiSettingsDao;
+import com.bear27570.app.db.JdbiConfig;
 import com.bear27570.app.model.AiSettings;
 import com.bear27570.app.util.AESUtil;
 import com.bear27570.app.util.AiClient;
@@ -14,19 +15,19 @@ import java.util.Map;
 public class LiveApiKeySmokeTest {
 
     public static void main(String[] args) {
+        String dbUrl = JdbiConfig.resolveAppDbUrl();
+        File dbFile = new File(JdbiConfig.resolveAppDbFile().getAbsolutePath() + ".mv.db");
         System.out.println("================================================================================");
-        System.out.println("[LIVE SMOKE TEST] Checking for stored API Keys in ./app_data database...");
+        System.out.println("[LIVE SMOKE TEST] Checking for stored API Keys in database: " + dbUrl);
 
-        File dbFile = new File("./app_data.mv.db");
         if (!dbFile.exists()) {
-            System.out.println("No local app_data.mv.db found at: " + dbFile.getAbsolutePath());
+            System.out.println("No local database found at: " + dbFile.getAbsolutePath());
             System.out.println("================================================================================");
             return;
         }
 
         try {
-            Jdbi jdbi = Jdbi.create("jdbc:h2:./app_data;AUTO_SERVER=TRUE", "sa", "");
-            jdbi.installPlugin(new SqlObjectPlugin());
+            Jdbi jdbi = JdbiConfig.create(dbUrl, "sa", "");
 
             List<AiSettings> allSettings = jdbi.withExtension(AiSettingsDao.class, dao -> {
                 try {

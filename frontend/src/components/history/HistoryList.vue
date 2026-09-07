@@ -110,7 +110,7 @@ function enter(el: Element, done: () => void) {
   const delay = Math.min(index, 10) * 50
   
   setTimeout(() => {
-    htmlEl.style.setProperty('transition', 'all 0.4s cubic-bezier(0.25, 1, 0.5, 1)', 'important')
+    htmlEl.style.setProperty('transition', 'all var(--motion-duration-normal) var(--motion-ease-out)', 'important')
     htmlEl.style.opacity = '1'
     htmlEl.style.transform = 'translateY(0)'
     
@@ -118,7 +118,7 @@ function enter(el: Element, done: () => void) {
     setTimeout(() => {
       htmlEl.style.removeProperty('transition')
       done()
-    }, 400)
+    }, 360)
   }, delay)
 }
 </script>
@@ -237,7 +237,7 @@ function enter(el: Element, done: () => void) {
   background: rgba(128, 128, 128, 0.1);
   backdrop-filter: brightness(1.1);
   pointer-events: none;
-  transition: top 0.25s cubic-bezier(0.25, 1, 0.5, 1), height 0.25s cubic-bezier(0.25, 1, 0.5, 1), opacity 0.2s ease;
+  transition: top var(--motion-duration-moderate) var(--motion-ease-out), height var(--motion-duration-moderate) var(--motion-ease-out), opacity var(--motion-duration-fast) ease;
   z-index: 10;
   border-radius: 14px;
 }

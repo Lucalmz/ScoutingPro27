@@ -39,7 +39,12 @@ export const useEventStore = defineStore('events', () => {
         inviteCode: res.inviteCode,
         hostId: userStore.userId,
       }
-      events.value.push(evt)
+      const existingIdx = events.value.findIndex(e => e.id === evt.id)
+      if (existingIdx >= 0) {
+        events.value[existingIdx] = evt
+      } else {
+        events.value.push(evt)
+      }
       currentEvent.value = evt
       return evt
     } catch (e: any) {
@@ -56,7 +61,12 @@ export const useEventStore = defineStore('events', () => {
     try {
       const evt = await joinEvent(inviteCode)
       // Note: we can ignore eventName since the real name comes from evt
-      events.value.push(evt)
+      const existingIdx = events.value.findIndex(e => e.id === evt.id)
+      if (existingIdx >= 0) {
+        events.value[existingIdx] = evt
+      } else {
+        events.value.push(evt)
+      }
       currentEvent.value = evt
       return evt
     } catch (e: any) {

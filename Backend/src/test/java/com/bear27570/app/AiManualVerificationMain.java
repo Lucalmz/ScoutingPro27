@@ -160,8 +160,7 @@ public class AiManualVerificationMain {
             System.out.println("Body: " + getChatRes.body());
 
             System.out.println("\n[Step 9] Windows Master Key File Verification");
-            String masterKeyPath = System.getProperty("user.home") + File.separator + ".scoutingpro27" + File.separator + "master.key";
-            File masterKeyFile = new File(masterKeyPath);
+            File masterKeyFile = AESUtil.getMasterKeyFile();
             System.out.println("Path: " + masterKeyFile.getAbsolutePath());
             System.out.println("Exists: " + masterKeyFile.exists());
             System.out.println("Readable: " + masterKeyFile.canRead() + ", Writable: " + masterKeyFile.canWrite());

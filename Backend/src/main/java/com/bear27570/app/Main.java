@@ -24,6 +24,7 @@ import java.nio.file.Files;
 
 public class Main {
     private static final String JCEF_BUNDLE_RESOURCE = "/jcef-bundle.zip";
+
     public static void main(String[] args) {
         boolean headless = false;
         for (String arg : args) {
@@ -102,22 +103,7 @@ public class Main {
             // ==========================================
             // 数据库配置 + 迁移
             // ==========================================
-            File appDataDir = new File(System.getProperty("user.home"), ".scoutingpro27");
-            if (!appDataDir.exists()) {
-                appDataDir.mkdirs();
-            }
-            File legacyDb = new File("app_data.mv.db");
-            File targetDb = new File(appDataDir, "app_data.mv.db");
-            if (legacyDb.exists() && !targetDb.exists()) {
-                try {
-                    Files.copy(legacyDb.toPath(), targetDb.toPath());
-                    System.out.println("已自动将本地数据库迁移至用户主目录: " + targetDb.getAbsolutePath());
-                } catch (Exception e) {
-                    System.err.println("自动迁移本地数据库失败: " + e.getMessage());
-                }
-            }
-            File dbFile = new File(appDataDir, "app_data");
-            String dbUrl = System.getenv("DB_URL") != null ? System.getenv("DB_URL") : ("jdbc:h2:" + dbFile.getAbsolutePath().replace('\\', '/') + ";AUTO_SERVER=TRUE");
+            String dbUrl = JdbiConfig.resolveAppDbUrl();
             String dbUser = "sa";
             String dbPassword = "";
 
@@ -136,48 +122,29 @@ public class Main {
             Jdbi jdbi = JdbiConfig.create(dbUrl, dbUser, dbPassword);
 
             // ==========================================
-            // 端口配置：--port=N 或 DEV_PORT 环境变量，默认 0（随机）
+            // 端口配置：默认 8080（标准防火墙规则端口），可通过 --port=N 或 DEV_PORT 自定义
             // ==========================================
-            int port = 0;
+            int targetPort = 8080;
             String devPort = System.getenv("DEV_PORT");
             if (devPort != null && !devPort.isBlank()) {
-                port = Integer.parseInt(devPort);
+                targetPort = Integer.parseInt(devPort);
             }
             for (String arg : args) {
                 if (arg.startsWith("--port=")) {
-                    port = Integer.parseInt(arg.substring(7));
+                    targetPort = Integer.parseInt(arg.substring(7));
                 }
             }
 
             // ==========================================
-            // 启动 Javalin（Javalin 7：路由在 config.routes 中注册）
+            // 启动 Javalin（监听 0.0.0.0，使局域网、电脑热点及手机热点均可连接）
             // ==========================================
             if (splash != null) splash.updateProgress(55, "Starting local server...");
             ApiRoutes apiRoutes = new ApiRoutes(jdbi);
 
-            Javalin app = Javalin.create(config -> {
-                config.staticFiles.add(staticFiles -> {
-                    staticFiles.hostedPath = "/";
-                    staticFiles.directory = "/public";
-                    staticFiles.location = Location.CLASSPATH;
-                });
-                config.staticFiles.add(staticFiles -> {
-                    staticFiles.hostedPath = "/assets";
-                    staticFiles.directory = "/assets";
-                    staticFiles.location = Location.CLASSPATH;
-                });
-                // CORS
-                config.bundledPlugins.enableCors(cors -> {
-                    cors.addRule(rule -> rule.anyHost());
-                });
-                // REST API 路由
-                apiRoutes.register(config.routes);
-                // 生命周期优雅停机钩子
-                config.events.serverStopped(apiRoutes::shutdown);
-            }).start(port);
+            final Javalin app = startServerWithFallback(apiRoutes, targetPort);
 
             String localUrl = "http://localhost:" + app.port() + "/index.html";
-            System.out.println("Javalin 运行在: " + localUrl);
+            System.out.println("Javalin 运行在: " + localUrl + " (监听 0.0.0.0:" + app.port() + ")");
             
             boolean headless = false;
             for (String arg : args) {
@@ -199,6 +166,9 @@ public class Main {
             CefAppBuilder builder = new CefAppBuilder();
             builder.setInstallDir(ensureJcefBundle());
             builder.getCefSettings().windowless_rendering_enabled = false;
+            // 允许暴露真实本地网卡 IP（包括公网 IPv6），避免 Chromium 默认用 mDNS .local 掩盖导致跨网络 IPv6 直连打洞失败
+            builder.addJcefArgs("--disable-features=WebRtcHideLocalIpsWithMdns");
+
 
             // 为每个实例分配独立的缓存目录，防止多开时互相锁死崩溃
             File cacheDir = new File(System.getProperty("java.io.tmpdir"), "scoutingpro-jcef-" + java.util.UUID.randomUUID());
@@ -273,6 +243,39 @@ public class Main {
             }
             System.exit(1);
         }
+    }
+
+    private static Javalin startServerWithFallback(ApiRoutes apiRoutes, int targetPort) {
+        try {
+            return createJavalinApp(apiRoutes).start("0.0.0.0", targetPort);
+        } catch (Exception e) {
+            System.err.println("目标端口 " + targetPort + " 启动失败，尝试备用端口: " + e.getMessage());
+            try {
+                return createJavalinApp(apiRoutes).start("0.0.0.0", targetPort == 8080 ? 8081 : 0);
+            } catch (Exception e2) {
+                return createJavalinApp(apiRoutes).start("0.0.0.0", 0);
+            }
+        }
+    }
+
+    private static Javalin createJavalinApp(ApiRoutes apiRoutes) {
+        return Javalin.create(config -> {
+            config.staticFiles.add(staticFiles -> {
+                staticFiles.hostedPath = "/";
+                staticFiles.directory = "/public";
+                staticFiles.location = Location.CLASSPATH;
+            });
+            config.staticFiles.add(staticFiles -> {
+                staticFiles.hostedPath = "/assets";
+                staticFiles.directory = "/assets";
+                staticFiles.location = Location.CLASSPATH;
+            });
+            config.bundledPlugins.enableCors(cors -> {
+                cors.addRule(rule -> rule.anyHost());
+            });
+            apiRoutes.register(config.routes);
+            config.events.serverStopped(apiRoutes::shutdown);
+        });
     }
 
     private static void deleteDir(File file) {

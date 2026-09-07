@@ -32,8 +32,7 @@ class AESUtilTest {
 
     @Test
     void testMasterKeyFileCreatedAndAccessibleOnWindows() throws Exception {
-        String masterKeyPath = System.getProperty("user.home") + File.separator + ".scoutingpro27" + File.separator + "master.key";
-        File file = new File(masterKeyPath);
+        File file = AESUtil.getMasterKeyFile();
         
         assertTrue(file.exists(), "Master key file should exist on the filesystem");
         assertTrue(file.length() > 0, "Master key file should contain key bytes");
@@ -71,8 +70,8 @@ class AESUtilTest {
         String expectedPlainText = "AIzaSy-legacy-cbc-encrypted-key-55555";
         
         // 1. Manually construct legacy CBC payload using the actual master key file
-        String masterKeyPath = System.getProperty("user.home") + File.separator + ".scoutingpro27" + File.separator + "master.key";
-        byte[] keyBytes = Files.readAllBytes(Paths.get(masterKeyPath));
+        File masterKeyFile = AESUtil.getMasterKeyFile();
+        byte[] keyBytes = Files.readAllBytes(masterKeyFile.toPath());
         SecretKeySpec keySpec = new SecretKeySpec(keyBytes, "AES");
         
         byte[] cbcIv = new byte[16];

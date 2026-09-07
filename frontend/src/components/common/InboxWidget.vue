@@ -111,11 +111,11 @@ function handleMessageClick(msg: SystemMessage) {
   background: white;
   box-shadow: 0 10px 25px rgba(0, 0, 0, 0.2);
   cursor: default;
-  animation: bg-morph-open 0.6s cubic-bezier(0.25, 1, 0.5, 1) forwards;
+  animation: bg-morph-open 1.02s cubic-bezier(0.25, 1, 0.5, 1) forwards;
 }
 
 .inbox-widget:not(.is-open) .inbox-morph-container {
-  animation: bg-morph-close 0.6s cubic-bezier(0.25, 1, 0.5, 1) forwards;
+  animation: bg-morph-close 1.02s cubic-bezier(0.25, 1, 0.5, 1) forwards;
 }
 
 @keyframes bg-morph-open {

@@ -1,71 +1,216 @@
-# WebRTC Auto-Reconnect Manual Testing Checklist
+# ScoutingPro27 全链路手动测试与赛前人工验收清单 (Manual Testing Checklist)
 
-Due to the complex, distributed nature of WebRTC and MQTT signaling, automated E2E tests cannot cover every possible environmental factor. Please use this checklist to manually verify the robustness of the system across physical devices.
+> **版本**：v2.0-Engineered (全架构适配版)  
+> **适用场景**：正式 FTC 赛事开赛前 24 小时现场环境演练、跨网络物理多机验收、真机极限弱网与异常自愈测试。  
+> **重要说明**：由于 WebRTC P2P、MQTT 异步信令、NAT 穿透及移动端离线存储高度依赖真实的物理设备与网络拓扑，自动化单测与 E2E 无法完全替代现场硬件联调。请在正式比赛前严格按此清单逐项实机打勾验收。
 
-## 1. Client Network Drop (Auto-Reconnect)
-- [ ] Connect a Host (PC) and Client (Mobile) to the same event.
-- [ ] On the Client, submit a scouting record and verify it syncs to the Host.
-- [ ] On the Client, turn on **Airplane Mode** (or disable Wi-Fi/Cellular).
-- [ ] Observe the Client UI transition to `offline` or `degraded` within ~1-2 seconds.
-- [ ] On the Host, submit a new record. (This tests offline caching).
-- [ ] On the Client, turn off Airplane Mode.
-- [ ] **Expectation**: The Client should automatically reconnect within a few seconds without refreshing the page. The status should turn `connected`.
-- [ ] **Expectation**: The record submitted by the Host while offline should immediately appear on the Client's history list.
+---
 
-## 2. Host Network Drop
+## 1. 移动端扫码快速组网与多网卡适配 (Mobile QR Join & Multi-NIC)
 
-### Scenario A: Normal Exit (Immediate Broadcast)
-- [ ] Connect Host and Client.
-- [ ] On the Host, force close the browser tab.
-- [ ] **Expectation**: The Client should immediately receive a `HOST_LEAVING` signal (via beforeunload) and transition to `offline` instantly, without waiting for ICE timeout.
-- [ ] On the Host, reopen the app and enter the Event room again as Host.
-- [ ] **Expectation**: The Host sends a `host_hello` signal. The Client should intercept this and instantly transition back to `connected`.
+- [ ] **场景描述**：Host 电脑处于赛场局域网（或个人热点），侦察员使用手机扫码秒级加入赛事房间。
+- [ ] **步骤 1**：Host 电脑（JCEF 或浏览器）启动应用，创建或进入赛事，点击顶部导航栏的 **「手机扫码加入」** 图标。
+- [ ] **步骤 2**：观察弹出的 `MobileQrModal`：
+  - 系统是否通过 `/api/system/network-info` 自动识别并推荐最佳局域网 IPv4 地址；
+  - 若电脑连接了多网卡（如同时连着现场 Wi-Fi 与手机热点），下拉切换网卡 IP，观察二维码内容与下方 URL 是否实时无缝刷新。
+- [ ] **步骤 3**：使用手机（iOS Safari / Android Chrome）扫描屏幕二维码，访问 `http://<Host-IP>:8080/#/?join=<INVITE_CODE>`。
+- [ ] **预期结果**：
+  - 手机端直接加载前端页面，无需安装任何 App；
+  - 手机自动带入邀请码并完成用户登录/注册与加入赛事；
+  - 手机端自动适配移动端视图，底部呈现 `MobileBottomNav`（赛程、排位、Pit、侦察、AI 对话），触控手势丝滑。
 
-### Scenario B: Abnormal Exit (ICE Timeout)
-- [ ] Connect Host and Client.
-- [ ] On the Host, simulate a hard crash (e.g., unplug the ethernet cable, or kill the browser process from Task Manager so `beforeunload` does NOT fire).
-- [ ] **Expectation**: The Client does NOT receive a `HOST_LEAVING` broadcast.
-- [ ] Wait and time how long it takes for the Client to detect the dropped connection.
-- [ ] **Expectation**: The Client's ICE connection state should eventually time out (usually 5-15 seconds depending on the browser) and transition to `offline`, followed by the exponential backoff reconnection attempts.
+---
 
-## 3. Conflict Resolution During Offline Period
+## 2. P2P 零信任安全、SAS 短认证码与 TOFU 设备信任 (Zero-Trust & SAS)
 
-### Scenario A: 2-Way Conflict
-- [ ] Connect Host and Client.
-- [ ] Disconnect the Client's network (Airplane Mode).
-- [ ] On the Client, create and submit a record for Match 10, Team 1111.
-- [ ] On the Host, create and submit a record for Match 10, Team 1111 (same match/team).
-- [ ] Re-enable the Client's network.
-- [ ] **Expectation**: Both UI histories should flag the record as a **Conflict** (highlighted/tagged).
-- [ ] On the Host, edit the conflict record to be Team 2222.
-- [ ] **Expectation**: The conflict flag is cleared on both the Host and the Client instantly.
+- [ ] **场景描述**：验证 WebRTC DataChannel 建立过程中的 ECDH 共享密钥推导、SAS 短认证码核验及 TOFU（首次信任）机制。
+- [ ] **步骤 1 (首次连接 TOFU 自动信任)**：
+  - 新设备 A（手机端）首次连接 Host；
+  - 双方通过信令协商 ECDH P-256 临时公私钥并衍生共享 AES 密钥；
+  - 查看 Host 端与 Client 端控制台，双方应各自计算出相同的 4 位 16 进制安全指纹（如 `6EEF-550C`）；
+  - **预期**：设备 A 首次连接，TOFU 规则生效，自动在 IndexedDB（`identityStore.ts`）建档并放行，DataChannel 业务消息正常收发。
+- [ ] **步骤 2 (人工核验 SAS 阻断与确认)**：
+  - 若在开发/高安全模式下触发 `PENDING_VERIFICATION`，观察 UI 是否弹出 `SasVerificationModal`；
+  - 双方口头比对 4 位安全码，一致后点击 **「确认安全码」**；
+  - **预期**：确认前积压的待发消息队列立即被安全 Flush 清空并送达对端。
+- [ ] **步骤 3 (公钥突变/重装告警拦截)**：
+  - 清理手机端 IndexedDB 模拟应用重装，重新生成新公钥接入同一 Host；
+  - **预期**：Host 端识别到同一用户/设备的公钥发生轮换（Key Rotation），立即触发中危/高危告警，未核验前严禁对该通道传输敏感比赛数据。
 
-### Scenario B: 3-Way Conflict (Host + 2 Clients)
-- [ ] Connect Host, Client1, and Client2.
-- [ ] Disconnect Client1 and Client2 networks.
-- [ ] Client1, Client2, and Host each submit a different record for Match 10, Team 1111.
-- [ ] Re-enable both Clients' networks.
-- [ ] **Expectation**: The record is flagged as a Conflict across all 3 devices.
-- [ ] On Host, correct the record.
-- [ ] **Expectation**: The conflict flag is cleared across all devices, confirming that the "lazy resolution" (waiting until all conflicts collapse into one) correctly handles >2 divergent records.
+---
 
-## 4. True Mobile Network & TURN Relay (MANDATORY)
-*This is the most critical test as it simulates the actual competition environment where devices are behind restrictive firewalls/NATs.*
-- [ ] **Setup**: Connect the Host to a mobile hotspot (e.g., Carrier A). Connect the Client to a completely independent cellular network (e.g., Carrier B). Do NOT use the same WiFi or Hotspot.
-- [ ] Connect the Client to the Host's event.
-- [ ] Check `chrome://webrtc-internals` on either device to confirm they connected using `relay` (TURN) rather than `host` or `srflx`.
-- [ ] Submit a few records back and forth to ensure the TURN server successfully relays the DataChannel messages.
-- [ ] Perform a brief Airplane Mode toggle on the Client to ensure reconnection works over TURN.
+## 3. 自愈型 ICE 看门狗与 TURN 强制中继兜底 (Self-Healing Watchdog)
 
-## 5. TURN Traffic Consumption Check
-- [ ] After completing all of the above tests (especially Section 4), log into the Metered.ca dashboard.
-- [ ] Check the total bandwidth consumed during this testing session.
-- [ ] **Goal**: Use this baseline to estimate whether the free 0.5 GB/month tier is sufficient.
-      *(Calculation: If a 10-minute intense test uses X MB, calculate `X * (hours of competition) * (number of devices)` to estimate tournament usage).*
+*本项是验证赛场严苛防火墙（对称 NAT / 阻断 UDP 直连）下系统能否顽强存活的关键测试。*
 
-## 6. Long Offline (Exponential Backoff Limit)
-- [ ] Connect Host and Client.
-- [ ] Disconnect the Client's network.
-- [ ] Wait for ~45 seconds. Observe the console logs showing backoff attempts (1s, 2s, 4s, 8s, 16s...).
-- [ ] **Expectation**: After 6 attempts, the Client stops trying and transitions to a `long_offline` or permanent disconnected state.
-- [ ] Manually refresh the Client page to reconnect.
+- [ ] **网络准备 (强制真实网络隔离)**：
+  - Host 电脑连接手机热点 A（如中国移动）；
+  - Scout 手机连接独立蜂窝网络 B（如中国联通）；**绝对禁止两者连接同一 Wi-Fi 或热点**。
+- [ ] **步骤 1 (日常建联检查)**：
+  - 手机端加入房间，在 Chrome 地址栏打开 `chrome://webrtc-internals`；
+  - 展开 `RTCIceCandidatePair`，确认当前活跃连接的类型（在对称 NAT 下通常为 `relay` 或 `srflx`）。
+- [ ] **步骤 2 (ICE 停滞与看门狗自愈)**：
+  - 在路由器或防火墙中限制 UDP 直连报文，或在网络切换瞬间观察；
+  - **预期 (3.5s)**：UI 提示网络不稳定（Watchdog 3500ms 探测报警）；
+  - **预期 (5.5s)**：看门狗触发 `restartIce(Attempt 1/2)`，发起备用 Candidate 重新建联；
+  - **预期 (降级 Relay)**：若 2 次 restartIce 仍无法打洞，看门狗主动销毁当前连接，以 `iceTransportPolicy: 'relay'` 重建 PeerConnection，强制走 Metered.ca TURN 中继建立链路并恢复通信。
+- [ ] **步骤 3 (TURN 流量估算)**：
+  - 密集录入 20 条比赛数据，测试完成后登录 Metered.ca 后台查看用量；
+  - 确认文字信令与数据包消耗极小（通常 < 1 MB），确认免费额度充裕。
+
+---
+
+## 4. 客户端断网恢复与 hostSeq 增量游标同步 (Client Network Drop & Sync)
+
+- [ ] **步骤 1**：Host 与 Client 保持已连接状态。
+- [ ] **步骤 2**：在 Client 手机上开启 **「飞行模式」**（关闭 Wi-Fi 与移动网络）。
+- [ ] **步骤 3**：观察 Client UI 在 1~2 秒内感知断开，状态徽章变为 `offline` 或 `degraded`。
+- [ ] **步骤 4**：在 Client 离线期间，Client 录入 1 场比赛记录（第 5 场 27570 队，总分 120 分）；
+- [ ] **步骤 5**：与此同时，Host 端也录入 1 场比赛记录（第 6 场 25787 队，总分 95 分）。
+- [ ] **步骤 6**：在 Client 上关闭飞行模式恢复网络。
+- [ ] **预期结果**：
+  - Client 触发指数退避（1s, 2s, 4s...）或通过 MQTT `host_hello` 广播秒级唤醒重连，状态恢复 `connected`；
+  - Client 向 Host 报告其持有的 `lastHostSeq`；
+  - Host 仅下发第 6 场的增量数据，Client 瞬间呈现第 6 场记录；
+  - Client 离线暂存的第 5 场记录被安全回传给 Host，Host 为其打上递增的 `hostSeq` 并落盘落库，双方数据完全一致无缺漏。
+
+---
+
+## 5. 页面刷新三向合并防覆灭实测 (3-Way Guarded Merge on F5)
+
+- [ ] **步骤 1**：Client 连入 Host 房间，通过 WebRTC 接收到了 Host 下发的 30 条历史比赛记录。
+- [ ] **步骤 2**：在 Client 端断开网络（或故意关闭 Host 服务端）。
+- [ ] **步骤 3**：在 Client 浏览器中强行按下 **F5 刷新页面**。
+- [ ] **预期结果**：
+  - 页面重新加载后，30 条比赛记录完整显示在列表中，**绝不出现“页面一刷新，历史记录瞬间全部清空变白板”的致命缺陷**；
+  - 本地 LocalStorage 与 Store 的三向合并机制生效，即使本地后端此时为空，对端权威记录仍被完整保全。
+
+---
+
+## 6. 离线并发写冲突与 LWW 解决 (Conflict Resolution & LWW)
+
+- [ ] **步骤 1 (同场次多 Scout 重复录入)**：
+  - 断开 Client 1 的网络；
+  - Client 1 录入第 10 场 18223 队的数据（总分 100 分）；
+  - Host 同时也录入第 10 场 18223 队的数据（总分 110 分）；
+  - 恢复 Client 1 网络，双方完成同步；
+  - **预期**：双方界面的历史记录中，第 10 场 18223 队均被高亮标记为 **「冲突 (Conflict)」**，提示数据不一致。
+- [ ] **步骤 2 (自动解除冲突)**：
+  - Client 1 点击修改该记录，将比分修正为与 Host 一致的 110 分；
+  - **预期**：冲突标记瞬间在双方屏幕上自动解除，无需房主特权裁决。
+- [ ] **步骤 3 (单条记录编辑 LWW 版本保护)**：
+  - 同一记录被修改时，其 `version` 字段严格 +1；
+  - 模拟低版本旧数据重放，验证数据库与前端状态树均拒绝低版本覆盖高版本。
+
+---
+
+## 7. 赛事赛程导入与侦察员智能排班实测 (Schedule & Assignments)
+
+- [ ] **步骤 1 (赛程导入与替换)**：
+  - 在 Host 端进入「赛程排班」面板，点击「批量导入赛程」；
+  - 导入包含 10 场资格赛的 JSON 赛程，勾选或不勾选「覆盖现有赛程」；
+  - **预期**：赛程表格清晰展示每场比赛的红 1、红 2、蓝 1、蓝 2 战队编号；同时后端自动为每场初始化 4 个留空的工位排班。
+- [ ] **步骤 2 (工位排班指派与留空)**：
+  - Host 为第 1 场的红 1 工位指派侦察员 Alice，红 2 工位指派 Bob，蓝方两个工位保持留空；
+  - **预期**：所有已连接的 Client 屏幕上即时同步更新排班表格，无任何延迟；
+  - 将 Bob 从红 2 工位移除（恢复留空），验证系统支持永久留空，且数据库持久化无异常。
+- [ ] **步骤 3 (Scout 视角匹配提示)**：
+  - 登录名为 Alice 的手机侦察员进入表单录入页面；
+  - **预期**：表单自动提示或高亮其本轮负责的场次与工位战队。
+
+---
+
+## 8. 量化展位侦察 (Pit Scouting) 与特写照片离线回传实测
+
+- [ ] **步骤 1 (电脑端直接落盘)**：
+  - 在 Host 电脑端打开战队 27570 的 Pit 侦察表单；
+  - 填写底盘类型（麦轮）、机械臂构型、自述得分（自主 40，手动 80，终局挂高杠 Level 2）；
+  - 上传一张机器人特写照片，点击保存；
+  - **预期**：照片直接被压缩为 WebP 并保存到电脑物理磁盘 `app_data/pit_photos/<eventId>/`（或生产目录），未占用浏览器有限的 IndexedDB 内存。
+- [ ] **步骤 2 (手机端离线拍摄与静默回传)**：
+  - 侦察员持手机在维修区侦察，此时故意断开手机 Wi-Fi（离线）；
+  - 在手机端为战队 25787 填写 Pit 记录并拍摄 2 张实物特写照片，点击保存；
+  - **预期**：界面提示保存成功，照片进入手机本地 IndexedDB 待回传队列；
+  - 走出维修区重新连上局域网 Wi-Fi；
+  - **预期**：手机端监听 `window.online` 事件，自动在后台静默回传待发照片与记录（Flush Queue），Host 端物理磁盘即刻生成对应照片文件，天梯榜实时点亮该队伍的 Pit 标识。
+
+---
+
+## 9. 战队名录与“吹牛指数 (Brag Index)”对账实测
+
+- [ ] **步骤 1 (量化自述与实际得分对账)**：
+  - 针对战队 11115，其 Pit 自述总分为 150 分（自主 50，手动 80，终局 20）；
+  - 该队在第 1 场资格赛中实际仅打出 50 分；
+  - **预期**：战队卡片与列表中的吹牛指数立即核算出倍率 $\approx 3.0\text{x}$，显著呈现标签：【3.0x 吹破牛皮 🔥】。
+- [ ] **步骤 2 (真实发挥与守信评级)**：
+  - 针对战队 27570，自述总分 100 分，后续两场实际打出 95 分与 110 分；
+  - **预期**：吹牛倍率 $\approx 1.0\text{x}$，标签评级呈现【1.0x 真实守信 🎯】。
+- [ ] **步骤 3 (高悬挂机构留力特赦核验)**：
+  - 战队自述具备 Level 2 高悬挂（终局自述 20 分）；
+  - 常规赛打满 2 场，终局得分均为 0 分（实际未挂）；
+  - **预期**：算法触发工程留力特赦逻辑，不直接打入吹牛档，修饰标签展示为：【(高挂待验证 🧗)】；
+  - 若在第 3 场比赛中该队成功完成高悬挂（终局得分 $\ge 15$ 分），标签即刻转为铁证如山的【(高杠已证实 🧗)】。
+
+---
+
+## 10. 流式战术 AI 助手与赛事上下文联动实测 (Tactical AI & SSE)
+
+- [ ] **步骤 1 (连通性与密钥保存)**：
+  - 进入「AI 战术助手」面板，配置 Gemini 或 OpenAI API Key，填写代理地址（如需要）；
+  - 点击「测试连接」，后端安全过滤 URL（防范 SSRF），测试成功后保存（数据库 AES-256 加密落库）。
+- [ ] **步骤 2 (流式打字机输出与心跳保持)**：
+  - 向 AI 提问：“分析一下当前排名前三的战队优势与克制策略”；
+  - **预期**：后端通过 SSE 流式推流，前端以打字机形式逐字渲染；
+  - 观察 Network 选项卡，长推理过程中后端每 15 秒输出 `: heartbeat`，连接不中断。
+- [ ] **步骤 3 (实体战队编号高亮与抽屉联动)**：
+  - AI 回复中若出现战队编号（如 `#27570` 或 `Team 25787`）；
+  - **预期**：文本自动被正则解析并渲染为高亮交互芯片；
+  - 点击战队芯片，界面右侧应立即滑出该战队的完整数据抽屉（含雷达图、历史场次走势、Pit 自述与实物特写）。
+- [ ] **步骤 4 (Token 滑动窗口防爆炸)**：
+  - 连续与 AI 对话 15 轮以上；
+  - **预期**：前端通过滑动窗口严格截取最近 10 轮消息发送给后端，绝不出现 `context length exceeded` 报错。
+
+---
+
+## 11. 会话冲突仲裁与账号防篡改接管 (Session Conflicts & Takeover)
+
+- [ ] **步骤 1 (同名不同人重命名建议)**：
+  - 设备 A 登录为 "Alex" 加入赛事；
+  - 设备 B 注册不同账号但在个人资料中改名为 "Alex" 尝试加入同一赛事；
+  - **预期**：Host 识别到不同 UserId 的重名冲突，弹出 `SessionConflictModal`，为设备 B 推荐 `Alex-88` 等后缀名，允许一键改名加入。
+- [ ] **步骤 2 (同一账号跨设备接管)**：
+  - 设备 A 使用账号 "Alice" 在房间中在线侦察；
+  - 设备 A 电量耗尽，Alice 换用设备 B 使用相同账号登录加入房间；
+  - **预期**：触发账号接管流程，设备 A 收到接管确认提示（带 30s 倒计时）；若设备 A 无响应超时或主动点击同意，设备 B 顺利接管该 Scout 会话，设备 A 提示下线。
+
+---
+
+## 12. 单机多开多实例本地演练实测 (Multi-Instance Local Testing)
+
+- [ ] **步骤 1**：在同一台 Windows 电脑上双击启动第 1 个应用实例，创建赛事 `TEST01`；
+- [ ] **步骤 2**：在同一台电脑上双击启动第 2 个应用实例（模拟从机）；
+- [ ] **预期**：
+  - 第 2 个实例自动检测到 8080 端口被占用，自愈切换到 8081 端口启动；
+  - 两个实例分配各自独立的 JCEF 缓存文件夹，界面均正常显示，无任何 Chromium 锁死崩溃；
+  - 第 2 个实例输入邀请码 `TEST01`，顺利以 Scout 身份加入房间，进行双机联调测试。
+
+---
+
+## 赛前终极验收签字 (Sign-off)
+
+| 验收项目 | 负责人 | 验证结论 (Pass / Fail) | 备注说明 |
+|---|---|---|---|
+| 1. 移动端扫码与多网卡 | | | |
+| 2. P2P 零信任与 SAS 核对 | | | |
+| 3. ICE 看门狗与 TURN 穿透 | | | |
+| 4. 离线增量游标同步 (hostSeq) | | | |
+| 5. 刷新防覆灭三向合并 | | | |
+| 6. 离线冲突解决与 LWW | | | |
+| 7. 赛程排班与留空工位 | | | |
+| 8. 展位侦察与照片离线回传 | | | |
+| 9. 战队吹牛指数对账与高挂特赦 | | | |
+| 10. 流式 AI 战术助手与实体联动 | | | |
+| 11. 会话冲突与接管 | | | |
+| 12. 真实 4G/5G 蜂窝网络穿透实测 | | | |
+
+*清单验收完毕且全绿后，方可将系统交付 FTC 现场侦察组正式上线投入比赛！*

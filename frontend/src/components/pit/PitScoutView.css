@@ -1,0 +1,163 @@
+.pit-scout-view {
+  display: flex;
+  flex-direction: column;
+  gap: 20px;
+  padding: 20px;
+  width: 100%;
+  max-width: 1400px;
+  margin: 0 auto;
+}
+
+.pit-header-banner {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 16px;
+  background: var(--card, #0a0a0a);
+  border: 1px solid var(--border, #262626);
+  border-radius: 12px;
+  padding: 16px 20px;
+}
+
+.banner-left {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+}
+
+.banner-title {
+  margin: 0;
+  font-size: 20px;
+  font-weight: 800;
+  color: var(--foreground, #ededed);
+  letter-spacing: -0.02em;
+}
+
+.progress-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 12px;
+  border-radius: 9999px;
+  background: rgba(57, 255, 20, 0.12);
+  border: 1px solid rgba(57, 255, 20, 0.3);
+  color: var(--primary, #39ff14);
+  font-size: 13px;
+  font-weight: 600;
+}
+
+.banner-actions {
+  display: flex;
+  gap: 10px;
+}
+
+.btn-sync {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 8px 16px;
+  border-radius: 8px;
+  background: rgba(57, 255, 20, 0.08);
+  border: 1px solid rgba(57, 255, 20, 0.3);
+  color: var(--primary, #39ff14);
+  font-size: 13px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: all 0.2s ease;
+}
+
+.btn-sync:hover:not(:disabled) {
+  background: var(--primary, #39ff14);
+  color: var(--primary-foreground, #000000);
+  box-shadow: 0 0 12px rgba(57, 255, 20, 0.3);
+}
+
+.btn-sync:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.pit-toolbar {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 12px;
+}
+
+.search-box {
+  flex: 1;
+  min-width: 220px;
+}
+
+.search-input {
+  width: 100%;
+  padding: 8px 14px;
+  border-radius: 8px;
+  background: var(--card, #0a0a0a);
+  border: 1px solid var(--border, #262626);
+  color: var(--foreground, #ededed);
+  font-size: 14px;
+  transition: border-color 0.2s ease;
+}
+
+.search-input:focus {
+  outline: none;
+  border-color: var(--primary, #39ff14);
+}
+
+.filter-controls {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 10px;
+}
+
+.filter-select {
+  padding: 8px 12px;
+  border-radius: 8px;
+  background: var(--card, #0a0a0a);
+  border: 1px solid var(--border, #262626);
+  color: var(--foreground, #ededed);
+  font-size: 13px;
+  cursor: pointer;
+  transition: border-color 0.2s ease;
+}
+
+.filter-select:focus {
+  outline: none;
+  border-color: var(--primary, #39ff14);
+}
+
+.roster-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(320px, 1fr));
+  gap: 16px;
+}
+
+.empty-state {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  padding: 60px 20px;
+  background: var(--card, #0a0a0a);
+  border: 1px dashed var(--border, #262626);
+  border-radius: 12px;
+  text-align: center;
+  color: var(--muted-foreground, #888888);
+  gap: 12px;
+}
+
+.empty-title {
+  margin: 0;
+  font-size: 16px;
+  font-weight: 600;
+  color: var(--foreground, #ededed);
+}
+
+.empty-desc {
+  margin: 0;
+  font-size: 13px;
+  max-width: 400px;
+}

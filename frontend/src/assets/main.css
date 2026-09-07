@@ -68,10 +68,27 @@
   --status-success: #39ff14;
   --status-warning: #fcd34d;
   --status-error: #ef4444;
+  --status-info: #38bdf8;
+
+  /* Surface & Muted Helpers */
+  --surface: #0a0a0a;
+  --surface-hover: #141414;
+  --text-muted: #a3a3a3;
 
   /* Glow Effects */
   --glow-primary: 0 0 10px rgba(57, 255, 20, 0.4), 0 0 20px rgba(57, 255, 20, 0.2);
   --glow-primary-hover: 0 0 15px rgba(57, 255, 20, 0.6), 0 0 30px rgba(57, 255, 20, 0.3);
+
+  /* Unified Motion Design Tokens */
+  --motion-ease-out: cubic-bezier(0.16, 1, 0.3, 1);
+  --motion-ease-in: cubic-bezier(0.7, 0, 0.84, 0);
+  --motion-ease-in-out: cubic-bezier(0.65, 0, 0.35, 1);
+  --motion-ease-spring: cubic-bezier(0.34, 1.25, 0.64, 1);
+
+  --motion-duration-fast: 0.272s;
+  --motion-duration-moderate: 0.476s;
+  --motion-duration-normal: 0.612s;
+  --motion-duration-slow: 0.816s;
 }
 
 *,
@@ -185,7 +202,10 @@ button,
 .score-btn, 
 .clickable-item,
 .action-btn {
-  transition: transform 0.2s cubic-bezier(0.25, 1, 0.5, 1), box-shadow 0.2s cubic-bezier(0.25, 1, 0.5, 1), background-color 0.2s ease, opacity 0.2s ease !important;
+  transition: transform var(--motion-duration-fast) var(--motion-ease-out),
+              box-shadow var(--motion-duration-fast) var(--motion-ease-out),
+              background-color var(--motion-duration-fast) ease,
+              opacity var(--motion-duration-fast) ease !important;
 }
 
 button:active:not(:disabled), 
@@ -196,39 +216,141 @@ button:active:not(:disabled),
 .score-btn:active:not(:disabled),
 .clickable-item:active,
 .action-btn:active:not(:disabled) {
-  transform: scale(0.96) !important;
+  transform: scale(0.97) !important;
 }
 
 /* ==========================================================================
    Animations & Transitions
    ========================================================================== */
 
-/* Fade Transition (Tabs) */
+/* Fade Transition (Tabs Fallback) */
 .fade-enter-active,
 .fade-leave-active {
-  transition: opacity 0.25s ease, transform 0.25s ease;
+  transition: opacity var(--motion-duration-moderate) var(--motion-ease-out),
+              transform var(--motion-duration-moderate) var(--motion-ease-out);
 }
-.fade-enter-from,
+.fade-enter-from {
+  opacity: 0;
+  transform: translateY(8px);
+}
 .fade-leave-to {
   opacity: 0;
-  transform: translateY(10px);
+  transform: translateY(-8px);
 }
 
-/* Modal Transition */
+/* Universal Modal Transitions */
 .modal-enter-active,
 .modal-leave-active {
-  transition: opacity 0.3s ease;
+  transition: opacity var(--motion-duration-normal) var(--motion-ease-out);
 }
 .modal-enter-active .modal-card,
-.modal-leave-active .modal-card {
-  transition: transform 0.3s cubic-bezier(0.34, 1.56, 0.64, 1);
+.modal-leave-active .modal-card,
+.modal-enter-active .offline-sync-modal,
+.modal-leave-active .offline-sync-modal,
+.modal-enter-active .sas-modal-card,
+.modal-leave-active .sas-modal-card {
+  transition: transform var(--motion-duration-normal) var(--motion-ease-out),
+              opacity var(--motion-duration-normal) var(--motion-ease-out);
 }
+
 .modal-enter-from,
 .modal-leave-to {
   opacity: 0;
 }
 .modal-enter-from .modal-card,
-.modal-leave-to .modal-card {
-  transform: scale(0.9) translateY(20px);
+.modal-leave-to .modal-card,
+.modal-enter-from .offline-sync-modal,
+.modal-leave-to .offline-sync-modal,
+.modal-enter-from .sas-modal-card,
+.modal-leave-to .sas-modal-card {
+  opacity: 0;
+  transform: scale(0.95) translateY(14px);
+}
+
+/* Universal Drawer Transitions */
+.drawer-enter-active,
+.drawer-leave-active {
+  transition: opacity var(--motion-duration-normal) var(--motion-ease-out);
+}
+.drawer-enter-active .team-drawer,
+.drawer-leave-active .team-drawer {
+  transition: transform var(--motion-duration-normal) var(--motion-ease-out);
+}
+.drawer-enter-from,
+.drawer-leave-to {
+  opacity: 0;
+}
+.drawer-enter-from .team-drawer,
+.drawer-leave-to .team-drawer {
+  transform: translateX(100%);
+}
+@media (max-width: 768px) {
+  .drawer-enter-from .team-drawer,
+  .drawer-leave-to .team-drawer {
+    transform: translateY(100%);
+  }
+}
+
+/* Tab Fade Transition */
+.tab-fade-enter-active,
+.tab-fade-leave-active {
+  transition: opacity var(--motion-duration-moderate) var(--motion-ease-out),
+              transform var(--motion-duration-moderate) var(--motion-ease-out);
+}
+.tab-fade-enter-from {
+  opacity: 0;
+  transform: translateY(6px);
+}
+.tab-fade-leave-to {
+  opacity: 0;
+  transform: translateY(-6px);
+}
+
+/* Tag Badge Transitions */
+.tag-badge-enter-active,
+.tag-badge-leave-active {
+  transition: all var(--motion-duration-moderate) var(--motion-ease-out);
+}
+.tag-badge-enter-from {
+  opacity: 0;
+  transform: scale(0.8);
+}
+.tag-badge-leave-to {
+  opacity: 0;
+  transform: scale(0.8);
+}
+
+/* User Profile Morph View Transitions (修改名字核心动效保持) */
+html[data-transition-type='user-profile']::view-transition-old(root),
+html[data-transition-type='user-profile']::view-transition-new(root) {
+  animation: none !important;
+  mix-blend-mode: normal !important;
+}
+
+::view-transition-group(user-profile-box) {
+  animation-duration: var(--motion-duration-normal);
+  animation-timing-function: var(--motion-ease-out);
+  z-index: 10000;
+}
+
+::view-transition-old(user-profile-box),
+::view-transition-new(user-profile-box) {
+  height: 100%;
+  width: 100%;
+  border-radius: inherit;
+  overflow: clip;
+}
+
+::view-transition-group(user-profile-text) {
+  animation-duration: var(--motion-duration-normal);
+  animation-timing-function: var(--motion-ease-out);
+  z-index: 10001;
+}
+
+::view-transition-old(user-profile-text),
+::view-transition-new(user-profile-text) {
+  height: auto;
+  width: auto;
+  overflow: visible;
 }
 

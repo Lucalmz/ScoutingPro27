@@ -1,4 +1,5 @@
-import type { ScoutingRecord, RankingRow, ScoutingEvent, TeamTagItem } from '@/types'
+import type { ScoutingRecord, RankingRow, ScoutingEvent, TeamTagItem, PitScoutingRecord } from '@/types'
+import { calculateBragIndex } from '@/utils/bragIndex'
 
 export interface ContextOptions {
   event?: ScoutingEvent | null
@@ -6,15 +7,13 @@ export interface ContextOptions {
   records: ScoutingRecord[]
   bannedTeams?: number[]
   tags?: TeamTagItem[]
+  pitRecords?: PitScoutingRecord[]
 }
 
 /**
  * Cleanly formats preset or custom tags for AI prompt consumption
  */
 function formatTagForPrompt(tag: TeamTagItem): string {
-  if (tag.isPreset || tag.tag.startsWith('preset.')) {
-    return tag.tag.replace(/^preset\./, '').replace(/_/g, ' ')
-  }
   return tag.tag
 }
 
@@ -23,10 +22,11 @@ function formatTagForPrompt(tag: TeamTagItem): string {
  * for consumption by LLMs (DeepSeek, Gemini, OpenAI, etc.).
  */
 export function buildEventDataContext(options: ContextOptions): string {
-  const { event, rankings, records, bannedTeams, tags } = options
+  const { event, rankings, records, bannedTeams, tags, pitRecords } = options
   const activeRecords = records.filter(r => !r.isDeleted)
+  const activePitRecords = (pitRecords || []).filter(p => !p.isDeleted)
 
-  if (activeRecords.length === 0 && rankings.length === 0 && (!tags || tags.length === 0)) {
+  if (activeRecords.length === 0 && rankings.length === 0 && (!tags || tags.length === 0) && activePitRecords.length === 0) {
     return '[Current Event Data: No scouting records or match data have been recorded yet.]'
   }
 
@@ -38,7 +38,7 @@ export function buildEventDataContext(options: ContextOptions): string {
       lines.push(`Event Code: ${event.ftcEventCode} (Year: ${event.ftcYear || 'N/A'})`)
     }
   }
-  lines.push(`Total Active Records: ${activeRecords.length} | Total Tracked Teams: ${rankings.length}`)
+  lines.push(`Total Active Records: ${activeRecords.length} | Total Tracked Teams: ${rankings.length}${activePitRecords.length > 0 ? ` | Pit Profiles: ${activePitRecords.length}` : ''}`)
 
   if (bannedTeams && bannedTeams.length > 0) {
     lines.push(`Banned / Marked Weak Teams: ${bannedTeams.join(', ')}`)
@@ -96,7 +96,45 @@ export function buildEventDataContext(options: ContextOptions): string {
     }
   }
 
-  // 3. Detailed Match Records
+  // 3. Pit Scouting & Robot Hardware Profiles (Self-Reported Specs & Brag Audit)
+  if (activePitRecords.length > 0) {
+    lines.push('\n[Pit Scouting & Robot Hardware Profiles (Self-Reported Specs & Brag Audit)]')
+    lines.push('Team # | Drivetrain | Mechanism | Hang Type | Odom | Claimed Auto | Claimed TeleOp | Claimed Hang | Claimed Total | Brag Index (Audit)')
+    lines.push('---|---|---|---|---|---|---|---|---|---')
+    const sortedPits = [...activePitRecords].sort((a, b) => a.teamNumber - b.teamNumber)
+    for (const pit of sortedPits) {
+      const teamMatches = activeRecords.filter(r => r.teamNumber === pit.teamNumber)
+      const brag = calculateBragIndex(pit, teamMatches)
+      const drivetrain = pit.drivetrainType || 'N/A'
+      const mechanism = pit.mechanismType || 'N/A'
+      const hangType = pit.hangType || 'N/A'
+      const odom = pit.odometryType || 'N/A'
+      const autoStr = `${pit.claimedAutoScore} pts (${pit.claimedAutoPieces} pcs, Hang L${pit.claimedAutoHangLevel})`
+      const teleopStr = `${pit.claimedTeleopScore} pts (${pit.claimedTeleopCycleSec}s/cycle)`
+      const hangStr = pit.claimedEndgameHangLevel > 0
+        ? `L${pit.claimedEndgameHangLevel} (${pit.claimedEndgameTimeSec}s)`
+        : 'None'
+      const totalStr = `${pit.claimedTotalScore} pts`
+
+      let bragStr = 'Pending'
+      if (brag) {
+        if (brag.tier === 'pending') {
+          bragStr = 'Pending (No Matches)'
+        } else {
+          let hangNotice = ''
+          if (brag.hangVerified) {
+            hangNotice = ', High Hang Verified'
+          } else if (brag.hangPardoned) {
+            hangNotice = ', High Hang Pending Verification'
+          }
+          bragStr = `${brag.overallRatio}x (${brag.tier}${hangNotice})`
+        }
+      }
+      lines.push(`${pit.teamNumber} | ${drivetrain} | ${mechanism} | ${hangType} | ${odom} | ${autoStr} | ${teleopStr} | ${hangStr} | ${totalStr} | ${bragStr}`)
+    }
+  }
+
+  // 4. Detailed Match Records
   if (activeRecords.length > 0) {
     lines.push('\n[Detailed Match Scouting Records]')
     lines.push('Match # | Team # | Scouter | Total Score | Auto | TeleOp | Endgame | Broken | Notes')

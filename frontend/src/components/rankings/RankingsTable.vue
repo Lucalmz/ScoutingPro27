@@ -8,6 +8,7 @@ import { useToastStore } from '@/stores/toast'
 import { useRouter } from 'vue-router'
 import { transitionState } from '@/utils/transitionState'
 import { useTween } from '@/composables/useTween'
+import { useNavigationStore } from '@/stores/navigation'
 
 // Inline component for animated numbers
 const AnimatedNumber = defineComponent({
@@ -24,6 +25,7 @@ const eventStore = useEventStore()
 const recordStore = useRecordStore()
 const toastStore = useToastStore()
 const router = useRouter()
+const navStore = useNavigationStore()
 
 const props = defineProps<{
   rankings: RankingRow[]
@@ -43,12 +45,7 @@ const availableFilterTags = computed<string[]>(() => {
 })
 
 function formatTagLabel(tagKey?: string | null): string {
-  if (!tagKey) return ''
-  if (tagKey.startsWith('preset.')) {
-    const i18nKey = `tags.${tagKey}`
-    return te(i18nKey) ? t(i18nKey) : tagKey.replace(/^preset\./, '')
-  }
-  return tagKey
+  return tagKey || ''
 }
 
 function setSort(key: SortKey) {
@@ -133,6 +130,16 @@ async function banTeam(teamNumber: number) {
 
 function viewTeamDetails(teamNumber: number) {
   if (eventStore.currentEvent?.id) {
+    const tabContent = document.querySelector('.tab-content') as HTMLElement | null
+    const tableWrapper = document.querySelector('.table-wrapper') as HTMLElement | null
+    navStore.saveEventPosition({
+      eventId: eventStore.currentEvent.id,
+      fromTab: 'rankings',
+      contentScrollTop: tabContent ? tabContent.scrollTop : window.scrollY,
+      contentScrollLeft: tabContent ? tabContent.scrollLeft : window.scrollX,
+      tableScrollLeft: tableWrapper ? tableWrapper.scrollLeft : 0,
+      teamNumber: teamNumber
+    })
     transitionState.startSharedTransition(`team-card-${teamNumber}`)
     nextTick(() => {
       router.push(`/event/${eventStore.currentEvent!.id}/team/${teamNumber}`)
@@ -206,6 +213,7 @@ function viewTeamDetails(teamNumber: number) {
             v-for="(row, index) in sorted" 
             :key="row.teamNumber" 
             :data-index="index"
+            :data-team-row="row.teamNumber"
             @mouseenter="onRowEnter"
           >
             <td class="team-cell">
@@ -277,7 +285,7 @@ function viewTeamDetails(teamNumber: number) {
 .list-move,
 .list-enter-active,
 .list-leave-active {
-  transition: all 0.5s cubic-bezier(0.25, 1, 0.5, 1);
+  transition: all var(--motion-duration-normal) var(--motion-ease-out);
 }
 
 .list-leave-active {
@@ -287,12 +295,13 @@ function viewTeamDetails(teamNumber: number) {
 .list-enter-from,
 .list-leave-to {
   opacity: 0;
-  transform: translateX(30px);
+  transform: translateX(20px);
 }
 
 .rankings-panel {
-  max-width: 800px;
-  margin: 0 auto;
+  width: 100%;
+  max-width: 100%;
+  box-sizing: border-box;
 }
 
 .loading-msg,
@@ -304,12 +313,15 @@ function viewTeamDetails(teamNumber: number) {
 
 .table-wrapper {
   overflow-x: auto;
+  width: 100%;
+  box-sizing: border-box;
 }
 
 table {
   width: 100%;
   border-collapse: collapse;
   font-size: 14px;
+  min-width: 760px;
 }
 
 thead th {

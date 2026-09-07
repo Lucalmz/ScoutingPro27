@@ -194,9 +194,56 @@ public class FtcApiClient {
     /**
      * 获取指定赛季的赛事列表
      */
-    public JsonObject fetchEvents(int season) throws Exception {
-        String path = "/v2.0/" + season + "/events";
-        return fetchJsonWithCache(path);
+    /**
+     * 获取指定赛季与赛事代码的参赛战队列表，处理自动翻页，并归一化为纯净 Team 列表
+     *
+     * @param season    FTC 赛季年份 (如 2024, 2025)
+     * @param eventCode 赛事代码 (如 CNCMPLB, TXHOU)
+     * @return 归一化后的战队列表 JsonArray
+     */
+    public JsonArray fetchNormalizedTeams(int season, String eventCode) throws Exception {
+        JsonArray allTeams = new JsonArray();
+        int page = 1;
+        int pageTotal = 1;
+
+        do {
+            String path = "/v2.0/" + season + "/teams?eventCode=" + eventCode + "&page=" + page;
+            JsonObject rawObj = fetchJsonWithCache(path);
+            if (rawObj == null || !rawObj.has("teams") || rawObj.get("teams").isJsonNull()) {
+                break;
+            }
+
+            if (rawObj.has("pageTotal") && !rawObj.get("pageTotal").isJsonNull()) {
+                pageTotal = rawObj.get("pageTotal").getAsInt();
+            }
+
+            JsonArray teamsArr = rawObj.getAsJsonArray("teams");
+            for (JsonElement tElem : teamsArr) {
+                if (!tElem.isJsonObject()) continue;
+                JsonObject t = tElem.getAsJsonObject();
+
+                int teamNum = t.has("teamNumber") && !t.get("teamNumber").isJsonNull() ? t.get("teamNumber").getAsInt() : 0;
+                if (teamNum <= 0) continue;
+
+                String nameFull = t.has("nameFull") && !t.get("nameFull").isJsonNull() ? t.get("nameFull").getAsString() : "Team " + teamNum;
+                String robotName = t.has("robotName") && !t.get("robotName").isJsonNull() ? t.get("robotName").getAsString() : "";
+                String city = t.has("city") && !t.get("city").isJsonNull() ? t.get("city").getAsString() : "";
+                String country = t.has("country") && !t.get("country").isJsonNull() ? t.get("country").getAsString() : "";
+
+                JsonObject normTeam = new JsonObject();
+                normTeam.addProperty("teamNumber", teamNum);
+                normTeam.addProperty("nameFull", nameFull);
+                normTeam.addProperty("robotName", robotName);
+                normTeam.addProperty("city", city);
+                normTeam.addProperty("country", country);
+
+                allTeams.add(normTeam);
+            }
+
+            page++;
+        } while (page <= pageTotal && page <= 20);
+
+        return allTeams;
     }
 
     private JsonObject fetchJsonWithCache(String path) throws Exception {

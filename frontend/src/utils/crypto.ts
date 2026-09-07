@@ -79,15 +79,45 @@ export function generateNonce(length = 16): string {
 }
 
 /**
- * Derive an HMAC-SHA256 Key from inviteCode and room name
+ * Compute SHA-256 hex string for a given text or public key
  */
-export async function deriveHmacKey(inviteCode: string, roomSalt = 'scoutingpro27'): Promise<CryptoKey> {
+export async function sha256Hex(str: string): Promise<string> {
   const enc = new TextEncoder()
-  const keyMaterial = enc.encode(`${inviteCode}:${roomSalt}`)
-  return await crypto.subtle.importKey(
+  const data = enc.encode(str)
+  const hashBuffer = await crypto.subtle.digest('SHA-256', data)
+  const hashArray = Array.from(new Uint8Array(hashBuffer))
+  return hashArray.map(b => b.toString(16).padStart(2, '0')).join('')
+}
+
+/**
+ * Derive an HMAC-SHA256 Key from inviteCode and room salt using PBKDF2 (100,000 iterations)
+ */
+export async function deriveHmacKey(inviteCode: string, roomSalt = 'scoutingpro27', iterations = 100000): Promise<CryptoKey> {
+  // Test hook to allow fast test execution in Vitest
+  if (typeof (globalThis as any).__TEST_PBKDF2_ITERATIONS__ === 'number') {
+    iterations = (globalThis as any).__TEST_PBKDF2_ITERATIONS__
+  }
+  const enc = new TextEncoder()
+  const keyMaterial = enc.encode(inviteCode)
+  const salt = enc.encode(roomSalt)
+
+  const baseKey = await crypto.subtle.importKey(
     'raw',
     keyMaterial,
-    { name: 'HMAC', hash: 'SHA-256' },
+    { name: 'PBKDF2' },
+    false,
+    ['deriveKey']
+  )
+
+  return await crypto.subtle.deriveKey(
+    {
+      name: 'PBKDF2',
+      salt,
+      iterations,
+      hash: 'SHA-256'
+    },
+    baseKey,
+    { name: 'HMAC', hash: 'SHA-256', length: 256 },
     false,
     ['sign', 'verify']
   )
@@ -253,3 +283,27 @@ export async function decryptSignalingData(
   const dec = new TextDecoder()
   return dec.decode(decryptedBuffer)
 }
+
+/**
+ * Compute an out-of-band Short Authentication String (SAS) / Security Fingerprint
+ * Symmetric function of both peers' public keys and room code:
+ * SAS = SHA-256(min(pubA, pubB) + ":" + max(pubA, pubB) + ":" + inviteCode)
+ * Returns formatted 8-char hex string, e.g. "A3F1-9BC2"
+ */
+export async function computeSecurityFingerprint(
+  localPubHex: string,
+  remotePubHex: string,
+  inviteCode: string
+): Promise<string> {
+  if (!localPubHex || !remotePubHex) return ''
+  const sortedKeys = [localPubHex.toLowerCase(), remotePubHex.toLowerCase()].sort()
+  const payload = `${sortedKeys[0]}:${sortedKeys[1]}:${inviteCode}`
+  const enc = new TextEncoder()
+  const digest = await crypto.subtle.digest('SHA-256', enc.encode(payload))
+  const hex = Array.from(new Uint8Array(digest))
+    .map(b => b.toString(16).padStart(2, '0'))
+    .join('')
+    .toUpperCase()
+  return `${hex.slice(0, 4)}-${hex.slice(4, 8)}`
+}
+

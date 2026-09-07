@@ -42,7 +42,7 @@ watch(() => inboxStore.messages.length, (newLen, oldLen) => {
 
 .page-enter-active,
 .page-leave-active {
-  transition: opacity 0.5s cubic-bezier(0.25, 1, 0.5, 1), transform 0.5s cubic-bezier(0.25, 1, 0.5, 1);
+  transition: opacity 0.85s cubic-bezier(0.25, 1, 0.5, 1), transform 0.85s cubic-bezier(0.25, 1, 0.5, 1);
 }
 
 .page-enter-from {
@@ -83,8 +83,8 @@ watch(() => inboxStore.messages.length, (newLen, oldLen) => {
 ::view-transition-group(*),
 ::view-transition-old(*),
 ::view-transition-new(*) {
-  animation-duration: 0.6s;
-  animation-timing-function: cubic-bezier(0.25, 1, 0.5, 1);
+  animation-duration: var(--motion-duration-slow);
+  animation-timing-function: var(--motion-ease-out);
 }
 
 [data-direction='forward']::view-transition-new(page-view) {
@@ -109,41 +109,41 @@ watch(() => inboxStore.messages.length, (newLen, oldLen) => {
 /* If a shared element is transitioning, tone down the page-view transition */
 [data-transition-type='shared']::view-transition-old(page-view) {
   animation-name: fade-out;
-  animation-duration: 0.4s;
+  animation-duration: var(--motion-duration-normal);
 }
 [data-transition-type='shared']::view-transition-new(page-view) {
   animation-name: fade-in;
-  animation-duration: 0.4s;
+  animation-duration: var(--motion-duration-normal);
 }
 
 @keyframes slide-from-right {
   from {
-    transform: translateX(80px) scale(0.98);
-    filter: blur(4px);
+    transform: translateX(48px) scale(0.98);
+    filter: blur(2px);
     opacity: 0;
   }
 }
 
 @keyframes slide-to-left {
   to {
-    transform: translateX(-80px) scale(0.98);
-    filter: blur(4px);
+    transform: translateX(-48px) scale(0.98);
+    filter: blur(2px);
     opacity: 0;
   }
 }
 
 @keyframes slide-from-left {
   from {
-    transform: translateX(-80px) scale(0.98);
-    filter: blur(4px);
+    transform: translateX(-48px) scale(0.98);
+    filter: blur(2px);
     opacity: 0;
   }
 }
 
 @keyframes slide-to-right {
   to {
-    transform: translateX(80px) scale(0.98);
-    filter: blur(4px);
+    transform: translateX(48px) scale(0.98);
+    filter: blur(2px);
     opacity: 0;
   }
 }
@@ -166,7 +166,7 @@ watch(() => inboxStore.messages.length, (newLen, oldLen) => {
   }
 }
 
-/* EventView Staggered Entrance and Exit (Native View Transitions) */
+/* EventView Staggered Entrance and Exit (Native View Transitions - 核心保留并调优) */
 ::view-transition-new(event-topbar),
 ::view-transition-new(event-tabs),
 ::view-transition-new(event-content),
@@ -175,30 +175,32 @@ watch(() => inboxStore.messages.length, (newLen, oldLen) => {
 ::view-transition-old(event-tabs),
 ::view-transition-old(event-content),
 ::view-transition-old(event-status) {
-  animation-duration: 0.65s;
-  animation-timing-function: cubic-bezier(0.25, 1, 0.5, 1);
+  animation-duration: var(--motion-duration-slow);
+  animation-timing-function: var(--motion-ease-out);
   animation-fill-mode: both;
 }
 
 ::view-transition-group(event-card-title) {
   z-index: 9999;
+  animation-duration: var(--motion-duration-slow);
+  animation-timing-function: var(--motion-ease-out);
 }
 
 [data-direction='forward']::view-transition-new(event-topbar) {
   animation-name: slide-down-fade-in;
-  animation-delay: 0.15s;
+  animation-delay: 0.136s;
 }
 [data-direction='forward']::view-transition-new(event-status) {
   animation-name: slide-from-left-fade-in;
-  animation-delay: 0.25s;
+  animation-delay: 0.238s;
 }
 [data-direction='forward']::view-transition-new(event-tabs) {
   animation-name: slide-from-right-fade-in;
-  animation-delay: 0.35s;
+  animation-delay: 0.34s;
 }
 [data-direction='forward']::view-transition-new(event-content) {
   animation-name: slide-up-fade-in;
-  animation-delay: 0.45s;
+  animation-delay: 0.442s;
 }
 
 [data-direction='back']::view-transition-old(event-topbar) {
@@ -207,20 +209,20 @@ watch(() => inboxStore.messages.length, (newLen, oldLen) => {
 }
 [data-direction='back']::view-transition-old(event-status) {
   animation-name: slide-to-left-fade-out;
-  animation-delay: 0.1s;
+  animation-delay: 0.102s;
 }
 [data-direction='back']::view-transition-old(event-tabs) {
   animation-name: slide-to-right-fade-out;
-  animation-delay: 0.2s;
+  animation-delay: 0.204s;
 }
 [data-direction='back']::view-transition-old(event-content) {
   animation-name: slide-down-fade-out;
-  animation-delay: 0.3s;
+  animation-delay: 0.306s;
 }
 
 @keyframes slide-down-fade-in {
   from {
-    transform: translateY(-60px);
+    transform: translateY(-32px);
     opacity: 0;
   }
   to {
@@ -231,7 +233,7 @@ watch(() => inboxStore.messages.length, (newLen, oldLen) => {
 
 @keyframes slide-up-fade-in {
   from {
-    transform: translateY(60px);
+    transform: translateY(32px);
     opacity: 0;
   }
   to {
@@ -242,7 +244,7 @@ watch(() => inboxStore.messages.length, (newLen, oldLen) => {
 
 @keyframes slide-from-left-fade-in {
   from {
-    transform: translateX(-120px);
+    transform: translateX(-40px);
     opacity: 0;
   }
   to {
@@ -253,7 +255,7 @@ watch(() => inboxStore.messages.length, (newLen, oldLen) => {
 
 @keyframes slide-from-right-fade-in {
   from {
-    transform: translateX(120px);
+    transform: translateX(40px);
     opacity: 0;
   }
   to {
@@ -268,7 +270,7 @@ watch(() => inboxStore.messages.length, (newLen, oldLen) => {
     opacity: 1;
   }
   to {
-    transform: translateY(-60px);
+    transform: translateY(-32px);
     opacity: 0;
   }
 }
@@ -279,7 +281,7 @@ watch(() => inboxStore.messages.length, (newLen, oldLen) => {
     opacity: 1;
   }
   to {
-    transform: translateY(60px);
+    transform: translateY(32px);
     opacity: 0;
   }
 }
@@ -290,7 +292,7 @@ watch(() => inboxStore.messages.length, (newLen, oldLen) => {
     opacity: 1;
   }
   to {
-    transform: translateX(-120px);
+    transform: translateX(-40px);
     opacity: 0;
   }
 }
@@ -301,13 +303,13 @@ watch(() => inboxStore.messages.length, (newLen, oldLen) => {
     opacity: 1;
   }
   to {
-    transform: translateX(120px);
+    transform: translateX(40px);
     opacity: 0;
   }
 }
 
 /* ----------------------------------------------------
-   Tab Switching View Transitions
+   Tab Switching View Transitions (精致从上至下滑刷入)
    ---------------------------------------------------- */
 [data-transition-type='tab-switch']::view-transition-group(page-view) {
   animation: none !important;
@@ -317,25 +319,34 @@ watch(() => inboxStore.messages.length, (newLen, oldLen) => {
   animation: none !important;
 }
 
-[data-transition-type='tab-switch']::view-transition-old(event-content),
+[data-transition-type='tab-switch']::view-transition-old(event-content) {
+  animation: tab-brush-out var(--motion-duration-fast) var(--motion-ease-out) both;
+}
+
 [data-transition-type='tab-switch']::view-transition-new(event-content) {
-  animation-duration: 0.35s;
-  animation-timing-function: cubic-bezier(0.25, 1, 0.5, 1);
-  animation-fill-mode: both;
+  animation: tab-brush-in var(--motion-duration-moderate) var(--motion-ease-out) both;
 }
 
-[data-transition-type='tab-switch'][data-tab-direction='slide-left']::view-transition-old(event-content) {
-  animation-name: slide-to-left-fade-out;
-}
-[data-transition-type='tab-switch'][data-tab-direction='slide-left']::view-transition-new(event-content) {
-  animation-name: slide-from-right-fade-in;
+@keyframes tab-brush-out {
+  from {
+    transform: translateY(0);
+    opacity: 1;
+  }
+  to {
+    transform: translateY(16px);
+    opacity: 0;
+  }
 }
 
-[data-transition-type='tab-switch'][data-tab-direction='slide-right']::view-transition-old(event-content) {
-  animation-name: slide-to-right-fade-out;
-}
-[data-transition-type='tab-switch'][data-tab-direction='slide-right']::view-transition-new(event-content) {
-  animation-name: slide-from-left-fade-in;
+@keyframes tab-brush-in {
+  from {
+    transform: translateY(-24px) scale(0.995);
+    opacity: 0;
+  }
+  to {
+    transform: translateY(0) scale(1);
+    opacity: 1;
+  }
 }
 
 /* ==============================================================
@@ -370,18 +381,18 @@ watch(() => inboxStore.messages.length, (newLen, oldLen) => {
 
 /* Entering TeamDetailView */
 [data-to-type='team-detail']::view-transition-new(modal-sheet) {
-  animation: modal-slide-up 0.5s cubic-bezier(0.25, 1, 0.5, 1) both;
+  animation: modal-slide-up 0.765s var(--motion-ease-out) both;
 }
 [data-to-type='team-detail']::view-transition-old(page-view) {
-  animation: modal-push-back 0.5s cubic-bezier(0.25, 1, 0.5, 1) both;
+  animation: modal-push-back 0.765s var(--motion-ease-out) both;
 }
 
 /* Leaving TeamDetailView */
 [data-from-type='team-detail']::view-transition-old(modal-sheet) {
-  animation: modal-slide-down 0.5s cubic-bezier(0.25, 1, 0.5, 1) both;
+  animation: modal-slide-down 0.765s var(--motion-ease-out) both;
 }
 [data-from-type='team-detail']::view-transition-new(page-view) {
-  animation: modal-pull-forward 0.5s cubic-bezier(0.25, 1, 0.5, 1) both;
+  animation: modal-pull-forward 0.765s var(--motion-ease-out) both;
 }
 
 @keyframes modal-slide-up {
@@ -396,11 +407,11 @@ watch(() => inboxStore.messages.length, (newLen, oldLen) => {
 
 @keyframes modal-push-back {
   from { transform: scale(1); filter: brightness(1); border-radius: 0; }
-  to { transform: scale(0.92); filter: brightness(0.6); border-radius: 16px; }
+  to { transform: scale(0.94); filter: brightness(0.65); border-radius: 16px; }
 }
 
 @keyframes modal-pull-forward {
-  from { transform: scale(0.92); filter: brightness(0.6); border-radius: 16px; }
+  from { transform: scale(0.94); filter: brightness(0.65); border-radius: 16px; }
   to { transform: scale(1); filter: brightness(1); border-radius: 0; }
 }
 </style>

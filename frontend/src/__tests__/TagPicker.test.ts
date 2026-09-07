@@ -24,7 +24,7 @@ describe('TagPicker.vue', () => {
   it('renders existing tags for the team', () => {
     const recordStore = useRecordStore()
     recordStore.teamTags = [
-      { id: 't1', eventId: 'e1', teamNumber: 27570, tag: 'preset.fast_cycle', color: 'blue', isPreset: true },
+      { id: 't1', eventId: 'e1', teamNumber: 27570, tag: 'fast_cycle', color: 'blue', isPreset: false },
       { id: 't2', eventId: 'e1', teamNumber: 27570, tag: 'aluminum_chassis', color: 'green', isPreset: false },
       { id: 't3', eventId: 'e1', teamNumber: 19600, tag: 'other_team_tag', color: 'red', isPreset: false }
     ]

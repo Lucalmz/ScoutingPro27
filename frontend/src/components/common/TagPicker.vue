@@ -82,7 +82,7 @@ async function handleAddCustomTag() {
     raw = raw.toLowerCase()
   }
 
-  // 防撞车：自定义标签禁止包含 '.'（V27）
+  // 禁止输入预设标签前缀（V27）
   if (raw.includes('.')) {
     toastStore.showToast(t('tags.no_dot_allowed'), 'error')
     return
@@ -144,7 +144,7 @@ function selectSuggestion(suggestion: string) {
 <template>
   <div class="tag-picker-container">
     <!-- 当前已附带标签列表 -->
-    <div class="tags-list">
+    <TransitionGroup name="tag-badge" tag="div" class="tags-list">
       <span
         v-for="tag in currentTags"
         :key="tag.id || tag.tag"
@@ -166,6 +166,7 @@ function selectSuggestion(suggestion: string) {
 
       <!-- 添加标签按钮 / 展开面板 -->
       <button
+        key="btn-add"
         v-if="!readonly && !isAdding"
         class="btn-add-tag"
         :disabled="isSubmitting || currentTags.length >= 15"
@@ -174,67 +175,69 @@ function selectSuggestion(suggestion: string) {
         <span class="material-icons" style="font-size: 14px">add</span>
         {{ t('tags.add_tag') }}
       </button>
-    </div>
+    </TransitionGroup>
 
     <!-- 添加标签交互面板 -->
-    <div v-if="!readonly && isAdding" class="tag-edit-panel">
-      <div class="custom-input-section">
-        <span class="edit-label">{{ t('tags.custom_tag') }}:</span>
-        <div class="input-row">
-          <input
-            v-model="inputTag"
-            type="text"
-            class="tag-input"
-            maxlength="30"
-            :placeholder="t('tags.input_placeholder')"
-            @keydown.enter.prevent="handleAddCustomTag"
-          />
-
-          <!-- 颜色选择器 -->
-          <div class="color-picker">
-            <button
-              v-for="col in COLOR_OPTIONS"
-              :key="col"
-              type="button"
-              class="color-dot"
-              :class="[`bg-${col}`, { selected: selectedColor === col }]"
-              @click="selectedColor = col"
-              :title="col"
+    <Transition name="tab-fade">
+      <div v-if="!readonly && isAdding" class="tag-edit-panel">
+        <div class="custom-input-section">
+          <span class="edit-label">{{ t('tags.custom_tag') }}:</span>
+          <div class="input-row">
+            <input
+              v-model="inputTag"
+              type="text"
+              class="tag-input"
+              maxlength="30"
+              :placeholder="t('tags.input_placeholder')"
+              @keydown.enter.prevent="handleAddCustomTag"
             />
+
+            <!-- 颜色选择器 -->
+            <div class="color-picker">
+              <button
+                v-for="col in COLOR_OPTIONS"
+                :key="col"
+                type="button"
+                class="color-dot"
+                :class="[`bg-${col}`, { selected: selectedColor === col }]"
+                @click="selectedColor = col"
+                :title="col"
+              />
+            </div>
+
+            <button
+              type="button"
+              class="btn-confirm-add"
+              :disabled="!inputTag.trim() || isSubmitting"
+              @click="handleAddCustomTag"
+            >
+              {{ t('tags.confirm') }}
+            </button>
+            <button
+              type="button"
+              class="btn-cancel-add"
+              @click="isAdding = false"
+            >
+              {{ t('tags.cancel') }}
+            </button>
           </div>
 
-          <button
-            type="button"
-            class="btn-confirm-add"
-            :disabled="!inputTag.trim() || isSubmitting"
-            @click="handleAddCustomTag"
-          >
-            {{ t('tags.confirm') }}
-          </button>
-          <button
-            type="button"
-            class="btn-cancel-add"
-            @click="isAdding = false"
-          >
-            {{ t('tags.cancel') }}
-          </button>
-        </div>
-
-        <!-- 历史补全建议（V14）-->
-        <div v-if="tagSuggestions.length > 0" class="suggestions-row">
-          <span class="sugg-label">{{ t('tags.suggestions') }}:</span>
-          <button
-            v-for="sugg in tagSuggestions"
-            :key="sugg"
-            type="button"
-            class="sugg-chip"
-            @click="selectSuggestion(sugg)"
-          >
-            {{ sugg }}
-          </button>
+          <!-- 历史补全建议（V14）-->
+          <div v-if="tagSuggestions.length > 0" class="suggestions-row">
+            <span class="sugg-label">{{ t('tags.suggestions') }}:</span>
+            <button
+              v-for="sugg in tagSuggestions"
+              :key="sugg"
+              type="button"
+              class="sugg-chip"
+              @click="selectSuggestion(sugg)"
+            >
+              {{ sugg }}
+            </button>
+          </div>
         </div>
       </div>
-    </div>
+    </Transition>
   </div>
 </template>
 

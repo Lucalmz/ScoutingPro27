@@ -27,6 +27,10 @@ const router = createRouter({
       meta: { depth: 2 }
     },
     {
+      path: '/join',
+      redirect: (to) => ({ path: '/', query: to.query })
+    },
+    {
       path: '/event/:eventId/team/:teamNumber',
       name: 'team-detail',
       component: () => import('@/views/TeamDetailView.vue'),
@@ -39,6 +43,25 @@ const router = createRouter({
 let currentTransition: any = null // Use any if ViewTransition type is missing in older TS
 
 router.beforeEach((to, from) => {
+  // Enforce mandatory password/session authentication for all app routes
+  if (to.name !== 'login') {
+    const rawUser = localStorage.getItem('scoutingpro-user')
+    let hasValidSession = false
+    if (rawUser) {
+      try {
+        const u = JSON.parse(rawUser)
+        if (u && u.id && u.token) {
+          hasValidSession = true
+        }
+      } catch {
+        hasValidSession = false
+      }
+    }
+    if (!hasValidSession) {
+      return { name: 'login', query: to.query }
+    }
+  }
+
   if (to.name === 'dashboard' && from.name === 'event') {
     transitionState.startSharedTransition(`event-card-${from.params.eventId}`)
   }

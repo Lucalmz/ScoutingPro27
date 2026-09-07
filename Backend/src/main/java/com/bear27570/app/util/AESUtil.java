@@ -12,6 +12,7 @@ import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.Paths;
+import com.bear27570.app.db.AppConfig;
 import java.security.SecureRandom;
 import java.util.Arrays;
 import java.util.Base64;
@@ -24,9 +25,12 @@ public class AESUtil {
     private static final int GCM_IV_SIZE = 12;
     private static final int GCM_TAG_LENGTH_BIT = 128;
     private static final int CBC_IV_SIZE = 16;
-    private static final String MASTER_KEY_FILE = System.getProperty("user.home") + File.separator + ".scoutingpro27" + File.separator + "master.key";
 
     private static SecretKey secretKey;
+
+    public static File getMasterKeyFile() {
+        return AppConfig.resolveMasterKeyFile();
+    }
 
     static {
         try {
@@ -38,7 +42,7 @@ public class AESUtil {
     }
 
     public static synchronized void initMasterKey() throws Exception {
-        File keyFile = new File(MASTER_KEY_FILE);
+        File keyFile = getMasterKeyFile();
         if (keyFile.exists() && keyFile.length() > 0) {
             byte[] keyBytes = Files.readAllBytes(keyFile.toPath());
             secretKey = new SecretKeySpec(keyBytes, ALGORITHM);

@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest'
 import { buildEventDataContext } from '@/components/ai/contextBuilder'
-import type { ScoutingRecord, RankingRow, ScoutingEvent } from '@/types'
+import type { ScoutingRecord, RankingRow, ScoutingEvent, PitScoutingRecord } from '@/types'
 
 describe('buildEventDataContext', () => {
   it('returns empty notice when there are no records and no rankings', () => {
@@ -130,21 +130,21 @@ describe('buildEventDataContext', () => {
     expect(result).toContain('=== END OF EVENT DATA ===')
   })
 
-  it('includes tactical observation tags grouped by team with preset formatting (V11, V18, V20)', () => {
+  it('includes tactical observation tags grouped by team (V11, V18, V20)', () => {
     const result = buildEventDataContext({
       event: null,
       rankings: [{ teamNumber: 27570, matchCount: 1, avgAutoScore: 10, avgTeleopScore: 10, avgEndgameScore: 10, maxScore: 30, avgRating: 30, brokenCount: 0, trend: 'stable' }],
       records: [],
       tags: [
-        { id: '1', eventId: 'e1', teamNumber: 27570, tag: 'preset.dual_motor_hang', color: 'green', isPreset: true },
+        { id: '1', eventId: 'e1', teamNumber: 27570, tag: 'dual_motor_hang', color: 'green', isPreset: false },
         { id: '2', eventId: 'e1', teamNumber: 27570, tag: 'aluminum_lift', color: 'blue', isPreset: false },
-        { id: '3', eventId: 'e1', teamNumber: 19600, tag: 'preset.defense_specialist', color: 'red', isPreset: true }
+        { id: '3', eventId: 'e1', teamNumber: 19600, tag: 'defense_specialist', color: 'red', isPreset: false }
       ]
     })
 
     expect(result).toContain('[Scouter Tactical Observation Tags (Subjective Field Notes - Cross-Validate with Match Stats)]')
-    expect(result).toContain('Team 19600: defense specialist')
-    expect(result).toContain('Team 27570: dual motor hang, aluminum_lift')
+    expect(result).toContain('Team 19600: defense_specialist')
+    expect(result).toContain('Team 27570: dual_motor_hang, aluminum_lift')
   })
 
   it('truncates tags safely at line boundary when exceeding 1500 chars (V19, V29)', () => {
@@ -174,4 +174,139 @@ describe('buildEventDataContext', () => {
     const tagSection = result.split('[Scouter Tactical Observation Tags')[1].split('=== END OF EVENT DATA ===')[0]
     expect(tagSection.length).toBeLessThan(1700)
   })
+
+  it('includes pit scouting robot hardware profiles and brag audit', () => {
+    const mockPitRecords: PitScoutingRecord[] = [
+      {
+        id: 'pit_1',
+        eventId: 'evt_1',
+        teamNumber: 27570,
+        scoutId: 's1',
+        scoutName: 'Alice',
+        drivetrainType: 'swerve',
+        weightLbs: 38.5,
+        sizingPassed: true,
+        mechanismType: 'slide_claw',
+        hangType: 'winch',
+        odometryType: 'pinpoint_otos',
+        claimedAutoPieces: 3,
+        claimedAutoScore: 40,
+        claimedAutoHangLevel: 1,
+        claimedTeleopCycleSec: 6,
+        claimedTeleopScore: 80,
+        claimedEndgameHangLevel: 3,
+        claimedEndgameTimeSec: 5,
+        claimedTotalScore: 150,
+        syncStatus: 'SYNCED',
+        createdAt: '2026-08-20T10:00:00Z',
+        updatedAt: '2026-08-20T10:00:00Z',
+        version: 1
+      },
+      {
+        id: 'pit_deleted',
+        eventId: 'evt_1',
+        teamNumber: 99999,
+        scoutId: 's2',
+        scoutName: 'Bob',
+        drivetrainType: 'tank',
+        weightLbs: 35,
+        sizingPassed: true,
+        mechanismType: 'linkage_arm',
+        hangType: 'none',
+        odometryType: 'none',
+        claimedAutoPieces: 0,
+        claimedAutoScore: 0,
+        claimedAutoHangLevel: 0,
+        claimedTeleopCycleSec: 0,
+        claimedTeleopScore: 0,
+        claimedEndgameHangLevel: 0,
+        claimedEndgameTimeSec: 0,
+        claimedTotalScore: 0,
+        syncStatus: 'SYNCED',
+        createdAt: '2026-08-20T10:00:00Z',
+        updatedAt: '2026-08-20T10:00:00Z',
+        isDeleted: true,
+        version: 2
+      }
+    ]
+
+    const mockMatchRecords: ScoutingRecord[] = [
+      {
+        id: 'rec_1',
+        eventId: 'evt_1',
+        scoutId: 's1',
+        scoutName: 'Bob',
+        matchNumber: 1,
+        teamNumber: 27570,
+        autoScore: 35,
+        teleopScore: 75,
+        endgameScore: 30,
+        totalScore: 140,
+        notes: 'Great match',
+        rawData: '{}',
+        syncStatus: 'SYNCED',
+        createdAt: '2026-08-20T10:00:00Z',
+        updatedAt: '2026-08-20T10:00:00Z',
+        isBroken: false,
+        version: 1
+      }
+    ]
+
+    const result = buildEventDataContext({
+      event: null,
+      rankings: [],
+      records: mockMatchRecords,
+      pitRecords: mockPitRecords
+    })
+
+    expect(result).toContain('Pit Profiles: 1')
+    expect(result).toContain('[Pit Scouting & Robot Hardware Profiles (Self-Reported Specs & Brag Audit)]')
+    expect(result).toContain('Team # | Drivetrain | Mechanism | Hang Type | Odom | Claimed Auto | Claimed TeleOp | Claimed Hang | Claimed Total | Brag Index (Audit)')
+    expect(result).toContain('27570 | swerve | slide_claw | winch | pinpoint_otos | 40 pts (3 pcs, Hang L1) | 80 pts (6s/cycle) | L3 (5s) | 150 pts')
+    expect(result).toContain('1.02x (realistic, High Hang Verified)')
+    // Deleted pit record must not appear
+    expect(result).not.toContain('99999')
+  })
+
+  it('handles pit scouting profiles when no match records have been played yet', () => {
+    const mockPitRecords: PitScoutingRecord[] = [
+      {
+        id: 'pit_1',
+        eventId: 'evt_1',
+        teamNumber: 19600,
+        scoutId: 's3',
+        scoutName: 'Charlie',
+        drivetrainType: 'mecanum',
+        weightLbs: 32,
+        sizingPassed: true,
+        mechanismType: 'slide_roller',
+        hangType: 'passive',
+        odometryType: 'two_wheel',
+        claimedAutoPieces: 2,
+        claimedAutoScore: 30,
+        claimedAutoHangLevel: 1,
+        claimedTeleopCycleSec: 8,
+        claimedTeleopScore: 60,
+        claimedEndgameHangLevel: 1,
+        claimedEndgameTimeSec: 8,
+        claimedTotalScore: 100,
+        syncStatus: 'SYNCED',
+        createdAt: '2026-08-20T10:00:00Z',
+        updatedAt: '2026-08-20T10:00:00Z',
+        version: 1
+      }
+    ]
+
+    const result = buildEventDataContext({
+      event: null,
+      rankings: [],
+      records: [],
+      pitRecords: mockPitRecords
+    })
+
+    expect(result).toContain('Pit Profiles: 1')
+    expect(result).toContain('19600 | mecanum | slide_roller | passive | two_wheel | 30 pts (2 pcs, Hang L1) | 60 pts (8s/cycle) | L1 (8s) | 100 pts | Pending (No Matches)')
+  })
 })
+
+

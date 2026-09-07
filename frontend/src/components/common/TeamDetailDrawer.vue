@@ -3,6 +3,7 @@ import { ref, computed, watch, onUnmounted } from 'vue'
 import { useRouter } from 'vue-router'
 import { useI18n } from 'vue-i18n'
 import { useRecordStore } from '@/stores/records'
+import { useNavigationStore } from '@/stores/navigation'
 import TagPicker from '@/components/common/TagPicker.vue'
 import type { RankingRow, ScoutingRecord } from '@/types'
 
@@ -19,6 +20,7 @@ const emit = defineEmits<{
 const router = useRouter()
 const { t } = useI18n()
 const recordStore = useRecordStore()
+const navStore = useNavigationStore()
 
 // ── 抽屉可见性 ──
 const isVisible = computed(() => props.teamNumber !== null)
@@ -87,6 +89,16 @@ function trendIconName(trend: RankingRow['trend']): string {
 
 function goFullDetail() {
   if (props.teamNumber === null) return
+  const tabContent = document.querySelector('.tab-content') as HTMLElement | null
+  const chatMessages = document.querySelector('.chat-messages') as HTMLElement | null
+  navStore.saveEventPosition({
+    eventId: props.eventId,
+    fromTab: 'ai',
+    contentScrollTop: tabContent ? tabContent.scrollTop : window.scrollY,
+    contentScrollLeft: tabContent ? tabContent.scrollLeft : window.scrollX,
+    aiChatScrollTop: chatMessages ? chatMessages.scrollTop : null,
+    teamNumber: props.teamNumber
+  })
   emit('close')
   router.push(`/event/${props.eventId}/team/${props.teamNumber}`)
 }
@@ -113,17 +125,18 @@ onUnmounted(() => {
 </script>
 
 <template>
-  <!-- V6/V8：v-show 常驻 DOM；遮罩层用于移动端点击关闭 -->
+  <!-- V6/V8：常驻 DOM，Transition 保证进退场平滑 -->
   <Teleport to="body">
-    <div
-      v-show="isVisible"
-      class="drawer-overlay"
-      @click.self="emit('close')"
-      aria-modal="true"
-      role="dialog"
-      :aria-label="teamNumber ? t('team_drawer.title', { team: teamNumber }) : ''"
-    >
-      <div class="team-drawer" :class="{ visible: isVisible }">
+    <Transition name="drawer">
+      <div
+        v-show="isVisible"
+        class="drawer-overlay"
+        @click.self="emit('close')"
+        aria-modal="true"
+        role="dialog"
+        :aria-label="teamNumber ? t('team_drawer.title', { team: teamNumber }) : ''"
+      >
+        <div class="team-drawer">
         <!-- 头部 -->
         <div class="drawer-header">
           <div class="drawer-title">
@@ -244,370 +257,9 @@ onUnmounted(() => {
           </button>
         </div>
       </div>
-    </div>
+      </div>
+    </Transition>
   </Teleport>
 </template>
 
-<style scoped>
-/* ── Overlay（移动端全屏，桌面端右侧抽屉，V8）── */
-.drawer-overlay {
-  position: fixed;
-  inset: 0;
-  z-index: 1000;
-  pointer-events: none;
-}
-
-.drawer-overlay.visible,
-.drawer-overlay:has(.team-drawer.visible) {
-  pointer-events: auto;
-}
-
-/* 桌面端：右侧抽屉 */
-.team-drawer {
-  position: fixed;
-  top: 0;
-  right: 0;
-  height: 100%;
-  width: 380px;
-  max-width: 100vw;
-  background: var(--card, #0a0a0a);
-  border-left: 1px solid var(--border, #262626);
-  display: flex;
-  flex-direction: column;
-  transform: translateX(100%);
-  transition: transform 0.28s cubic-bezier(0.4, 0, 0.2, 1);
-  pointer-events: auto;
-  box-shadow: -6px 0 30px rgba(0, 0, 0, 0.8), -1px 0 10px rgba(57, 255, 20, 0.05);
-}
-
-.team-drawer.visible {
-  transform: translateX(0);
-}
-
-/* 移动端：底部 Sheet（V8）*/
-@media (max-width: 768px) {
-  .drawer-overlay {
-    background: rgba(0, 0, 0, 0.6);
-    pointer-events: none;
-    backdrop-filter: blur(2px);
-  }
-  .drawer-overlay:has(.team-drawer.visible) {
-    pointer-events: auto;
-    background: rgba(0, 0, 0, 0.6);
-  }
-
-  .team-drawer {
-    top: auto;
-    bottom: 0;
-    left: 0;
-    right: 0;
-    width: 100%;
-    height: 78vh;
-    border-left: none;
-    border-top: 1px solid var(--border, #262626);
-    border-radius: 16px 16px 0 0;
-    transform: translateY(100%);
-    box-shadow: 0 -8px 30px rgba(0, 0, 0, 0.8), 0 -1px 10px rgba(57, 255, 20, 0.05);
-  }
-
-  .team-drawer.visible {
-    transform: translateY(0);
-  }
-}
-
-/* ── Header ── */
-.drawer-header {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  padding: 14px 16px;
-  background: var(--popover, #111111);
-  border-bottom: 1px solid var(--border, #262626);
-  flex-shrink: 0;
-}
-
-.drawer-title {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  font-size: 1rem;
-  font-weight: 700;
-  color: var(--foreground, #f1f5f9);
-  font-family: 'Orbitron', 'ZCOOLQingKeHuangYou', sans-serif;
-  letter-spacing: 0.03em;
-}
-
-.drawer-title .material-icons {
-  color: var(--primary, #39ff14);
-  filter: drop-shadow(0 0 6px rgba(57, 255, 20, 0.4));
-}
-
-.drawer-actions {
-  display: flex;
-  gap: 4px;
-}
-
-.btn-icon {
-  background: transparent;
-  border: none;
-  cursor: pointer;
-  color: var(--muted-foreground, #a3a3a3);
-  padding: 6px;
-  border-radius: 6px;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  transition: all 0.15s ease-in-out;
-}
-
-.btn-icon:hover {
-  background: rgba(57, 255, 20, 0.1);
-  color: var(--primary, #39ff14);
-}
-
-/* ── Loading & Empty ── */
-.drawer-loading,
-.drawer-empty {
-  flex: 1;
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  justify-content: center;
-  gap: 12px;
-  color: var(--muted-foreground, #a3a3a3);
-  font-size: 0.9rem;
-  padding: 24px;
-  text-align: center;
-}
-
-.drawer-loading .material-icons,
-.drawer-empty .material-icons {
-  color: var(--primary, #39ff14);
-}
-
-.drawer-hint {
-  font-size: 0.78rem;
-  opacity: 0.7;
-  margin: 0;
-}
-
-.spinning {
-  animation: spin 1s linear infinite;
-}
-
-@keyframes spin {
-  from { transform: rotate(0deg); }
-  to   { transform: rotate(360deg); }
-}
-
-/* ── Body ── */
-.drawer-body {
-  flex: 1;
-  overflow-y: auto;
-  padding: 14px 16px;
-  display: flex;
-  flex-direction: column;
-  gap: 14px;
-}
-
-/* ── Stat Card ── */
-.stat-card {
-  background: var(--popover, #111111);
-  border: 1px solid var(--border, #262626);
-  border-radius: 10px;
-  padding: 12px;
-  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.3);
-}
-
-.stat-row {
-  display: flex;
-  gap: 8px;
-  flex-wrap: wrap;
-}
-
-.stat-row.sub {
-  margin-top: 8px;
-  padding-top: 8px;
-  border-top: 1px solid rgba(255, 255, 255, 0.05);
-  gap: 10px;
-}
-
-.stat-item {
-  flex: 1;
-  min-width: 60px;
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  gap: 2px;
-}
-
-.stat-label {
-  font-size: 0.7rem;
-  color: var(--muted-foreground, #a3a3a3);
-  text-transform: uppercase;
-  letter-spacing: 0.05em;
-}
-
-.stat-value {
-  font-size: 1.1rem;
-  font-weight: 700;
-  color: var(--foreground, #f1f5f9);
-  font-family: 'Orbitron', monospace;
-}
-
-.stat-value.rank {
-  color: var(--primary, #39ff14);
-  text-shadow: 0 0 10px rgba(57, 255, 20, 0.3);
-}
-
-.stat-value.trend {
-  display: flex;
-  align-items: center;
-  justify-content: center;
-}
-
-.trend-icon {
-  font-size: 1.25rem;
-}
-
-.trend-icon.up {
-  color: var(--status-success, #39ff14);
-}
-
-.trend-icon.down {
-  color: var(--destructive, #ef4444);
-}
-
-.trend-icon.stable {
-  color: var(--muted-foreground, #a3a3a3);
-}
-
-.trend-icon.new {
-  color: var(--status-warning, #fcd34d);
-}
-
-.stat-sub {
-  font-size: 0.75rem;
-  color: var(--muted-foreground, #a3a3a3);
-  display: flex;
-  align-items: center;
-  gap: 2px;
-}
-
-.stat-sub.broken {
-  color: var(--destructive, #ef4444);
-}
-
-/* ── Matches ── */
-.section-title {
-  font-size: 0.8rem;
-  font-weight: 700;
-  color: var(--foreground, #f1f5f9);
-  font-family: 'Orbitron', 'ZCOOLQingKeHuangYou', sans-serif;
-  text-transform: uppercase;
-  letter-spacing: 0.05em;
-  margin: 0 0 8px;
-}
-
-.match-row {
-  background: var(--popover, #111111);
-  border: 1px solid var(--border, #262626);
-  border-radius: 8px;
-  padding: 10px 12px;
-  margin-bottom: 6px;
-  transition: border-color 0.15s;
-}
-
-.match-row:hover {
-  border-color: rgba(57, 255, 20, 0.3);
-}
-
-.match-row.is-broken {
-  border-color: rgba(239, 68, 68, 0.5);
-  background: rgba(239, 68, 68, 0.05);
-}
-
-.match-row-header {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  margin-bottom: 4px;
-}
-
-.match-num {
-  font-size: 0.85rem;
-  font-weight: 600;
-  color: var(--foreground, #f1f5f9);
-  flex: 1;
-}
-
-.broken-tag {
-  font-size: 0.72rem;
-  color: var(--destructive, #ef4444);
-  display: flex;
-  align-items: center;
-  gap: 2px;
-}
-
-.match-total {
-  font-size: 0.95rem;
-  font-weight: 700;
-  color: var(--primary, #39ff14);
-  font-family: 'Orbitron', monospace;
-}
-
-.match-scores {
-  display: flex;
-  gap: 10px;
-  font-size: 0.75rem;
-  color: var(--muted-foreground, #a3a3a3);
-}
-
-.match-notes {
-  margin: 6px 0 0;
-  font-size: 0.78rem;
-  color: var(--foreground, #f1f5f9);
-  border-top: 1px solid var(--border, #262626);
-  padding-top: 6px;
-  line-height: 1.4;
-}
-
-.no-matches {
-  font-size: 0.82rem;
-  color: var(--muted-foreground, #a3a3a3);
-  text-align: center;
-  padding: 12px 0;
-}
-
-/* ── Footer ── */
-.drawer-footer {
-  padding: 12px 16px;
-  background: var(--popover, #111111);
-  border-top: 1px solid var(--border, #262626);
-  flex-shrink: 0;
-}
-
-.btn-full-detail {
-  width: 100%;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  gap: 6px;
-  padding: 10px;
-  background: var(--primary, #39ff14);
-  color: var(--primary-foreground, #000000);
-  border: none;
-  border-radius: 8px;
-  font-size: 0.88rem;
-  font-weight: 700;
-  cursor: pointer;
-  box-shadow: var(--glow-primary);
-  transition: all 0.15s ease-in-out;
-}
-
-.btn-full-detail:hover {
-  background: #32e012;
-  box-shadow: var(--glow-primary-hover);
-  transform: translateY(-1px);
-}
-</style>
+<style scoped src="./TeamDetailDrawer.css"></style>

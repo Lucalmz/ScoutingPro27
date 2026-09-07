@@ -53,4 +53,22 @@ describe('Events Store', () => {
     expect(store.events[0].ftcYear).toBe(2025)
     expect(store.events[0].ftcEventCode).toBe('CNCMPLB')
   })
+
+  it('create and join deduplicate events when event id already exists', async () => {
+    const store = useEventStore()
+    vi.mocked(api.createEvent).mockResolvedValue({ id: 'evt-1', inviteCode: 'ABCDEF' })
+    vi.mocked(api.joinEvent).mockResolvedValue({ id: 'evt-1', name: 'Updated Event', inviteCode: 'ABCDEF', hostId: 'u1' })
+
+    await store.create('Initial Event')
+    expect(store.events).toHaveLength(1)
+
+    // Creating again with same ID (or joining same ID) updates instead of pushing duplicate
+    await store.create('Initial Event Renamed')
+    expect(store.events).toHaveLength(1)
+    expect(store.events[0].name).toBe('Initial Event Renamed')
+
+    await store.join('ABCDEF', 'Updated Event')
+    expect(store.events).toHaveLength(1)
+    expect(store.events[0].name).toBe('Updated Event')
+  })
 })

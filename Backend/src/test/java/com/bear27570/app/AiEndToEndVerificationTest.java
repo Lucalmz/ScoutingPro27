@@ -141,8 +141,7 @@ public class AiEndToEndVerificationTest {
             assertThat(loadedChat).isEqualTo(chatHistoryPayload);
 
             System.err.println("\n[E2E Step 9] Verifying Windows Master Key file integrity and access...");
-            String masterKeyPath = System.getProperty("user.home") + File.separator + ".scoutingpro27" + File.separator + "master.key";
-            File keyFile = new File(masterKeyPath);
+            File keyFile = AESUtil.getMasterKeyFile();
             System.err.println("  -> Key file location: " + keyFile.getAbsolutePath());
             System.err.println("  -> Exists: " + keyFile.exists() + ", Size: " + keyFile.length() + " bytes");
             System.err.println("  -> canRead: " + keyFile.canRead() + ", canWrite: " + keyFile.canWrite());

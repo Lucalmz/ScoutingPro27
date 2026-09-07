@@ -1,109 +1,216 @@
 # ScoutingPro27 🚀
 
 <p align="left">
-  <img src="https://img.shields.io/badge/Vue.js-35495E?style=for-the-badge&logo=vue.js&logoColor=4FC08D" alt="Vue.js" />
+  <img src="https://img.shields.io/badge/Vue.js_3-35495E?style=for-the-badge&logo=vue.js&logoColor=4FC08D" alt="Vue.js" />
   <img src="https://img.shields.io/badge/TypeScript-007ACC?style=for-the-badge&logo=typescript&logoColor=white" alt="TypeScript" />
-  <img src="https://img.shields.io/badge/Java-ED8B00?style=for-the-badge&logo=openjdk&logoColor=white" alt="Java" />
+  <img src="https://img.shields.io/badge/Java_21-ED8B00?style=for-the-badge&logo=openjdk&logoColor=white" alt="Java" />
+  <img src="https://img.shields.io/badge/Javalin_7-009688?style=for-the-badge&logo=fastapi&logoColor=white" alt="Javalin" />
   <img src="https://img.shields.io/badge/WebRTC-333333?style=for-the-badge&logo=webrtc&logoColor=white" alt="WebRTC" />
   <img src="https://img.shields.io/badge/MQTT-660066?style=for-the-badge&logo=mqtt&logoColor=white" alt="MQTT" />
   <img src="https://img.shields.io/badge/H2_Database-003545?style=for-the-badge&logo=databricks&logoColor=white" alt="H2 Database" />
+  <img src="https://img.shields.io/badge/JCEF_Desktop-4285F4?style=for-the-badge&logo=googlechrome&logoColor=white" alt="JCEF" />
 </p>
 
-ScoutingPro27 是一款专为 FIRST Tech Challenge (FTC) 打造的离线优先赛事侦察与数据分析桌面应用，目标是在赛场网络条件不稳定的环境下，为车队提供可靠的数据同步与队伍战力分析。
+**ScoutingPro27** 是一款专为 **FIRST Tech Challenge (FTC)** 机器人赛事打造的**离线优先、去中心化分布式赛事侦察、赛程排班与战力智能分析桌面/移动协同系统**。
 
-数据完全存储在本地（内嵌 H2 数据库），设备之间通过 WebRTC 建立点对点连接同步数据。这意味着不需要自建或租用后端服务器、不需要 Docker，双击启动即可使用。**但请注意**：设备发现和 NAT 穿透依赖公共的免费信令服务（MQTT broker）和免费额度的 TURN 中继服务，这两者本身是外部第三方服务，存在限流或服务变更的可能——详见下方「已知限制」一节。
+在赛场极其恶劣的网络条件（Wi-Fi 严重干扰、移动网络对称 NAT 隔离、基站限流）下，系统基于本地嵌入式 H2 数据库与 WebRTC 点对点直连技术，为车队提供毫秒级多端增量同步、量化展位侦察 (Pit Scouting)、智能排班指派、基于官方成绩的队伍“吹牛指数”对账分析，以及搭载流式 SSE 的战术 AI 助手。
 
-## 🌟 主要功能 (Features)
-
-- **多端离线协作**：赛事现场无网/弱网时本地缓存侦察数据，网络恢复后自动双向同步（含断线自动重连，见下）。
-- **智能化表单录入**：支持单机或双机侦察模式，提供防重录入、自增运算等输入校验。
-- **动态能力排行榜**：基于历史数据计算队伍得分能力，附带战力走势分析（`↗` / `➡` / `↘`）。
-- **赛事内网即时通讯**：Host 与 Scout 可通过点对点连接进行文字通讯与任务分发。
-- **官方数据一键比对**：接入 FTC 官方数据源核对成绩，自动剔除赛场违规得分。
-- **冲突检测与解决**：多人对同一场次/队伍重复提交数据时自动标记冲突，双方可各自修正，无需人工仲裁谁对谁错。
+无需自建云端服务器、无需部署 Docker，双击即可在单机或多设备局域网/互联网中即时组网运行。
 
 ---
 
-## 核心技术架构
+## 🌟 核心功能矩阵 (Features)
 
-### 1. WebRTC + MQTT 信令 + STUN/TURN 三级穿透
+### 1. 离线优先的多端协同组网
+- **无公网依赖**：数据完整驻留本地嵌入式 H2 数据库中。设备间通过 WebRTC DataChannel 点对点直连，网络中断时本地全功能运行，网络恢复后毫秒级增量双向同步。
+- **移动端扫码秒级接入**：Host 主机一键生成携带内网 IP 的动态二维码，手机端侦察员无需下载任何客户端，微信/系统相机扫码即以 Web 端无缝接入。
 
-设备之间的数据同步走 WebRTC DataChannel 点对点连接，具体流程：
+### 2. 赛事赛程与侦察员智能排班 (Match Schedule & Assignments)
+- **赛程导入与管理**：支持从 FTC 官方 API 一键同步或自定义导入资格赛/淘汰赛赛程，自动解析红一/红二/蓝一/蓝二联盟战队。
+- **动态排班工作台**：支持为每场比赛的 4 个工位灵活指派侦察员；支持持久“留空”模式，排班变动实时通过 WebRTC 广播同步到所有侦察员屏幕。
 
-- **信令交换**：通过公共的 `broker.emqx.io` (MQTT over WebSocket) 交换 SDP offer/answer 和 ICE candidate，用邀请码的 SHA-256 哈希生成唯一 topic，避免不同房间之间串消息。
-- **连接建立优先级**：ICE 协议会按顺序自动尝试局域网直连（host candidate）→ 公网 STUN 反射直连（srflx candidate）→ TURN 中继（relay candidate）。前两者失败时才会退化到 TURN，这也是目前唯一能保证赛场上不同网络环境（尤其是移动网络下常见的对称 NAT）都能连上的兜底方案。
-- **拓扑**：以 Host 为中心的星状拓扑，任意一端提交/修改数据都会被广播给其他所有已连接的端。
+### 3. 量化展位侦察与特写照片系统 (Quantified Pit Scouting & Photos)
+- **标准量化自述指标**：细致记录各战队底盘构型（麦轮/全向/西海岸）、机械臂结构、悬挂类型、测距传感器配置，以及自主、手动、终局各阶段量化自述指标。
+- **分层混合照片资产管理**：电脑端直接流式落盘到本地磁盘，手机端采用 IndexedDB 异步队列缓冲，支持弱网环境下的断点续传与静默批量回传。
 
-### 2. 断线自动恢复
+### 4. 战力天梯榜与“吹牛指数”量化对账 (Brag Index Analytics)
+- **吹牛指数 (Brag Index) 算法**：将战队在 Pit 展位填报的“自述数据”与天梯赛实际得分进行多维动态对账，自动划分【真实守信 🎯】、【略偏乐观 🟡】、【夸大其词 ⚠️】与【吹破牛皮 🔥】四档，并内置“高悬挂留力”特赦核验机制。
+- **官方数据交叉验证**：直连 FTC 官方数据平台核实战队真实表现，侦察员历史误报率超过 20% 时自动启动可信度降权防线。
 
-赛场网络抖动是常态，为此实现了两层机制：
+### 5. 零信任 P2P 安全加固与防篡改体系
+- **ECDH 密钥协商与 4 位短认证码 (SAS)**：WebRTC 建联时双方自动生成临时公私钥并推导共享密钥，生成 4 位可视短认证码防范中间人攻击（MITM）。
+- **TOFU (Trust-On-First-Use) 设备资产信任**：首次连接设备自动建档存入 IndexedDB，后续连接自动认证；遇到公钥突变（重装或冒充）时触发高危告警阻断。
+- **会话防篡改与接管仲裁**：防范冒充他人 ID 提交记录；同名登录自动建议重命名，同用户跨设备登录支持授权接管与 30s 冷却超时防抖。
 
-- **快速感知**：ICE 连接出现异常时，UI 会立即给出「网络不稳定」的提示，而不必等到彻底判定离线；同时区分「Host 主动退出」（通过信令主动广播，客户端可秒级感知）和「Host 异常掉线」（依赖标准的 ICE 超时判定，通常需要数秒到十几秒）。
-- **指数退避重连**：客户端断线后按 1s、2s、4s...最多 6 次尝试重新建立连接，达到上限后进入明确的长时间离线状态，避免无意义的持续重试消耗电量和网络请求。断线期间用于信令交换的 MQTT 连接保持存活，一旦 Host 恢复上线会主动广播通知，客户端可以立即重连，不必等待重试计时器。
-
-### 3. 离线数据持久化
-
-所有数据先写入内存与 `localStorage`（防抖写入，避免频繁 IO），并处理了以下几种真实会发生的边界情况：读取时数据损坏的容错、写入超限（QuotaExceeded）时的用户可见提示、页面关闭前的强制落盘（`beforeunload`）、以及多标签页打开同一应用时的数据同步。
-
-### 4. 冲突检测机制
-
-当多人对同一场次/队伍提交了不同的记录（比如两人都记了同一场同一队），系统不会武断地丢弃或覆盖任何一方的数据，而是把所有版本都保留下来并标记为冲突状态，提示相关人员各自核实修正。任意一方修正后，只要冲突双方的数据重新一致，冲突标记会自动解除并广播给所有端 —— 不需要 Host 手动裁决。
-
-### 5. 侦察员数据可信度加权
-
-系统会将每位 Scout 提交的成绩单与 `api.ftcscout.org` 的官方比赛成绩做比对。当某位侦察员的历史平均误差率超过 20%，其后续提交的数据在计算队伍综合评分时权重减半（0.5），以降低偶发误记录对整体数据的影响。
-
-### 6. 幂等的数据合并
-
-后端使用 H2 的 `MERGE INTO` 语句处理数据的插入/更新合并，并用子查询保证一条记录不管经历多少次断线重传或多端覆盖写入，其最初的 `created_at` 时间戳都不会被后续写入覆盖。
-
-### 7. 桌面端封装 (JCEF)
-
-桌面端使用 JCEF (Java Chromium Embedded Framework) 在 Java 进程中承载前端页面渲染，避免了 Electron 自带 Node.js 运行时的额外内存开销。多开实例时通过为每个实例分配独立的临时用户数据目录，避免 Chromium 底层对共享 `user_data_path` 的多进程锁死限制。
-
-### 8. 端到端多端测试
-
-针对 WebRTC 这类分布式实时同步逻辑，单元测试难以覆盖真实的多端交互场景，因此项目额外维护了一套基于 Puppeteer 的端到端测试（`e2e/multi-client.test.js`），模拟 Host + 2 个 Client 的完整交互流程：
-
-- **多端并发场景**：三个独立浏览器实例并行连接同一房间，验证信令与连接建立在多端并发下的正确性（这类问题在两端场景下往往测不出来，比如曾经出现过的 ICE candidate 跨客户端串扰问题）。
-- **强制 TURN 中继验证**：可通过注入 `iceTransportPolicy: 'relay'` 强制跳过局域网/STUN 直连，专门验证 TURN 兜底链路本身是否可用，避免因为测试机器本身在同一网络下走了直连而误判「TURN 没问题」。
-- **真实断网模拟**：使用 CDP 网络条件模拟断线场景（并针对 WebRTC 层不受 HTTP 网络模拟约束的特性做了专门处理），验证断线检测、自动重连、以及重连后的数据补偿与冲突自动解除是否符合预期。
-- **构建产物一致性保护**：测试执行前会自动触发前后端构建（`npm run build` + `mvn package`），避免出现「改了源码但测试跑的仍是旧编译产物」这类难以察觉的假阳性结果。
-- **跨平台与资源清理**：测试脚本处理了 Windows/Unix 下子进程管理的差异，并确保浏览器实例与后端进程在测试结束（无论成功或失败）后都被彻底清理，避免残留进程导致下次运行端口冲突。
-
-配套的 `MANUAL_TESTING_CHECKLIST.md` 补充了自动化测试无法覆盖的场景，例如真实移动网络下（非同一局域网）的 TURN 穿透实测、多方同时冲突的解决验证等，正式比赛前按清单人工过一遍，确保场上不出意外。
-
-### 9. 现代化的 UI 交互体验 (View Transitions API & 3D Hover)
-
-为了提供桌面级原生的极佳质感，前端页面进行了深度的视觉与交互定制：
-
-- **View Transitions 空间动画**：深入应用原生 View Transitions API，在页面切换时提供各个页面模块的定制飞行轨迹（如表格上浮、顶部栏下滑、侧边栏飞入等）。结合 Shared Element 机制，实现了卡片大标题在进入和退出页面时的无缝缩放与形态变换（Morphing）。
-- **Same-Document 方向性滑动**：在赛事内部的 Tab 切换中，使用带有动态控制方向的 View Transitions 实现原生级别滑动（向右点则内容右侧推入，反之左侧推入）。针对高频快速点击的极端边缘情况（Edge Cases），设计了 `skipTransition()` 动画并发中断与保底降级的容错机制，确保 UI 状态永不卡死。
-- **光标感知边缘高光**：主面板中的赛事卡片可通过监听鼠标相对位置，在距离鼠标最近的边框位置呈现精致柔和的白色高光过渡（Spotlight Border），提供内敛现代的桌面级微交互质感。
-
-### 10. 全局一致性的增量同步机制 (Incremental Sync)
-
-针对大规模数据和弱网环境，从原先低效的全量推送升级为基于逻辑时钟的增量同步：
-
-- **Host 全局单调序列**：摒弃了跨时区、跨设备极易出错的本地时间戳，改由 Host 统一下发全局唯一且单调递增的 `hostSeq` 作为同步游标。
-- **持久化与断线恢复**：增量游标深度整合至 Java 后端 (H2 数据库) 及前端 `localStorage`。Client 重连时只需声明自身的 `lastHostSeq`，Host 即可精准过滤并仅下发增量记录，大幅节约了弱网环境下的带宽。
-- **基于 Version 的 LWW 冲突解决**：在记录级别引入严格自增的 `version` 字段，替代时间戳解决分布式环境下的并发写冲突，并由后端 `GREATEST` 机制兜底，确保多客户端与主机之间数据最终一致。
+### 6. 流式赛事战术 AI 助手 2.0 (Tactical AI Engine)
+- **双引擎多模型支持**：原生适配 Google Gemini 与 OpenAI 系模型，密钥本地 AES-256 对称加密安全存储。
+- **全赛事实时数据注入**：动态提取当前赛事排位、战队自述、历史战绩与标签作为 Context 注入 Prompt。
+- **SSE 流式打字机与心跳保活**：基于 Server-Sent Events 实现流式输出，内置 15s 后端心跳守护；支持 Markdown 表格渲染与战队编号正则捕获（点击战队编号即刻拉起战队详尽档案抽屉）。
 
 ---
 
-## ⚠️ 已知限制
+## 🛠️ 架构蓝图与运行原理 (Architecture & Working Principles)
 
-- **信令与 TURN 均为第三方免费服务**：MQTT broker 和 TURN（Metered.ca）都是公共免费额度，存在被限流、服务变更或临时不可用的可能。TURN 免费额度按流量计费，重度使用（比如整场比赛大量设备长时间在线）需要自行关注实际消耗，必要时升级到付费额度或替换为自建服务。
-- **NAT 穿透效果因网络环境而异**：STUN 直连能否成功取决于当天设备所在网络的 NAT 类型，无法在代码层面保证 100% 直连成功；TURN 中继是兜底手段，不是首选路径。
-- **`beforeunload` 在移动端浏览器上不完全可靠**：如果 Host 固定运行在桌面端，这个限制影响有限；但如果参与设备包含移动端浏览器访问场景，「主动离开广播」这一优化在移动端可能不会稳定触发，此时会退化为依赖标准 ICE 超时判定。
-- 建议在正式比赛前，使用真实的、彼此物理隔离的移动网络环境（而非同一局域网）做一次实机连接测试，确认 TURN 兜底和断线重连在真实条件下工作正常。
+```
++-----------------------------------------------------------------------------------+
+|                               ScoutingPro27 协同拓扑                               |
++-----------------------------------------------------------------------------------+
+                                        |
+                 [公共信令通道 (MQTT over WSS - broker.emqx.io)]
+                                        |
+    +-----------------------------------+-----------------------------------+
+    |                                                                       |
+    v                                                                       v
++-----------------------+        WebRTC P2P DataChannel         +-----------------------+
+|   Host 节点 (电脑端)   |<====================================>|  Scout 节点 (手机/PC)  |
+|                       |  • ECDH 共享密钥加密信令                 |                       |
+|  • JCEF 原生桌面容器   |  • 4位 SAS 短认证码 / TOFU 设备信任    |  • 移动端浏览器 / JCEF |
+|  • Javalin 7 本地服务 |  • 全局 hostSeq 增量版本同步游标       |  • IndexedDB 离线队列 |
+|  • H2 嵌入式关系数据库 |  • 赛程 / 排班 / 展位侦察即时广播      |  • 本地 Pinia 反应式  |
+|  • 本地磁盘特写照片库  |  • 背压感知 (DataChannelSender)       |  • 增量请求 (sinceSeq)|
++-----------------------+                                       +-----------------------+
+```
 
 ---
 
-## 🎨 设计与视觉资产
+## 💡 六大核心技术亮点与运行逻辑原理
 
-应用内图标均使用 **Google Material Icons**。
+### 亮点一：分布式逻辑时钟与增量同步机制 (Host Monotonic Sequence)
+- **运行逻辑**：摒弃跨设备本地时钟极易偏差（时区、设备时间不准）的时间戳同步方案，改由 Host 统一下发全局严格单调递增的逻辑游标 `hostSeq`。
+- **断线增量补偿**：从机本地持久化记录上次确认的 `lastHostSeq`。网络重连后，Client 只需发起 `REQUEST_SYNC(sinceVersion = lastHostSeq)`，Host 仅检索过滤出 `hostSeq > sinceVersion` 的增量记录，单次同步数据量从全量几百 KB 骤降至几 KB，保障弱网秒级恢复。
+- **防覆灭三向合并 (3-Way Guarded Merge)**：客户端页面刷新（F5）或后端重启时，通过 `records.ts` 执行内存、LocalStorage 与后端查询的三向合并，确保高版本内存记录绝不被空库或旧库冲掉。
+
+### 亮点二：零信任 P2P 通信与 SAS / TOFU 安全矩阵
+- **ECDH 密钥协商**：两端初始化时通过 Web Crypto API 动态生成椭圆曲线临时密钥对（ECDH P-256），信令传输使用协商后的 AES-GCM 密钥加密。
+- **短认证码 (SAS Fingerprint)**：双方依据各自公钥与赛事邀请码哈希衍生 4 位 16 进制指纹码（如 `6EEF-550C`）。侦察员在赛场现场目测核对即可物理阻断信令劫持与中间人嗅探。
+- **TOFU 信任持久化**：设备首次配对后自动将设备指纹存入 IndexedDB（`identityStore.ts`）。再次建联时比对历史指纹自动放行；一旦检测到公钥突变（Key Flapping），系统立即冻结 DataChannel 消息收发，阻断未授权接入。
+
+### 亮点三：自愈型 ICE 穿透与看门狗降级 (Self-Healing ICE Watchdog)
+- **穿透梯度机制**：ICE 优先探测局域网直连（host candidate）→ 公网 STUN 反射（srflx candidate）→ TURN 中继（relay candidate）。
+- **智能看门狗计时器**：
+  - 若连接处于 `checking` 状态超过 3.5 秒，触发网络抖动提示；
+  - 停滞超过 5.5 秒，自动触发 `pc.restartIce()` 进行备用地址重协商（支持最多 2 次重启）；
+  - 若 2 次尝试后仍受阻（赛场高对称 NAT 拦截 UDP 报文），看门狗主动销毁当前连接，直接注入 `iceTransportPolicy: 'relay'` 强制启用 Metered.ca TURN 中继建立链路，实现极端网络下的自愈建联。
+
+### 亮点四：分层混合持久化存储架构 (Hybrid Persistence Layer)
+- **电脑 Host 端**：依托 Java 21 原生进程运行内嵌式 **H2 数据库**（开启 `AUTO_SERVER=TRUE` 模式），搭配 Jdbi 3 处理高吞吐并发事务；展位大图采用 WebP 压缩后直接流式存储在电脑物理磁盘中，利用 HTTP 强缓存（`Cache-Control: immutable`）实现零内存损耗加载。
+- **移动 Scout 端**：浏览器环境通过封装的 **IndexedDB**（`indexedDb.ts` 与 `mobilePhotoCache.ts`）维护离线照片缓冲队列；业务数据通过防抖监听持久化于 `localStorage`，并在网络畅通时静默回传电脑主机。
+
+### 亮点五：“吹牛指数”动态对账与高悬挂特赦算法 (Brag Index)
+- **量化对账模型**：战队在 Pit 填报的自述总分、自主分、手动分与实际排位赛的平均分及最高分进行动态比对：
+  $$\text{OverallRatio} = \frac{\text{ClaimedTotalScore}}{\max(\text{MaxActualScore}, \text{AvgActualScore} \times 1.05, 1)}$$
+- **高悬挂机构特赦机制 (High-Hang Pardon Rule)**：针对 FTC 机器人高悬挂装置在常规赛中“结构复位极其繁琐、战队选择留力”的工程实际，算法设定：
+  1. 只要战队在任意一场实际比赛中展现过高悬挂能力（终局得分 $\ge 15$ 分），即铁证如山，直接点亮【高杠已证实 🧗】；
+  2. 若打满 $\ge 2$ 场仍未挂出，系统判定为常规赛留力，自动予以【特赦免责】，不直接扣除信誉分，避免算法脱离赛事实情。
+
+### 亮点六：流式 SSE 战术 AI 助手与赛事上下文智能融合
+- **服务端事件流 (SSE)**：基于 Javalin 异步上下文与 HTTP 响应流，配合后端单线程定时调度器每 15 秒输出 `: heartbeat\n\n` 保持连接，彻底解决移动端弱网或长耗时推理导致的连接中断。
+- **智能滑动窗口 (Sliding Window)**：采用 `MAX_CONTEXT_MESSAGES = 10` 对历史轮次进行动态修剪，避免 Token 爆炸与超长计费。
+- **实体高亮联动**：前端 Markdown 渲染引擎配合自定义正则捕获模型返回的战队编号（如 `#27570` 或 `Team 25787`），自动渲染为可交互战队芯片，点击即刻通过 Pinia 状态树滑出该战队的综合能力抽屉。
 
 ---
 
-> *Powered by 27570 B.E.A.R. and 25787 TechBY*
+## 💻 快速开始与运行指南 (Getting Started)
+
+### 环境要求
+- **后端运行**：JDK 21+，Maven 3.8+
+- **前端开发**：Node.js 18+，npm 9+
+- **网络环境**：用于设备发现与信令交换的互联网络（赛场内网可连接外网 MQTT 即可）
+
+### 方式一：开发调试模式 (前后端独立启动)
+
+1. **后端启动 (Javalin REST + H2)**
+   ```powershell
+   cd Backend
+   mvn clean compile exec:java -Dexec.mainClass="com.bear27570.app.Main" -Dexec.args="--headless --port=8080"
+   ```
+   > 提示：`--headless` 参数会跳过 JCEF 桌面窗口，仅启动后台 RESTful 接口与嵌入式 H2 数据库。
+
+2. **前端启动 (Vite Dev Server)**
+   ```powershell
+   cd frontend
+   npm install
+   npm run dev
+   ```
+   浏览器访问 `http://localhost:5173` 即可进入系统。
+
+### 方式二：生产桌面一体化模式 (JCEF 独立桌面程序)
+
+1. **构建前端产物**
+   ```powershell
+   cd frontend
+   npm run build
+   ```
+   构建产物将自动输出至 `Backend/src/main/resources/public`。
+
+2. **编译打包后端可执行 JAR**
+   ```powershell
+   cd ../Backend
+   mvn clean package -DskipTests
+   ```
+
+3. **双击运行桌面应用**
+   ```powershell
+   java -jar target/ScoutingPro27-1.0-SNAPSHOT.jar
+   ```
+   系统将自动完成数据库 Flyway 迁移、加载 JCEF 原生 Chromium 渲染内核并淡入主界面。
+
+### 方式三：赛场现场单机多开演练 (Multi-Client Simulation)
+系统原生支持单台电脑同时启动多个实例（1 个 Host 房间端 + 多个 Scout 客户端）：
+- **端口冲突自愈**：当默认 8080 端口被占用时，后续实例会自动按 8081 -> 动态空闲随机端口降级启动；
+- **JCEF 缓存隔离**：每个进程分配独立的 `scoutingpro-jcef-<uuid>` 临时缓存目录，杜绝 Chromium 多进程排他锁死；
+- **H2 数据库并发代理**：基于 `AUTO_SERVER=TRUE`，首个进程启动嵌入式引擎，后续实例自动通过 TCP 代理并发读写。
+
+---
+
+## ⚙️ 核心配置与环境变量
+
+| 配置项 / 变量名 | 默认值 | 作用说明 |
+|---|---|---|
+| `DEV_PORT` / `--port=N` | `8080` | 指定本地 Javalin 服务监听端口 |
+| `SCOUTING_ENV` / `app.env` | `DEV` / `PROD` | 运行环境标识；开发环境下数据存放在 `app_data/`，生产环境下统一存放在 `~/.scoutingpro27/` |
+| `DB_URL` | 自动解析 | 自定义 H2 数据库 JDBC 连接字符串 |
+| `ENABLE_TEST_CLEANUP` | `false` | 是否开启集成测试数据重置接口 (`/api/test/cleanup`) |
+
+---
+
+## 🧪 测试与质量保障 (Verification & Testing)
+
+项目遵循严格的**证据闭环与全链路验证铁律**：
+
+```powershell
+# 1. 运行后端完整单测 (77 项单测全部绿灯)
+cd Backend
+mvn test
+
+# 2. 运行前端 Vitest 单元与组件测试 (231 项单测全部通过)
+cd ../frontend
+npm test -- --run
+
+# 3. 运行前端 TypeScript 静态编译与强类型检查
+npm run type-check
+
+# 4. 运行 Puppeteer 端到端多端并发模拟测试
+node e2e/multi-client.test.js
+```
+
+配套的 **`MANUAL_TESTING_CHECKLIST.md`** 详细列出了真实比赛前必须执行的 10 项物理环境人工验收清单（包括真实 4G/5G 移动蜂窝网络下的 TURN 中继穿透、手机扫码离线拍照与静默回传、高悬挂对账特赦判定等）。
+
+---
+
+## ⚠️ 已知限制与使用建议
+
+1. **信令与 TURN 免费额度**：MQTT broker (`broker.emqx.io`) 与 Metered.ca TURN 中继属于公共服务，重度使用需关注流量配额，正式比赛建议车队自建小型 MQTT/TURN 节点。
+2. **NAT 穿透边界**：STUN 直连取决于赛场局域网与运营商 NAT 类型（对称型 NAT 需依靠 TURN 中继兜底）。
+3. **正式比赛前建议**：在比赛前一天，使用物理隔离的双手机移动热点与电脑进行一次实操演练，确认 TURN 链路畅通。
+
+---
+
+## 🎨 视觉与设计资产
+
+- 应用内图标：**Google Material Icons**
+- 视觉排版字体：**Manrope** & **Orbitron**
+
+---
+
+> *Crafted with ❤️ by FTC Team 27570 B.E.A.R. & 25787 TechBY*

@@ -2,6 +2,7 @@ package com.bear27570.app;
 
 import com.bear27570.app.dao.AiSettingsDao;
 import com.bear27570.app.model.AiSettings;
+import com.bear27570.app.db.JdbiConfig;
 import com.bear27570.app.routes.ApiRoutes;
 import com.bear27570.app.util.AESUtil;
 import io.javalin.Javalin;
@@ -19,9 +20,9 @@ import java.util.List;
 public class TestConnectionVerificationMain {
 
     public static void main(String[] args) throws Exception {
-        String dbUrl = "jdbc:h2:./app_data;AUTO_SERVER=TRUE";
-        Jdbi jdbi = Jdbi.create(dbUrl, "sa", "");
-        jdbi.installPlugin(new SqlObjectPlugin());
+        String dbUrl = JdbiConfig.resolveAppDbUrl();
+        Flyway.configure().dataSource(dbUrl, "sa", "").locations("classpath:db").load().migrate();
+        Jdbi jdbi = JdbiConfig.create(dbUrl, "sa", "");
 
         Javalin app = Javalin.create(config -> {
             new ApiRoutes(jdbi).register(config.routes);

@@ -11,7 +11,8 @@
     "type-check": "vue-tsc --build",
     "test": "vitest run",
     "test:e2e": "node e2e/multi-client.test.js",
-    "test:e2e:ui": "cross-env SHOW_UI=1 node e2e/multi-client.test.js"
+    "test:e2e:ui": "cross-env SHOW_UI=1 node e2e/multi-client.test.js",
+    "test:e2e:motion": "node e2e/motion-and-sheet.e2e.js"
   },
   "dependencies": {
     "@types/dompurify": "^3.0.5",
@@ -22,6 +23,7 @@
     "mqtt": "^5.15.2",
     "pinia": "^4.0.2",
     "puppeteer-core": "^25.5.0",
+    "qrcode": "^1.5.4",
     "vue": "^3.5.40",
     "vue-i18n": "^9.14.5",
     "vue-router": "^4.6.4"
@@ -30,6 +32,7 @@
     "@pinia/testing": "^0.1.7",
     "@tsconfig/node24": "^24.0.4",
     "@types/node": "^24.13.3",
+    "@types/qrcode": "^1.5.6",
     "@vitejs/plugin-vue": "^6.0.8",
     "@vue/test-utils": "^2.4.11",
     "@vue/tsconfig": "^0.9.1",

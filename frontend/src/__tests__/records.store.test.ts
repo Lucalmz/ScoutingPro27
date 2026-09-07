@@ -182,9 +182,9 @@ describe('Records Store', () => {
       id: 'tag-1',
       eventId: 'e1',
       teamNumber: 27570,
-      tag: 'preset.fast_cycle',
+      tag: 'fast_cycle',
       color: 'blue',
-      isPreset: true,
+      isPreset: false,
       createdBy: 'user1'
     }
 
@@ -217,4 +217,158 @@ describe('Records Store', () => {
     expect(store.getTagsForTeam(27570)).toHaveLength(1)
     expect(store.getTagsForTeam(19600)).toHaveLength(1)
   })
+
+  it('migrates scoutId and scoutName across all historical records upon user rename', () => {
+    const store = useRecordStore()
+    store.records = [
+      createDummyRecord('r1', 27570, 10, 20, 10, 'old_scout_id', 'SYNCED'),
+      createDummyRecord('r2', 27570, 15, 25, 10, 'old_scout_id', 'PENDING'),
+      createDummyRecord('r3', 19600, 20, 30, 20, 'other_scout_id', 'SYNCED')
+    ]
+
+    store.migrateScoutId('old_scout_id', 'new_scout_id_88', 'Alice-88')
+
+    // Records belonging to old_scout_id are updated
+    expect(store.records[0]!.scoutId).toBe('new_scout_id_88')
+    expect(store.records[0]!.scoutName).toBe('Alice-88')
+    expect(store.records[0]!.version).toBe(2)
+
+    expect(store.records[1]!.scoutId).toBe('new_scout_id_88')
+    expect(store.records[1]!.scoutName).toBe('Alice-88')
+    expect(store.records[1]!.version).toBe(2)
+
+    // Other scout's record remains untouched
+    expect(store.records[2]!.scoutId).toBe('other_scout_id')
+    expect(store.records[2]!.scoutName).toBe('Scout other_scout_id')
+
+    // myRecords getter works seamlessly with new ID
+    const myRecs = store.myRecords('new_scout_id_88')
+    expect(myRecs).toHaveLength(2)
+    expect(store.myRecords('old_scout_id')).toHaveLength(0)
+  })
+
+  it('computes trend correctly without out-of-bounds when broken matches are present', () => {
+    const store = useRecordStore()
+    // Match 1: 50 points
+    const rec1 = { ...createDummyRecord('r1', 27570, 20, 20, 10), matchNumber: 1 }
+    // Match 2: isBroken = true (score ignored in trend)
+    const rec2 = { ...createDummyRecord('r2', 27570, 0, 0, 0), matchNumber: 2, isBroken: true }
+    // Match 3: 100 points (trend should be 'up' compared to 50)
+    const rec3 = { ...createDummyRecord('r3', 27570, 40, 40, 20), matchNumber: 3 }
+
+    store.records = [rec1, rec2, rec3]
+    const ranking = store.rankings.find(r => r.teamNumber === 27570)
+    expect(ranking).toBeDefined()
+    expect(ranking!.matchCount).toBe(3)
+    expect(ranking!.trend).toBe('up')
+  })
+
+  it('filters deleted records in activeRecords and myRecords getters', () => {
+    const store = useRecordStore()
+    const rec1 = { ...createDummyRecord('r1', 27570, 10, 10, 10, 'scout_1'), isDeleted: false }
+    const rec2 = { ...createDummyRecord('r2', 27570, 10, 10, 10, 'scout_1'), isDeleted: true }
+
+    store.records = [rec1, rec2]
+    expect(store.records).toHaveLength(2)
+    expect(store.activeRecords).toHaveLength(1)
+    expect(store.activeRecords[0]!.id).toBe('r1')
+    expect(store.myRecords('scout_1')).toHaveLength(1)
+    expect(store.myRecords('scout_1')[0]!.id).toBe('r1')
+  })
+
+  it('fetchRecords preserves in-memory peer records and newer unpushed local records (guarded 3-way merge)', async () => {
+    const store = useRecordStore()
+    // Pre-existing in memory / localStorage:
+    // 1. Peer stamped record received via WebRTC
+    const peerStamped = { ...createDummyRecord('r_peer_stamped', 27570, 30, 30, 10, 'peer_scout'), hostSeq: 5, version: 1 }
+    // 2. Local edited record awaiting sync (version 2, PENDING)
+    const localEdited = { ...createDummyRecord('r_local_edit', 27570, 40, 40, 20, 's1', 'PENDING'), version: 2 }
+
+    store.records = [peerStamped, localEdited]
+
+    // Backend listRecords only returns older version for local_edit and does NOT have peerStamped yet
+    const backendRecords = [
+      { ...createDummyRecord('r_local_edit', 27570, 20, 20, 10, 's1', 'SYNCED'), version: 1 },
+      { ...createDummyRecord('r_other_backend', 118, 15, 15, 10, 's3', 'SYNCED'), version: 1 }
+    ]
+    vi.mocked(api.listRecords).mockResolvedValue(backendRecords)
+
+    await store.fetchRecords('e1')
+
+    // Expect all 3 to be present!
+    expect(store.records).toHaveLength(3)
+    // peerStamped must NOT be wiped!
+    const foundPeer = store.records.find(r => r.id === 'r_peer_stamped')
+    expect(foundPeer).toBeDefined()
+    expect(foundPeer!.hostSeq).toBe(5)
+
+    // localEdited with higher version wins over backend older version!
+    const foundLocal = store.records.find(r => r.id === 'r_local_edit')
+    expect(foundLocal).toBeDefined()
+    expect(foundLocal!.version).toBe(2)
+    expect(foundLocal!.totalScore).toBe(100)
+
+    // other backend record is added
+    const foundOther = store.records.find(r => r.id === 'r_other_backend')
+    expect(foundOther).toBeDefined()
+  })
+
+  it('bulkSync on client persists stamped peer records (hostSeq > 0) to local DB', async () => {
+    const store = useRecordStore()
+    const { useUserStore } = await import('../stores/user')
+    const userStore = useUserStore()
+    userStore.user = { id: 'scout_local', username: 'LocalScout', token: 'fake_jwt' }
+
+    const peerStamped = { ...createDummyRecord('r_stamped_1', 27570, 20, 20, 10, 'peer_scout'), hostSeq: 42, version: 1 }
+    await store.bulkSync([peerStamped])
+
+    expect(api.syncRecords).toHaveBeenCalledWith(expect.arrayContaining([
+      expect.objectContaining({ id: 'r_stamped_1', hostSeq: 42 })
+    ]))
+  })
+
+  it('currentEventId isolates records across events in rankings, activeRecords, and myRecords', () => {
+    const store = useRecordStore()
+    const recEvt1 = { ...createDummyRecord('r_evt1', 118, 10, 20, 10, 's1'), eventId: 'event-A' }
+    const recEvt2 = { ...createDummyRecord('r_evt2', 254, 30, 30, 30, 's1'), eventId: 'event-B' }
+    const recEvt1Deleted = { ...createDummyRecord('r_evt1_del', 118, 50, 50, 50, 's1'), eventId: 'event-A', isDeleted: true }
+
+    store.records = [recEvt1, recEvt2, recEvt1Deleted]
+
+    // When currentEventId is set to event-A
+    store.currentEventId = 'event-A'
+
+    // activeRecords only contains non-deleted records for event-A
+    expect(store.activeRecords).toHaveLength(1)
+    expect(store.activeRecords[0].id).toBe('r_evt1')
+
+    // rankings only contains team 118, not 254
+    expect(store.rankings).toHaveLength(1)
+    expect(store.rankings[0].teamNumber).toBe(118)
+
+    // myRecords only returns event-A records
+    expect(store.myRecords('s1')).toHaveLength(1)
+    expect(store.myRecords('s1')[0].id).toBe('r_evt1')
+
+    // Switching currentEventId to event-B
+    store.currentEventId = 'event-B'
+    expect(store.activeRecords).toHaveLength(1)
+    expect(store.activeRecords[0].id).toBe('r_evt2')
+    expect(store.rankings[0].teamNumber).toBe(254)
+  })
+
+  it('migrateScoutId marks migrated records as PENDING', () => {
+    const store = useRecordStore()
+    store.records = [
+      { ...createDummyRecord('r1', 118, 10, 10, 10, 'old-scout'), syncStatus: 'SYNCED' as any }
+    ]
+
+    store.migrateScoutId('old-scout', 'new-scout', 'New Name')
+
+    expect(store.records[0].scoutId).toBe('new-scout')
+    expect(store.records[0].scoutName).toBe('New Name')
+    expect(store.records[0].syncStatus).toBe('PENDING')
+  })
 })
+
+

@@ -7,6 +7,7 @@ export interface User {
   id: string
   username: string
   token?: string
+  legacyAliasNotice?: string
 }
 
 // --- System Messaging & Outbox ---
@@ -129,6 +130,7 @@ export interface LoginResponse {
   id: string
   username: string
   token: string
+  legacyAliasNotice?: string
 }
 
 export interface CreateEventRequest {
@@ -140,6 +142,35 @@ export interface CreateEventResponse {
   inviteCode: string
 }
 
+// --- Match Schedule & Scout Assignments ---
+export type StationType = 'red1' | 'red2' | 'blue1' | 'blue2'
+
+export interface MatchScheduleItem {
+  id?: string
+  eventId: string
+  matchNumber: number
+  tournamentLevel?: string
+  red1: number
+  red2: number
+  blue1: number
+  blue2: number
+  scoreRedFinal?: number | null
+  scoreBlueFinal?: number | null
+  createdAt?: string
+}
+
+export interface ScoutAssignment {
+  id?: string
+  eventId: string
+  matchNumber: number
+  tournamentLevel?: string
+  station: StationType
+  teamNumber: number
+  scoutId?: string | null
+  scoutName?: string | null
+  updatedAt?: string
+}
+
 // --- WebRTC Data-Channel message protocol ---
 export type WebRtcMessage =
   | WebRtcRequestSync
@@ -149,6 +180,125 @@ export type WebRtcMessage =
   | WebRtcTeamTagUpdate
   | WebRtcRequestTagsSync
   | WebRtcTagsFullSync
+  | WebRtcSessionConflict
+  | WebRtcTakeoverRequest
+  | WebRtcTakeoverPrompt
+  | WebRtcTakeoverDecision
+  | WebRtcSessionKicked
+  | WebRtcIdentityMigration
+  | WebRtcAckMigration
+  | WebRtcEventMetadata
+  | WebRtcRequestScheduleSync
+  | WebRtcScheduleFullSync
+  | WebRtcAssignmentUpdate
+  | WebRtcPitScoutUpdate
+  | WebRtcPitFullSync
+  | WebRtcRequestPitSync
+  | WebRtcOfficialRosterSync
+
+export interface WebRtcRequestScheduleSync {
+  type: 'REQUEST_SCHEDULE_SYNC'
+  authCode?: string
+  senderId?: string
+}
+
+export interface WebRtcScheduleFullSync {
+  type: 'SCHEDULE_FULL_SYNC'
+  schedules: MatchScheduleItem[]
+  assignments: ScoutAssignment[]
+  authCode?: string
+}
+
+export interface WebRtcAssignmentUpdate {
+  type: 'ASSIGNMENT_UPDATE'
+  assignment: ScoutAssignment
+  authCode?: string
+}
+
+export interface WebRtcPitScoutUpdate {
+  type: 'PIT_SCOUT_UPDATE'
+  record: PitScoutingRecord
+  authCode?: string
+  senderId?: string
+}
+
+export interface WebRtcPitFullSync {
+  type: 'PIT_SCOUT_FULL_SYNC'
+  records: PitScoutingRecord[]
+  authCode?: string
+}
+
+export interface WebRtcRequestPitSync {
+  type: 'REQUEST_PIT_SYNC'
+  authCode?: string
+  senderId?: string
+}
+
+export interface WebRtcOfficialRosterSync {
+  type: 'OFFICIAL_ROSTER_SYNC'
+  teams: OfficialTeamInfo[]
+  authCode?: string
+}
+
+export interface WebRtcEventMetadata {
+  type: 'EVENT_METADATA'
+  event: ScoutingEvent
+  authCode?: string
+  hostSessionId?: string
+}
+
+export interface WebRtcIdentityMigration {
+  type: 'IDENTITY_MIGRATION'
+  eventId: string
+  oldScoutId: string
+  newScoutId: string
+  newScoutName: string
+  authCode?: string
+}
+
+export interface WebRtcAckMigration {
+  type: 'ACK_MIGRATION'
+  eventId: string
+  newScoutId: string
+  authCode?: string
+}
+
+export interface WebRtcSessionConflict {
+  type: 'SESSION_CONFLICT'
+  conflictingUsername: string
+  conflictingUserId: string
+  conflictType?: 'SAME_USER' | 'DUPLICATE_NAME'
+  suggestedName?: string
+  rejected?: boolean
+  authCode?: string
+}
+
+export interface WebRtcTakeoverRequest {
+  type: 'TAKEOVER_REQUEST'
+  username: string
+  userId?: string
+  authCode?: string
+}
+
+export interface WebRtcTakeoverPrompt {
+  type: 'TAKEOVER_PROMPT'
+  requesterUsername: string
+  timeoutSeconds: number
+  authCode?: string
+}
+
+export interface WebRtcTakeoverDecision {
+  type: 'TAKEOVER_DECISION'
+  username: string
+  permit: boolean
+  authCode?: string
+}
+
+export interface WebRtcSessionKicked {
+  type: 'SESSION_KICKED'
+  reason: string
+  authCode?: string
+}
 
 export interface TeamTagItem {
   id: string
@@ -241,6 +391,21 @@ export interface WebRtcAckSync {
 // --- Connection status ---
 export type ConnectionStatus = 'offline' | 'connecting' | 'waiting' | 'connected' | 'unstable' | 'degraded' | 'long_offline'
 
+export type TransportType = 'ipv6_p2p' | 'lan_p2p' | 'nat_p2p' | 'relay' | 'unknown'
+
+export interface ConnectionTransportInfo {
+  type: TransportType
+  localCandidateType: string
+  remoteCandidateType: string
+  localAddress: string
+  remoteAddress: string
+  protocol: string
+  rttMs: number | null
+  securityFingerprint?: string
+}
+
+
+
 // --- Rankings row (aggregated client-side) ---
 export interface RankingRow {
   teamNumber: number
@@ -264,3 +429,77 @@ export interface AiSettings {
   proxyPort: number | null;
   baseUrl?: string;
 }
+
+// --- Pit Scouting & Unified Team Pool ---
+export interface PitScoutingRecord {
+  id: string
+  eventId: string
+  teamNumber: number
+  scoutId: string
+  scoutName: string
+  robotName?: string
+
+  // 核心硬件构型
+  drivetrainType: 'mecanum' | 'tank' | 'swerve' | 'other'
+  weightLbs: number
+  sizingPassed: boolean
+  mechanismType: string // 'slide_claw' | 'slide_roller' | 'linkage_arm' | 'other'
+  hangType: string      // 'winch' | 'slide' | 'passive' | 'none'
+  odometryType: string  // 'none' | 'two_wheel' | 'three_wheel' | 'pinpoint_otos'
+
+  // 核心量化自述指标
+  claimedAutoScore: number
+  claimedAutoPieces: number
+  claimedAutoHangLevel: number
+  claimedTeleopScore: number
+  claimedTeleopCycleSec: number
+  claimedEndgameHangLevel: number
+  claimedEndgameTimeSec: number
+  claimedTotalScore: number
+
+  // 图片与版本
+  photoKeys?: string[]
+  version: number
+  hostSeq?: number
+  isDeleted?: boolean
+  createdAt?: string
+  updatedAt?: string
+}
+
+export interface OfficialTeamInfo {
+  eventId?: string
+  teamNumber: number
+  nameFull: string
+  robotName?: string
+  city?: string
+  country?: string
+}
+
+export type BragTier = 'realistic' | 'optimistic' | 'overclaimed' | 'mythical' | 'pending'
+
+export interface BragInfo {
+  tier: BragTier
+  overallRatio: number       // claimedTotal / actualMaxTotal
+  autoRatio: number          // claimedAuto / actualMaxAuto
+  teleopRatio: number        // claimedTeleop / actualMaxTeleop
+  hangUnfulfilled: boolean   // claimed high hang (>=2) but actual <= 1
+  hangPardoned?: boolean     // 高悬挂未履约特赦标志（机构难复位或常规赛留力）
+  hangVerified?: boolean     // 高悬挂实测已证实（只要有一次成功即证明没说谎）
+  label: string              // e.g. "1.05x 真实守信"
+}
+
+export interface UnifiedTeamItem {
+  teamNumber: number
+  name: string
+  robotName?: string
+  city?: string
+  country?: string
+  hasPitRecord: boolean
+  pitRecord?: PitScoutingRecord | null
+  bragInfo?: BragInfo
+  matchCount: number
+  avgTotalScore?: number
+  maxTotalScore?: number
+  tags: TeamTagItem[]
+}
+

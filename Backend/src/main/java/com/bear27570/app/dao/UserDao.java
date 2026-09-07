@@ -18,4 +18,14 @@ public interface UserDao {
 
     @SqlQuery("SELECT * FROM users WHERE id = :id")
     User findById(@Bind("id") String id);
+
+    @SqlQuery("SELECT * FROM users WHERE LOWER(TRIM(username)) = LOWER(TRIM(:username)) AND password != '' AND password IS NOT NULL LIMIT 1")
+    User findRegisteredByUsername(@Bind("username") String username);
+
+    @SqlUpdate("""
+        INSERT INTO users (id, username, password)
+        SELECT :id, :username, ''
+        WHERE NOT EXISTS (SELECT 1 FROM users WHERE id = :id)
+    """)
+    void ensureScoutUserPlaceholder(@Bind("id") String id, @Bind("username") String username);
 }

@@ -61,23 +61,26 @@ export const useAiStore = defineStore('ai', () => {
   async function testConnection(provider: string, apiKey?: string, proxyHost?: string, proxyPort?: number, baseUrl?: string) {
     if (!userStore.token) return { success: false, error: 'Not logged in' }
     
-    const params = new URLSearchParams()
-    params.append('provider', provider)
-    if (apiKey && !apiKey.includes('***') && apiKey !== '****') {
-      params.append('apiKey', apiKey.trim())
-    }
-    if (proxyHost) params.append('proxyHost', proxyHost)
-    if (proxyPort) params.append('proxyPort', proxyPort.toString())
-    if (baseUrl) params.append('baseUrl', baseUrl)
-    
     try {
-      const res = await fetch(`/api/ai/test-connection?${params.toString()}`, {
-        headers: { 'Authorization': `Bearer ${userStore.token}` }
+      const res = await fetch('/api/ai/test-connection', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${userStore.token}`
+        },
+        body: JSON.stringify({
+          provider,
+          apiKey: (apiKey && !apiKey.includes('***') && apiKey !== '****') ? apiKey.trim() : undefined,
+          proxyHost: proxyHost || undefined,
+          proxyPort: proxyPort || undefined,
+          baseUrl: baseUrl || undefined
+        })
       })
       if (res.ok) {
         return await res.json() // {success, statusCode, latencyMs, message, error}
       } else {
-        return { success: false, error: 'HTTP ' + res.status }
+        const errJson = await res.json().catch(() => null)
+        return { success: false, error: (errJson && errJson.error) ? errJson.error : ('HTTP ' + res.status) }
       }
     } catch (e: any) {
       return { success: false, error: e.message }

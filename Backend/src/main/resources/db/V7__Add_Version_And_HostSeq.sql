@@ -1,2 +1,0 @@
-﻿ALTER TABLE scouting_records ADD COLUMN IF NOT EXISTS version INT DEFAULT 1 NOT NULL;
-ALTER TABLE scouting_records ADD COLUMN IF NOT EXISTS host_seq INT;

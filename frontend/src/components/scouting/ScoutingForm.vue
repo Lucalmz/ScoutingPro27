@@ -2,9 +2,12 @@
 import { ref, computed, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { useRecordStore } from '@/stores/records'
+import { useScheduleStore } from '@/stores/schedule'
+import { usePitScoutStore } from '@/stores/pitScout'
 import { hapticFeedback } from '@/utils/haptics'
 import type { ScoutingRecord, ScoutingFormData } from '@/types'
 import TagPicker from '@/components/common/TagPicker.vue'
+import PitStatusIndicator from '@/components/pit/PitStatusIndicator.vue'
 
 const { t } = useI18n()
 
@@ -13,12 +16,29 @@ const props = defineProps<{
   scoutId: string
   scoutName: string
   editRecord?: ScoutingRecord | null
+  assignedTask?: { matchNumber: number; teamNumber: number; allianceColor: 'red' | 'blue' } | null
 }>()
 
 const emit = defineEmits<{
   submit: [record: ScoutingRecord | ScoutingRecord[]]
   cancelEdit: []
 }>()
+
+const scheduleStore = useScheduleStore()
+const pitStore = usePitScoutStore()
+
+function getPitSummary(teamNumStr: string) {
+  const num = parseInt(teamNumStr)
+  if (!num) return null
+  const u = pitStore.getUnifiedTeam(num)
+  if (!u?.pitRecord) return null
+  const r = u.pitRecord
+  return {
+    drivetrain: r.drivetrainType,
+    autoScore: r.claimedAutoScore,
+    hangLevel: r.claimedEndgameHangLevel
+  }
+}
 
 // --- Form State ---
 const scoutMode = ref<'single' | 'alliance'>('single')
@@ -115,6 +135,48 @@ watch(() => props.editRecord, (rec: ScoutingRecord | null | undefined) => {
   }
 }, { immediate: true })
 
+function applyTask(task: { matchNumber: number; teamNumber: number; allianceColor: 'red' | 'blue' }) {
+  if (scoutMode.value !== 'single') {
+    scoutMode.value = 'single'
+  }
+  matchNumber.value = String(task.matchNumber)
+  allianceColor.value = task.allianceColor
+  if (teamsData.value[0]) {
+    teamsData.value[0].teamNumber = String(task.teamNumber)
+  }
+  hapticFeedback(20)
+}
+
+watch(
+  () => props.assignedTask,
+  (task) => {
+    if (task) {
+      applyTask(task)
+    }
+  },
+  { immediate: true }
+)
+
+const nextPendingAssignment = computed(() => {
+  if (!props.scoutId) return null
+  const myTasks = scheduleStore.myAssignments(props.scoutId)
+  for (const t of myTasks) {
+    const isDone = recordStore.activeRecords.some(
+      (r) => r.matchNumber === t.matchNumber && r.teamNumber === t.teamNumber && r.scoutId === props.scoutId
+    )
+    if (!isDone) {
+      const color: 'red' | 'blue' = t.station.startsWith('red') ? 'red' : 'blue'
+      return {
+        matchNumber: t.matchNumber,
+        teamNumber: t.teamNumber,
+        allianceColor: color,
+        station: t.station
+      }
+    }
+  }
+  return null
+})
+
 function calcTeamTotal(team: TeamScoutData) {
   const auto = (3 * team.autoClassified) + (1 * team.autoOverflow) + (2 * team.autoPatterns) + (parseInt(team.autoMovementScore) || 0)
   const teleop = (3 * team.teleopClassified) + (1 * team.teleopOverflow) + (1.5 * team.gatesTriggered)
@@ -151,7 +213,7 @@ async function handleSubmit() {
   for (const team of activeTeams) {
     const matchNum = parseInt(matchNumber.value)
     const teamNum = parseInt(team.teamNumber)
-    const existing = recordStore.records.find(r => 
+    const existing = recordStore.activeRecords.find(r => 
       r.matchNumber === matchNum && 
       r.teamNumber === teamNum && 
       r.scoutId === props.scoutId &&
@@ -262,6 +324,18 @@ const recordStore = useRecordStore()
   <div :class="wrapperClass">
     <form class="scouting-form" @submit.prevent="handleSubmit">
       
+      <!-- Assigned Task Banner -->
+      <div v-if="nextPendingAssignment" class="assigned-task-banner">
+        <div class="task-info">
+          <span class="material-icons task-icon">assignment_ind</span>
+          <span>{{ t('schedule.assigned_task_hint', { match: nextPendingAssignment.matchNumber, team: nextPendingAssignment.teamNumber, alliance: nextPendingAssignment.allianceColor === 'red' ? t('scouting.red') : t('scouting.blue') }) }}</span>
+        </div>
+        <button type="button" class="btn-load-task" @click="applyTask(nextPendingAssignment)">
+          <span class="material-icons">download_done</span>
+          <span>{{ t('schedule.btn_load_task') }}</span>
+        </button>
+      </div>
+
       <!-- Top Settings (Mode & Color) -->
       <section class="form-section settings-section">
         <div class="setting-group">
@@ -303,8 +377,14 @@ const recordStore = useRecordStore()
           <section class="form-section">
             <div class="field-row">
               <label class="field">
-                <span>{{ t('scouting.team_number') }}</span>
+                <div style="display: flex; justify-content: space-between; align-items: center;">
+                  <span>{{ t('scouting.team_number') }}</span>
+                  <PitStatusIndicator v-if="parseInt(team.teamNumber) > 0" :team-number="parseInt(team.teamNumber)" :show-label="true" />
+                </div>
                 <input v-model="team.teamNumber" type="text" inputmode="numeric" placeholder="e.g. 12345" :class="{ 'invalid-field': isInvalidFormat(team.teamNumber) }" />
+                <span v-if="getPitSummary(team.teamNumber)" class="pit-quick-hint" style="font-size: 11px; color: var(--color-primary, #38bdf8); margin-top: 2px;">
+                  💡 展位自述：{{ getPitSummary(team.teamNumber)?.drivetrain }} | 自主 {{ getPitSummary(team.teamNumber)?.autoScore }}分 | 悬挂 L{{ getPitSummary(team.teamNumber)?.hangLevel }}
+                </span>
                 <span v-if="recordStore.bannedTeams.includes(parseInt(team.teamNumber))" class="banned-warning">
                   <span class="material-icons" style="font-size: 14px; vertical-align: middle;">warning</span> 
                   {{ t('scouting.banned_warning') }}
@@ -463,501 +543,4 @@ const recordStore = useRecordStore()
   </div>
 </template>
 
-<style scoped>
-.scouting-wrapper {
-  position: relative;
-  transition: box-shadow 0.5s ease, background 0.5s ease;
-  border-radius: 24px;
-  padding: 24px;
-  z-index: 1;
-}
-
-.scouting-wrapper::before {
-  content: '';
-  position: absolute;
-  inset: 0;
-  border-radius: 24px;
-  pointer-events: none;
-  transition: opacity 0.5s ease, box-shadow 0.5s ease;
-  opacity: 0;
-  z-index: -1;
-}
-
-@keyframes randomFlickerGlowRed {
-  0% { opacity: 0.5; box-shadow: 0 0 70px 15px rgba(239, 68, 68, 0.3); }
-  7% { opacity: 0.9; box-shadow: 0 0 90px 25px rgba(239, 68, 68, 0.4); }
-  14% { opacity: 0.4; box-shadow: 0 0 60px 10px rgba(239, 68, 68, 0.25); }
-  22% { opacity: 0.8; box-shadow: 0 0 85px 20px rgba(239, 68, 68, 0.35); }
-  35% { opacity: 0.3; box-shadow: 0 0 50px 5px rgba(239, 68, 68, 0.2); }
-  42% { opacity: 1; box-shadow: 0 0 100px 30px rgba(239, 68, 68, 0.45); }
-  55% { opacity: 0.6; box-shadow: 0 0 75px 18px rgba(239, 68, 68, 0.3); }
-  68% { opacity: 0.9; box-shadow: 0 0 95px 28px rgba(239, 68, 68, 0.4); }
-  80% { opacity: 0.4; box-shadow: 0 0 65px 12px rgba(239, 68, 68, 0.25); }
-  92% { opacity: 0.85; box-shadow: 0 0 88px 22px rgba(239, 68, 68, 0.38); }
-  100% { opacity: 0.5; box-shadow: 0 0 70px 15px rgba(239, 68, 68, 0.3); }
-}
-
-@keyframes randomFlickerGlowBlue {
-  0% { opacity: 0.5; box-shadow: 0 0 70px 15px rgba(59, 130, 246, 0.3); }
-  7% { opacity: 0.9; box-shadow: 0 0 90px 25px rgba(59, 130, 246, 0.4); }
-  14% { opacity: 0.4; box-shadow: 0 0 60px 10px rgba(59, 130, 246, 0.25); }
-  22% { opacity: 0.8; box-shadow: 0 0 85px 20px rgba(59, 130, 246, 0.35); }
-  35% { opacity: 0.3; box-shadow: 0 0 50px 5px rgba(59, 130, 246, 0.2); }
-  42% { opacity: 1; box-shadow: 0 0 100px 30px rgba(59, 130, 246, 0.45); }
-  55% { opacity: 0.6; box-shadow: 0 0 75px 18px rgba(59, 130, 246, 0.3); }
-  68% { opacity: 0.9; box-shadow: 0 0 95px 28px rgba(59, 130, 246, 0.4); }
-  80% { opacity: 0.4; box-shadow: 0 0 65px 12px rgba(59, 130, 246, 0.25); }
-  92% { opacity: 0.85; box-shadow: 0 0 88px 22px rgba(59, 130, 246, 0.38); }
-  100% { opacity: 0.5; box-shadow: 0 0 70px 15px rgba(59, 130, 246, 0.3); }
-}
-
-/* Glowing effects */
-.scouting-wrapper.color-none {
-  background: transparent;
-  box-shadow: 0 0 0 transparent;
-}
-.scouting-wrapper.color-none::before {
-  opacity: 0;
-}
-
-.scouting-wrapper.color-red {
-  background: rgba(239, 68, 68, 0.05);
-  box-shadow: 0 0 30px 5px rgba(239, 68, 68, 0.2);
-}
-.scouting-wrapper.color-red::before {
-  opacity: 1;
-  animation: randomFlickerGlowRed 12s infinite alternate;
-}
-
-.scouting-wrapper.color-blue {
-  background: rgba(59, 130, 246, 0.05);
-  box-shadow: 0 0 30px 5px rgba(59, 130, 246, 0.2);
-}
-.scouting-wrapper.color-blue::before {
-  opacity: 1;
-  animation: randomFlickerGlowBlue 12s infinite alternate;
-}
-
-@keyframes errorBlink {
-  0% { box-shadow: 0 0 30px rgba(249, 115, 22, 0.8); }
-  50% { box-shadow: 0 0 10px rgba(249, 115, 22, 0.2); }
-  100% { box-shadow: 0 0 30px rgba(249, 115, 22, 0.8); }
-}
-
-.scouting-wrapper.status-success {
-  background: rgba(34, 197, 94, 0.1) !important;
-  box-shadow: inset 0 0 60px rgba(34, 197, 94, 0.4), 0 0 30px rgba(34, 197, 94, 0.5) !important;
-}
-
-.scouting-wrapper.status-error {
-  background: rgba(249, 115, 22, 0.1) !important;
-  animation: errorBlink 0.5s infinite;
-}
-
-.scouting-wrapper {
-  max-width: 860px;
-  width: 100%;
-  margin: 0 auto;
-}
-
-.scouting-wrapper.alliance-mode {
-  max-width: 1280px;
-}
-
-.scouting-form {
-  width: 100%;
-}
-
-.settings-section {
-  display: flex;
-  gap: 24px;
-  flex-wrap: wrap;
-}
-
-.setting-group {
-  display: flex;
-  flex-direction: column;
-  gap: 8px;
-  flex: 1;
-}
-
-.setting-group > span {
-  font-size: 13px;
-  color: var(--muted-foreground);
-  font-weight: 600;
-}
-
-.segmented-control {
-  display: flex;
-  background: var(--background);
-  border: 1px solid var(--border);
-  border-radius: 10px;
-  overflow: hidden;
-}
-
-.segmented-control button {
-  flex: 1;
-  padding: 8px;
-  border: none;
-  background: none;
-  color: var(--muted-foreground);
-  font-weight: 600;
-  cursor: pointer;
-  transition: all 0.2s;
-}
-
-.segmented-control button.active {
-  background: var(--primary);
-  color: var(--primary-foreground);
-}
-
-.segmented-control button:disabled {
-  opacity: 0.5;
-  cursor: not-allowed;
-}
-
-.spdt-switch {
-  position: relative;
-  width: 100%;
-  max-width: 240px;
-  height: 38px;
-  background: var(--input);
-  border-radius: 19px;
-  display: flex;
-  align-items: center;
-  box-shadow: inset 0 2px 4px rgba(0,0,0,0.4);
-}
-
-.spdt-thumb {
-  position: absolute;
-  top: 3px;
-  bottom: 3px;
-  width: calc(50% - 3px);
-  border-radius: 16px;
-  background: white;
-  transition: left 0.3s cubic-bezier(0.4, 0, 0.2, 1), background 0.3s, box-shadow 0.3s;
-  z-index: 1;
-}
-
-.spdt-switch.pos-red .spdt-thumb {
-  left: 3px;
-  background: #ef4444;
-  box-shadow: 0 0 10px #ef4444;
-}
-
-.spdt-switch.pos-blue .spdt-thumb {
-  left: calc(50% + 1px);
-  background: #3b82f6;
-  box-shadow: 0 0 10px #3b82f6;
-}
-
-.spdt-labels {
-  position: absolute;
-  inset: 0;
-  display: flex;
-  z-index: 2;
-}
-
-.spdt-labels span {
-  flex: 1;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  font-size: 13px;
-  font-weight: 700;
-  color: var(--muted-foreground);
-  cursor: pointer;
-  transition: color 0.3s;
-}
-
-.spdt-labels span.active {
-  color: white;
-  text-shadow: 0 1px 2px rgba(0,0,0,0.5);
-}
-
-.teams-grid {
-  display: grid;
-  grid-template-columns: 1fr;
-  gap: 20px;
-}
-@media (min-width: 768px) {
-  .alliance-grid {
-    grid-template-columns: 1fr 1fr;
-    gap: 24px;
-  }
-}
-
-.team-header {
-  font-size: 18px;
-  margin: 0 0 12px;
-  text-align: center;
-  color: var(--primary);
-}
-
-.team-column {
-  min-width: 0;
-  display: flex;
-  flex-direction: column;
-}
-
-.form-section {
-  background: var(--card);
-  border: 1px solid var(--border);
-  border-radius: 12px;
-  padding: 20px;
-  margin-bottom: 16px;
-}
-
-.form-section h3 {
-  margin: 0 0 14px;
-  font-size: 16px;
-  color: var(--foreground);
-  display: flex;
-  align-items: center;
-  gap: 8px;
-}
-
-.field-row {
-  display: flex;
-  align-items: center;
-  gap: 16px;
-  flex-wrap: wrap;
-}
-
-.field-row.split {
-  display: grid;
-  grid-template-columns: 1fr 1fr;
-  gap: 16px;
-}
-
-@media (max-width: 520px) {
-  .field-row.split {
-    grid-template-columns: 1fr;
-  }
-}
-
-.field {
-  display: flex;
-  flex-direction: column;
-  gap: 4px;
-  flex: 1;
-  min-width: 140px;
-}
-.field > span {
-  font-size: 13px;
-  color: var(--muted-foreground);
-}
-
-.counter-field {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 12px;
-  flex: 1;
-  min-width: 180px;
-  padding: 4px 0;
-}
-
-.counter-label {
-  font-size: 13px;
-  color: var(--muted-foreground);
-  font-weight: 500;
-  line-height: 1.3;
-}
-
-.counter-controls {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  flex-shrink: 0;
-  white-space: nowrap;
-}
-
-.counter-btn {
-  width: 36px;
-  height: 36px;
-  border-radius: 8px;
-  border: 1px solid var(--input);
-  background: var(--border);
-  color: var(--foreground);
-  font-size: 18px;
-  font-weight: 700;
-  cursor: pointer;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  transition: all 0.15s ease;
-  user-select: none;
-}
-.counter-btn:hover {
-  background: var(--input);
-  border-color: var(--primary);
-}
-.counter-btn:active {
-  transform: scale(0.95);
-}
-
-.counter-val {
-  font-size: 20px;
-  font-weight: 700;
-  min-width: 30px;
-  text-align: center;
-  user-select: none;
-  font-variant-numeric: tabular-nums;
-}
-
-.team-tags-section {
-  margin-top: 14px;
-  padding-top: 12px;
-  border-top: 1px solid var(--border);
-}
-
-.team-tags-header {
-  font-size: 12px;
-  font-weight: 600;
-  color: var(--muted-foreground);
-  margin-bottom: 8px;
-  display: flex;
-  align-items: center;
-  gap: 4px;
-  text-transform: uppercase;
-  letter-spacing: 0.03em;
-}
-
-input[type='text'], input[type='number'], select {
-  padding: 10px 12px;
-  background: var(--background);
-  border: 1px solid var(--border);
-  border-radius: 8px;
-  color: var(--foreground);
-  font-size: 16px;
-  outline: none;
-  width: 100%;
-  box-sizing: border-box;
-  transition: all 0.3s ease;
-}
-input:focus, select:focus { border-color: var(--primary); }
-
-input.invalid-field {
-  border-color: #ef4444;
-  box-shadow: 0 0 0 3px rgba(239, 68, 68, 0.2);
-  background-color: rgba(239, 68, 68, 0.05);
-}
-
-.toggle-row { display: flex; gap: 20px; margin-bottom: 12px; }
-.toggle { display: flex; align-items: center; gap: 8px; cursor: pointer; font-size: 14px; color: var(--muted-foreground); }
-.toggle input[type='checkbox'] {
-  appearance: none; width: 44px; height: 24px;
-  background: var(--input); border-radius: 12px;
-  position: relative; transition: all 0.3s; outline: none; cursor: pointer; margin: 0;
-}
-.toggle input[type='checkbox']::after {
-  content: ''; position: absolute; top: 2px; left: 2px; width: 20px; height: 20px;
-  background: var(--muted-foreground); border-radius: 50%; transition: all 0.3s; box-shadow: 0 2px 4px rgba(0,0,0,0.2);
-}
-.toggle input[type='checkbox']:checked { background: var(--primary); box-shadow: var(--glow-primary); }
-.toggle input[type='checkbox']:checked::after { transform: translateX(20px); background: var(--primary-foreground); }
-
-.total-score-inline {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  background: var(--card);
-  padding: 12px 20px;
-  border-radius: 12px;
-  border: 1px solid var(--border);
-  margin-bottom: 16px;
-}
-
-.total-label { font-size: 12px; color: var(--muted-foreground); text-transform: uppercase; font-weight: 600;}
-.total-value { font-size: 28px; font-weight: 800; color: var(--primary); }
-
-.submit-area {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  margin-top: 20px;
-}
-
-.submit-status-msg {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  color: var(--status-success);
-  font-weight: 600;
-}
-.submit-status-msg.error {
-  color: #f97316;
-}
-
-.btn-submit {
-  padding: 14px 28px;
-  background: var(--primary);
-  color: var(--primary-foreground);
-  font-size: 16px;
-  font-weight: 700;
-  border: none;
-  border-radius: 12px;
-  cursor: pointer;
-  transition: all 0.2s;
-  box-shadow: var(--glow-primary);
-  display: flex;
-  align-items: center;
-  gap: 8px;
-}
-
-.btn-submit.btn-edit-mode {
-  background: #f97316;
-  box-shadow: 0 0 10px rgba(249, 115, 22, 0.4);
-}
-.btn-submit:hover:not(:disabled) { filter: brightness(1.1); }
-.btn-submit:disabled { opacity: 0.5; cursor: not-allowed; }
-
-.btn-cancel {
-  padding: 14px 20px;
-  background: transparent;
-  color: var(--muted-foreground);
-  font-size: 16px;
-  font-weight: 700;
-  border: 1px solid var(--border);
-  border-radius: 12px;
-  cursor: pointer;
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  transition: all 0.2s;
-}
-.btn-cancel:hover {
-  background: var(--card);
-  color: var(--foreground);
-}
-
-.banned-warning {
-  color: #ef4444;
-  font-size: 12px;
-  font-weight: 600;
-  margin-top: 4px;
-  display: flex;
-  align-items: center;
-  gap: 4px;
-}
-
-.notes-input {
-  padding: 10px 12px;
-  background: var(--background);
-  border: 1px solid var(--border);
-  border-radius: 8px;
-  color: var(--foreground);
-  font-size: 14px;
-  outline: none;
-  width: 100%;
-  box-sizing: border-box;
-  resize: vertical;
-  min-height: 60px;
-  transition: border-color 0.3s;
-}
-
-.notes-input:focus {
-  border-color: var(--primary);
-}
-</style>
+<style scoped src="./ScoutingForm.css"></style>

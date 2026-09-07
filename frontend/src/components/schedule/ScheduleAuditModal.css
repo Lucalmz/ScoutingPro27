@@ -1,0 +1,417 @@
+.audit-modal-backdrop {
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.75);
+  backdrop-filter: blur(8px);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 999;
+  padding: 16px;
+}
+
+.audit-modal {
+  background: #0d0d0d;
+  border: 1px solid var(--border, #262626);
+  border-radius: 14px;
+  width: 100%;
+  max-width: 680px;
+  max-height: 85vh;
+  display: flex;
+  flex-direction: column;
+  box-shadow: 0 10px 40px rgba(0, 0, 0, 0.8), 0 0 30px rgba(245, 158, 11, 0.15);
+  overflow: hidden;
+}
+
+.modal-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 16px 20px;
+  border-bottom: 1px solid var(--border, #222);
+}
+
+.header-title {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.header-icon {
+  font-size: 28px;
+  color: #f59e0b;
+}
+
+.header-title h3 {
+  margin: 0;
+  font-size: 1.1rem;
+  font-weight: 700;
+  color: var(--foreground, #fff);
+}
+
+.subtitle {
+  margin: 2px 0 0 0;
+  font-size: 0.78rem;
+  color: var(--muted-foreground, #888);
+}
+
+.btn-close {
+  background: transparent;
+  border: none;
+  color: var(--muted-foreground, #888);
+  cursor: pointer;
+  padding: 4px;
+  border-radius: 6px;
+  display: flex;
+  align-items: center;
+}
+
+.btn-close:hover {
+  color: var(--foreground, #fff);
+  background: rgba(255, 255, 255, 0.08);
+}
+
+/* 概览统计条 */
+.audit-overview-bar {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  padding: 12px 20px;
+  background: rgba(245, 158, 11, 0.06);
+  border-bottom: 1px solid rgba(245, 158, 11, 0.2);
+}
+
+.overview-stat {
+  display: flex;
+  flex-direction: column;
+}
+
+.stat-num {
+  font-size: 1.25rem;
+  font-weight: 900;
+  line-height: 1.1;
+}
+
+.text-danger {
+  color: #ef4444;
+}
+
+.text-warning {
+  color: #f59e0b;
+}
+
+.stat-label {
+  font-size: 0.72rem;
+  color: var(--muted-foreground, #aaa);
+}
+
+.overview-divider {
+  width: 1px;
+  height: 28px;
+  background: var(--border, #333);
+}
+
+.overview-hint {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 0.78rem;
+  color: var(--muted-foreground, #aaa);
+  margin-left: auto;
+}
+
+.info-icon {
+  font-size: 16px;
+  color: #f59e0b;
+}
+
+/* 主体列表 */
+.modal-body {
+  padding: 16px 20px;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.empty-audit-card {
+  padding: 48px 16px;
+  text-align: center;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 8px;
+}
+
+.ok-icon {
+  font-size: 48px;
+  color: var(--primary, #39ff14);
+}
+
+.empty-audit-card h4 {
+  margin: 0;
+  color: var(--foreground, #fff);
+  font-size: 1rem;
+}
+
+.empty-audit-card p {
+  margin: 0;
+  color: var(--muted-foreground, #888);
+  font-size: 0.84rem;
+}
+
+.discrepancy-card-list {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.discrepancy-card {
+  background: #141414;
+  border: 1px solid var(--border, #2a2a2a);
+  border-radius: 10px;
+  padding: 12px 16px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  transition: all 0.2s ease;
+}
+
+.discrepancy-card.focused {
+  border-color: #f59e0b;
+  box-shadow: 0 0 12px rgba(245, 158, 11, 0.25);
+  background: #171510;
+}
+
+.card-header {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.rank-badge {
+  padding: 2px 8px;
+  border-radius: 4px;
+  font-size: 0.72rem;
+  font-weight: 800;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+}
+
+.rank-1 {
+  background: #ef4444;
+  color: #fff;
+}
+
+.rank-2, .rank-3 {
+  background: #f59e0b;
+  color: #000;
+}
+
+.rank-4, .rank-5 {
+  background: #3b82f6;
+  color: #fff;
+}
+
+.match-title {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex: 1;
+}
+
+.match-code {
+  font-size: 1rem;
+  font-weight: 800;
+  color: var(--foreground, #fff);
+}
+
+.diff-highlight {
+  font-size: 0.8rem;
+  font-weight: 700;
+  color: #f59e0b;
+}
+
+.btn-locate {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  background: rgba(255, 255, 255, 0.05);
+  border: 1px solid var(--border, #333);
+  color: var(--foreground, #fff);
+  border-radius: 6px;
+  padding: 4px 8px;
+  font-size: 0.75rem;
+  cursor: pointer;
+  transition: all 0.15s;
+}
+
+.btn-locate:hover {
+  background: #f59e0b;
+  color: #000;
+  border-color: #f59e0b;
+}
+
+.btn-locate .material-icons {
+  font-size: 14px;
+}
+
+/* 红蓝对阵差额表格 */
+.alliance-comparison-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 10px;
+}
+
+.alliance-col {
+  background: rgba(0, 0, 0, 0.35);
+  border: 1px solid var(--border, #222);
+  border-radius: 8px;
+  padding: 8px 10px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.red-col {
+  border-left: 3px solid #ef4444;
+}
+
+.blue-col {
+  border-left: 3px solid #3b82f6;
+}
+
+.alliance-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.alliance-name {
+  font-size: 0.78rem;
+  font-weight: 700;
+}
+
+.alliance-name.red {
+  color: #ef4444;
+}
+
+.alliance-name.blue {
+  color: #3b82f6;
+}
+
+.diff-badge {
+  font-size: 0.72rem;
+  font-weight: 800;
+  padding: 1px 6px;
+  border-radius: 4px;
+}
+
+.diff-badge.higher {
+  background: rgba(239, 68, 68, 0.18);
+  color: #fca5a5;
+  border: 1px solid rgba(239, 68, 68, 0.35);
+}
+
+.diff-badge.lower {
+  background: rgba(59, 130, 246, 0.18);
+  color: #93c5fd;
+  border: 1px solid rgba(59, 130, 246, 0.35);
+}
+
+.scores-row {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  font-size: 0.76rem;
+}
+
+.score-pair {
+  display: flex;
+  gap: 4px;
+}
+
+.pair-lbl {
+  color: var(--muted-foreground, #888);
+}
+
+.pair-val {
+  font-weight: 700;
+  color: var(--foreground, #fff);
+}
+
+.scout-records-box {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  margin-top: 2px;
+}
+
+.scout-chip {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  background: rgba(255, 255, 255, 0.04);
+  padding: 2px 6px;
+  border-radius: 4px;
+  font-size: 0.72rem;
+}
+
+.team-tag {
+  font-weight: 800;
+  color: var(--foreground, #fff);
+}
+
+.scout-person {
+  color: var(--muted-foreground, #aaa);
+}
+
+.scout-score {
+  margin-left: auto;
+  font-weight: 700;
+  color: #f59e0b;
+}
+
+.no-scout-hint {
+  font-size: 0.72rem;
+  color: var(--muted-foreground, #666);
+  font-style: italic;
+}
+
+.diagnosis-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 10px;
+  background: rgba(245, 158, 11, 0.08);
+  border-radius: 6px;
+  font-size: 0.75rem;
+  color: #fde68a;
+}
+
+.diag-icon {
+  font-size: 16px;
+  color: #f59e0b;
+}
+
+.modal-footer {
+  padding: 12px 20px;
+  border-top: 1px solid var(--border, #222);
+  display: flex;
+  justify-content: flex-end;
+}
+
+.btn-primary {
+  background: var(--primary, #39ff14);
+  color: #000;
+  font-weight: 700;
+  border: none;
+  padding: 7px 18px;
+  border-radius: 6px;
+  cursor: pointer;
+  font-size: 0.84rem;
+}
+
+.btn-primary:hover {
+  filter: brightness(1.15);
+}
