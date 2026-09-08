@@ -71,6 +71,13 @@
   background: var(--input);
 }
 
+.event-brand-logo {
+  width: 26px;
+  height: 26px;
+  object-fit: contain;
+  filter: drop-shadow(0 0 6px rgba(57, 255, 20, 0.45));
+}
+
 .event-title {
   display: flex;
   flex-direction: column;
@@ -327,20 +334,20 @@
   }
 }
 
-/* Tab brush-in transition (fall-through cascade like HistoryList) */
+/* Tab brush-in transition (smooth, coherent cascade like HistoryList) */
 .tab-brush-enter-active,
 .tab-brush-leave-active {
-  transition: opacity var(--motion-duration-moderate, 0.425s) var(--motion-ease-out, ease-out),
-              transform var(--motion-duration-moderate, 0.425s) var(--motion-ease-out, ease-out);
+  transition: opacity var(--motion-duration-fast, 0.24s) var(--motion-ease-out, ease-out),
+              transform var(--motion-duration-fast, 0.24s) var(--motion-ease-out, ease-out);
 }
 
 .tab-brush-enter-from {
   opacity: 0;
-  transform: translateY(-24px) scale(0.995);
+  transform: translateY(12px);
 }
 
 .tab-brush-leave-to {
   opacity: 0;
-  transform: translateY(16px);
+  transform: translateY(-8px);
 }
 

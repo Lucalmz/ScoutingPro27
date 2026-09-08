@@ -59,27 +59,27 @@ export function calculateBragIndex(
 
   // 5. 判定档位（以赛场实际展现的峰值上限与产出比率为准）
   let tier: BragTier = 'realistic'
-  let label = `${overallRatio}x 真实守信 🎯`
+  let label = `${overallRatio}x 真实守信`
 
   if (overallRatio > 2.0) {
     tier = 'mythical'
-    label = `${overallRatio}x 吹破牛皮 🔥`
+    label = `${overallRatio}x 吹破牛皮`
   } else if (overallRatio > 1.45) {
     tier = 'overclaimed'
-    label = `${overallRatio}x 夸大其词 ⚠️`
+    label = `${overallRatio}x 夸大其词`
   } else if (overallRatio > 1.15) {
     tier = 'optimistic'
-    label = `${overallRatio}x 略偏乐观 🟡`
+    label = `${overallRatio}x 略偏乐观`
   } else {
     tier = 'realistic'
-    label = `${overallRatio}x 真实守信 🎯`
+    label = `${overallRatio}x 真实守信`
   }
 
   // 标注状态修饰
   if (hangVerified) {
-    label += ' (高杠已证实 🧗)'
+    label += ' (高杠已证实)'
   } else if (hangPardoned) {
-    label += ' (高挂待验证 🧗)'
+    label += ' (高挂待验证)'
   }
 
   return {

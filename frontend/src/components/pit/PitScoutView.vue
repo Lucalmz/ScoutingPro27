@@ -80,7 +80,8 @@ function handleSelectTeam(teamNumber: number) {
           :disabled="isSyncingRoster"
           @click="handleSyncOfficialRoster"
         >
-          <span>{{ isSyncingRoster ? t('pit_scout.syncing') : ('🔄 ' + t('pit_scout.sync_official')) }}</span>
+          <span class="material-icons" :class="{ spinning: isSyncingRoster }">sync</span>
+          <span>{{ isSyncingRoster ? t('pit_scout.syncing') : t('pit_scout.sync_official') }}</span>
         </button>
       </div>
     </div>
@@ -126,9 +127,10 @@ function handleSelectTeam(teamNumber: number) {
     <!-- 统一战队卡片网格 -->
     <div v-if="pitStore.unifiedTeamList.length > 0" class="roster-grid">
       <TeamRosterCard
-        v-for="team in pitStore.unifiedTeamList"
+        v-for="(team, idx) in pitStore.unifiedTeamList"
         :key="team.teamNumber"
         :team="team"
+        :card-index="idx"
         @select="handleSelectTeam"
       />
     </div>

@@ -458,7 +458,7 @@ async function handleClearSchedule() {
                     <span class="station-badge">{{ st.label }}</span>
                     <span class="team-number">#{{ st.team }}</span>
                     <PitStatusIndicator :team-number="st.team" size="sm" />
-                    <span v-if="isTeamScouted(sched.matchNumber, st.team)" class="scouted-icon" :title="t('schedule.scouted')">✓</span>
+                    <span v-if="isTeamScouted(sched.matchNumber, st.team)" class="material-icons scouted-icon" :title="t('schedule.scouted')">check</span>
                   </div>
 
                   <!-- Host 下拉排班 (支持留空) -->
@@ -508,7 +508,7 @@ async function handleClearSchedule() {
                     <span class="station-badge">{{ st.label }}</span>
                     <span class="team-number">#{{ st.team }}</span>
                     <PitStatusIndicator :team-number="st.team" size="sm" />
-                    <span v-if="isTeamScouted(sched.matchNumber, st.team)" class="scouted-icon" :title="t('schedule.scouted')">✓</span>
+                    <span v-if="isTeamScouted(sched.matchNumber, st.team)" class="material-icons scouted-icon" :title="t('schedule.scouted')">check</span>
                   </div>
 
                   <div v-if="isHost" class="assignment-control" @mousedown.stop>

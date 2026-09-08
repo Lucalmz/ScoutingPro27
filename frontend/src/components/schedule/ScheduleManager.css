@@ -480,7 +480,7 @@
   color: var(--foreground, #fff);
 }
 
-.scouted-icon { color: var(--primary, #39ff14); font-size: 0.8rem; font-weight: 800; }
+.scouted-icon { color: var(--primary, #39ff14); font-size: 14px; font-weight: 700; vertical-align: middle; }
 
 .scout-select {
   width: 100%;

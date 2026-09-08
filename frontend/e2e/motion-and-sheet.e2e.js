@@ -92,8 +92,8 @@ async function runMotionE2ETest() {
   const mavenCmd = os.platform() === 'win32' ? 'mvn.cmd' : 'mvn';
   const backendProcess = spawn(mavenCmd, [
     'exec:java',
-    '-Dexec.mainClass=com.bear27570.app.Main',
-    '-Dexec.args=--headless',
+    os.platform() === 'win32' ? '"-Dexec.mainClass=com.bear27570.app.Main"' : '-Dexec.mainClass=com.bear27570.app.Main',
+    os.platform() === 'win32' ? '"-Dexec.args=--headless"' : '-Dexec.args=--headless',
     '-DENABLE_TEST_CLEANUP=true'
   ], {
     cwd: path.join(__dirname, '../../Backend'),
@@ -106,7 +106,7 @@ async function runMotionE2ETest() {
     const timeout = setTimeout(() => reject(new Error('Backend failed to start within 60s')), 60000);
     const onData = (data) => {
       const s = data.toString();
-      if (s.includes('Listening on http://localhost:')) {
+      if (s.includes('Listening on http://') || s.includes('Javalin')) {
         clearTimeout(timeout);
         console.log(`✅ Backend successfully running on http://localhost:${PORT}`);
         resolve();

@@ -7,6 +7,7 @@ import PitStatusIndicator from './PitStatusIndicator.vue'
 
 const props = defineProps<{
   team: UnifiedTeamItem
+  cardIndex?: number
 }>()
 
 const emit = defineEmits<{
@@ -53,7 +54,12 @@ const bragLabel = computed(() => {
 </script>
 
 <template>
-  <div class="team-roster-card" :class="{ 'is-scouted': team.hasPitRecord }" @click="emit('select', team.teamNumber)">
+  <div
+    class="team-roster-card"
+    :class="{ 'is-scouted': team.hasPitRecord }"
+    :style="{ '--card-index': cardIndex ?? 0 }"
+    @click="emit('select', team.teamNumber)"
+  >
     <!-- 顶部状态栏 -->
     <div class="card-header">
       <div class="team-identity">
@@ -65,8 +71,14 @@ const bragLabel = computed(() => {
 
     <!-- 机器人名称与地点 -->
     <div v-if="team.robotName || team.city" class="card-subtitle">
-      <span v-if="team.robotName" class="robot-name">🤖 {{ team.robotName }}</span>
-      <span v-if="team.city" class="location">📍 {{ team.city }}</span>
+      <span v-if="team.robotName" class="robot-name">
+        <span class="material-icons card-info-icon">smart_toy</span>
+        {{ team.robotName }}
+      </span>
+      <span v-if="team.city" class="location">
+        <span class="material-icons card-info-icon">location_on</span>
+        {{ team.city }}
+      </span>
     </div>
 
     <!-- 硬件指标标签条 -->
@@ -75,10 +87,12 @@ const bragLabel = computed(() => {
         {{ drivetrainText }}
       </span>
       <span v-if="team.pitRecord.weightLbs > 0" class="pill pill-weight">
-        ⚖️ {{ team.pitRecord.weightLbs }} lbs
+        <span class="material-icons pill-icon">scale</span>
+        {{ team.pitRecord.weightLbs }} lbs
       </span>
       <span v-if="team.pitRecord.hangType && team.pitRecord.hangType !== 'none'" class="pill pill-hang">
-        🧗 {{ hangText }}
+        <span class="material-icons pill-icon">vertical_align_top</span>
+        {{ hangText }}
       </span>
     </div>
 
@@ -110,7 +124,11 @@ const bragLabel = computed(() => {
         <span>{{ t('pit_scout.avg_score', { score: team.avgTotalScore }) }}</span>
       </div>
       <div v-if="team.bragInfo" class="brag-tier-pill" :class="`tier-${team.bragInfo.tier}`">
-        {{ bragLabel }}
+        <span class="material-icons brag-icon" v-if="team.bragInfo.tier === 'realistic'">verified</span>
+        <span class="material-icons brag-icon" v-else-if="team.bragInfo.tier === 'optimistic'">trending_up</span>
+        <span class="material-icons brag-icon" v-else-if="team.bragInfo.tier === 'overclaimed'">warning</span>
+        <span class="material-icons brag-icon" v-else-if="team.bragInfo.tier === 'mythical'">local_fire_department</span>
+        <span>{{ bragLabel }}</span>
       </div>
     </div>
 
@@ -140,6 +158,38 @@ const bragLabel = computed(() => {
   cursor: pointer;
   transition: all 0.2s cubic-bezier(0.16, 1, 0.3, 1);
   position: relative;
+  animation: card-cascade-in var(--motion-duration-moderate, 0.4s) var(--motion-ease-out, ease-out) both;
+  animation-delay: calc(var(--card-index, 0) * 35ms);
+}
+
+@keyframes card-cascade-in {
+  from {
+    opacity: 0;
+    transform: translateY(14px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+.card-info-icon {
+  font-size: 13px;
+  vertical-align: middle;
+  margin-right: 3px;
+  opacity: 0.85;
+}
+
+.pill-icon {
+  font-size: 13px;
+  vertical-align: text-bottom;
+  margin-right: 3px;
+}
+
+.brag-icon {
+  font-size: 12px;
+  vertical-align: text-bottom;
+  margin-right: 3px;
 }
 
 .team-roster-card:hover {
@@ -260,6 +310,8 @@ const bragLabel = computed(() => {
 }
 
 .brag-tier-pill {
+  display: inline-flex;
+  align-items: center;
   font-weight: 600;
   padding: 2px 8px;
   border-radius: 9999px;

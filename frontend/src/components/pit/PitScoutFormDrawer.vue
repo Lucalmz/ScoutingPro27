@@ -287,7 +287,10 @@ function handleSave() {
               <button type="button" class="step-btn" @click="adjust(weightLbs, 0.5, 0, 50)">+</button>
               <span class="stepper-unit">{{ t('pit_scout.drawer.weight_hint') }}</span>
             </div>
-            <span v-if="weightLbs > 42" class="warning-text">{{ t('pit_scout.drawer.weight_over_warning') }}</span>
+            <span v-if="weightLbs > 42" class="warning-text">
+              <span class="material-icons" style="font-size: 14px; vertical-align: middle; margin-right: 4px;">warning</span>
+              {{ t('pit_scout.drawer.weight_over_warning') }}
+            </span>
           </div>
 
           <div class="form-group">
@@ -299,6 +302,7 @@ function handleSave() {
                 :class="{ 'is-active': sizingPassed }"
                 @click="sizingPassed = true"
               >
+                <span class="material-icons" style="font-size: 16px; margin-right: 4px; vertical-align: text-bottom;">check_circle</span>
                 {{ t('pit_scout.drawer.sizing_passed') }}
               </button>
               <button
@@ -307,6 +311,7 @@ function handleSave() {
                 :class="{ 'is-active': !sizingPassed }"
                 @click="sizingPassed = false"
               >
+                <span class="material-icons" style="font-size: 16px; margin-right: 4px; vertical-align: text-bottom;">cancel</span>
                 {{ t('pit_scout.drawer.sizing_failed') }}
               </button>
             </div>

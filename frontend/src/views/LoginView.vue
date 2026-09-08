@@ -112,7 +112,7 @@ async function handleLogin() {
     
     <div class="login-card">
       <div class="logo-area">
-        <span class="material-icons logo-icon">hive</span>
+        <img src="/logo_transparent.png" alt="SP27" class="login-brand-logo" />
         <h1>ScoutingPro 27</h1>
         <p class="powered-by">developed by 27570 B.E.A.R. and 25787 TechBY</p>
       </div>
@@ -289,10 +289,12 @@ async function handleLogin() {
   margin-bottom: 32px;
 }
 
-.logo-icon {
-  font-size: 48px;
-  margin-bottom: 8px;
-  color: var(--primary);
+.login-brand-logo {
+  width: 68px;
+  height: 68px;
+  object-fit: contain;
+  margin-bottom: 10px;
+  filter: drop-shadow(0 0 14px rgba(57, 255, 20, 0.45));
 }
 
 h1 {

@@ -51,8 +51,6 @@ export function useEventTransitions({
     return baseTabs
   })
 
-  let currentTabTransition: any = null
-
   function switchTab(newTabKey: EventTab) {
     if (activeTab.value === newTabKey) return
 
@@ -78,39 +76,7 @@ export function useEventTransitions({
       })
     }
 
-    if (!document.startViewTransition) {
-      activeTab.value = newTabKey
-      return
-    }
-
-    if (currentTabTransition) {
-      currentTabTransition.skipTransition()
-    }
-
-    const currentIndex = tabs.value.findIndex((t) => t.key === activeTab.value)
-    const newIndex = tabs.value.findIndex((t) => t.key === newTabKey)
-    const direction = newIndex > currentIndex ? 'slide-left' : 'slide-right'
-
-    document.documentElement.dataset.transitionType = 'tab-switch'
-    document.documentElement.dataset.tabDirection = direction
-    document.documentElement.removeAttribute('data-direction')
-
-    try {
-      currentTabTransition = document.startViewTransition(() => {
-        activeTab.value = newTabKey
-        return nextTick()
-      })
-
-      currentTabTransition.finished.finally(() => {
-        currentTabTransition = null
-        document.documentElement.removeAttribute('data-transition-type')
-        document.documentElement.removeAttribute('data-tab-direction')
-      })
-    } catch {
-      activeTab.value = newTabKey
-      document.documentElement.removeAttribute('data-transition-type')
-      document.documentElement.removeAttribute('data-tab-direction')
-    }
+    activeTab.value = newTabKey
   }
 
   function restorePosition(savedPos: EventNavigationState) {

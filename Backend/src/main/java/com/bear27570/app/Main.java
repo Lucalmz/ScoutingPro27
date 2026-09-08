@@ -11,6 +11,10 @@ import org.cef.browser.CefBrowser;
 import org.flywaydb.core.Flyway;
 import org.jdbi.v3.core.Jdbi;
 
+import com.bear27570.app.ui.CustomTitleBar;
+import com.bear27570.app.ui.WindowResizer;
+
+import javax.imageio.ImageIO;
 import javax.swing.*;
 import javax.swing.filechooser.FileNameExtensionFilter;
 import java.awt.*;
@@ -208,7 +212,24 @@ public class Main {
             // ==========================================
             SwingUtilities.invokeLater(() -> {
                 JFrame frame = new JFrame("ScoutingPro27");
+                frame.setUndecorated(true);
+
+                // Set taskbar and window icon
+                try (InputStream iconIn = Main.class.getResourceAsStream("/icon.png")) {
+                    if (iconIn != null) {
+                        frame.setIconImage(ImageIO.read(iconIn));
+                    }
+                } catch (Exception ignored) {}
+
+                // Custom title bar replacing system default title bar
+                CustomTitleBar customTitleBar = new CustomTitleBar(frame);
+                frame.getContentPane().setLayout(new BorderLayout());
+                frame.getContentPane().add(customTitleBar, BorderLayout.NORTH);
                 frame.getContentPane().add(browserUI, BorderLayout.CENTER);
+
+                // Attach edge & corner resizer for undecorated frame
+                WindowResizer.attach(frame);
+
                 frame.setSize(1024, 768);
                 frame.setLocationRelativeTo(null);
 

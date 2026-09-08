@@ -382,8 +382,9 @@ const recordStore = useRecordStore()
                   <PitStatusIndicator v-if="parseInt(team.teamNumber) > 0" :team-number="parseInt(team.teamNumber)" :show-label="true" />
                 </div>
                 <input v-model="team.teamNumber" type="text" inputmode="numeric" placeholder="e.g. 12345" :class="{ 'invalid-field': isInvalidFormat(team.teamNumber) }" />
-                <span v-if="getPitSummary(team.teamNumber)" class="pit-quick-hint" style="font-size: 11px; color: var(--color-primary, #38bdf8); margin-top: 2px;">
-                  💡 展位自述：{{ getPitSummary(team.teamNumber)?.drivetrain }} | 自主 {{ getPitSummary(team.teamNumber)?.autoScore }}分 | 悬挂 L{{ getPitSummary(team.teamNumber)?.hangLevel }}
+                <span v-if="getPitSummary(team.teamNumber)" class="pit-quick-hint" style="font-size: 11px; color: var(--color-primary, #38bdf8); margin-top: 2px; display: inline-flex; align-items: center; gap: 4px;">
+                  <span class="material-icons" style="font-size: 13px;">lightbulb</span>
+                  <span>展位自述：{{ getPitSummary(team.teamNumber)?.drivetrain }} | 自主 {{ getPitSummary(team.teamNumber)?.autoScore }}分 | 悬挂 L{{ getPitSummary(team.teamNumber)?.hangLevel }}</span>
                 </span>
                 <span v-if="recordStore.bannedTeams.includes(parseInt(team.teamNumber))" class="banned-warning">
                   <span class="material-icons" style="font-size: 14px; vertical-align: middle;">warning</span> 

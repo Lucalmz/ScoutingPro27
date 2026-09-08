@@ -158,7 +158,10 @@ function handleOpenRenameModal() {
   <div class="dashboard">
     <header class="topbar">
       <div class="topbar-left">
-        <span class="brand" style="display: flex; align-items: center; gap: 8px;"><span class="material-icons">explore</span> ScoutingPro 27</span>
+        <span class="brand" style="display: flex; align-items: center; gap: 10px;">
+          <img src="/logo_transparent.png" alt="SP27" class="brand-logo" />
+          <span>ScoutingPro 27</span>
+        </span>
       </div>
       <div class="topbar-right">
         <button

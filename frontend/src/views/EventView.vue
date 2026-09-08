@@ -203,7 +203,6 @@ onBeforeRouteUpdate((to, from) => {
 })
 
 const editingRecord = ref<any | null>(null)
-const isViewTransitionSupported = typeof document !== 'undefined' && 'startViewTransition' in document
 
 function handleEditRecord(record: any) {
   editingRecord.value = record
@@ -258,6 +257,7 @@ async function onRecordSubmitted(recordOrRecords: ScoutingRecord | ScoutingRecor
         <button class="btn-back" @click="goBack" style="display: flex; align-items: center; gap: 4px;">
           <span class="material-icons" style="font-size: 18px;">arrow_back</span>{{ t('event.back') }}
         </button>
+        <img src="/logo_transparent.png" alt="SP27" class="event-brand-logo" />
         <div class="event-title">
           <span class="event-name" :style="{ viewTransitionName: 'event-card-title' }">{{ event?.name ?? t('event.event') }}</span>
           <div class="event-meta-row" v-if="event">
@@ -338,8 +338,7 @@ async function onRecordSubmitted(recordOrRecords: ScoutingRecord | ScoutingRecor
     <main ref="contentRef" class="tab-content" :style="{ viewTransitionName: 'event-content' }">
       <Transition 
         name="tab-brush" 
-        :mode="isViewTransitionSupported ? undefined : 'out-in'"
-        :css="!isViewTransitionSupported"
+        mode="out-in"
       >
         <ScoutingForm
           v-if="activeTab === 'scout'"

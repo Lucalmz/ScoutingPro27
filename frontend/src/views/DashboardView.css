@@ -18,6 +18,13 @@
   font-size: 18px;
 }
 
+.brand-logo {
+  width: 24px;
+  height: 24px;
+  object-fit: contain;
+  filter: drop-shadow(0 0 6px rgba(57, 255, 20, 0.45));
+}
+
 .user-tag-btn {
   display: inline-flex;
   align-items: center;
