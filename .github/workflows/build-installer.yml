@@ -55,7 +55,12 @@ jobs:
       - name: Package jcef bundle as a resource
         shell: bash
         working-directory: Backend
-        run: jar --create --file=src/main/resources/jcef-bundle.zip -C jcef-bundle .
+        run: |
+          if [ "${{ runner.os }}" = "macOS" ]; then
+            tar -czf src/main/resources/jcef-bundle.tar.gz -C jcef-bundle .
+          else
+            jar --create --file=src/main/resources/jcef-bundle.zip -C jcef-bundle .
+          fi
 
       # ---------- 第二次打包：这次内嵌了离线原生库 ----------
       - name: Build fat jar (pass 2, with embedded jcef bundle)
@@ -109,6 +114,7 @@ jobs:
           --main-class com.bear27570.app.Main
           --dest dist
           --icon src/main/resources/icon.ico
+          --java-options "--add-opens=java.desktop/sun.awt=ALL-UNNAMED"
           --win-dir-chooser
           --win-shortcut
           --win-menu
@@ -143,6 +149,9 @@ jobs:
             --main-class com.bear27570.app.Main \
             --dest dist \
             $ICON_ARG \
+            --java-options "--add-opens=java.desktop/sun.awt=ALL-UNNAMED" \
+            --java-options "--add-opens=java.desktop/sun.lwawt=ALL-UNNAMED" \
+            --java-options "--add-opens=java.desktop/sun.lwawt.macosx=ALL-UNNAMED" \
             --mac-package-identifier com.bear27570.app \
             --mac-package-name ScoutingPro27
 

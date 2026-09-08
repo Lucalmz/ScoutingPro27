@@ -28,6 +28,7 @@ import java.nio.file.Files;
 
 public class Main {
     private static final String JCEF_BUNDLE_RESOURCE = "/jcef-bundle.zip";
+    private static final String JCEF_BUNDLE_TAR_RESOURCE = "/jcef-bundle.tar.gz";
 
     public static void main(String[] args) {
         boolean headless = false;
@@ -72,19 +73,60 @@ public class Main {
     /** 运行时优先使用内嵌的离线原生库，没有就退回 jcefmaven 默认联网下载 */
     private static File ensureJcefBundle() throws IOException {
         File targetDir = new File(System.getProperty("user.home"), ".scoutingpro27/jcef-bundle");
-        File marker = new File(targetDir, ".extracted_ok");
-        if (marker.exists()) {
+        File markerV3 = new File(targetDir, ".extracted_v3_ok");
+        boolean isWindows = System.getProperty("os.name", "").toLowerCase().contains("win");
+
+        if (markerV3.exists()) {
+            if (!isWindows) {
+                try {
+                    new ProcessBuilder("chmod", "-R", "755", targetDir.getAbsolutePath()).start().waitFor();
+                } catch (Exception ignored) {}
+            }
             return targetDir;
         }
+
+        // 彻底清理旧版或之前解压损坏的目录（例如缺少执行权限或丢失软链接的文件）
+        if (targetDir.exists()) {
+            deleteDir(targetDir);
+        }
+        targetDir.mkdirs();
+
+        // 1. 优先尝试 tar.gz 资源（macOS/Linux 打包产物，完美保留符号链接与 POSIX 执行权限）
+        try (InputStream tarIn = Main.class.getResourceAsStream(JCEF_BUNDLE_TAR_RESOURCE)) {
+            if (tarIn != null) {
+                File tempTar = File.createTempFile("jcef-bundle-", ".tar.gz");
+                try {
+                    try (FileOutputStream fos = new FileOutputStream(tempTar)) {
+                        byte[] buf = new byte[16384];
+                        int len;
+                        while ((len = tarIn.read(buf)) > 0) fos.write(buf, 0, len);
+                    }
+                    Process p = new ProcessBuilder("tar", "-xzf", tempTar.getAbsolutePath(), "-C", targetDir.getAbsolutePath()).start();
+                    int code = p.waitFor();
+                    if (code == 0) {
+                        if (!isWindows) {
+                            new ProcessBuilder("chmod", "-R", "755", targetDir.getAbsolutePath()).start().waitFor();
+                        }
+                        new FileOutputStream(markerV3).close();
+                        return targetDir;
+                    }
+                } catch (Exception e) {
+                    e.printStackTrace();
+                } finally {
+                    tempTar.delete();
+                }
+            }
+        }
+
+        // 2. 尝试 zip 资源（Windows 打包产物）
         try (InputStream in = Main.class.getResourceAsStream(JCEF_BUNDLE_RESOURCE)) {
             if (in == null) {
                 // 开发环境没打包这个资源，走原来的联网下载
                 return targetDir;
             }
-            targetDir.mkdirs();
             try (java.util.zip.ZipInputStream zis = new java.util.zip.ZipInputStream(in)) {
                 java.util.zip.ZipEntry entry;
-                byte[] buf = new byte[8192];
+                byte[] buf = new byte[16384];
                 while ((entry = zis.getNextEntry()) != null) {
                     File outFile = new File(targetDir, entry.getName());
                     if (entry.isDirectory()) {
@@ -95,10 +137,18 @@ public class Main {
                             int len;
                             while ((len = zis.read(buf)) > 0) fos.write(buf, 0, len);
                         }
+                        if (!isWindows) {
+                            outFile.setExecutable(true, false);
+                        }
                     }
                 }
             }
-            new FileOutputStream(marker).close();
+            if (!isWindows) {
+                try {
+                    new ProcessBuilder("chmod", "-R", "755", targetDir.getAbsolutePath()).start().waitFor();
+                } catch (Exception ignored) {}
+            }
+            new FileOutputStream(markerV3).close();
         }
         return targetDir;
     }
@@ -172,6 +222,11 @@ public class Main {
             builder.getCefSettings().windowless_rendering_enabled = false;
             // 允许暴露真实本地网卡 IP（包括公网 IPv6），避免 Chromium 默认用 mDNS .local 掩盖导致跨网络 IPv6 直连打洞失败
             builder.addJcefArgs("--disable-features=WebRtcHideLocalIpsWithMdns");
+
+            boolean isMac = System.getProperty("os.name", "").toLowerCase().contains("mac");
+            if (isMac) {
+                builder.addJcefArgs("--no-sandbox");
+            }
 
 
             // 为每个实例分配独立的缓存目录，防止多开时互相锁死崩溃
