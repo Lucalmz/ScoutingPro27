@@ -212,23 +212,31 @@ public class Main {
             // ==========================================
             SwingUtilities.invokeLater(() -> {
                 JFrame frame = new JFrame("ScoutingPro27");
-                frame.setUndecorated(true);
+                boolean isWindows = System.getProperty("os.name", "").toLowerCase().contains("win");
 
-                // Set taskbar and window icon
-                try (InputStream iconIn = Main.class.getResourceAsStream("/icon.png")) {
-                    if (iconIn != null) {
-                        frame.setIconImage(ImageIO.read(iconIn));
-                    }
-                } catch (Exception ignored) {}
+                if (isWindows) {
+                    frame.setUndecorated(true);
 
-                // Custom title bar replacing system default title bar
-                CustomTitleBar customTitleBar = new CustomTitleBar(frame);
-                frame.getContentPane().setLayout(new BorderLayout());
-                frame.getContentPane().add(customTitleBar, BorderLayout.NORTH);
-                frame.getContentPane().add(browserUI, BorderLayout.CENTER);
+                    // Set taskbar and window icon
+                    try (InputStream iconIn = Main.class.getResourceAsStream("/icon.png")) {
+                        if (iconIn != null) {
+                            frame.setIconImage(ImageIO.read(iconIn));
+                        }
+                    } catch (Exception ignored) {}
 
-                // Attach edge & corner resizer for undecorated frame
-                WindowResizer.attach(frame);
+                    // Custom title bar replacing system default title bar on Windows
+                    CustomTitleBar customTitleBar = new CustomTitleBar(frame);
+                    frame.getContentPane().setLayout(new BorderLayout());
+                    frame.getContentPane().add(customTitleBar, BorderLayout.NORTH);
+                    frame.getContentPane().add(browserUI, BorderLayout.CENTER);
+
+                    // Attach edge & corner resizer for undecorated frame
+                    WindowResizer.attach(frame);
+                } else {
+                    // macOS / Linux: 保持标准原生窗口，避免 JCEF 在 macOS 无边框 NSWindowStyleMaskBorderless 下发生 native SIGTRAP 崩溃
+                    frame.getContentPane().setLayout(new BorderLayout());
+                    frame.getContentPane().add(browserUI, BorderLayout.CENTER);
+                }
 
                 frame.setSize(1024, 768);
                 frame.setLocationRelativeTo(null);
