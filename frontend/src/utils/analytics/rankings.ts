@@ -1,5 +1,15 @@
 import type { ScoutingRecord, OfficialMatch, RankingRow } from '@/types'
 
+function getRecordTournamentLevel(r: ScoutingRecord): string {
+  try {
+    if (!r.rawData) return 'QUALIFICATION'
+    const parsed = typeof r.rawData === 'string' ? JSON.parse(r.rawData) : r.rawData
+    return (parsed.tournamentLevel || 'QUALIFICATION').toUpperCase()
+  } catch {
+    return 'QUALIFICATION'
+  }
+}
+
 /**
  * Calculates reliability rating ('low' | 'high') for each scout based on
  * historical deviation from official FTC match scores.
@@ -13,7 +23,8 @@ export function calculateScoutReliability(
   const uniqueRecords = new Map<string, ScoutingRecord>()
   for (const record of records) {
     if (record.isDeleted) continue
-    const key = `${record.matchNumber}-${record.teamNumber}`
+    const level = getRecordTournamentLevel(record)
+    const key = `${level}-${record.matchNumber}-${record.teamNumber}`
     const existing = uniqueRecords.get(key)
     if (!existing || new Date(record.updatedAt) > new Date(existing.updatedAt)) {
       uniqueRecords.set(key, record)
@@ -21,7 +32,12 @@ export function calculateScoutReliability(
   }
 
   for (const record of uniqueRecords.values()) {
-    const match = officialMatches.find((m) => m.matchNum === record.matchNumber)
+    const rLevel = getRecordTournamentLevel(record)
+    const match = officialMatches.find((m) => {
+      if (m.matchNum !== record.matchNumber) return false
+      const mLevel = (m.tournamentLevel || 'QUALIFICATION').toUpperCase()
+      return mLevel === rLevel
+    })
     if (!match || !match.scores) continue
 
     const team = match.teams.find((t) => t.teamNumber === record.teamNumber)
@@ -31,7 +47,7 @@ export function calculateScoutReliability(
     const allianceScores = match.scores[alliance]
     if (!allianceScores) continue
 
-    const matchKey = `${record.matchNumber}-${alliance}`
+    const matchKey = `${rLevel}-${record.matchNumber}-${alliance}`
     if (!matchAlliances[matchKey]) {
       matchAlliances[matchKey] = { officialTotal: allianceScores.totalPointsNp, scouts: [] }
     }
@@ -112,7 +128,12 @@ export function calculateRankings(
       weightSum += weight
 
       let realTotalScore = r.totalScore
-      const match = officialMatches.find((m) => m.matchNum === r.matchNumber)
+      const rLevel = getRecordTournamentLevel(r)
+      const match = officialMatches.find((m) => {
+        if (m.matchNum !== r.matchNumber) return false
+        const mLevel = (m.tournamentLevel || 'QUALIFICATION').toUpperCase()
+        return mLevel === rLevel
+      })
       if (match && match.scores) {
         const teamInfo = match.teams.find((t) => t.teamNumber === r.teamNumber)
         if (teamInfo) {

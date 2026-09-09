@@ -9,17 +9,33 @@ const inboxStore = useInboxStore()
 const userStore = useUserStore()
 const router = useRouter()
 const route = useRoute()
-const isOpen = ref(false)
+
+const isOpen = computed({
+  get: () => inboxStore.isOpen,
+  set: (val: boolean) => inboxStore.setOpen(val)
+})
 
 /** Visibility controlled internally — parent renders this component unconditionally */
 const shouldShow = computed(() => userStore.isLoggedIn && route.name !== 'login')
 
 function toggleOpen() {
-  isOpen.value = !isOpen.value
+  inboxStore.toggleOpen()
 }
 
 function handleMarkRead(id: string) {
   inboxStore.markRead(id)
+}
+
+function handleDelete(id: string) {
+  inboxStore.deleteMessage(id)
+}
+
+function handleMarkAllRead() {
+  inboxStore.markAllRead()
+}
+
+function handleClearAll() {
+  inboxStore.clearAllMessages()
 }
 
 function handleMessageClick(msg: SystemMessage) {
@@ -27,7 +43,7 @@ function handleMessageClick(msg: SystemMessage) {
     const eventId = route.params.eventId
     if (eventId) {
       router.push(`/event/${eventId}?tab=history&highlightMatch=${msg.conflictMatchNumber}&highlightTeam=${msg.conflictTeamNumber}`)
-      isOpen.value = false
+      inboxStore.setOpen(false)
     } else {
       alert('Please enter the event first to view the conflict.')
     }
@@ -37,6 +53,11 @@ function handleMessageClick(msg: SystemMessage) {
 
 <template>
   <div class="inbox-widget" v-show="shouldShow" :class="{ 'is-open': isOpen }">
+    <!-- Backdrop overlay on mobile/desktop when open to dismiss by tapping outside -->
+    <transition name="fade">
+      <div v-if="isOpen" class="inbox-backdrop" @click.stop="toggleOpen"></div>
+    </transition>
+
     <div class="inbox-morph-container" @click="!isOpen && toggleOpen()">
       <!-- FAB Content (visible when closed) -->
       <transition name="fade">
@@ -49,9 +70,15 @@ function handleMessageClick(msg: SystemMessage) {
       <!-- Dropdown Content (visible when open) -->
       <transition name="fade-delay">
         <div v-if="isOpen" class="inbox-dropdown-content">
-          <div class="inbox-header" @click.stop="toggleOpen" style="cursor: pointer; display: flex; justify-content: space-between; align-items: center;">
-            <h3>Inbox</h3>
-            <span class="material-icons close-btn" style="font-size: 20px;">close</span>
+          <div class="inbox-header" style="display: flex; justify-content: space-between; align-items: center;">
+            <div style="display: flex; align-items: center; gap: 8px;">
+              <h3 style="margin: 0;">Inbox</h3>
+              <span v-if="inboxStore.messages.length > 0" class="inbox-actions" style="display: flex; gap: 6px;">
+                <button type="button" class="action-btn" title="Mark all read" @click.stop="handleMarkAllRead" style="font-size: 11px; padding: 2px 6px; cursor: pointer; border-radius: 4px; border: 1px solid #444; background: #222; color: #aaa;">Mark all read</button>
+                <button type="button" class="action-btn" title="Clear all" @click.stop="handleClearAll" style="font-size: 11px; padding: 2px 6px; cursor: pointer; border-radius: 4px; border: 1px solid #444; background: #222; color: #e57373;">Clear</button>
+              </span>
+            </div>
+            <span class="material-icons close-btn" style="font-size: 20px; cursor: pointer;" @click.stop="toggleOpen">close</span>
           </div>
           <div class="inbox-list">
             <div v-if="inboxStore.messages.length === 0" class="empty">No messages</div>
@@ -67,7 +94,10 @@ function handleMessageClick(msg: SystemMessage) {
                 <span class="time">{{ new Date(msg.timestamp).toLocaleTimeString() }}</span>
               </div>
               <p>{{ msg.body }}</p>
-              <button v-if="!msg.read" @click.stop="handleMarkRead(msg.id)" class="mark-read">Mark Read</button>
+              <div class="item-actions" style="display: flex; gap: 8px; align-items: center; margin-top: 6px;">
+                <button v-if="!msg.read" type="button" @click.stop="handleMarkRead(msg.id)" class="mark-read">Mark Read</button>
+                <button type="button" @click.stop="handleDelete(msg.id)" class="delete-msg-btn" style="background: none; border: none; color: #888; cursor: pointer; font-size: 11px; padding: 0;">Delete</button>
+              </div>
             </div>
           </div>
         </div>
@@ -84,6 +114,25 @@ function handleMessageClick(msg: SystemMessage) {
   z-index: 1000;
 }
 
+@media (max-width: 768px) {
+  .inbox-widget {
+    bottom: calc(56px + env(safe-area-inset-bottom, 0px) + 16px);
+    right: 16px;
+  }
+}
+
+.inbox-backdrop {
+  position: fixed;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  background: rgba(0, 0, 0, 0.45);
+  backdrop-filter: blur(2px);
+  -webkit-backdrop-filter: blur(2px);
+  z-index: 999;
+}
+
 .inbox-morph-container {
   position: absolute;
   bottom: 0;
@@ -92,30 +141,33 @@ function handleMessageClick(msg: SystemMessage) {
   height: 56px;
   border-radius: 50%;
   background: var(--primary, #39ff14);
-  box-shadow: 0 4px 10px rgba(57, 255, 20, 0.35);
+  box-shadow: 0 4px 14px rgba(57, 255, 20, 0.45);
   overflow: hidden;
-  transition: width 0.6s cubic-bezier(0.25, 1, 0.5, 1), 
-              height 0.6s cubic-bezier(0.25, 1, 0.5, 1), 
-              border-radius 0.6s cubic-bezier(0.25, 1, 0.5, 1),
-              box-shadow 0.6s cubic-bezier(0.25, 1, 0.5, 1);
+  transition: width 0.5s cubic-bezier(0.25, 1, 0.5, 1), 
+              height 0.5s cubic-bezier(0.25, 1, 0.5, 1), 
+              border-radius 0.5s cubic-bezier(0.25, 1, 0.5, 1),
+              box-shadow 0.5s cubic-bezier(0.25, 1, 0.5, 1);
   cursor: pointer;
   display: flex;
   flex-direction: column;
   view-transition-name: inbox-widget;
+  z-index: 1000;
 }
 
 .inbox-widget.is-open .inbox-morph-container {
-  width: 320px;
-  height: 400px;
+  width: 340px;
+  height: 420px;
+  max-width: calc(100vw - 32px);
+  max-height: calc(100vh - 120px);
   border-radius: 16px;
   background: white;
-  box-shadow: 0 10px 25px rgba(0, 0, 0, 0.2);
+  box-shadow: 0 12px 32px rgba(0, 0, 0, 0.35);
   cursor: default;
-  animation: bg-morph-open 1.02s cubic-bezier(0.25, 1, 0.5, 1) forwards;
+  animation: bg-morph-open 0.8s cubic-bezier(0.25, 1, 0.5, 1) forwards;
 }
 
 .inbox-widget:not(.is-open) .inbox-morph-container {
-  animation: bg-morph-close 1.02s cubic-bezier(0.25, 1, 0.5, 1) forwards;
+  animation: bg-morph-close 0.8s cubic-bezier(0.25, 1, 0.5, 1) forwards;
 }
 
 @keyframes bg-morph-open {
@@ -156,8 +208,8 @@ function handleMessageClick(msg: SystemMessage) {
 }
 
 .inbox-dropdown-content {
-  width: 320px;
-  height: 400px;
+  width: 100%;
+  height: 100%;
   display: flex;
   flex-direction: column;
   position: absolute;

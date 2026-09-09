@@ -6,6 +6,9 @@ import { useEventStore } from '@/stores/events'
 import { useRecordStore } from '@/stores/records'
 import { useConnectionStore } from '@/stores/connection'
 import { useNavigationStore, type EventTab } from '@/stores/navigation'
+import { useInboxStore } from '@/stores/inbox'
+import { usePitScoutStore } from '@/stores/pitScout'
+import { flushOfflinePhotos } from '@/services/photoStorage'
 import { useI18n } from 'vue-i18n'
 import type { ScoutingRecord } from '@/types'
 import ConnectionStatus from '@/components/common/ConnectionStatus.vue'
@@ -33,14 +36,16 @@ const userStore = useUserStore()
 const eventStore = useEventStore()
 const recordStore = useRecordStore()
 
-const activeScoutTask = ref<{ matchNumber: number; teamNumber: number; allianceColor: 'red' | 'blue' } | null>(null)
+const activeScoutTask = ref<{ matchNumber: number; teamNumber: number; allianceColor: 'red' | 'blue'; tournamentLevel?: string } | null>(null)
 
-function handleStartScouting(task: { matchNumber: number; teamNumber: number; allianceColor: 'red' | 'blue' }) {
+function handleStartScouting(task: { matchNumber: number; teamNumber: number; allianceColor: 'red' | 'blue'; tournamentLevel?: string }) {
   activeScoutTask.value = task
   switchTab('scout')
 }
 const connStore = useConnectionStore()
 const navStore = useNavigationStore()
+const inboxStore = useInboxStore()
+const pitStore = usePitScoutStore()
 const { t } = useI18n()
 
 const showRenameModal = ref(false)
@@ -161,6 +166,11 @@ onMounted(async () => {
   // Set up WebRTC
   setupWebRTC()
 
+  if (evt) {
+    pitStore.flushPendingPitRecords(evt.id)
+    flushOfflinePhotos(evt.id)
+  }
+
   if (eventStore.isHost) {
     window.addEventListener('beforeunload', handleBeforeUnload)
   }
@@ -277,6 +287,15 @@ async function onRecordSubmitted(recordOrRecords: ScoutingRecord | ScoutingRecor
         </div>
       </div>
       <div class="topbar-right" :style="{ viewTransitionName: 'event-status' }">
+        <button
+          class="user-tag-btn inbox-topbar-btn"
+          @click="inboxStore.toggleOpen()"
+          title="Inbox"
+        >
+          <span class="material-icons" style="font-size: 18px; margin-right: 4px;">inbox</span>
+          <span class="username-text">Inbox</span>
+          <span v-if="inboxStore.unreadCount > 0" class="topbar-unread-badge">{{ inboxStore.unreadCount }}</span>
+        </button>
         <button
           v-if="eventStore.isHost"
           class="user-tag-btn host-qr-btn"

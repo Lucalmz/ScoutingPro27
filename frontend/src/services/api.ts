@@ -325,3 +325,10 @@ export function uploadPitPhoto(
     { key, dataUrl }
   )
 }
+
+export function deletePitPhoto(eventId: string, key: string): Promise<void> {
+  return request<void>(
+    'DELETE',
+    `/events/${encodeURIComponent(eventId)}/pit/photos/${encodeURIComponent(key)}`
+  )
+}

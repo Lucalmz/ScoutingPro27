@@ -96,7 +96,8 @@ public class FtcApiClient {
     public JsonArray fetchNormalizedMatches(int season, String eventCode, String tournamentLevel) throws Exception {
         String path = "/v2.0/" + season + "/matches/" + eventCode;
         if (tournamentLevel != null && !tournamentLevel.isBlank()) {
-            path += "?tournamentLevel=" + tournamentLevel;
+            String normalizedLevel = tournamentLevel.trim().toLowerCase(Locale.ROOT).startsWith("play") ? "playoff" : "qual";
+            path += "?tournamentLevel=" + normalizedLevel;
         }
 
         JsonObject rawObj = fetchJsonWithCache(path);
@@ -186,7 +187,9 @@ public class FtcApiClient {
      * 获取详细小分 (Score Breakdown)，预留用于 Auto/TeleOp/Endgame 细分项深度对账
      */
     public JsonObject fetchScoreBreakdown(int season, String eventCode, String tournamentLevel) throws Exception {
-        String level = (tournamentLevel != null && !tournamentLevel.isBlank()) ? tournamentLevel : "qual";
+        String level = (tournamentLevel != null && !tournamentLevel.isBlank())
+                ? (tournamentLevel.trim().toLowerCase(Locale.ROOT).startsWith("play") ? "playoff" : "qual")
+                : "qual";
         String path = "/v2.0/" + season + "/scores/" + eventCode + "/" + level;
         return fetchJsonWithCache(path);
     }
@@ -249,7 +252,7 @@ public class FtcApiClient {
     private JsonObject fetchJsonWithCache(String path) throws Exception {
         CacheEntry cached = cache.get(path);
         if (cached != null && !cached.isExpired()) {
-            return cached.data.getAsJsonObject();
+            return (cached.data != null && cached.data.isJsonObject()) ? cached.data.getAsJsonObject() : new JsonObject();
         }
 
         HttpRequest.Builder reqBuilder = HttpRequest.newBuilder()
@@ -273,7 +276,7 @@ public class FtcApiClient {
         if (response.statusCode() == 304 && cached != null) {
             // 304 Not Modified: 刷新缓存有效期并返回
             cache.put(path, new CacheEntry(CACHE_TTL_MS, cached.lastModified, cached.etag, cached.data));
-            return cached.data.getAsJsonObject();
+            return (cached.data != null && cached.data.isJsonObject()) ? cached.data.getAsJsonObject() : new JsonObject();
         }
 
         if (response.statusCode() >= 200 && response.statusCode() < 300) {

@@ -209,6 +209,8 @@ public class UserRoutes {
 
                     // Update scout_name in local records for UI consistency, but scout_id remains unchanged
                     handle.execute("UPDATE scouting_records SET scout_name = ? WHERE scout_id = ?", targetUsername, oldId);
+                    handle.execute("UPDATE scout_assignments SET scout_name = ? WHERE scout_id = ?", targetUsername, oldId);
+                    handle.execute("UPDATE pit_scouting_records SET scout_name = ? WHERE scout_id = ?", targetUsername, oldId);
                     User u = dao.findById(oldId);
                     return u != null ? u : new User(oldId, targetUsername);
                 });

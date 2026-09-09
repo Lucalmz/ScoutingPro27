@@ -16,7 +16,7 @@ const props = defineProps<{
   scoutId: string
   scoutName: string
   editRecord?: ScoutingRecord | null
-  assignedTask?: { matchNumber: number; teamNumber: number; allianceColor: 'red' | 'blue' } | null
+  assignedTask?: { matchNumber: number; teamNumber: number; allianceColor: 'red' | 'blue'; tournamentLevel?: string } | null
 }>()
 
 const emit = defineEmits<{
@@ -44,6 +44,7 @@ function getPitSummary(teamNumStr: string) {
 const scoutMode = ref<'single' | 'alliance'>('single')
 const allianceColor = ref<'none' | 'red' | 'blue'>('none')
 const matchNumber = ref('1')
+const currentTournamentLevel = ref<string>('QUALIFICATION')
 
 interface TeamScoutData {
   teamNumber: string
@@ -118,6 +119,7 @@ watch(() => props.editRecord, (rec: ScoutingRecord | null | undefined) => {
     }
     matchNumber.value = String(rec.matchNumber)
     allianceColor.value = raw.allianceColor || 'none'
+    currentTournamentLevel.value = raw.tournamentLevel || 'QUALIFICATION'
     teamsData.value = [{
       teamNumber: String(rec.teamNumber),
       autoClassified: raw.autoClassified ?? 0,
@@ -135,12 +137,13 @@ watch(() => props.editRecord, (rec: ScoutingRecord | null | undefined) => {
   }
 }, { immediate: true })
 
-function applyTask(task: { matchNumber: number; teamNumber: number; allianceColor: 'red' | 'blue' }) {
+function applyTask(task: { matchNumber: number; teamNumber: number; allianceColor: 'red' | 'blue'; tournamentLevel?: string }) {
   if (scoutMode.value !== 'single') {
     scoutMode.value = 'single'
   }
   matchNumber.value = String(task.matchNumber)
   allianceColor.value = task.allianceColor
+  currentTournamentLevel.value = task.tournamentLevel || 'QUALIFICATION'
   if (teamsData.value[0]) {
     teamsData.value[0].teamNumber = String(task.teamNumber)
   }
@@ -161,16 +164,26 @@ const nextPendingAssignment = computed(() => {
   if (!props.scoutId) return null
   const myTasks = scheduleStore.myAssignments(props.scoutId)
   for (const t of myTasks) {
-    const isDone = recordStore.activeRecords.some(
-      (r) => r.matchNumber === t.matchNumber && r.teamNumber === t.teamNumber && r.scoutId === props.scoutId
-    )
+    const isDone = recordStore.activeRecords.some((r) => {
+      if (r.matchNumber !== t.matchNumber || r.teamNumber !== t.teamNumber || r.scoutId !== props.scoutId) {
+        return false
+      }
+      try {
+        const parsed = JSON.parse(r.rawData)
+        if (t.assignment.tournamentLevel && parsed.tournamentLevel) {
+          return parsed.tournamentLevel.toUpperCase() === t.assignment.tournamentLevel.toUpperCase()
+        }
+      } catch {}
+      return true
+    })
     if (!isDone) {
       const color: 'red' | 'blue' = t.station.startsWith('red') ? 'red' : 'blue'
       return {
         matchNumber: t.matchNumber,
         teamNumber: t.teamNumber,
         allianceColor: color,
-        station: t.station
+        station: t.station,
+        tournamentLevel: t.assignment.tournamentLevel
       }
     }
   }
@@ -179,7 +192,7 @@ const nextPendingAssignment = computed(() => {
 
 function calcTeamTotal(team: TeamScoutData) {
   const auto = (3 * team.autoClassified) + (1 * team.autoOverflow) + (2 * team.autoPatterns) + (parseInt(team.autoMovementScore) || 0)
-  const teleop = (3 * team.teleopClassified) + (1 * team.teleopOverflow) + (1.5 * team.gatesTriggered)
+  const teleop = (3 * team.teleopClassified) + (1 * team.teleopOverflow) + Math.floor(1.5 * team.gatesTriggered)
   const endgame = team.baseScore + (team.supportMultiplier * 18)
   return auto + teleop + endgame
 }
@@ -200,6 +213,7 @@ function isInvalidFormat(val: string) {
 }
 
 async function handleSubmit() {
+  if (submitting.value) return
   if (!isFormValid.value) {
     submitStatus.value = 'error'
     submitErrorMsg.value = '包含非法字符或长度超限，请检查标红的输入框'
@@ -213,12 +227,18 @@ async function handleSubmit() {
   for (const team of activeTeams) {
     const matchNum = parseInt(matchNumber.value)
     const teamNum = parseInt(team.teamNumber)
-    const existing = recordStore.activeRecords.find(r => 
-      r.matchNumber === matchNum && 
-      r.teamNumber === teamNum && 
-      r.scoutId === props.scoutId &&
-      (!props.editRecord || r.id !== props.editRecord.id)
-    )
+    const existing = recordStore.activeRecords.find(r => {
+      if (r.matchNumber !== matchNum || r.teamNumber !== teamNum || r.scoutId !== props.scoutId) return false
+      if (props.editRecord && r.id === props.editRecord.id) return false
+      try {
+        const raw = JSON.parse(r.rawData)
+        const rLevel = (raw.tournamentLevel || 'QUALIFICATION').toUpperCase()
+        const curLevel = (currentTournamentLevel.value || 'QUALIFICATION').toUpperCase()
+        return rLevel === curLevel
+      } catch {
+        return true
+      }
+    })
     if (existing) {
       submitStatus.value = 'error'
       submitErrorMsg.value = t('toast.conflict_error', { match: matchNum, team: teamNum })
@@ -233,12 +253,13 @@ async function handleSubmit() {
   try {
     const records: ScoutingRecord[] = activeTeams.map(team => {
       const auto = (3 * team.autoClassified) + (1 * team.autoOverflow) + (2 * team.autoPatterns) + (parseInt(team.autoMovementScore) || 0)
-      const teleop = (3 * team.teleopClassified) + (1 * team.teleopOverflow) + (1.5 * team.gatesTriggered)
+      const teleop = (3 * team.teleopClassified) + (1 * team.teleopOverflow) + Math.floor(1.5 * team.gatesTriggered)
       const endgame = team.baseScore + (team.supportMultiplier * 18)
       const total = auto + teleop + endgame
 
       const formData: ScoutingFormData = {
         matchNumber: parseInt(matchNumber.value),
+        tournamentLevel: currentTournamentLevel.value,
         teamNumber: parseInt(team.teamNumber),
         allianceColor: allianceColor.value,
         autoClassified: team.autoClassified,
@@ -301,7 +322,9 @@ async function handleSubmit() {
   } catch (err) {
     submitStatus.value = 'error'
   } finally {
-    submitting.value = false
+    setTimeout(() => {
+      submitting.value = false
+    }, 1000)
     setTimeout(() => {
       submitStatus.value = 'none'
     }, 2000)

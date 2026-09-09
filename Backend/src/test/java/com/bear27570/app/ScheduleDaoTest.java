@@ -135,4 +135,76 @@ class ScheduleDaoTest {
             assertThat(dao.findAssignmentsByEvent("evt_1")).isEmpty();
         });
     }
+
+    @Test
+    void testSuperLongCompositeIdsForSuperEvent() {
+        String uuidEventId = "b2609bb0-e0cb-4d43-9878-831e5e042be6";
+        jdbi.useExtension(EventDao.class, dao -> {
+            ScoutingEvent e = new ScoutingEvent();
+            e.setId(uuidEventId);
+            e.setName("Super Regional World Championship 2026");
+            e.setInviteCode("SUPER1");
+            e.setHostId("host_1");
+            e.setFtcYear(2026);
+            e.setFtcEventCode("WORLDS");
+            dao.insert(e);
+        });
+
+        jdbi.useExtension(ScheduleDao.class, dao -> {
+            // Test ID length > 36 chars (which previously crashed with VARCHAR(36) overflow)
+            String superLongMatchId = uuidEventId + "_SUPER_DIVISION_CHAMPIONSHIP_QUALIFICATION_MATCH_NUMBER_9999_EXTRA_LONG_IDENTIFIER";
+            String superLongAssignId = uuidEventId + "_SUPER_DIVISION_CHAMPIONSHIP_QUALIFICATION_MATCH_NUMBER_9999_STATION_BLUE2_RESERVED";
+
+            MatchScheduleItem m = new MatchScheduleItem(superLongMatchId, uuidEventId, 9999, "QUALIFICATION", 18223, 27570, 25787, 11115);
+            dao.upsertSchedule(m);
+
+            ScoutAssignment a = new ScoutAssignment(superLongAssignId, uuidEventId, 9999, "QUALIFICATION", "blue2", 11115, "scout_uuid_12345", "SuperScout");
+            dao.upsertAssignment(a);
+
+            List<MatchScheduleItem> schedules = dao.findSchedulesByEvent(uuidEventId);
+            assertThat(schedules).hasSize(1);
+            assertThat(schedules.get(0).getId()).isEqualTo(superLongMatchId);
+
+            List<ScoutAssignment> assignments = dao.findAssignmentsByEvent(uuidEventId);
+            assertThat(assignments).hasSize(1);
+            assertThat(assignments.get(0).getId()).isEqualTo(superLongAssignId);
+        });
+    }
+
+    @Test
+    void testFindAssignmentAndPreserveScout() {
+        jdbi.useExtension(ScheduleDao.class, dao -> {
+            ScoutAssignment a = new ScoutAssignment("a_test", "evt_1", 1, "QUALIFICATION", "red1", 18223, "scout_1", "ScoutAlice");
+            dao.upsertAssignment(a);
+
+            ScoutAssignment found = dao.findAssignment("evt_1", 1, "QUALIFICATION", "red1");
+            assertThat(found).isNotNull();
+            assertThat(found.getScoutId()).isEqualTo("scout_1");
+            assertThat(found.getScoutName()).isEqualTo("ScoutAlice");
+            assertThat(found.getTeamNumber()).isEqualTo(18223);
+
+            ScoutAssignment notFound = dao.findAssignment("evt_1", 99, "QUALIFICATION", "blue2");
+            assertThat(notFound).isNull();
+        });
+    }
+
+    @Test
+    void testPlayoffQualificationIdCollision() {
+        jdbi.useExtension(ScheduleDao.class, dao -> {
+            // Fixed ID generation: including tournamentLevel:
+            String qualId = "evt_1_QUALIFICATION_1_red1";
+            String playoffId = "evt_1_PLAYOFF_1_red1"; // No collision!
+
+            ScoutAssignment qualAssign = new ScoutAssignment(qualId, "evt_1", 1, "QUALIFICATION", "red1", 18223, null, null);
+            dao.upsertAssignment(qualAssign);
+
+            // Now playoff match 1 red1 comes along with distinct ID:
+            ScoutAssignment playoffAssign = new ScoutAssignment(playoffId, "evt_1", 1, "PLAYOFF", "red1", 27570, null, null);
+            dao.upsertAssignment(playoffAssign);
+
+            List<ScoutAssignment> list = dao.findAssignmentsByEvent("evt_1");
+            assertThat(list).hasSize(2);
+        });
+    }
 }
+

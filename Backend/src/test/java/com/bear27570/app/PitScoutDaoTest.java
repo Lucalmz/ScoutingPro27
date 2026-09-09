@@ -98,6 +98,16 @@ class PitScoutDaoTest {
         assertThat(updated).isNotNull();
         assertThat(updated.getClaimedAutoScore()).isEqualTo(95);
         assertThat(updated.getVersion()).isEqualTo(2);
+
+        // Attempting to overwrite with an older version (v1) must be rejected by MERGE
+        record.setClaimedAutoScore(40);
+        record.setVersion(1);
+        jdbi.useExtension(PitScoutDao.class, dao -> dao.upsertPitRecord(record));
+
+        PitScoutingRecord staleIgnored = jdbi.withExtension(PitScoutDao.class, dao -> dao.findPitRecordByTeam("evt_pit", 27570));
+        assertThat(staleIgnored).isNotNull();
+        assertThat(staleIgnored.getClaimedAutoScore()).isEqualTo(95);
+        assertThat(staleIgnored.getVersion()).isEqualTo(2);
     }
 
     @Test

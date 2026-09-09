@@ -3,7 +3,8 @@ import { ref, computed, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { usePitScoutStore } from '@/stores/pitScout'
 import { useUserStore } from '@/stores/user'
-import { savePhoto, getPhotoUrl, deletePhoto } from '@/services/photoStorage'
+import { useToastStore } from '@/stores/toast'
+import { savePhoto, getPhotoUrl, deletePhoto, flushOfflinePhotos } from '@/services/photoStorage'
 import type { PitScoutingRecord } from '@/types'
 import './PitScoutFormDrawer.css'
 
@@ -20,6 +21,7 @@ const emit = defineEmits<{
 const { t } = useI18n()
 const pitStore = usePitScoutStore()
 const userStore = useUserStore()
+const toastStore = useToastStore()
 
 const team = computed(() => {
   return props.teamNumber ? pitStore.getUnifiedTeam(props.teamNumber) : null
@@ -56,52 +58,93 @@ const calculatedTotalScore = computed(() => {
 })
 
 // 加载已有数据
-watch(
-  () => props.teamNumber,
-  async (num) => {
-    if (!num) return
-    const existing = pitStore.getUnifiedTeam(num)?.pitRecord
-    if (existing) {
-      drivetrainType.value = existing.drivetrainType || 'mecanum'
-      weightLbs.value = existing.weightLbs || 0
-      sizingPassed.value = existing.sizingPassed ?? true
-      mechanismType.value = existing.mechanismType || 'slide_claw'
-      hangType.value = existing.hangType || 'winch'
-      odometryType.value = existing.odometryType || 'two_wheel'
+async function reloadFormData(num: number | null) {
+  if (!num) return
+  const existing = pitStore.getUnifiedTeam(num)?.pitRecord
+  if (existing) {
+    drivetrainType.value = existing.drivetrainType || 'mecanum'
+    weightLbs.value = existing.weightLbs || 0
+    sizingPassed.value = existing.sizingPassed ?? true
+    mechanismType.value = existing.mechanismType || 'slide_claw'
+    hangType.value = existing.hangType || 'winch'
+    odometryType.value = existing.odometryType || 'two_wheel'
 
-      claimedAutoScore.value = existing.claimedAutoScore || 0
-      claimedAutoPieces.value = existing.claimedAutoPieces || 0
-      claimedAutoHangLevel.value = existing.claimedAutoHangLevel || 0
-      claimedTeleopScore.value = existing.claimedTeleopScore || 0
-      claimedTeleopCycleSec.value = existing.claimedTeleopCycleSec || 0
-      claimedEndgameHangLevel.value = existing.claimedEndgameHangLevel || 0
-      claimedEndgameTimeSec.value = existing.claimedEndgameTimeSec || 0
+    claimedAutoScore.value = existing.claimedAutoScore || 0
+    claimedAutoPieces.value = existing.claimedAutoPieces || 0
+    claimedAutoHangLevel.value = existing.claimedAutoHangLevel || 0
+    claimedTeleopScore.value = existing.claimedTeleopScore || 0
+    claimedTeleopCycleSec.value = existing.claimedTeleopCycleSec || 0
+    claimedEndgameHangLevel.value = existing.claimedEndgameHangLevel || 0
+    claimedEndgameTimeSec.value = existing.claimedEndgameTimeSec || 0
 
-      photoKeys.value = existing.photoKeys ? [...existing.photoKeys] : []
-    } else {
-      // 默认初始值
-      drivetrainType.value = 'mecanum'
-      weightLbs.value = 38.0
-      sizingPassed.value = true
-      mechanismType.value = 'slide_claw'
-      hangType.value = 'winch'
-      odometryType.value = 'two_wheel'
+    photoKeys.value = existing.photoKeys ? [...existing.photoKeys] : []
+  } else {
+    // 默认初始值
+    drivetrainType.value = 'mecanum'
+    weightLbs.value = 38.0
+    sizingPassed.value = true
+    mechanismType.value = 'slide_claw'
+    hangType.value = 'winch'
+    odometryType.value = 'two_wheel'
 
-      claimedAutoScore.value = 60
-      claimedAutoPieces.value = 2
-      claimedAutoHangLevel.value = 0
-      claimedTeleopScore.value = 80
-      claimedTeleopCycleSec.value = 8.0
-      claimedEndgameHangLevel.value = 2
-      claimedEndgameTimeSec.value = 4.0
-      photoKeys.value = []
+    claimedAutoScore.value = 60
+    claimedAutoPieces.value = 2
+    claimedAutoHangLevel.value = 0
+    claimedTeleopScore.value = 80
+    claimedTeleopCycleSec.value = 8.0
+    claimedEndgameHangLevel.value = 2
+    claimedEndgameTimeSec.value = 4.0
+    photoKeys.value = []
+  }
+
+  // 加载图片预览
+  photoPreviews.value = []
+  for (const key of photoKeys.value) {
+    const url = await getPhotoUrl(key, pitStore.currentEventId || '')
+    if (url) photoPreviews.value.push({ key, url })
+  }
+  initialSnapshot = takeSnapshot()
+}
+
+let initialSnapshot = ''
+function takeSnapshot(): string {
+  return JSON.stringify({
+    drivetrainType: drivetrainType.value,
+    weightLbs: weightLbs.value,
+    sizingPassed: sizingPassed.value,
+    mechanismType: mechanismType.value,
+    hangType: hangType.value,
+    odometryType: odometryType.value,
+    claimedAutoScore: claimedAutoScore.value,
+    claimedAutoPieces: claimedAutoPieces.value,
+    claimedAutoHangLevel: claimedAutoHangLevel.value,
+    claimedTeleopScore: claimedTeleopScore.value,
+    claimedTeleopCycleSec: claimedTeleopCycleSec.value,
+    claimedEndgameHangLevel: claimedEndgameHangLevel.value,
+    claimedEndgameTimeSec: claimedEndgameTimeSec.value,
+    photoKeys: photoKeys.value
+  })
+}
+
+const isDirty = computed(() => {
+  if (!props.modelValue || !initialSnapshot) return false
+  return takeSnapshot() !== initialSnapshot
+})
+
+function requestClose() {
+  if (isDirty.value) {
+    if (!window.confirm(t('pit_scout.drawer.unsaved_confirm') || '您有未保存的侦查内容，确定要退出并丢弃更改吗？')) {
+      return
     }
+  }
+  emit('update:modelValue', false)
+}
 
-    // 加载图片预览
-    photoPreviews.value = []
-    for (const key of photoKeys.value) {
-      const url = await getPhotoUrl(key, pitStore.currentEventId || '')
-      if (url) photoPreviews.value.push({ key, url })
+watch(
+  [() => props.teamNumber, () => props.modelValue],
+  ([num, open]) => {
+    if (open && num) {
+      reloadFormData(num)
     }
   },
   { immediate: true }
@@ -131,8 +174,9 @@ async function handleFileSelected(e: Event) {
       await savePhoto(key, dataUrl, pitStore.currentEventId || '')
       photoKeys.value.push(key)
       photoPreviews.value.push({ key, url: dataUrl })
-    } catch (err) {
+    } catch (err: any) {
       console.warn('[PitScout] Image compression failed:', err)
+      toastStore.showToast(t('pit_scout.photo_save_failed') || '照片保存失败，请重试', 'error')
     }
   }
   target.value = ''
@@ -146,41 +190,41 @@ function removePhoto(key: string) {
 
 function compressImageToWebP(file: File): Promise<string> {
   return new Promise((resolve, reject) => {
-    const reader = new FileReader()
-    reader.onload = (e) => {
-      const img = new Image()
-      img.onload = () => {
-        const canvas = document.createElement('canvas')
-        const MAX_DIM = 1280
-        let width = img.width
-        let height = img.height
+    const objectUrl = URL.createObjectURL(file)
+    const img = new Image()
+    img.onload = () => {
+      URL.revokeObjectURL(objectUrl)
+      const canvas = document.createElement('canvas')
+      const MAX_DIM = 1280
+      let width = img.width
+      let height = img.height
 
-        if (width > height) {
-          if (width > MAX_DIM) {
-            height = Math.round((height * MAX_DIM) / width)
-            width = MAX_DIM
-          }
-        } else {
-          if (height > MAX_DIM) {
-            width = Math.round((width * MAX_DIM) / height)
-            height = MAX_DIM
-          }
+      if (width > height) {
+        if (width > MAX_DIM) {
+          height = Math.round((height * MAX_DIM) / width)
+          width = MAX_DIM
         }
-
-        canvas.width = width
-        canvas.height = height
-        const ctx = canvas.getContext('2d')
-        if (!ctx) return reject('No canvas context')
-
-        ctx.drawImage(img, 0, 0, width, height)
-        const webpData = canvas.toDataURL('image/webp', 0.75)
-        resolve(webpData)
+      } else {
+        if (height > MAX_DIM) {
+          width = Math.round((width * MAX_DIM) / height)
+          height = MAX_DIM
+        }
       }
-      img.onerror = reject
-      img.src = e.target?.result as string
+
+      canvas.width = width
+      canvas.height = height
+      const ctx = canvas.getContext('2d')
+      if (!ctx) return reject(new Error('No canvas context'))
+
+      ctx.drawImage(img, 0, 0, width, height)
+      const webpData = canvas.toDataURL('image/webp', 0.75)
+      resolve(webpData)
     }
-    reader.onerror = reject
-    reader.readAsDataURL(file)
+    img.onerror = (err) => {
+      URL.revokeObjectURL(objectUrl)
+      reject(err)
+    }
+    img.src = objectUrl
   })
 }
 
@@ -218,13 +262,19 @@ function handleSave() {
   }
 
   pitStore.saveRecord(record)
+  if (pitStore.currentEventId) {
+    flushOfflinePhotos(pitStore.currentEventId).catch((err) => {
+      console.warn('[PitScout] Background flush photos deferred:', err)
+    })
+  }
+  initialSnapshot = takeSnapshot()
   emit('saved', record)
   emit('update:modelValue', false)
 }
 </script>
 
 <template>
-  <div v-if="modelValue" class="drawer-overlay" @click.self="emit('update:modelValue', false)">
+  <div v-if="modelValue" class="drawer-overlay" @click.self="requestClose">
     <div class="drawer-panel">
       <!-- 头部 -->
       <div class="drawer-header">
@@ -232,7 +282,7 @@ function handleSave() {
           <h3 class="drawer-title">{{ t('pit_scout.drawer.title', { teamNumber }) }}</h3>
           <span v-if="team" class="team-name-badge">{{ team.name }}</span>
         </div>
-        <button class="close-btn" type="button" @click="emit('update:modelValue', false)">×</button>
+        <button class="close-btn" type="button" @click="requestClose">×</button>
       </div>
 
       <!-- 表单主体 -->
@@ -586,7 +636,7 @@ function handleSave() {
 
       <!-- 底部操作按钮 -->
       <div class="drawer-footer">
-        <button type="button" class="btn-cancel" @click="emit('update:modelValue', false)">{{ t('pit_scout.drawer.btn_cancel') }}</button>
+        <button type="button" class="btn-cancel" @click="requestClose">{{ t('pit_scout.drawer.btn_cancel') }}</button>
         <button type="button" class="btn-primary" @click="handleSave">{{ t('pit_scout.drawer.btn_save') }}</button>
       </div>
     </div>

@@ -200,8 +200,26 @@ export const usePitScoutStore = defineStore('pitScout', () => {
           const localMap = new Map(records.value.map((r) => [r.teamNumber, r]))
           for (const serverRec of res.records) {
             const local = localMap.get(serverRec.teamNumber)
-            if (!local || (serverRec.version || 0) >= (local.version || 0)) {
+            if (!local) {
               localMap.set(serverRec.teamNumber, serverRec)
+            } else if (local.syncStatus === 'PENDING') {
+              // 本地有离线编辑未提交：保留本地编辑，同时合并服务端照片 Key，防止离线照片丢失
+              if (serverRec.photoKeys && serverRec.photoKeys.length > 0) {
+                local.photoKeys = Array.from(new Set([...(local.photoKeys || []), ...serverRec.photoKeys]))
+              }
+              localMap.set(serverRec.teamNumber, local)
+            } else if ((serverRec.version || 0) >= (local.version || 0)) {
+              // 服务端版本更新或相同：采纳服务端数据，合并本地可能缓存的照片
+              if (local.photoKeys && local.photoKeys.length > 0) {
+                serverRec.photoKeys = Array.from(new Set([...(serverRec.photoKeys || []), ...local.photoKeys]))
+              }
+              localMap.set(serverRec.teamNumber, serverRec)
+            } else {
+              // 本地版本更高：保留本地并合并照片
+              if (serverRec.photoKeys && serverRec.photoKeys.length > 0) {
+                local.photoKeys = Array.from(new Set([...(local.photoKeys || []), ...serverRec.photoKeys]))
+              }
+              localMap.set(serverRec.teamNumber, local)
             }
           }
           records.value = Array.from(localMap.values())
@@ -220,12 +238,17 @@ export const usePitScoutStore = defineStore('pitScout', () => {
     }
   }
 
+  const pendingPitRecords = computed(() => {
+    return records.value.filter((r) => r.syncStatus === 'PENDING')
+  })
+
   async function saveRecord(record: PitScoutingRecord) {
     if (!currentEventId.value) return
 
     record.eventId = currentEventId.value
     record.version = (record.version || 0) + 1
     record.updatedAt = new Date().toISOString()
+    record.syncStatus = 'PENDING'
 
     const idx = records.value.findIndex((r) => r.teamNumber === record.teamNumber)
     if (idx >= 0) {
@@ -252,8 +275,51 @@ export const usePitScoutStore = defineStore('pitScout', () => {
     // 本地 / Host 后端落盘
     try {
       await apiSavePitRecord(currentEventId.value, record)
+      record.syncStatus = 'SYNCED'
+      saveToLocalStorage(currentEventId.value)
     } catch (e) {
       console.warn('[PitScoutStore] Saved locally, backend sync deferred:', e)
+    }
+  }
+
+  async function flushPendingPitRecords(targetEventId?: string) {
+    const eid = targetEventId || currentEventId.value
+    if (!eid) return
+    const pending = records.value.filter((r) => r.syncStatus === 'PENDING')
+    if (pending.length === 0) return
+
+    console.log(`[PitScoutStore] Flushing ${pending.length} pending pit records for event ${eid}...`)
+
+    let httpSuccess = false
+    try {
+      await syncPitRecordsBatch(eid, pending)
+      httpSuccess = true
+      for (const rec of pending) {
+        rec.syncStatus = 'SYNCED'
+      }
+      saveToLocalStorage(eid)
+      console.log(`[PitScoutStore] Successfully flushed ${pending.length} pit records via HTTP API`)
+    } catch (e) {
+      console.warn('[PitScoutStore] HTTP batch flush deferred/failed:', e)
+    }
+
+    try {
+      const connStore = useConnectionStore()
+      if (connStore.rtcService && connStore.status === 'connected') {
+        await connStore.rtcService.sendMessage({
+          type: 'PIT_SCOUT_BATCH_SYNC',
+          records: pending
+        })
+        if (!httpSuccess) {
+          for (const rec of pending) {
+            rec.syncStatus = 'SYNCED'
+          }
+          saveToLocalStorage(eid)
+        }
+        console.log(`[PitScoutStore] Successfully broadcasted ${pending.length} pit records via DataChannel`)
+      }
+    } catch (e) {
+      console.warn('[PitScoutStore] WebRTC DataChannel batch broadcast failed:', e)
     }
   }
 
@@ -264,13 +330,31 @@ export const usePitScoutStore = defineStore('pitScout', () => {
     if (idx >= 0) {
       const local = records.value[idx]
       if (local) {
+        // 如果本地有正在等待同步的更改，且版本更高或相同，保留本地编辑，仅合并照片
+        if (local.syncStatus === 'PENDING' && (local.version || 0) >= (record.version || 0)) {
+          if (record.photoKeys && record.photoKeys.length > 0) {
+            local.photoKeys = Array.from(new Set([...(local.photoKeys || []), ...record.photoKeys]))
+            if (currentEventId.value) saveToLocalStorage(currentEventId.value)
+          }
+          return
+        }
+
         const shouldAccept = (record.version || 0) > (local.version || 0) ||
           ((record.version || 0) === (local.version || 0) && (record.updatedAt || '') >= (local.updatedAt || ''))
         if (shouldAccept) {
+          // 合并本地可能拍摄的照片 key，防止覆盖
+          if (local.photoKeys && local.photoKeys.length > 0) {
+            record.photoKeys = Array.from(new Set([...(record.photoKeys || []), ...local.photoKeys]))
+          }
+          record.syncStatus = 'SYNCED'
           records.value[idx] = record
+        } else {
+          // 拒绝已过时的旧版本更新，禁止污染本地与远程数据库
+          return
         }
       }
     } else {
+      record.syncStatus = 'SYNCED'
       records.value.push(record)
     }
 
@@ -293,8 +377,43 @@ export const usePitScoutStore = defineStore('pitScout', () => {
     const map = new Map(records.value.map((r) => [r.teamNumber, r]))
     for (const inc of incomingRecords) {
       const cur = map.get(inc.teamNumber)
-      if (!cur || (inc.version || 0) >= (cur.version || 0)) {
+      if (!cur) {
+        inc.syncStatus = 'SYNCED'
         map.set(inc.teamNumber, inc)
+      } else {
+        const curIsPending = cur.syncStatus === 'PENDING'
+        const incV = inc.version || 0
+        const curV = cur.version || 0
+        const incTime = inc.updatedAt || ''
+        const curTime = cur.updatedAt || ''
+
+        if (curIsPending) {
+          const shouldAccept = incV > curV || (incV === curV && incTime > curTime)
+          if (shouldAccept) {
+            if (cur.photoKeys && cur.photoKeys.length > 0) {
+              inc.photoKeys = Array.from(new Set([...(inc.photoKeys || []), ...cur.photoKeys]))
+            }
+            inc.syncStatus = 'SYNCED'
+            map.set(inc.teamNumber, inc)
+          } else {
+            if (inc.photoKeys && inc.photoKeys.length > 0) {
+              cur.photoKeys = Array.from(new Set([...(cur.photoKeys || []), ...inc.photoKeys]))
+            }
+          }
+        } else {
+          const shouldAccept = incV > curV || (incV === curV && incTime >= curTime)
+          if (shouldAccept) {
+            if (cur.photoKeys && cur.photoKeys.length > 0) {
+              inc.photoKeys = Array.from(new Set([...(inc.photoKeys || []), ...cur.photoKeys]))
+            }
+            inc.syncStatus = 'SYNCED'
+            map.set(inc.teamNumber, inc)
+          } else {
+            if (inc.photoKeys && inc.photoKeys.length > 0) {
+              cur.photoKeys = Array.from(new Set([...(cur.photoKeys || []), ...inc.photoKeys]))
+            }
+          }
+        }
       }
     }
     records.value = Array.from(map.values())
@@ -358,6 +477,8 @@ export const usePitScoutStore = defineStore('pitScout', () => {
     getUnifiedTeam,
     fetchPitData,
     saveRecord,
+    flushPendingPitRecords,
+    pendingPitRecords,
     applyRemoteUpdate,
     applyFullSync,
     syncFtcRoster,

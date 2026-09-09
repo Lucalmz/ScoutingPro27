@@ -378,6 +378,18 @@ public class AiRoutes {
                 final Object streamLock = new Object();
                 final AtomicBoolean isCancelled = new AtomicBoolean(false);
                 final AtomicBoolean isFinished = new AtomicBoolean(false);
+
+                try {
+                    if (ctx.req().isAsyncStarted()) {
+                        ctx.req().getAsyncContext().addListener(new jakarta.servlet.AsyncListener() {
+                            @Override public void onComplete(jakarta.servlet.AsyncEvent event) { isFinished.set(true); }
+                            @Override public void onTimeout(jakarta.servlet.AsyncEvent event) { isCancelled.set(true); }
+                            @Override public void onError(jakarta.servlet.AsyncEvent event) { isCancelled.set(true); }
+                            @Override public void onStartAsync(jakarta.servlet.AsyncEvent event) {}
+                        });
+                    }
+                } catch (Exception ignored) {}
+
                 java.io.OutputStream out;
                 try {
                     out = ctx.res().getOutputStream();

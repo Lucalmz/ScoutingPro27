@@ -158,9 +158,18 @@ export async function getOrCreateDeviceIdentity(): Promise<DeviceIdentity> {
 
   // Generate new persistent device identity
   const deviceId = `dev_${Date.now().toString(36)}_${generateNonce(8)}`
-  const keyPair = await generateEcdhKeyPair()
-  const publicKeyHex = await exportEcdhPublicKey(keyPair.publicKey)
-  const privateKeyJwk = await exportPrivateKeyJwk(keyPair.privateKey)
+  let keyPair: any = null
+  let publicKeyHex = ''
+  let privateKeyJwk: any = null
+  try {
+    keyPair = await generateEcdhKeyPair()
+    if (keyPair) {
+      publicKeyHex = await exportEcdhPublicKey(keyPair.publicKey)
+      privateKeyJwk = await exportPrivateKeyJwk(keyPair.privateKey)
+    }
+  } catch (err) {
+    console.warn('[Security Store] ECDH key generation unavailable in insecure context:', err)
+  }
   const createdAt = Date.now()
 
   memDeviceIdentity = {

@@ -7,6 +7,7 @@ import { safeJsonParse } from '@/utils/json'
 import { syncRecords } from '@/services/api'
 import { DataChannelSender } from '@/services/dataChannelSender'
 import { useInboxStore } from '@/stores/inbox'
+import { useUserStore } from '@/stores/user'
 import type { WebRtcCallbacks, ClientEntry } from './types'
 import type { OfflineMessageManager } from './offlineQueue'
 
@@ -297,19 +298,24 @@ export function createChannelMessageHandler(ctx: ChannelMessageHandlerContext) {
 
             // 步骤 4：唯有 Host 持久化成功后，才向房间内其他 Client 广播更新
             if (accepted.length > 0) {
-              ctx.clients.forEach((c, cid) => {
-                if (cid !== senderId && c.dc && c.dc.readyState === 'open') {
-                  if (!c.sender) c.sender = new DataChannelSender(c.dc)
-                  c.sender.enqueueSend(
-                    JSON.stringify({
-                      type: 'SYNC_DATA',
-                      records: accepted,
-                      authCode: currentInviteCode,
-                      hostSessionId: ctx.getHostSessionId()
+              const BATCH_SIZE = 15
+              for (let i = 0; i < accepted.length; i += BATCH_SIZE) {
+                const chunk = accepted.slice(i, i + BATCH_SIZE)
+                const payload = JSON.stringify({
+                  type: 'SYNC_DATA',
+                  records: chunk,
+                  authCode: currentInviteCode,
+                  hostSessionId: ctx.getHostSessionId()
+                })
+                ctx.clients.forEach((c, cid) => {
+                  if (cid !== senderId && c.dc && c.dc.readyState === 'open') {
+                    if (!c.sender) c.sender = new DataChannelSender(c.dc)
+                    c.sender.enqueueSend(payload).catch((err) => {
+                      console.warn(`[WebRTC Host] Failed to broadcast chunk to client ${cid}:`, err)
                     })
-                  )
-                }
-              })
+                  }
+                })
+              }
             }
           })
         } else {
@@ -337,18 +343,41 @@ export function createChannelMessageHandler(ctx: ChannelMessageHandlerContext) {
         )
         break
 
-      case 'DIRECT_MESSAGE':
-        useInboxStore().addMessage({
-          title: msg.title,
-          body: msg.body,
-          type: 'direct',
-          senderId: msg.senderId,
-          senderName: msg.senderName,
-          targetId: msg.targetId,
-          targetName: msg.targetName,
-          deliveryStatus: 'DELIVERED'
-        })
+      case 'DIRECT_MESSAGE': {
+        const inboxStore = useInboxStore()
+        const userStore = useUserStore()
+        const myUserId = userStore.userId
+        
+        // 目标是本地用户或者未指定目标时，存入本地收件箱
+        if (!msg.targetId || msg.targetId === myUserId || (isHostMode && msg.targetId === 'host')) {
+          inboxStore.addMessage({
+            id: msg.messageId || msg.id,
+            title: msg.title,
+            body: msg.body,
+            type: 'direct',
+            senderId: msg.senderId,
+            senderName: msg.senderName,
+            targetId: msg.targetId,
+            targetName: msg.targetName,
+            deliveryStatus: 'DELIVERED'
+          })
+        }
+
+        // Host 负责星型拓扑下的私信转发
+        if (isHostMode) {
+          if (msg.targetId && msg.targetId !== myUserId && msg.targetId !== 'host') {
+            const targetClientId = ctx.scoutIdToClientId.get(msg.targetId) || msg.targetId
+            const targetClient = ctx.clients.get(targetClientId)
+            if (targetClient && targetClient.dc && targetClient.dc.readyState === 'open') {
+              if (!targetClient.sender) targetClient.sender = new DataChannelSender(targetClient.dc)
+              targetClient.sender.enqueueSend(JSON.stringify(msg))
+            } else {
+              ctx.offlineMessages.enqueue(msg.targetId, msg)
+            }
+          }
+        }
         break
+      }
 
       case 'TEAM_TAGS_UPDATE':
         if (msg.eventId && msg.tag) {
@@ -419,6 +448,21 @@ export function createChannelMessageHandler(ctx: ChannelMessageHandlerContext) {
       case 'PIT_SCOUT_UPDATE':
         if (msg.record) {
           callbacks.onPitScoutUpdateReceived?.(msg.record)
+          if (isHostMode) {
+            // Forward to other clients
+            ctx.clients.forEach((c, cid) => {
+              if (cid !== senderId && c.dc && c.dc.readyState === 'open') {
+                if (!c.sender) c.sender = new DataChannelSender(c.dc)
+                c.sender.enqueueSend(JSON.stringify(msg))
+              }
+            })
+          }
+        }
+        break
+
+      case 'PIT_SCOUT_BATCH_SYNC':
+        if (Array.isArray(msg.records) && msg.records.length > 0) {
+          callbacks.onPitScoutBatchSyncReceived?.(msg.records, senderId)
           if (isHostMode) {
             // Forward to other clients
             ctx.clients.forEach((c, cid) => {
@@ -515,21 +559,23 @@ export function createChannelMessageHandler(ctx: ChannelMessageHandlerContext) {
         const username = msg.username
         const boundUserId = senderId ? ctx.clientIdToScoutId.get(senderId) : undefined
 
+        let pendingKey: string | undefined = boundUserId
         let pending = boundUserId ? ctx.pendingTakeovers.get(boundUserId) : undefined
-        if (!pending && username) {
-          for (const [, p] of ctx.pendingTakeovers.entries()) {
-            if (p.username.toLowerCase() === username.toLowerCase() || p.oldClientId === senderId) {
+        if (!pending) {
+          for (const [key, p] of ctx.pendingTakeovers.entries()) {
+            if ((username && p.username.toLowerCase() === username.toLowerCase()) || p.oldClientId === senderId) {
               pending = p
+              pendingKey = key
               break
             }
           }
         }
-        if (!pending) break
+        if (!pending || !pendingKey) break
 
-        const targetUserId = boundUserId || pending.username
+        const targetUserId = pendingKey
 
         clearTimeout(pending.timeoutTimer)
-        ctx.pendingTakeovers.delete(targetUserId)
+        ctx.pendingTakeovers.delete(pendingKey)
 
         if (msg.permit) {
           ctx.promoteTakeover(targetUserId, pending.username, pending.newClientId, pending.oldClientId, 'TAKEOVER_PERMITTED')

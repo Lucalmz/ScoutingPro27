@@ -356,4 +356,61 @@ class DaoTest {
             assertThat(dao.findByEvent("e1")).isEmpty();
         });
     }
+
+    @Test
+    void testPurgeExpiredTombstones() {
+        jdbi.useExtension(UserDao.class, dao -> {
+            User host = new User("u_tomb", "tombuser");
+            host.setPassword("pass");
+            dao.upsert(host);
+        });
+
+        jdbi.useExtension(EventDao.class, dao -> {
+            ScoutingEvent e = new ScoutingEvent();
+            e.setId("e_tomb");
+            e.setName("Tombstone Test Event");
+            e.setHostId("u_tomb");
+            e.setInviteCode("TOMB01");
+            dao.insert(e);
+        });
+
+        // Seed 3 records directly via handle to precisely control timestamps
+        jdbi.useHandle(handle -> {
+            // 1. Active record with old updated_at (20 days ago) -> MUST NOT be deleted!
+            handle.execute("""
+                INSERT INTO scouting_records (id, event_id, scout_id, scout_name, match_number, team_number,
+                    auto_score, teleop_score, endgame_score, total_score, notes, raw_data, sync_status, is_broken, is_deleted,
+                    created_at, updated_at, version, host_seq)
+                VALUES ('rec_active_old', 'e_tomb', 'u_tomb', 'scout', 1, 100, 10, 10, 10, 30, '', '{}', 'SYNCED', FALSE, FALSE,
+                    DATEADD('DAY', -20, CURRENT_TIMESTAMP), DATEADD('DAY', -20, CURRENT_TIMESTAMP), 1, 1)
+            """);
+
+            // 2. Fresh tombstone (5 days ago) -> MUST NOT be deleted (preserved for P2P sync)!
+            handle.execute("""
+                INSERT INTO scouting_records (id, event_id, scout_id, scout_name, match_number, team_number,
+                    auto_score, teleop_score, endgame_score, total_score, notes, raw_data, sync_status, is_broken, is_deleted,
+                    created_at, updated_at, version, host_seq)
+                VALUES ('rec_tomb_fresh', 'e_tomb', 'u_tomb', 'scout', 2, 200, 10, 10, 10, 30, '', '{}', 'SYNCED', FALSE, TRUE,
+                    DATEADD('DAY', -5, CURRENT_TIMESTAMP), DATEADD('DAY', -5, CURRENT_TIMESTAMP), 2, 2)
+            """);
+
+            // 3. Expired tombstone (20 days ago) -> MUST BE PURGED!
+            handle.execute("""
+                INSERT INTO scouting_records (id, event_id, scout_id, scout_name, match_number, team_number,
+                    auto_score, teleop_score, endgame_score, total_score, notes, raw_data, sync_status, is_broken, is_deleted,
+                    created_at, updated_at, version, host_seq)
+                VALUES ('rec_tomb_expired', 'e_tomb', 'u_tomb', 'scout', 3, 300, 10, 10, 10, 30, '', '{}', 'SYNCED', FALSE, TRUE,
+                    DATEADD('DAY', -20, CURRENT_TIMESTAMP), DATEADD('DAY', -20, CURRENT_TIMESTAMP), 2, 3)
+            """);
+        });
+
+        int purged = jdbi.withExtension(RecordDao.class, RecordDao::purgeExpiredTombstones);
+        assertThat(purged).isEqualTo(1);
+
+        jdbi.useExtension(RecordDao.class, dao -> {
+            assertThat(dao.findById("rec_active_old")).isNotNull();
+            assertThat(dao.findById("rec_tomb_fresh")).isNotNull();
+            assertThat(dao.findById("rec_tomb_expired")).isNull();
+        });
+    }
 }

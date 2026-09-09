@@ -63,4 +63,79 @@ describe('Match Score Discrepancy & Audit', () => {
   it('handles empty records or matches gracefully', () => {
     expect(calculateMatchDiscrepancies([], [])).toEqual([])
   })
+
+  it('accurately isolates QUALIFICATION and PLAYOFF matches with identical match numbers', () => {
+    const officialMatches: OfficialMatch[] = [
+      {
+        matchNum: 1,
+        tournamentLevel: 'QUALIFICATION',
+        scores: {
+          red: { penaltyPointsCommitted: 0, totalPointsNp: 100 },
+          blue: { penaltyPointsCommitted: 0, totalPointsNp: 50 }
+        },
+        teams: [
+          { teamNumber: 27570, alliance: 'Red' },
+          { teamNumber: 11111, alliance: 'Red' }
+        ]
+      },
+      {
+        matchNum: 1,
+        tournamentLevel: 'PLAYOFF',
+        scores: {
+          red: { penaltyPointsCommitted: 0, totalPointsNp: 180 },
+          blue: { penaltyPointsCommitted: 0, totalPointsNp: 120 }
+        },
+        teams: [
+          { teamNumber: 27570, alliance: 'Red' },
+          { teamNumber: 22222, alliance: 'Red' }
+        ]
+      }
+    ]
+
+    const records: ScoutingRecord[] = [
+      // Q1 for team 27570: score 50 (with partner 50 -> total 100, matches official 100)
+      {
+        id: 'r_q1', eventId: 'e1', scoutId: 's1', scoutName: 'Alice',
+        teamNumber: 27570, matchNumber: 1, autoScore: 20, teleopScore: 20, endgameScore: 10, totalScore: 50,
+        syncStatus: 'SYNCED', version: 1, isBroken: false,
+        rawData: JSON.stringify({ tournamentLevel: 'QUALIFICATION' }),
+        createdAt: '2026-09-06T10:00:00Z',
+        updatedAt: '2026-09-06T10:00:00Z'
+      },
+      {
+        id: 'r_q1_p', eventId: 'e1', scoutId: 's2', scoutName: 'Bob',
+        teamNumber: 11111, matchNumber: 1, autoScore: 20, teleopScore: 20, endgameScore: 10, totalScore: 50,
+        syncStatus: 'SYNCED', version: 1, isBroken: false,
+        rawData: JSON.stringify({ tournamentLevel: 'QUALIFICATION' }),
+        createdAt: '2026-09-06T10:00:00Z',
+        updatedAt: '2026-09-06T10:00:00Z'
+      },
+      // P1 for team 27570: score 90 (with partner 90 -> total 180, matches official 180)
+      {
+        id: 'r_p1', eventId: 'e1', scoutId: 's1', scoutName: 'Alice',
+        teamNumber: 27570, matchNumber: 1, autoScore: 30, teleopScore: 40, endgameScore: 20, totalScore: 90,
+        syncStatus: 'SYNCED', version: 1, isBroken: false,
+        rawData: JSON.stringify({ tournamentLevel: 'PLAYOFF' }),
+        createdAt: '2026-09-06T12:00:00Z',
+        updatedAt: '2026-09-06T12:00:00Z'
+      },
+      {
+        id: 'r_p1_p', eventId: 'e1', scoutId: 's3', scoutName: 'Charlie',
+        teamNumber: 22222, matchNumber: 1, autoScore: 30, teleopScore: 40, endgameScore: 20, totalScore: 90,
+        syncStatus: 'SYNCED', version: 1, isBroken: false,
+        rawData: JSON.stringify({ tournamentLevel: 'PLAYOFF' }),
+        createdAt: '2026-09-06T12:00:00Z',
+        updatedAt: '2026-09-06T12:00:00Z'
+      }
+    ]
+
+    const discrepancies = calculateMatchDiscrepancies(records, officialMatches)
+    expect(discrepancies).toHaveLength(2)
+    const q1Disc = discrepancies.find(d => (d.tournamentLevel || 'QUALIFICATION').toUpperCase() === 'QUALIFICATION' && d.matchNumber === 1)
+    const p1Disc = discrepancies.find(d => (d.tournamentLevel || '').toUpperCase() === 'PLAYOFF' && d.matchNumber === 1)
+    expect(q1Disc).toBeDefined()
+    expect(p1Disc).toBeDefined()
+    expect(q1Disc?.maxDiff).toBe(0)
+    expect(p1Disc?.maxDiff).toBe(0)
+  })
 })

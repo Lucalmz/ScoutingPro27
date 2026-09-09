@@ -19,10 +19,10 @@ public interface RecordDao {
             :matchNumber, :teamNumber,
             :autoScore, :teleopScore, :endgameScore, :totalScore,
             :notes, :rawData, :syncStatus, :isBroken, :isDeleted,
-            COALESCE(:createdAt, CURRENT_TIMESTAMP),
+            COALESCE(NULLIF(TRIM(:createdAt), ''), CURRENT_TIMESTAMP),
             CASE 
-                WHEN :updatedAt > DATEADD('SECOND', 5, CURRENT_TIMESTAMP) THEN CURRENT_TIMESTAMP
-                ELSE COALESCE(:updatedAt, CURRENT_TIMESTAMP)
+                WHEN NULLIF(TRIM(:updatedAt), '') IS NOT NULL AND NULLIF(TRIM(:updatedAt), '') > DATEADD('SECOND', 5, CURRENT_TIMESTAMP) THEN CURRENT_TIMESTAMP
+                ELSE COALESCE(NULLIF(TRIM(:updatedAt), ''), CURRENT_TIMESTAMP)
             END,
             :version, :hostSeq
         )) AS src (

@@ -243,15 +243,9 @@ public class AiClient {
 
         java.util.concurrent.CompletableFuture<HttpResponse<java.io.InputStream>> future = client.sendAsync(request, HttpResponse.BodyHandlers.ofInputStream());
 
-        HttpResponse<java.io.InputStream> response;
-        try {
-            response = future.get();
-        } catch (Exception e) {
-            if (isCancelled != null && isCancelled.get()) {
-                future.cancel(true);
-                return;
-            }
-            throw e;
+        HttpResponse<java.io.InputStream> response = awaitResponseWithCancellation(future, isCancelled);
+        if (response == null) {
+            return;
         }
 
         int statusCode = response.statusCode();
@@ -324,15 +318,9 @@ public class AiClient {
 
         java.util.concurrent.CompletableFuture<HttpResponse<java.io.InputStream>> future = client.sendAsync(request, HttpResponse.BodyHandlers.ofInputStream());
 
-        HttpResponse<java.io.InputStream> response;
-        try {
-            response = future.get();
-        } catch (Exception e) {
-            if (isCancelled != null && isCancelled.get()) {
-                future.cancel(true);
-                return;
-            }
-            throw e;
+        HttpResponse<java.io.InputStream> response = awaitResponseWithCancellation(future, isCancelled);
+        if (response == null) {
+            return;
         }
 
         int code = response.statusCode();
@@ -552,5 +540,30 @@ public class AiClient {
             return bUrl + "/models";
         }
         return bUrl + "/v1/models";
+    }
+
+    private static HttpResponse<java.io.InputStream> awaitResponseWithCancellation(
+            java.util.concurrent.CompletableFuture<HttpResponse<java.io.InputStream>> future,
+            java.util.concurrent.atomic.AtomicBoolean isCancelled) throws Exception {
+        try {
+            while (!future.isDone()) {
+                if (isCancelled != null && isCancelled.get()) {
+                    future.cancel(true);
+                    return null;
+                }
+                try {
+                    return future.get(500, java.util.concurrent.TimeUnit.MILLISECONDS);
+                } catch (java.util.concurrent.TimeoutException te) {
+                    // loop check isCancelled
+                }
+            }
+            return future.get();
+        } catch (Exception e) {
+            if (isCancelled != null && isCancelled.get()) {
+                future.cancel(true);
+                return null;
+            }
+            throw e;
+        }
     }
 }

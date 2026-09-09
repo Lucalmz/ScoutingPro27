@@ -152,6 +152,13 @@ export class SasSecurityManager {
   }
 
   cleanupPeerResources(senderId: string): void {
+    const timer = this.sasTimeoutTimers.get(senderId)
+    if (timer) {
+      clearTimeout(timer)
+      this.sasTimeoutTimers.delete(senderId)
+    }
+    this.hostPendingOutgoing.delete(senderId)
+    this.hostPendingIncoming.delete(senderId)
     this.clientSharedKeys.delete(senderId)
     this.clientEcdhPubHexes.delete(senderId)
     this.clientFingerprints.delete(senderId)

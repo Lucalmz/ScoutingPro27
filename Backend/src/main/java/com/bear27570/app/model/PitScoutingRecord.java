@@ -27,7 +27,8 @@ public class PitScoutingRecord {
     private int claimedTotalScore = 0;
 
     // 图片与版本
-    private String photoKeys;
+    @com.google.gson.annotations.JsonAdapter(com.bear27570.app.util.StringListTypeAdapter.class)
+    private java.util.List<String> photoKeys = new java.util.ArrayList<>();
     private int version = 1;
     private Integer hostSeq;
     private boolean isDeleted = false;
@@ -96,8 +97,12 @@ public class PitScoutingRecord {
     public int getClaimedTotalScore() { return claimedTotalScore; }
     public void setClaimedTotalScore(int claimedTotalScore) { this.claimedTotalScore = claimedTotalScore; }
 
-    public String getPhotoKeys() { return photoKeys; }
-    public void setPhotoKeys(String photoKeys) { this.photoKeys = photoKeys; }
+    public java.util.List<String> getPhotoKeys() {
+        return photoKeys != null ? photoKeys : new java.util.ArrayList<>();
+    }
+    public void setPhotoKeys(java.util.List<String> photoKeys) {
+        this.photoKeys = photoKeys != null ? photoKeys : new java.util.ArrayList<>();
+    }
 
     public int getVersion() { return version; }
     public void setVersion(int version) { this.version = version; }

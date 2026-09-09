@@ -137,4 +137,29 @@ describe('Brag Index Calculator (吹牛指数算法)', () => {
     expect(res?.hangPardoned).toBe(false)
     expect(res?.label).toContain('高杠已证实')
   })
+
+  it('handles 0 or unfilled claimed total score gracefully without misidentifying as realistic', () => {
+    const claimed = createClaimedRecord(0, 0, 0, 0)
+    const matches = [
+      createDummyMatch(1, 40, 50, 15),
+      createDummyMatch(2, 45, 55, 15)
+    ]
+    const res = calculateBragIndex(claimed, matches)
+    expect(res).toBeDefined()
+    expect(res?.tier).toBe('pending')
+    expect(res?.label).toContain('自述待补充')
+  })
+
+  it('rejects level 3 verification when only level 2 (15 pts) was achieved', () => {
+    const claimed = createClaimedRecord(50, 60, 3, 140) // Claims level 3 (30 pts)
+    const matches = [
+      createDummyMatch(1, 40, 50, 15), // Only level 2 achieved (15 pts)
+      createDummyMatch(2, 45, 55, 15)
+    ]
+    const res = calculateBragIndex(claimed, matches)
+    expect(res).toBeDefined()
+    expect(res?.hangVerified).toBe(false)
+    expect(res?.hangUnfulfilled).toBe(true)
+    expect(res?.label).not.toContain('高杠已证实')
+  })
 })

@@ -26,17 +26,31 @@ export function calculateBragIndex(
     }
   }
 
-  const maxTotalScore = Math.max(...validMatches.map((r) => r.totalScore || 0), 0)
-  const avgTotalScore = validMatches.reduce((s, r) => s + (r.totalScore || 0), 0) / validMatches.length
-  const maxAutoScore = Math.max(...validMatches.map((r) => r.autoScore || 0), 0)
-  const maxTeleopScore = Math.max(...validMatches.map((r) => r.teleopScore || 0), 0)
-  const maxEndgameScore = Math.max(...validMatches.map((r) => r.endgameScore || 0), 0)
+  // 未填写自述得分
+  if (!claimed.claimedTotalScore || claimed.claimedTotalScore <= 0) {
+    return {
+      tier: 'pending',
+      overallRatio: 1.0,
+      autoRatio: 1.0,
+      teleopRatio: 1.0,
+      hangUnfulfilled: false,
+      label: '⏳ 自述待补充'
+    }
+  }
+
+  // 过滤机械/断电故障场次（若存在正常场次则排除 isBroken 干扰；若全为故障场次则保留作为参考）
+  const normalMatches = validMatches.filter((r) => !r.isBroken)
+  const evalMatches = normalMatches.length > 0 ? normalMatches : validMatches
+
+  const maxTotalScore = Math.max(...evalMatches.map((r) => r.totalScore || 0), 0)
+  const avgTotalScore = evalMatches.reduce((s, r) => s + (r.totalScore || 0), 0) / evalMatches.length
+  const maxAutoScore = Math.max(...evalMatches.map((r) => r.autoScore || 0), 0)
+  const maxTeleopScore = Math.max(...evalMatches.map((r) => r.teleopScore || 0), 0)
+  const maxEndgameScore = Math.max(...evalMatches.map((r) => r.endgameScore || 0), 0)
 
   // 1. 总分吹牛倍率 (综合实际最高分与带 5% 浮动的平均分)
   const totalBaseline = Math.max(maxTotalScore, avgTotalScore * 1.05, 1)
-  const overallRatio = claimed.claimedTotalScore > 0
-    ? Number((claimed.claimedTotalScore / totalBaseline).toFixed(2))
-    : 1.0
+  const overallRatio = Number((claimed.claimedTotalScore / totalBaseline).toFixed(2))
 
   // 2. 自主吹牛倍率
   const autoRatio = claimed.claimedAutoScore > 0
@@ -48,14 +62,14 @@ export function calculateBragIndex(
     ? Number((claimed.claimedTeleopScore / Math.max(maxTeleopScore, 1)).toFixed(2))
     : 1.0
 
-  // 4. 悬挂与高难机构履约核验 (自述能上高杠 Level 2/3，FTC 终局高悬挂一般 >= 15 分)
-  // 【特赦核心逻辑】：高悬挂结构（如单向棘轮卷扬、级联滑轨）在赛场复位极其耗时繁琐，
-  // 1) 只要在比赛中有至少 1 次标注成功（打出过一次高悬挂 >= 15 分），即铁证如山：证明战队具备该硬件实力，绝未说谎！
-  // 2) 若打满多场（>= 2场）但在常规赛暂未挂出（0次），属于典型“结构难复位常规赛留力”，予以特赦免责，不直接降级为吹牛。
-  const claimsHighHang = claimed.claimedEndgameHangLevel >= 2
-  const hangVerified = claimsHighHang && maxEndgameScore >= 15
-  const hangUnfulfilled = claimsHighHang && validMatches.length >= 2 && maxEndgameScore < 15
-  const hangPardoned = hangUnfulfilled // 针对高悬挂难复位特赦免责
+  // 4. 悬挂与高难机构履约核验
+  // FTC 实战打分中: Level 2 = 15 分, Level 3 = 28 分
+  const hangLevel = claimed.claimedEndgameHangLevel || 0
+  const claimsHighHang = hangLevel >= 2
+  const targetHangScore = hangLevel === 3 ? 28 : 15
+  const hangVerified = claimsHighHang && maxEndgameScore >= targetHangScore
+  const hangUnfulfilled = claimsHighHang && validMatches.length >= 2 && maxEndgameScore < targetHangScore
+  const hangPardoned = hangUnfulfilled // 针对高悬挂难复位或排位赛策略性留力特赦免责
 
   // 5. 判定档位（以赛场实际展现的峰值上限与产出比率为准）
   let tier: BragTier = 'realistic'

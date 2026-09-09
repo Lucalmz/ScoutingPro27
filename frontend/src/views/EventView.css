@@ -51,6 +51,17 @@
   opacity: 1;
 }
 
+.topbar-unread-badge {
+  background: #ef4444;
+  color: #ffffff;
+  font-size: 10px;
+  font-weight: 700;
+  border-radius: 9999px;
+  padding: 1px 6px;
+  margin-left: 4px;
+  line-height: 1.2;
+}
+
 .topbar-left {
   display: flex;
   align-items: center;
@@ -324,12 +335,13 @@
     display: none !important;
   }
   .tab-content {
-    padding-bottom: 72px;
+    padding-bottom: calc(72px + env(safe-area-inset-bottom, 0px));
   }
   .topbar {
     padding: 10px 14px;
   }
-  .user-tag-btn.host-qr-btn .username-text {
+  .user-tag-btn.host-qr-btn .username-text,
+  .user-tag-btn.inbox-topbar-btn .username-text {
     display: none;
   }
 }

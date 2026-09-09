@@ -49,31 +49,306 @@
 
 ---
 
-## 🛠️ 架构蓝图与运行原理 (Architecture & Working Principles)
+## 🛠️ 架构蓝图与协同拓扑 (Architecture & System Topology)
 
-```
-+-----------------------------------------------------------------------------------+
-|                               ScoutingPro27 协同拓扑                               |
-+-----------------------------------------------------------------------------------+
-                                        |
-                 [公共信令通道 (MQTT over WSS - broker.emqx.io)]
-                                        |
-    +-----------------------------------+-----------------------------------+
-    |                                                                       |
-    v                                                                       v
-+-----------------------+        WebRTC P2P DataChannel         +-----------------------+
-|   Host 节点 (电脑端)   |<====================================>|  Scout 节点 (手机/PC)  |
-|                       |  • ECDH 共享密钥加密信令                 |                       |
-|  • JCEF 原生桌面容器   |  • 4位 SAS 短认证码 / TOFU 设备信任    |  • 移动端浏览器 / JCEF |
-|  • Javalin 7 本地服务 |  • 全局 hostSeq 增量版本同步游标       |  • IndexedDB 离线队列 |
-|  • H2 嵌入式关系数据库 |  • 赛程 / 排班 / 展位侦察即时广播      |  • 本地 Pinia 反应式  |
-|  • 本地磁盘特写照片库  |  • 背压感知 (DataChannelSender)       |  • 增量请求 (sinceSeq)|
-+-----------------------+                                       +-----------------------+
+ScoutingPro27 采用**离线优先的去中心化分布式架构**。主机端以 JCEF (Java Chromium Embedded Framework) 桌面容器为核心，承载 Javalin 7 本地微服务、H2 嵌入式关系数据库与磁盘文件存储；客户端支持手机移动端浏览器或轻量桌面端扫码直连，节点间通过 WebRTC DataChannel 构成去中心化数据交互网。
+
+```mermaid
+graph TB
+    subgraph Signaling["公共信令通道 (Signaling Layer)"]
+        MQTT["MQTT over WSS (broker.emqx.io)<br/>• 动态专属房间 Topic: scoutingpro/event/{eventId}<br/>• ECDH 临时公钥广播与 SDP / ICE 候选交换"]
+    end
+
+    subgraph Host["Host 主机节点 (电脑端 JCEF / Java 21)"]
+        JCEF["JCEF Chromium 渲染界面 (Vue 3 + Pinia)"]
+        Javalin["Javalin 7 RESTful API & SSE 流式引擎"]
+        H2[("内嵌式 H2 关系数据库<br/>AUTO_SERVER=TRUE + Jdbi 3")]
+        PhotoDisk["本地磁盘特写照片库 (WebP 强缓存)"]
+        HostSync["分布式时钟引擎 (hostSeq Monotonic Cursor)"]
+        
+        JCEF --> Javalin
+        Javalin --> H2
+        Javalin --> PhotoDisk
+        Javalin --> HostSync
+    end
+
+    subgraph P2P["WebRTC DataChannel (直连传输链路)"]
+        DC["AES-GCM-256 加密数据通道<br/>• 4位 SAS 短认证码 / TOFU 设备信任<br/>• 背压感应分片传输 (DataChannelSender)<br/>• 赛程 / 排班 / 侦察记录 / 照片流式直推"]
+    end
+
+    subgraph Scouts["Scout 侦察员从节点 (手机端 H5 / 平板 / PC)"]
+        ScoutUI["移动端 Web 响应式界面 (Vue 3 + Pinia)"]
+        ScoutIDB[("IndexedDB 本地缓存<br/>• 离线照片队列<br/>• TOFU 设备信任指纹")]
+        ScoutLS["LocalStorage (离线表单数据双写)"]
+        ScoutSync["增量同步管理器 (lastHostSeq 跟踪)"]
+        
+        ScoutUI --> ScoutIDB
+        ScoutUI --> ScoutLS
+        ScoutUI --> ScoutSync
+    end
+
+    Host <-->|WSS 信令| MQTT
+    Scouts <-->|WSS 信令| MQTT
+    Host <===>|WebRTC P2P 直连| Scouts
 ```
 
 ---
 
-## 💡 六大核心技术亮点与运行逻辑原理
+## 🔄 核心业务逻辑与流转流程图 (Business Logic & Workflows)
+
+ScoutingPro27 覆盖 FTC 赛事的全生命周期，从**赛前展位建档、赛程排班**到**赛中四机位同步采集、离线落盘**，再到**赛后吹牛指数对账、战术 AI 辅助决策**，各模块环环相扣。
+
+### 1. 全生命周期业务流转闭环 (End-to-End Tournament Lifecycle)
+
+```mermaid
+flowchart TD
+    Start([赛事准备阶段]) --> InitEvent[创建/导入赛事 Event]
+    InitEvent --> FetchFTC[可选: FTC 官方 API 同步赛程与战队名册]
+    InitEvent --> HostQR[Host 生成局域网/互联网接入动态二维码]
+
+    HostQR --> ScoutJoin[侦察员扫码接入]
+    ScoutJoin --> P2PHandshake[WebRTC P2P 握手与 ECDH 协商]
+    P2PHandshake --> SASVerify{SAS 4位指纹核对 / TOFU 自动比对}
+    SASVerify -->|首次配对| SaveTOFU[录入 IndexedDB 信任资产]
+    SASVerify -->|已知设备| PassAuth[信任放行进入协同网]
+    SASVerify -->|公钥异常突变| BlockDevice[阻断 DataChannel 并高危告警]
+    SaveTOFU --> PassAuth
+
+    PassAuth --> PitScoutPhase[展位量化侦察阶段 Pit Scouting]
+    PassAuth --> SchedulePhase[排班与赛程准备 Schedule & Assignment]
+
+    subgraph PitWork[展位量化侦察子流程]
+        PitScoutPhase --> InputPit[量化填报: 机构构型 / 自述自主分 / 手动分 / 终局悬挂]
+        InputPit --> TakePhoto[特写拍摄: 机器人关键机械结构照片]
+        TakePhoto --> SavePhoto{电脑端还是手机端?}
+        SavePhoto -->|电脑端 Host| DiskSave[直接 WebP 压缩流式落盘]
+        SavePhoto -->|手机端 Scout| IDBQueue[入库 IndexedDB 离线队列并分片回传]
+    end
+
+    subgraph ScheduleWork[排班矩阵子流程]
+        SchedulePhase --> AssignScouts[4 机位矩阵指派: 红1 / 红2 / 蓝1 / 蓝2]
+        AssignScouts --> AuditSchedule[智能排班审计: 缺员 / 留空 / 侦察员重叠预警]
+        AuditSchedule --> BroadcastSchedule[P2P 实时广播排班到侦察员屏幕]
+    end
+
+    BroadcastSchedule --> MatchScoutPhase[现场实战侦察阶段 Match Scouting]
+    DiskSave --> BragIndexPhase[战力天梯与吹牛指数对账]
+    IDBQueue --> BragIndexPhase
+
+    subgraph MatchWork[比赛现场侦察子流程]
+        MatchScoutPhase --> AutoStep[自主阶段 Auto: 样本得分 / 样品放入 / 停靠]
+        AutoStep --> TeleopStep[手动阶段 Teleop: 高低篮筐 / 样品沉样 / 打分统计]
+        TeleopStep --> EndgameStep[终局阶段 Endgame: 1/2/3 级悬挂 / 停靠 / 防守评级]
+        EndgameStep --> SubmitScout[提交侦察记录 Local 双写持久化]
+        SubmitScout --> P2PSync[通过 DataChannel 推送给 Host]
+        P2PSync --> AssignSeq[Host 分配严格单调 hostSeq 并落盘 H2]
+        AssignSeq --> BroadcastDelta[增量广播最新记录至全场所有设备]
+    end
+
+    BroadcastDelta --> BragIndexPhase
+
+    subgraph AnalyticsWork[战力分析与战术决策]
+        BragIndexPhase --> CalcBrag[吹牛指数算法: Pit自述得分 vs 实际赛事实测得分]
+        CalcBrag --> PardonCheck{是否挂高杠? 终局得分 >= 15?}
+        PardonCheck -->|已证实| MarkVerified[标记: 高杠已证实 🧗]
+        PardonCheck -->|未展示但场次 >= 2| MarkPardon[触发特赦: 常规赛留力特赦免责 🛡️]
+        PardonCheck -->|其他| StandardTier[判定四档: 真实守信 / 略偏乐观 / 夸大其词 / 吹破牛皮]
+        MarkVerified --> RankLadder[生成战力天梯综合排名榜]
+        MarkPardon --> RankLadder
+        StandardTier --> RankLadder
+
+        RankLadder --> AiTactics[战术 AI 助手 2.0 Gemini / OpenAI]
+        AiTactics --> InjectContext[动态抽取: 赛事数据 + 战队档案 + 侦察自述 + 吹牛指数]
+        InjectContext --> SSEStream[SSE 流式打字机推理 + 15s 心跳保活]
+        SSEStream --> AlliancePick[辅助车队制定淘汰赛选拔与对战策略]
+    end
+```
+
+### 2. P2P 零信任建联与单调游标增量同步时序 (Security & Monotonic Sync Flow)
+
+```mermaid
+sequenceDiagram
+    autonumber
+    actor Lead as 领队/Host (电脑端)
+    participant HostApp as Host (Javalin/JCEF)
+    participant MQTT as MQTT Broker (公共信令通道)
+    participant ScoutApp as Scout Web端 (手机)
+    actor Scout as 侦察员 (手机端)
+
+    Lead->>HostApp: 启动赛事房间并显示动态二维码
+    Scout->>ScoutApp: 手机微信/系统相机扫码
+    ScoutApp->>MQTT: 订阅 scoutingpro/event/{id} 并发送 JOIN_REQUEST
+    HostApp->>MQTT: 广播 JOIN_ACCEPT (携带 Host ECDH 公钥)
+    ScoutApp->>HostApp: 通过信令交换 SDP Offer/Answer 与 ICE Candidates
+    HostApp-->>ScoutApp: 建立 WebRTC DataChannel 直连通道打通
+
+    Note over HostApp,ScoutApp: 零信任安全握手阶段 (SAS & TOFU)
+    HostApp->>HostApp: 计算 4 位 SAS 指纹 (Hash(PubKeyHost + PubKeyClient + Salt))
+    ScoutApp->>ScoutApp: 计算 4 位 SAS 指纹并弹窗展示
+    Lead->>Scout: 现场口头核对 4 位 SAS 码 (如 6EEF-550C)
+    ScoutApp->>ScoutApp: TOFU 指纹比对 (首次自动记录，突变告警)
+
+    Note over HostApp,ScoutApp: 分布式逻辑时钟与增量同步阶段
+    ScoutApp->>HostApp: 发送 REQUEST_SYNC (携带本地 lastHostSeq = 42)
+    HostApp->>HostApp: 查询 H2 数据库: SELECT * WHERE hostSeq > 42
+    HostApp-->>ScoutApp: 下发 SYNC_RESPONSE (仅含增量记录，仅需几 KB)
+    ScoutApp->>ScoutApp: 3-Way Guarded Merge (内存 + 本地缓存 + 增量)
+    ScoutApp->>HostApp: 确认 SYNC_ACK (更新 lastHostSeq = 58)
+```
+
+### 3. 四机位排班矩阵与现场侦察派单时序 (Match Station Assignment Flow)
+
+```mermaid
+sequenceDiagram
+    autonumber
+    actor Lead as 领队 (Lead Scout)
+    participant LeadUI as 排班工作台
+    participant P2P as WebRTC Mesh
+    participant S1 as 红1 侦察员 (Scout 1)
+    participant S2 as 蓝2 侦察员 (Scout 2)
+
+    Lead->>LeadUI: 选择 Match Q-12, 指派 [红1: Alice, 红2: Bob, 蓝1: Carol, 蓝2: Dave]
+    LeadUI->>LeadUI: 智能审计 (校验工位无缺漏、无同一人双重指派)
+    LeadUI->>P2P: 广播 ASSIGNMENT_UPDATE 消息
+    P2P->>S1: 推送工位指派 (Alice -> Match Q-12 红1 战队 #27570)
+    P2P->>S2: 推送工位指派 (Dave -> Match Q-12 蓝2 战队 #18225)
+    S1->>S1: 自动锁定表单战队与场次，高亮提示就位
+    S1->>P2P: 比赛结束，提交 Match Q-12 现场侦察数据
+    P2P->>LeadUI: 接收侦察数据，实时标记该机位为【已完成 ✅】
+```
+
+### 4. “吹牛指数”量化对账与高悬挂留力特赦状态机 (Brag Index State Machine)
+
+```mermaid
+stateDiagram-v2
+    [*] --> 计算综合比值: 收集 Pit 自述总分与排位赛实际总分
+    计算综合比值 --> 真实守信: Ratio <= 1.05
+    计算综合比值 --> 略偏乐观: 1.05 < Ratio <= 1.25
+    计算综合比值 --> 夸大其词: 1.25 < Ratio <= 1.60
+    计算综合比值 --> 吹破牛皮: Ratio > 1.60
+
+    state "终局高悬挂特赦裁决 (High-Hang Pardon Rule)" as HangCheck {
+        [*] --> 检查实战终局得分
+        检查实战终局得分 --> 高悬挂已证实: 任意场次终局得分 >= 15分
+        高悬挂已证实 --> 保持信誉星级: 铁证如山，认定具备高悬挂实力
+        检查实战终局得分 --> 检查出场总次数: 实战终局得分均 < 15分
+        检查出场总次数 --> 留力特赦免责: 实战出场 >= 2场 (常规赛留力避免结构疲劳)
+        检查出场总次数 --> 待后续观察: 实战出场 < 2场 (样本尚不足)
+    }
+
+    真实守信 --> HangCheck
+    略偏乐观 --> HangCheck
+    夸大其词 --> HangCheck
+    吹破牛皮 --> HangCheck
+```
+
+### 5. 流式战术 AI 助手数据流转链路 (Tactical AI 2.0 Pipeline)
+
+```mermaid
+flowchart LR
+    subgraph Storage["数据底座 (Data Source)"]
+        H2Rank["H2 战力积分榜"]
+        H2Pit["H2 展位自述指标"]
+        H2Scout["H2 现场侦察评级"]
+        H2Notes["H2 战术备忘录/标签"]
+    end
+
+    subgraph Context["上下文提取与组装 (contextBuilder.ts)"]
+        Filter["按当前赛事与关联战队提取"]
+        Format["Markdown 紧凑矩阵格式化"]
+        Slice["滑动窗口修剪 (MAX_MESSAGES=10)"]
+    end
+
+    subgraph Engine["后端流式引擎 (AiRoutes.java + AiClient.java)"]
+        Key["AES-256 本地安全解密 API Key"]
+        Req["异步请求 Gemini / OpenAI 模型"]
+        Heartbeat["15s 后端定时心跳保活 (: heartbeat)"]
+    end
+
+    subgraph Client["前端流式呈现 (AiChatView.vue)"]
+        SSEParser["SSE 事件流解析器"]
+        Markdown["Markdown 增量打字机渲染"]
+        Regex["战队正则匹配 (#27570)"]
+        Chip["可点击战队芯片 -> 拉起战队综合画像"]
+    end
+
+    Storage --> Filter --> Format --> Slice
+    Slice --> Req
+    Key --> Req
+    Req --> SSEParser
+    Heartbeat --> SSEParser
+    SSEParser --> Markdown --> Regex --> Chip
+```
+
+---
+
+## 🗂️ 前后端核心源码与架构映射索引 (Codebase Architecture Map)
+
+| 核心业务领域 | 前端实现 (Vue 3 / TypeScript / Pinia) | 后端实现 (Java 21 / Javalin 7 / H2 / Jdbi) | 核心职责与数据不变量 |
+|---|---|---|---|
+| **网络直连与信令** | `services/webrtc.ts`<br/>`services/mqttSignaling.ts`<br/>`services/dataChannelSender.ts` | `routes/WebRtcRoutes.java` | P2P 穿透、背压感应分片传输、看门狗重协商 |
+| **零信任加密与安全** | `services/crypto.ts`<br/>`services/identityStore.ts`<br/>`common/SasVerificationModal.vue` | `util/AESUtil.java` | ECDH P-256 密钥协商、4位 SAS 认证码、TOFU 持久化 |
+| **赛程与排班工作台** | `stores/schedule.ts`<br/>`components/schedule/ScheduleManager.vue`<br/>`components/schedule/ScheduleAuditModal.vue` | `routes/ScheduleRoutes.java`<br/>`dao/ScheduleDao.java`<br/>`model/ScoutAssignment.java` | 赛程导入、4机位矩阵指派、缺员冲突审计 |
+| **实战侦察数据采集** | `stores/records.ts`<br/>`components/scouting/ScoutingForm.vue`<br/>`utils/offlineSync.ts` | `routes/RecordRoutes.java`<br/>`dao/RecordDao.java`<br/>`model/ScoutingRecord.java` | 自主/手动/终局量化打分、三向防冲合并 (3-Way Merge) |
+| **展位侦察与照片存储** | `stores/pitScout.ts`<br/>`components/pit/PitScoutView.vue`<br/>`services/photoStorage.ts`<br/>`services/indexedDb.ts` | `routes/PitScoutRoutes.java`<br/>`dao/PitScoutDao.java`<br/>`util/PhotoStorageUtil.java` | 机构量化填报、电脑端物理磁盘落盘、手机端 IndexedDB 队列 |
+| **天梯榜与吹牛指数** | `views/TeamDetailView.vue`<br/>`components/rankings/RankingsTable.vue`<br/>`utils/bragIndex.ts` | `dao/RecordDao.java`<br/>`dao/PitScoutDao.java` | 自述 vs 实测动态对账、高悬挂留力特赦判定 |
+| **战术 AI 助手 2.0** | `components/ai/AiChatView.vue`<br/>`components/ai/contextBuilder.ts`<br/>`components/ai/useAiChatStream.ts` | `routes/AiRoutes.java`<br/>`util/AiClient.java`<br/>`dao/AiChatSessionDao.java` | 赛事上下文注入、SSE 流式打字机、15s 后端心跳保活 |
+
+---
+
+## 🛡️ 用户信息安全与零信任联网同步机制 (Information Security & Zero-Trust Sync Matrix)
+
+在激烈的机器人锦标赛与商业技术竞赛中，**战队的核心战术数据、机器人技术缺陷照片、对手战力评级与联盟挑选策略属于最高机密**。ScoutingPro27 将**用户信息安全与通信抗对抗能力**置于系统架构的最高优先级，构建了业内领先的**零信任（Zero-Trust）多层防御矩阵**：
+
+```
++---------------------------------------------------------------------------------------------------+
+|                                ScoutingPro27 零信任纵深防御安全矩阵                                |
++---------------------------------------------------------------------------------------------------+
+|  [物理数据主权] 100% 本地嵌入式持久化 | 零公网云盘/数据库依赖 | 赛场断网物理级数据隔离            |
+|  [通道加密防护] ECDH (P-256) 密钥协商 | HKDF 派生密钥 | AES-256-GCM 逐包信令与载荷全密文传输       |
+|  [防嗅探与防篡改] 基于房间盐值的 HMAC-SHA256 载荷验签 | 规范化键序防参数篡改                      |
+|  [防重放与注入] 随机 Nonce + ±30s 时间戳窗口 | 5000 容量 NonceLruCache 内存硬核拦截              |
+|  [防中间人攻击] 4位/8位 SAS 可视短认证码 (Short Authentication String) | 物理核验建立信任锚点     |
+|  [设备资产认证] TOFU (Trust-On-First-Use) 设备资产库 | 会话级公钥突变 (Key Flapping) 秒级切断熔断 |
+|  [身份防伪造] (eventId, userId, deviceId) 三元组主键 | 30s 冷却授权接管仲裁机制                   |
+|  [凭据本地保护] AI 模型 API Key 本地 AES-256 硬件/派生加密 | 内存解密调用，绝不上行广播           |
++---------------------------------------------------------------------------------------------------+
+```
+
+### 1. 物理级数据主权：零云端泄露隐患
+- **无中心化云服务器**：传统侦察软件常将数据上传至公有云或第三方数据库，极易面临数据被爬取、撞库或外泄的风险。ScoutingPro27 坚持**离线优先原则**，所有的战队自述数据、现场打分、特写高清大图与战术备忘录**100% 完整驻留在队伍电脑的内嵌式 H2 数据库和本地物理磁盘**中。
+- **公网 MQTT 仅为“盲信令管道”**：用于节点发现的公网 MQTT Broker 仅作为打洞握手时的盲转交中继（Blind Relay），信道内流转的数据均经端到端加密，中继服务器无从知晓任何战术与用户信息。
+
+### 2. 传输层前向保密加密体系 (ECDH P-256 + HKDF + AES-256-GCM)
+- **临时密钥协商**：两端初始化时通过 Web Crypto API 动态生成椭圆曲线临时密钥对（ECDH P-256）。
+- **高熵派生与会话隔离**：通过对端公钥与本地私钥推导共享比特，再经 **HKDF-SHA256** 派生出 256 位的专属 AES-GCM 会话密钥。
+- **AES-256-GCM 全程加密**：DataChannel 建立前的信令交换全部采用 AES-256-GCM 认证加密传输，每个数据包均带有独立的随机 12 字节 IV，即便赛场 Wi-Fi 被恶意嗅探或镜像抓包，攻击者也仅能看到高熵随机密文。
+
+### 3. 防重放攻击与防篡改验证 (HMAC-SHA256 + Nonce LRU Cache)
+- **规范化键序签名**：信令载荷在发出前，会自动剔除签名键并按字典序重排，通过基于邀请码与房间盐值派生的 HMAC-SHA256 进行严格签名，彻底消除参数污染与中间人篡改。
+- **双重防重放防线**：
+  1. **时间戳窗口校验**：强制校验数据包时间戳与当前系统时间的偏差（$|T_{\text{now}} - T_{\text{pkg}}| \le 30\text{s}$），逾期数据包立即丢弃；
+  2. **LRU 随机数去重**：维护容量为 5000 的 `NonceLruCache`，对每个随机 Nonce 记录入库，一旦检测到已处理的 Nonce 立即拒绝，杜绝赛场无线电嗅探者的重放攻击。
+
+### 4. 防中间人攻击 (MITM)：4 位 SAS 短认证码
+- **算法模型**：
+  $$\text{SAS} = \text{SHA-256}(\min(\text{PubKey}_A, \text{PubKey}_B) \mathbin{\Vert} \text{":"} \mathbin{\Vert} \max(\text{PubKey}_A, \text{PubKey}_B) \mathbin{\Vert} \text{":"} \mathbin{\Vert} \text{InviteCode})$$
+- **可视指纹物理核验**：双方依据各自协商的公钥与房间邀请码，在各自屏幕上衍生出一致的 4 位十六进制短认证码（如 `6EEF-550C`）。
+- 侦察员扫码入网时，领队与侦察员只需在赛场现场目测核对这 4 位代码，即可在不依赖任何第三方 CA 证书体系的前提下，以密码学方式彻底击碎针对 WebRTC 的中间人替换攻击。
+
+### 5. TOFU (Trust-On-First-Use) 设备资产信任与突变熔断
+- **持久化设备身份标识**：每台终端生成唯一的 `deviceId` 与私钥对，保存在浏览器隔离的 IndexedDB (`scoutingpro_security_v1`) 中，刷新或重启不会丢失。
+- **首次连入自动建档**：首度配对成功后，系统自动将对端公钥记录为基线指纹。后续连接自动免密放行，保障赛场无感流畅交互。
+- **公钥突变秒级熔断 (Key Flapping Protection)**：若同一设备在活跃会话中突然出示不一致的公钥（典型的中间人注入特征），系统立即触发 **CRITICAL 红色安全熔断**，瞬间切断 DataChannel 数据通道并弹窗阻断，杜绝未授权劫持。
+
+### 6. 身份防冒充与跨设备会话接管仲裁
+- **三元组主体绑定**：信任记录以 `(eventId, userId, deviceId)` 为复合主键，准确识别侦察员更换手机或平板操作的合法行为。
+- **接管防抖与仲裁**：当同名侦察员从新设备连入时，系统触发 30s 冷却弹窗仲裁确认，原设备收到授权提醒，防止场外人员冒充他人姓名恶意覆盖侦察数据。
+
+### 7. 本地敏感凭据防护 (AES-256)
+- AI 战术助手接入所需的 Google Gemini 或 OpenAI API Key 绝不上行传输，均通过 Java 后端本地 AES-256 算法加密存储在 H2 数据库中，仅在后端发起推理请求时于内存中解密，全面护航车队隐私资产。
+
+---
 
 ### 亮点一：分布式逻辑时钟与增量同步机制 (Host Monotonic Sequence)
 - **运行逻辑**：摒弃跨设备本地时钟极易偏差（时区、设备时间不准）的时间戳同步方案，改由 Host 统一下发全局严格单调递增的逻辑游标 `hostSeq`。

@@ -11,7 +11,7 @@ const props = defineProps<{
 
 const emit = defineEmits<{
   (e: 'update:visible', value: boolean): void
-  (e: 'selectMatch', matchNumber: number): void
+  (e: 'selectMatch', matchNumber: number, tournamentLevel?: string): void
 }>()
 
 const { t } = useI18n()
@@ -26,12 +26,17 @@ const maxDeviation = computed(() => {
   return Math.max(...top5List.value.map((d) => d.maxDiff))
 })
 
+function matchPrefix(level?: string): string {
+  const norm = (level || 'QUALIFICATION').toUpperCase()
+  return norm.startsWith('P') ? 'P' : 'Q'
+}
+
 function handleClose() {
   emit('update:visible', false)
 }
 
-function handleSelectMatch(matchNumber: number) {
-  emit('selectMatch', matchNumber)
+function handleSelectMatch(matchNumber: number, tournamentLevel?: string) {
+  emit('selectMatch', matchNumber, tournamentLevel)
   handleClose()
 }
 </script>
@@ -82,7 +87,7 @@ function handleSelectMatch(matchNumber: number) {
           <div v-else class="discrepancy-card-list">
             <div
               v-for="item in top5List"
-              :key="item.matchNumber"
+              :key="`${item.tournamentLevel || 'Q'}-${item.matchNumber}`"
               class="discrepancy-card"
               :class="{ focused: focusMatchNumber === item.matchNumber }"
             >
@@ -91,10 +96,10 @@ function handleSelectMatch(matchNumber: number) {
                   Top {{ item.rank }}
                 </div>
                 <div class="match-title">
-                  <span class="match-code">Q{{ item.matchNumber }}</span>
+                  <span class="match-code">{{ matchPrefix(item.tournamentLevel) }}{{ item.matchNumber }}</span>
                   <span class="diff-highlight">最大差额 ±{{ item.maxDiff }} 分 ({{ (item.maxRatio * 100).toFixed(0) }}%)</span>
                 </div>
-                <button class="btn-locate" @click="handleSelectMatch(item.matchNumber)">
+                <button class="btn-locate" @click="handleSelectMatch(item.matchNumber, item.tournamentLevel)">
                   <span class="material-icons">search</span>
                   <span>{{ t('audit.btn_locate_match') }}</span>
                 </button>

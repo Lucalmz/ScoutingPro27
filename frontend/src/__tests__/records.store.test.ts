@@ -357,17 +357,78 @@ describe('Records Store', () => {
     expect(store.rankings[0].teamNumber).toBe(254)
   })
 
-  it('migrateScoutId marks migrated records as PENDING', () => {
+  it('scoutReliability and matchDiscrepancies respect currentEventId isolation', () => {
     const store = useRecordStore()
-    store.records = [
-      { ...createDummyRecord('r1', 118, 10, 10, 10, 'old-scout'), syncStatus: 'SYNCED' as any }
+    store.officialMatches = [
+      {
+        matchNum: 1,
+        scores: {
+          red: { penaltyPointsCommitted: 0, totalPointsNp: 100, finalScore: 100 },
+          blue: { penaltyPointsCommitted: 0, totalPointsNp: 80, finalScore: 80 }
+        },
+        teams: [
+          { teamNumber: 118, alliance: 'Red' },
+          { teamNumber: 222, alliance: 'Red' },
+          { teamNumber: 333, alliance: 'Blue' },
+          { teamNumber: 444, alliance: 'Blue' }
+        ]
+      }
     ]
 
-    store.migrateScoutId('old-scout', 'new-scout', 'New Name')
+    // rA: scout s1 scouts team 118 with auto=10, teleop=10, endgame=10 -> total 30 (massive discrepancy with 100)
+    const rA = { ...createDummyRecord('r_evtA', 118, 10, 10, 10, 's1', 'SYNCED', 'red'), eventId: 'event-A' }
+    // rB: scout s2 scouts team 118 with auto=30, teleop=40, endgame=30 -> total 100 (matches official red score)
+    const rB = { ...createDummyRecord('r_evtB', 118, 30, 40, 30, 's2', 'SYNCED', 'red'), eventId: 'event-B' }
 
-    expect(store.records[0].scoutId).toBe('new-scout')
-    expect(store.records[0].scoutName).toBe('New Name')
-    expect(store.records[0].syncStatus).toBe('PENDING')
+    store.records = [rA, rB]
+
+    // Set to event-A
+    store.currentEventId = 'event-A'
+    expect(store.currentRecords).toHaveLength(1)
+    expect(store.currentRecords[0].id).toBe('r_evtA')
+    expect(store.matchDiscrepancies.length).toBeGreaterThan(0)
+    expect(store.matchDiscrepancies[0].red?.scouts.some((s) => s.scoutId === 's1')).toBe(true)
+    expect(store.matchDiscrepancies[0].red?.scouts.some((s) => s.scoutId === 's2')).toBe(false)
+
+    // Set to event-B
+    store.currentEventId = 'event-B'
+    expect(store.currentRecords).toHaveLength(1)
+    expect(store.currentRecords[0].id).toBe('r_evtB')
+    expect(store.matchDiscrepancies.length).toBeGreaterThan(0)
+    expect(store.matchDiscrepancies[0].red?.scouts.some((s) => s.scoutId === 's2')).toBe(true)
+    expect(store.matchDiscrepancies[0].red?.scouts.some((s) => s.scoutId === 's1')).toBe(false)
+  })
+
+  it('offline addRecord catches API error gracefully and queues PENDING record', async () => {
+    const store = useRecordStore()
+    vi.mocked(api.saveRecord).mockRejectedValue(new Error('Network Offline'))
+
+    const newRec = createDummyRecord('r_offline_1', 99999, 10, 20, 30, 's1', 'PENDING')
+    const result = await store.addRecord(newRec)
+
+    expect(result.success).toBe(true)
+    expect(store.records.some((r) => r.id === 'r_offline_1')).toBe(true)
+    const saved = store.records.find((r) => r.id === 'r_offline_1')
+    expect(saved?.syncStatus).toBe('PENDING')
+  })
+
+  it('bulkSync absorbs SYNCED status when incoming has equal version and equal hostSeq', () => {
+    const store = useRecordStore()
+    const local = createDummyRecord('r_sync_1', 12345, 10, 20, 30, 's1', 'PENDING')
+    local.version = 2
+    local.hostSeq = 5
+    local.updatedAt = '2026-09-09T10:00:00Z'
+    store.records = [local]
+
+    const incoming: ScoutingRecord = {
+      ...local,
+      syncStatus: 'SYNCED',
+      updatedAt: '2026-09-09T10:00:00Z'
+    }
+
+    store.bulkSync([incoming])
+    const found = store.records.find((r) => r.id === 'r_sync_1')
+    expect(found?.syncStatus).toBe('SYNCED')
   })
 })
 

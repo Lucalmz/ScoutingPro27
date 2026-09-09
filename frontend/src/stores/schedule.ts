@@ -14,23 +14,27 @@ import { useConnectionStore } from './connection'
  */
 export function deduplicateSchedules(list: MatchScheduleItem[]): MatchScheduleItem[] {
   if (!Array.isArray(list)) return []
-  const map = new Map<number, MatchScheduleItem>()
+  const map = new Map<string, MatchScheduleItem>()
   for (const item of list) {
     if (!item) continue
     const num = Number(item.matchNumber)
     if (isNaN(num) || num <= 0) continue
 
+    const level = (item.tournamentLevel || 'QUALIFICATION').toUpperCase()
+    const key = `${level}_${num}`
+
     const normalized: MatchScheduleItem = {
       ...item,
       matchNumber: num,
+      tournamentLevel: item.tournamentLevel || 'QUALIFICATION',
       red1: Number(item.red1) || 0,
       red2: Number(item.red2) || 0,
       blue1: Number(item.blue1) || 0,
       blue2: Number(item.blue2) || 0
     }
 
-    const existing = map.get(num)
-    map.set(num, existing ? {
+    const existing = map.get(key)
+    map.set(key, existing ? {
       ...existing,
       ...normalized,
       scoreRedFinal: normalized.scoreRedFinal ?? existing.scoreRedFinal,
@@ -41,7 +45,17 @@ export function deduplicateSchedules(list: MatchScheduleItem[]): MatchScheduleIt
       blue2: normalized.blue2 || existing.blue2
     } : normalized)
   }
-  return Array.from(map.values()).sort((a, b) => a.matchNumber - b.matchNumber)
+  return Array.from(map.values()).sort((a, b) => {
+    const levelOrder = (lvl?: string) => {
+      const l = (lvl || 'QUALIFICATION').toUpperCase()
+      if (l === 'QUALIFICATION') return 1
+      if (l === 'PLAYOFF') return 2
+      return 3
+    }
+    const diffLevel = levelOrder(a.tournamentLevel) - levelOrder(b.tournamentLevel)
+    if (diffLevel !== 0) return diffLevel
+    return a.matchNumber - b.matchNumber
+  })
 }
 
 export const useScheduleStore = defineStore('schedule', () => {
@@ -53,10 +67,11 @@ export const useScheduleStore = defineStore('schedule', () => {
   const error = ref<string | null>(null)
 
   // 划选集合与划选状态 (Mouse drag / wheel selection)
-  const selectedMatches = ref<Set<number>>(new Set())
+  const selectedMatches = ref<Set<string | number>>(new Set())
   const isDraggingSelection = ref(false)
   const dragAnchorMatch = ref<number | null>(null)
   const dragTargetMatch = ref<number | null>(null)
+  const dragLevel = ref<string>('QUALIFICATION')
 
   const sortedSchedules = computed(() => {
     return deduplicateSchedules(schedules.value)
@@ -64,16 +79,37 @@ export const useScheduleStore = defineStore('schedule', () => {
 
   const selectedCount = computed(() => selectedMatches.value.size)
 
-  function isMatchSelected(matchNumber: number): boolean {
-    return selectedMatches.value.has(Number(matchNumber))
+  function getMatchSelectionKey(matchNumber: number | string, tournamentLevel?: string): string {
+    const level = (tournamentLevel || 'QUALIFICATION').toUpperCase()
+    return `${level}_${Number(matchNumber)}`
   }
 
-  function getAssignmentKey(matchNumber: number, station: StationType): string {
-    return `${Number(matchNumber)}_${station}`
+  function isMatchSelected(matchNumber: number | string, tournamentLevel?: string): boolean {
+    const num = Number(matchNumber)
+    const key = getMatchSelectionKey(matchNumber, tournamentLevel)
+    return selectedMatches.value.has(key) || selectedMatches.value.has(num) || selectedMatches.value.has(String(num))
   }
 
-  function getStationAssignment(matchNumber: number, station: StationType): ScoutAssignment | undefined {
-    return assignments.value[getAssignmentKey(Number(matchNumber), station)]
+  function getAssignmentKey(matchNumber: number, station: StationType, tournamentLevel?: string): string {
+    const level = (tournamentLevel || 'QUALIFICATION').toUpperCase()
+    return `${level}_${Number(matchNumber)}_${station}`
+  }
+
+  function getStationAssignment(matchNumber: number, station: StationType, tournamentLevel?: string): ScoutAssignment | undefined {
+    const targetLevel = (tournamentLevel || 'QUALIFICATION').toUpperCase()
+    const direct = assignments.value[getAssignmentKey(Number(matchNumber), station, targetLevel)]
+    if (direct) return direct
+
+    if (targetLevel === 'QUALIFICATION') {
+      const legacy = assignments.value[`${Number(matchNumber)}_${station}`]
+      if (legacy) return legacy
+    }
+
+    return Object.values(assignments.value).find(
+      (a) => Number(a.matchNumber) === Number(matchNumber) &&
+             a.station === station &&
+             (!a.tournamentLevel || a.tournamentLevel.toUpperCase() === targetLevel)
+    )
   }
 
   /**
@@ -90,19 +126,24 @@ export const useScheduleStore = defineStore('schedule', () => {
         schedule?: MatchScheduleItem
       }> = []
 
-      const schedMap = new Map<number, MatchScheduleItem>()
+      const schedMap = new Map<string, MatchScheduleItem>()
       for (const s of schedules.value) {
-        schedMap.set(s.matchNumber, s)
+        const lvl = (s.tournamentLevel || 'QUALIFICATION').toUpperCase()
+        schedMap.set(`${lvl}_${s.matchNumber}`, s)
+        if (lvl === 'QUALIFICATION') {
+          schedMap.set(`QUALIFICATION_${s.matchNumber}`, s)
+        }
       }
 
       for (const a of Object.values(assignments.value)) {
         if (a.scoutId === scoutId) {
+          const lvl = (a.tournamentLevel || 'QUALIFICATION').toUpperCase()
           list.push({
             matchNumber: a.matchNumber,
             station: a.station,
             teamNumber: a.teamNumber,
             assignment: a,
-            schedule: schedMap.get(a.matchNumber)
+            schedule: schedMap.get(`${lvl}_${a.matchNumber}`) || schedMap.get(`QUALIFICATION_${a.matchNumber}`)
           })
         }
       }
@@ -153,14 +194,18 @@ export const useScheduleStore = defineStore('schedule', () => {
     try {
       const res = await fetchEventSchedule(eventId)
       if (res && res.schedules) {
-        schedules.value = deduplicateSchedules(res.schedules)
+        if (res.schedules.length > 0 || schedules.value.length === 0) {
+          schedules.value = deduplicateSchedules(res.schedules)
+        }
       }
       if (res && res.assignments) {
-        const assignMap: Record<string, ScoutAssignment> = {}
-        for (const a of res.assignments) {
-          assignMap[getAssignmentKey(a.matchNumber, a.station)] = a
+        if (res.assignments.length > 0 || Object.keys(assignments.value).length === 0) {
+          const assignMap: Record<string, ScoutAssignment> = {}
+          for (const a of res.assignments) {
+            assignMap[getAssignmentKey(a.matchNumber, a.station, a.tournamentLevel)] = a
+          }
+          assignments.value = assignMap
         }
-        assignments.value = assignMap
       }
       saveToLocalStorage(eventId)
     } catch (e: any) {
@@ -199,18 +244,19 @@ export const useScheduleStore = defineStore('schedule', () => {
 
       saveToLocalStorage(eventId)
 
-      // 异步保存到后端 DB
+      // 保存到后端 DB
       try {
-        await saveScheduleBatch(eventId, items, replace)
+        await saveScheduleBatch(eventId, cleanItems, replace)
       } catch (e) {
-        console.warn('[ScheduleStore] Backend saveScheduleBatch failed (offline mode):', e)
+        console.error('[ScheduleStore] Backend saveScheduleBatch failed:', e)
+        throw e
       }
 
       if (broadcast) {
         broadcastScheduleSync()
       }
 
-      return { success: true, count: items.length }
+      return { success: true, count: cleanItems.length }
     } finally {
       loading.value = false
     }
@@ -224,10 +270,10 @@ export const useScheduleStore = defineStore('schedule', () => {
       { station: 'blue2', teamNumber: item.blue2 }
     ]
     for (const st of stations) {
-      const key = getAssignmentKey(item.matchNumber, st.station)
+      const key = getAssignmentKey(item.matchNumber, st.station, item.tournamentLevel)
       if (!targetMap[key]) {
         targetMap[key] = {
-          id: `${eventId}_${item.matchNumber}_${st.station}`,
+          id: `${eventId}_${item.tournamentLevel || 'QUALIFICATION'}_${item.matchNumber}_${st.station}`,
           eventId,
           matchNumber: item.matchNumber,
           tournamentLevel: item.tournamentLevel || 'QUALIFICATION',
@@ -266,11 +312,13 @@ export const useScheduleStore = defineStore('schedule', () => {
       const scoreRed = m.scores?.red ? ((m.scores.red as any).finalScore ?? m.scores.red.totalPointsNp) : null
       const scoreBlue = m.scores?.blue ? ((m.scores.blue as any).finalScore ?? m.scores.blue.totalPointsNp) : null
 
+      const level = (m.tournamentLevel || 'QUALIFICATION').toUpperCase()
+      const id = level === 'PLAYOFF' ? `${eventId}_PLAYOFF_M${m.matchNum}` : `${eventId}_M${m.matchNum}`
       items.push({
-        id: `${eventId}_M${m.matchNum}`,
+        id,
         eventId,
         matchNumber: m.matchNum,
-        tournamentLevel: 'QUALIFICATION',
+        tournamentLevel: level,
         red1,
         red2,
         blue1,
@@ -304,7 +352,7 @@ export const useScheduleStore = defineStore('schedule', () => {
 
       // 跳过表头 (如 Match, Red1, Red2, Blue1, Blue2 或 场次, 红1...)
       const firstStr = p0.toLowerCase()
-      if (firstStr.includes('match') || firstStr.includes('场次') || firstStr.includes('qual')) {
+      if (firstStr.includes('match') || firstStr.includes('场次') || firstStr.includes('qual') || firstStr.includes('playoff')) {
         const pureMatchNum = parseInt(p0.replace(/[^0-9]/g, ''), 10)
         if (isNaN(pureMatchNum)) continue
       }
@@ -318,11 +366,14 @@ export const useScheduleStore = defineStore('schedule', () => {
       if (isNaN(matchNum) || matchNum <= 0) continue
       if (isNaN(red1) || isNaN(red2) || isNaN(blue1) || isNaN(blue2)) continue
 
+      const level = (/^p\d+/i.test(p0) || firstStr.includes('playoff')) ? 'PLAYOFF' : 'QUALIFICATION'
+      const id = level === 'PLAYOFF' ? `${eventId}_PLAYOFF_M${matchNum}` : `${eventId}_M${matchNum}`
+
       items.push({
-        id: `${eventId}_M${matchNum}`,
+        id,
         eventId,
         matchNumber: matchNum,
-        tournamentLevel: 'QUALIFICATION',
+        tournamentLevel: level,
         red1,
         red2,
         blue1,
@@ -342,13 +393,16 @@ export const useScheduleStore = defineStore('schedule', () => {
     station: StationType,
     scoutId: string | null,
     scoutName: string | null,
-    broadcast = true
+    broadcast = true,
+    tournamentLevel = 'QUALIFICATION'
   ) {
-    const key = getAssignmentKey(matchNumber, station)
+    const key = getAssignmentKey(matchNumber, station, tournamentLevel)
     const existing = assignments.value[key]
 
     // 获取当前队号
-    const sched = schedules.value.find((s) => s.matchNumber === matchNumber)
+    const sched = schedules.value.find(
+      (s) => s.matchNumber === matchNumber && (!tournamentLevel || (s.tournamentLevel || 'QUALIFICATION').toUpperCase() === tournamentLevel.toUpperCase())
+    )
     let teamNumber = 0
     if (sched) {
       if (station === 'red1') teamNumber = sched.red1
@@ -360,10 +414,10 @@ export const useScheduleStore = defineStore('schedule', () => {
     }
 
     const updated: ScoutAssignment = {
-      id: existing?.id || `${eventId}_${matchNumber}_${station}`,
+      id: existing?.id || `${eventId}_${tournamentLevel || 'QUALIFICATION'}_${matchNumber}_${station}`,
       eventId,
       matchNumber,
-      tournamentLevel: existing?.tournamentLevel || 'QUALIFICATION',
+      tournamentLevel: tournamentLevel || existing?.tournamentLevel || 'QUALIFICATION',
       station,
       teamNumber,
       scoutId: scoutId || null,
@@ -391,15 +445,31 @@ export const useScheduleStore = defineStore('schedule', () => {
     eventId: string,
     stationTarget: StationType | 'all',
     scoutId: string | null,
-    scoutName: string | null
+    scoutName: string | null,
+    tournamentLevel = 'QUALIFICATION'
   ) {
     if (selectedMatches.value.size === 0) return
 
-    const matches = Array.from(selectedMatches.value).sort((a, b) => a - b)
+    const selectedItems = Array.from(selectedMatches.value)
     const updates: ScoutAssignment[] = []
 
-    for (const matchNumber of matches) {
-      const sched = schedules.value.find((s) => s.matchNumber === matchNumber)
+    for (const item of selectedItems) {
+      let itemLevel = tournamentLevel
+      let matchNumber: number
+
+      if (typeof item === 'string' && item.includes('_')) {
+        const parts = item.split('_')
+        itemLevel = parts[0] || tournamentLevel
+        matchNumber = Number(parts[1])
+      } else {
+        matchNumber = Number(item)
+      }
+
+      if (isNaN(matchNumber)) continue
+
+      const sched = schedules.value.find(
+        (s) => Number(s.matchNumber) === matchNumber && (!itemLevel || (s.tournamentLevel || 'QUALIFICATION').toUpperCase() === itemLevel.toUpperCase())
+      )
       if (!sched) continue
 
       const targetStations: StationType[] =
@@ -414,12 +484,13 @@ export const useScheduleStore = defineStore('schedule', () => {
         else if (st === 'blue1') teamNumber = sched.blue1
         else if (st === 'blue2') teamNumber = sched.blue2
 
-        const key = getAssignmentKey(matchNumber, st)
+        const targetLevel = sched.tournamentLevel || itemLevel || 'QUALIFICATION'
+        const key = getAssignmentKey(matchNumber, st, targetLevel)
         const updated: ScoutAssignment = {
-          id: assignments.value[key]?.id || `${eventId}_${matchNumber}_${st}`,
+          id: assignments.value[key]?.id || `${eventId}_${targetLevel}_${matchNumber}_${st}`,
           eventId,
           matchNumber,
-          tournamentLevel: 'QUALIFICATION',
+          tournamentLevel: targetLevel,
           station: st,
           teamNumber,
           scoutId: scoutId || null, // null 表示留空
@@ -459,32 +530,44 @@ export const useScheduleStore = defineStore('schedule', () => {
   }
 
   // --- 划选逻辑 (Selection Helpers: Mouse Drag & Wheel) ---
-  function toggleMatchSelection(matchNumber: number) {
+  function toggleMatchSelection(matchNumber: number | string, tournamentLevel?: string) {
     const num = Number(matchNumber)
-    if (selectedMatches.value.has(num)) {
+    const key = getMatchSelectionKey(matchNumber, tournamentLevel)
+    if (selectedMatches.value.has(key)) {
+      selectedMatches.value.delete(key)
+    } else if (selectedMatches.value.has(num)) {
       selectedMatches.value.delete(num)
+    } else if (selectedMatches.value.has(String(num))) {
+      selectedMatches.value.delete(String(num))
     } else {
-      selectedMatches.value.add(num)
+      if (tournamentLevel) {
+        selectedMatches.value.add(key)
+      } else {
+        selectedMatches.value.add(num)
+      }
     }
   }
 
-  function startDragSelection(matchNumber: number) {
+  function startDragSelection(matchNumber: number | string, tournamentLevel?: string) {
     const num = Number(matchNumber)
+    const lvl = (tournamentLevel || 'QUALIFICATION').toUpperCase()
     isDraggingSelection.value = true
     dragAnchorMatch.value = num
     dragTargetMatch.value = num
-    selectedMatches.value.add(num)
+    dragLevel.value = lvl
+    selectedMatches.value.add(getMatchSelectionKey(num, lvl))
   }
 
-  function dragSelectMatch(matchNumber: number) {
+  function dragSelectMatch(matchNumber: number | string, tournamentLevel?: string) {
     const num = Number(matchNumber)
+    const lvl = (tournamentLevel || dragLevel.value || 'QUALIFICATION').toUpperCase()
     if (!isDraggingSelection.value || dragAnchorMatch.value === null) return
     dragTargetMatch.value = num
     const min = Math.min(dragAnchorMatch.value, num)
     const max = Math.max(dragAnchorMatch.value, num)
     for (let m = min; m <= max; m++) {
-      if (schedules.value.some((s) => Number(s.matchNumber) === m)) {
-        selectedMatches.value.add(m)
+      if (schedules.value.some((s) => Number(s.matchNumber) === m && (s.tournamentLevel || 'QUALIFICATION').toUpperCase() === lvl)) {
+        selectedMatches.value.add(getMatchSelectionKey(m, lvl))
       }
     }
   }
@@ -497,7 +580,8 @@ export const useScheduleStore = defineStore('schedule', () => {
 
   function selectAllMatches() {
     for (const s of schedules.value) {
-      selectedMatches.value.add(Number(s.matchNumber))
+      const lvl = (s.tournamentLevel || 'QUALIFICATION').toUpperCase()
+      selectedMatches.value.add(getMatchSelectionKey(s.matchNumber, lvl))
     }
   }
 
@@ -538,7 +622,7 @@ export const useScheduleStore = defineStore('schedule', () => {
     if (incomingAssignments) {
       const assignMap: Record<string, ScoutAssignment> = {}
       for (const a of incomingAssignments) {
-        assignMap[getAssignmentKey(Number(a.matchNumber), a.station)] = a
+        assignMap[getAssignmentKey(Number(a.matchNumber), a.station, a.tournamentLevel)] = a
       }
       assignments.value = assignMap
     }
@@ -549,9 +633,24 @@ export const useScheduleStore = defineStore('schedule', () => {
 
   function applyAssignmentUpdate(incomingAssignment: ScoutAssignment) {
     if (!incomingAssignment) return
-    const key = getAssignmentKey(incomingAssignment.matchNumber, incomingAssignment.station)
+    const key = getAssignmentKey(incomingAssignment.matchNumber, incomingAssignment.station, incomingAssignment.tournamentLevel)
     assignments.value[key] = incomingAssignment
     if (currentEventId.value) {
+      saveToLocalStorage(currentEventId.value)
+    }
+  }
+
+  function migrateScoutId(oldScoutId: string, newScoutId: string, newScoutName?: string) {
+    let changed = false
+    for (const key of Object.keys(assignments.value)) {
+      const a = assignments.value[key]
+      if (a && a.scoutId === oldScoutId) {
+        a.scoutId = newScoutId
+        if (newScoutName) a.scoutName = newScoutName
+        changed = true
+      }
+    }
+    if (changed && currentEventId.value) {
       saveToLocalStorage(currentEventId.value)
     }
   }
@@ -586,6 +685,7 @@ export const useScheduleStore = defineStore('schedule', () => {
     broadcastScheduleSync,
     broadcastAssignmentUpdate,
     applyScheduleFullSync,
-    applyAssignmentUpdate
+    applyAssignmentUpdate,
+    migrateScoutId
   }
 })

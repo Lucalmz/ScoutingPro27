@@ -1,4 +1,4 @@
-import { uploadPitPhoto } from './api'
+import { uploadPitPhoto, deletePitPhoto } from './api'
 import {
   saveMobileCachedPhoto,
   getMobileCachedPhoto,
@@ -78,6 +78,11 @@ export async function getPhotoUrl(key: string, eventId: string): Promise<string 
 export async function deletePhoto(key: string, eventId: string): Promise<void> {
   if (!isDesktopHost()) {
     await deleteMobileCachedPhoto(key)
+  }
+  try {
+    await deletePitPhoto(eventId, key)
+  } catch (err) {
+    console.warn('[photoStorage] Server photo deletion deferred or failed:', err)
   }
 }
 

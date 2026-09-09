@@ -22,6 +22,7 @@ export interface PeerConnectionFactoryOptions {
   updateHostStatus?: () => void
   getClientDcState?: () => RTCDataChannelState | undefined
   getClientPc?: () => RTCPeerConnection | null
+  isExplicitlyClosed?: () => boolean
 }
 
 export class PeerConnectionManager {
@@ -213,9 +214,23 @@ export class PeerConnectionManager {
             break
           case 'disconnected':
           case 'failed':
+            this.options.setStatus('unstable')
+            if (onDisconnect) {
+              onDisconnect()
+            } else {
+              this.options.setStatus('offline')
+            }
+            break
           case 'closed':
+            if (this.options.isExplicitlyClosed?.()) {
+              this.options.setStatus('offline')
+            } else {
+              this.options.setStatus('unstable')
+              if (onDisconnect) onDisconnect()
+            }
+            break
           case 'new':
-            this.options.setStatus('offline')
+            this.options.setStatus('connecting')
             break
           default:
             this.options.setStatus('connecting')
@@ -238,7 +253,8 @@ export class PeerConnectionManager {
             }
           }, 3500)
         }
-        if (!stallRestartWatchdog) {
+        const scheduleStallRestart = () => {
+          if (stallRestartWatchdog) clearTimeout(stallRestartWatchdog)
           stallRestartWatchdog = setTimeout(async () => {
             stallRestartWatchdog = null
             if (peer.iceConnectionState === 'checking') {
@@ -289,6 +305,10 @@ export class PeerConnectionManager {
                 } catch (restartErr) {
                   console.warn('[WebRTC Watchdog] Failed to restart ICE:', restartErr)
                 }
+                // 递归重试调度：若网络持续停滞在 checking，确保自动调度下一轮检查直至达到上限
+                if (peer.iceConnectionState === 'checking') {
+                  scheduleStallRestart()
+                }
               } else {
                 console.warn(
                   '[WebRTC Watchdog] Max restartIce attempts (2) exceeded. Actively triggering relay-only fallback with iceTransportPolicy: "relay".'
@@ -312,6 +332,10 @@ export class PeerConnectionManager {
               }
             }
           }, 5500)
+        }
+
+        if (!stallRestartWatchdog) {
+          scheduleStallRestart()
         }
       } else if (peer.iceConnectionState === 'disconnected' || peer.iceConnectionState === 'failed') {
         if (checkingWatchdog) {

@@ -160,9 +160,10 @@ describe('Crypto & Signaling Security Utils', () => {
       await expect(decryptSignalingData(eveAesKey, encrypted)).rejects.toThrow()
 
       // Tampering with ciphertext fails auth tag check in AES-GCM
+      const firstChar = encrypted.ciphertext[0] === '0' ? '1' : '0'
       const tampered = {
         iv: encrypted.iv,
-        ciphertext: 'ff' + encrypted.ciphertext.slice(2)
+        ciphertext: firstChar + encrypted.ciphertext.slice(1)
       }
       await expect(decryptSignalingData(aliceAesKey, tampered)).rejects.toThrow()
     })
@@ -214,4 +215,25 @@ describe('Crypto & Signaling Security Utils', () => {
       expect(await computeSecurityFingerprint('04abc', '', 'ROOM')).toBe('')
     })
   })
+
+  describe('Pure JS SHA-256 fallback', () => {
+    it('computes exact standard SHA-256 hashes matching official test vectors', async () => {
+      const { pureJsSha256, sha256Hex } = await import('../utils/crypto')
+      const enc = new TextEncoder()
+      // Test vector 1: empty string
+      expect(pureJsSha256(enc.encode(''))).toBe('e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855')
+      expect(await sha256Hex('')).toBe('e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855')
+
+      // Test vector 2: "hello"
+      expect(pureJsSha256(enc.encode('hello'))).toBe('2cf24dba5fb0a30e26e83b2ac5b9e29e1b161e5c1fa7425e73043362938b9824')
+      expect(await sha256Hex('hello')).toBe('2cf24dba5fb0a30e26e83b2ac5b9e29e1b161e5c1fa7425e73043362938b9824')
+
+      // Test vector 3: longer string
+      const str = 'The quick brown fox jumps over the lazy dog'
+      const expected = 'd7a8fbb307d7809469ca9abcb0082e4f8d5651e46d3cdb762d02d0bf37c9e592'
+      expect(pureJsSha256(enc.encode(str))).toBe(expected)
+      expect(await sha256Hex(str)).toBe(expected)
+    })
+  })
 })
+

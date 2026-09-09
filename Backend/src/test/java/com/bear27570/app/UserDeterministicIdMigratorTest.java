@@ -72,6 +72,10 @@ class UserDeterministicIdMigratorTest {
                     oldId, "evt1", "[]");
             handle.execute("INSERT INTO team_tags (id, event_id, team_number, tag, created_by) VALUES (?, ?, ?, ?, ?)",
                     "tag1", "evt1", 27570, "defense", oldId);
+            handle.execute("INSERT INTO scout_assignments (id, event_id, match_number, tournament_level, station, team_number, scout_id, scout_name) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+                    "asgn1", "evt1", 1, "QUALIFICATION", "red1", 27570, oldId, "Alice");
+            handle.execute("INSERT INTO pit_scouting_records (id, event_id, team_number, scout_id, scout_name, claimed_total_score) VALUES (?, ?, ?, ?, ?, ?)",
+                    "pit1", "evt1", 27570, oldId, "Alice", 180);
             handle.execute("SET REFERENTIAL_INTEGRITY TRUE");
 
             // Execute cascading user ID migration
@@ -95,6 +99,12 @@ class UserDeterministicIdMigratorTest {
 
             String tagCreatedBy = handle.createQuery("SELECT created_by FROM team_tags WHERE id = 'tag1'").mapTo(String.class).one();
             assertThat(tagCreatedBy).isEqualTo(newDeterministicId);
+
+            String assignmentScoutId = handle.createQuery("SELECT scout_id FROM scout_assignments WHERE id = 'asgn1'").mapTo(String.class).one();
+            assertThat(assignmentScoutId).isEqualTo(newDeterministicId);
+
+            String pitScoutId = handle.createQuery("SELECT scout_id FROM pit_scouting_records WHERE id = 'pit1'").mapTo(String.class).one();
+            assertThat(pitScoutId).isEqualTo(newDeterministicId);
         });
     }
 }

@@ -51,14 +51,14 @@ export function createWebRtcService(callbacks: WebRtcCallbacks): WebRtcService {
   let clientPc: RTCPeerConnection | null = null
   let clientDc: RTCDataChannel | null = null
   let clientSender: DataChannelSender | null = null
-  let clientPendingCandidates: RTCIceCandidateInit[] = []
+  let clientPendingCandidates: any[] = []
   let clientHostSenderId: string | undefined = undefined
   let clientForceRelay = false
 
   // Host mode state
   const clients = new Map<string, ClientEntry>()
   const stagedClients = new Map<string, ClientEntry>()
-  const preOfferCandidates = new Map<string, RTCIceCandidateInit[]>()
+  const preOfferCandidates = new Map<string, any[]>()
   const hostQueues = new Map<string, Promise<void>>()
   const scoutIdToClientId = new Map<string, string>()
   const clientIdToScoutId = new Map<string, string>()
@@ -135,7 +135,8 @@ export function createWebRtcService(callbacks: WebRtcCallbacks): WebRtcService {
     },
     updateHostStatus,
     getClientDcState: () => clientDc?.readyState,
-    getClientPc: () => clientPc
+    getClientPc: () => clientPc,
+    isExplicitlyClosed: () => isExplicitlyClosed
   })
 
   const dispatcher = createMessageDispatcher({
@@ -381,8 +382,14 @@ export function createWebRtcService(callbacks: WebRtcCallbacks): WebRtcService {
       console.log(`[WebRTC Host] Using persistent device identity: ${localDeviceId}`)
     } catch (e) {
       console.warn('[WebRTC Host] Ephemeral ECDH generation fallback:', e)
-      localEcdhKeyPair = await generateEcdhKeyPair()
-      localEcdhPubHex = await exportEcdhPublicKey(localEcdhKeyPair.publicKey)
+      try {
+        localEcdhKeyPair = await generateEcdhKeyPair()
+        localEcdhPubHex = localEcdhKeyPair ? await exportEcdhPublicKey(localEcdhKeyPair.publicKey) : ''
+      } catch (err) {
+        console.warn('[WebRTC Host] ECDH unavailable in insecure context:', err)
+        localEcdhKeyPair = null
+        localEcdhPubHex = ''
+      }
     }
 
     signaling = new SignalingChannel(inviteCode)
@@ -417,8 +424,14 @@ export function createWebRtcService(callbacks: WebRtcCallbacks): WebRtcService {
       console.log(`[WebRTC Client] Using persistent device identity: ${localDeviceId}`)
     } catch (e) {
       console.warn('[WebRTC Client] Ephemeral ECDH generation fallback:', e)
-      localEcdhKeyPair = await generateEcdhKeyPair()
-      localEcdhPubHex = await exportEcdhPublicKey(localEcdhKeyPair.publicKey)
+      try {
+        localEcdhKeyPair = await generateEcdhKeyPair()
+        localEcdhPubHex = localEcdhKeyPair ? await exportEcdhPublicKey(localEcdhKeyPair.publicKey) : ''
+      } catch (err) {
+        console.warn('[WebRTC Client] ECDH unavailable in insecure context:', err)
+        localEcdhKeyPair = null
+        localEcdhPubHex = ''
+      }
     }
 
     signaling = new SignalingChannel(inviteCode)
@@ -429,7 +442,10 @@ export function createWebRtcService(callbacks: WebRtcCallbacks): WebRtcService {
         if (localEcdhPubHex) {
           signaling!.send({ type: 'client_hello', ecdhPublicKey: localEcdhPubHex, deviceId: localDeviceId })
         }
-        await clientSession.setupClientConnection()
+        const isConnectedAndOpen = clientPc && clientPc.connectionState === 'connected' && clientDc && clientDc.readyState === 'open'
+        if (!isConnectedAndOpen) {
+          await clientSession.setupClientConnection()
+        }
       },
       onError: () => setStatus('offline'),
       onMessage: async (data: any) => {
@@ -439,6 +455,7 @@ export function createWebRtcService(callbacks: WebRtcCallbacks): WebRtcService {
   }
 
   async function reconnectNow(): Promise<boolean> {
+    isExplicitlyClosed = false
     if (isHostMode) {
       if (currentInviteCode) {
         await host(currentInviteCode)

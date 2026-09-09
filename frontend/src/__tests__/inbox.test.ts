@@ -81,4 +81,68 @@ describe('useInboxStore Outbox and Message delivery', () => {
     expect(inbox.outbox[0].status).toBe('DELIVERED')
     expect(inbox.pendingOutboxCount).toBe(0)
   })
+
+  it('manages isOpen state with toggleOpen and setOpen', () => {
+    const inbox = useInboxStore()
+    expect(inbox.isOpen).toBe(false)
+
+    inbox.toggleOpen()
+    expect(inbox.isOpen).toBe(true)
+
+    inbox.toggleOpen()
+    expect(inbox.isOpen).toBe(false)
+
+    inbox.setOpen(true)
+    expect(inbox.isOpen).toBe(true)
+
+    inbox.setOpen(false)
+    expect(inbox.isOpen).toBe(false)
+  })
+
+  it('deduplicates messages by id and supports markAllRead, deleteMessage, clearAllMessages', () => {
+    const inbox = useInboxStore()
+
+    // Add first message with id
+    inbox.addMessage({
+      id: 'msg-fixed-1',
+      title: 'Strategy Update',
+      body: 'Autonomous plan changed',
+      type: 'direct'
+    })
+
+    // Add duplicate message with same id -> should be deduplicated
+    inbox.addMessage({
+      id: 'msg-fixed-1',
+      title: 'Strategy Update',
+      body: 'Autonomous plan changed duplicate',
+      type: 'direct'
+    })
+
+    expect(inbox.messages.length).toBe(1)
+    expect(inbox.unreadCount).toBe(1)
+
+    // Add second message
+    inbox.addMessage({
+      id: 'msg-fixed-2',
+      title: 'Match 3 Ready',
+      body: 'Queueing now',
+      type: 'broadcast'
+    })
+    expect(inbox.messages.length).toBe(2)
+    expect(inbox.unreadCount).toBe(2)
+
+    // Mark all read
+    inbox.markAllRead()
+    expect(inbox.unreadCount).toBe(0)
+    expect(inbox.messages.every((m) => m.read)).toBe(true)
+
+    // Delete single message
+    inbox.deleteMessage('msg-fixed-1')
+    expect(inbox.messages.length).toBe(1)
+    expect(inbox.messages[0].id).toBe('msg-fixed-2')
+
+    // Clear all messages
+    inbox.clearAllMessages()
+    expect(inbox.messages.length).toBe(0)
+  })
 })

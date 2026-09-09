@@ -56,6 +56,17 @@
   opacity: 1;
 }
 
+.topbar-unread-badge {
+  background: #ef4444;
+  color: #ffffff;
+  font-size: 10px;
+  font-weight: 700;
+  border-radius: 9999px;
+  padding: 1px 6px;
+  margin-left: 4px;
+  line-height: 1.2;
+}
+
 .btn-logout {
   background: transparent;
   border: 1px solid var(--input);
@@ -312,4 +323,13 @@ h2 {
 .btn-confirm:disabled {
   opacity: 0.5;
   cursor: not-allowed;
+}
+
+@media (max-width: 768px) {
+  .topbar {
+    padding: 10px 14px;
+  }
+  .user-tag-btn.inbox-topbar-btn .username-text {
+    display: none;
+  }
 }

@@ -80,7 +80,7 @@ export class DataChannelSender {
     if (this.dc.bufferedAmount > this.BUFFER_HIGH_WATERMARK) {
       this.onCongestion?.(true)
       await new Promise<void>((resolve, reject) => {
-        let resolved = false
+        let finished = false
         let intervalId: ReturnType<typeof setInterval> | null = null
         let timeoutId: ReturnType<typeof setTimeout> | null = null
 
@@ -88,13 +88,23 @@ export class DataChannelSender {
           if (intervalId) clearInterval(intervalId)
           if (timeoutId) clearTimeout(timeoutId)
           this.dc.removeEventListener('bufferedamountlow', onLow)
+          this.dc.removeEventListener('close', onClose)
+          this.dc.removeEventListener('error', onClose)
         }
 
         const done = () => {
-          if (!resolved) {
-            resolved = true
+          if (!finished) {
+            finished = true
             cleanup()
             resolve()
+          }
+        }
+
+        const onClose = () => {
+          if (!finished) {
+            finished = true
+            cleanup()
+            reject(new Error('DataChannel closed while waiting for backpressure relief'))
           }
         }
 
@@ -102,6 +112,8 @@ export class DataChannelSender {
 
         this.dc.bufferedAmountLowThreshold = this.BUFFER_LOW_WATERMARK
         this.dc.addEventListener('bufferedamountlow', onLow)
+        this.dc.addEventListener('close', onClose)
+        this.dc.addEventListener('error', onClose)
 
         if (this.dc.bufferedAmount <= this.BUFFER_LOW_WATERMARK) {
           done()
@@ -109,19 +121,25 @@ export class DataChannelSender {
         }
 
         intervalId = setInterval(() => {
-          if (this.dc.bufferedAmount <= this.BUFFER_LOW_WATERMARK || this.dc.readyState !== 'open') {
+          if (this.dc.readyState !== 'open') {
+            onClose()
+          } else if (this.dc.bufferedAmount <= this.BUFFER_LOW_WATERMARK) {
             done()
           }
         }, 100)
 
         timeoutId = setTimeout(() => {
-          if (!resolved) {
-            resolved = true
+          if (!finished) {
+            finished = true
             cleanup()
             reject(new BackpressureTimeoutError(`Backpressure wait timeout (${this.MAX_BACKPRESSURE_TIMEOUT}ms)`))
           }
         }, this.MAX_BACKPRESSURE_TIMEOUT)
       })
+    }
+
+    if (this.dc.readyState !== 'open') {
+      throw new Error(`DataChannel closed before send (current state: ${this.dc.readyState})`)
     }
 
     this.dc.send(payload)

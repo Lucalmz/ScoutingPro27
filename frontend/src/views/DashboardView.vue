@@ -6,6 +6,7 @@ import { useUserStore } from '@/stores/user'
 import { useEventStore } from '@/stores/events'
 import { parseEventPackage } from '@/utils/offlineSync'
 import { useToastStore } from '@/stores/toast'
+import { useInboxStore } from '@/stores/inbox'
 import { isDesktopHost } from '@/services/photoStorage'
 import RenameModal from '@/components/common/RenameModal.vue'
 
@@ -14,6 +15,7 @@ const toastStore = useToastStore()
 const router = useRouter()
 const userStore = useUserStore()
 const eventStore = useEventStore()
+const inboxStore = useInboxStore()
 
 const showCreateModal = ref(false)
 const showJoinModal = ref(false)
@@ -164,6 +166,15 @@ function handleOpenRenameModal() {
         </span>
       </div>
       <div class="topbar-right">
+        <button
+          class="user-tag-btn inbox-topbar-btn"
+          @click="inboxStore.toggleOpen()"
+          title="Inbox"
+        >
+          <span class="material-icons" style="font-size: 18px; margin-right: 4px;">inbox</span>
+          <span class="username-text">Inbox</span>
+          <span v-if="inboxStore.unreadCount > 0" class="topbar-unread-badge">{{ inboxStore.unreadCount }}</span>
+        </button>
         <button
           class="user-tag-btn"
           @click="handleOpenRenameModal"

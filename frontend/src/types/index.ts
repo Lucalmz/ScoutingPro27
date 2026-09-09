@@ -87,6 +87,7 @@ export interface ScoutingRecord {
 // --- 前端表单数据（序列化后放入 rawData）---
 export interface ScoutingFormData {
   matchNumber: number
+  tournamentLevel?: string
   teamNumber: number
   allianceColor: 'none' | 'red' | 'blue'
   isBroken: boolean
@@ -111,6 +112,7 @@ export interface ScoutingFormData {
 // --- Official Match ---
 export interface OfficialMatch {
   matchNum: number
+  tournamentLevel?: string
   scores: {
     red: { penaltyPointsCommitted: number; totalPointsNp: number }
     blue: { penaltyPointsCommitted: number; totalPointsNp: number }
@@ -193,6 +195,7 @@ export type WebRtcMessage =
   | WebRtcAssignmentUpdate
   | WebRtcPitScoutUpdate
   | WebRtcPitFullSync
+  | WebRtcPitScoutBatchSync
   | WebRtcRequestPitSync
   | WebRtcOfficialRosterSync
 
@@ -226,6 +229,13 @@ export interface WebRtcPitFullSync {
   type: 'PIT_SCOUT_FULL_SYNC'
   records: PitScoutingRecord[]
   authCode?: string
+}
+
+export interface WebRtcPitScoutBatchSync {
+  type: 'PIT_SCOUT_BATCH_SYNC'
+  records: PitScoutingRecord[]
+  authCode?: string
+  senderId?: string
 }
 
 export interface WebRtcRequestPitSync {
@@ -345,6 +355,7 @@ export interface WebRtcTagsFullSync {
 
 export interface WebRtcDirectMessage {
   type: 'DIRECT_MESSAGE'
+  id?: string
   messageId?: string
   targetId: string
   targetName?: string
@@ -464,6 +475,7 @@ export interface PitScoutingRecord {
   isDeleted?: boolean
   createdAt?: string
   updatedAt?: string
+  syncStatus?: SyncStatus
 }
 
 export interface OfficialTeamInfo {

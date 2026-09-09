@@ -27,7 +27,23 @@ public class ApiRoutes {
     private static final Logger logger = LoggerFactory.getLogger(ApiRoutes.class);
     private final Jdbi jdbi;
     private final FtcApiClient ftcApiClient;
-    private final Gson gson = new com.google.gson.GsonBuilder().setDateFormat("yyyy-MM-dd'T'HH:mm:ss.SSSZ").create();
+    private final Gson gson = new com.google.gson.GsonBuilder()
+            .setDateFormat("yyyy-MM-dd'T'HH:mm:ss.SSSZ")
+            .registerTypeAdapter(int.class, (com.google.gson.JsonDeserializer<Integer>) (json, typeOfT, context) -> {
+                try {
+                    return (int) Math.round(json.getAsDouble());
+                } catch (Exception e) {
+                    return 0;
+                }
+            })
+            .registerTypeAdapter(Integer.class, (com.google.gson.JsonDeserializer<Integer>) (json, typeOfT, context) -> {
+                try {
+                    return (int) Math.round(json.getAsDouble());
+                } catch (Exception e) {
+                    return null;
+                }
+            })
+            .create();
     private final ScheduledExecutorService gcScheduler = Executors.newSingleThreadScheduledExecutor(r -> {
         Thread t = new Thread(r, "tombstone-gc-thread");
         t.setDaemon(true);
@@ -90,10 +106,30 @@ public class ApiRoutes {
     public void register(RoutesConfig routes) {
 
         routes.exception(NullPointerException.class, (e, ctx) -> {
-            // Ignore Jetty 12 request recycling exception on client abort/disconnect
+            try {
+                if (ctx.res().isCommitted()) {
+                    // Ignore Jetty 12 request recycling exception on client abort/disconnect when response is already committed
+                    return;
+                }
+            } catch (Throwable ignored) {
+                return;
+            }
+            logger.error("Unhandled NullPointerException on {}: {}", ctx.path(), e.getMessage(), e);
+            ctx.status(500).result("{\"error\":\"Internal server error: unexpected null pointer\"}").contentType("application/json");
         });
         routes.exception(com.google.gson.JsonSyntaxException.class, (e, ctx) -> {
             ctx.status(400).result("Invalid JSON body");
+        });
+        routes.exception(Exception.class, (e, ctx) -> {
+            try {
+                if (ctx.res().isCommitted()) {
+                    return;
+                }
+            } catch (Throwable ignored) {
+                return;
+            }
+            logger.error("Unhandled Exception on {}: {}", ctx.path(), e.getMessage(), e);
+            ctx.status(500).result("{\"error\":\"Internal server error\"}").contentType("application/json");
         });
 
         // ==================== User Routes ====================

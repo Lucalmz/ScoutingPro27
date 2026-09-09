@@ -207,6 +207,18 @@ public class RecordRoutes {
                         WHERE event_id = ? AND scout_id = ?
                     """, newScoutId, newScoutName, eventId, oldScoutId);
 
+                    handle.execute("""
+                        UPDATE scout_assignments
+                        SET scout_id = ?, scout_name = ?, updated_at = CURRENT_TIMESTAMP
+                        WHERE event_id = ? AND scout_id = ?
+                    """, newScoutId, newScoutName, eventId, oldScoutId);
+
+                    handle.execute("""
+                        UPDATE pit_scouting_records
+                        SET scout_id = ?, scout_name = ?, version = COALESCE(version, 1) + 1, updated_at = CURRENT_TIMESTAMP
+                        WHERE event_id = ? AND scout_id = ?
+                    """, newScoutId, newScoutName, eventId, oldScoutId);
+
                     // Update event memberships and tags if present
                     handle.execute("DELETE FROM event_users WHERE event_id = ? AND user_id = ?", eventId, newScoutId);
                     handle.execute("UPDATE event_users SET user_id = ? WHERE event_id = ? AND user_id = ?", newScoutId, eventId, oldScoutId);

@@ -79,7 +79,12 @@ export const useRecordStore = defineStore('records', () => {
   // Cross-tab sync
   window.addEventListener('storage', (e) => {
     if (e.key === 'scoutingpro_records' && e.newValue) {
-      try { records.value = JSON.parse(e.newValue) } catch {}
+      try {
+        const parsed = JSON.parse(e.newValue)
+        if (Array.isArray(parsed)) {
+          bulkSync(parsed)
+        }
+      } catch {}
     } else if (e.key === 'scoutingpro_officialMatches' && e.newValue) {
       try { officialMatches.value = JSON.parse(e.newValue) } catch {}
     } else if (e.key === 'scoutingpro_bannedTeams' && e.newValue) {
@@ -91,12 +96,12 @@ export const useRecordStore = defineStore('records', () => {
 
 
   const scoutReliability = computed<Record<string, 'low' | 'high'>>(() =>
-    calculateScoutReliability(records.value, officialMatches.value)
+    calculateScoutReliability(currentRecords.value, officialMatches.value)
   )
 
   // --- official score discrepancy audit ---
   const matchDiscrepancies = computed<MatchDiscrepancy[]>(() =>
-    calculateMatchDiscrepancies(records.value, officialMatches.value)
+    calculateMatchDiscrepancies(currentRecords.value, officialMatches.value)
   )
 
   const top5Discrepancies = computed<MatchDiscrepancy[]>(() =>
@@ -203,8 +208,10 @@ export const useRecordStore = defineStore('records', () => {
     }
   }
 
-  function reassessConflicts(matchNumber: number, teamNumber: number): ScoutingRecord[] {
-    const coordsRecords = currentRecords.value.filter(r => !r.isDeleted && r.matchNumber === matchNumber && r.teamNumber === teamNumber)
+  function reassessConflicts(matchNumber: number, teamNumber: number, targetEventId?: string): ScoutingRecord[] {
+    const eid = targetEventId || currentEventId.value
+    const pool = eid ? records.value.filter(r => r.eventId === eid) : currentRecords.value
+    const coordsRecords = pool.filter(r => !r.isDeleted && r.matchNumber === matchNumber && r.teamNumber === teamNumber)
     const uniqueScouts = new Set(coordsRecords.map(r => r.scoutId))
     const updatedRecords: ScoutingRecord[] = []
     
@@ -242,9 +249,9 @@ export const useRecordStore = defineStore('records', () => {
     const recordsToPush: ScoutingRecord[] = [record]
 
     if (oldMatch !== null && oldTeam !== null && (oldMatch !== record.matchNumber || oldTeam !== record.teamNumber)) {
-      recordsToPush.push(...reassessConflicts(oldMatch, oldTeam))
+      recordsToPush.push(...reassessConflicts(oldMatch, oldTeam, record.eventId))
     }
-    recordsToPush.push(...reassessConflicts(record.matchNumber, record.teamNumber))
+    recordsToPush.push(...reassessConflicts(record.matchNumber, record.teamNumber, record.eventId))
 
     try {
       const [{ useUserStore }, { useEventStore }] = await Promise.all([
@@ -275,13 +282,20 @@ export const useRecordStore = defineStore('records', () => {
     target.version = (target.version || 0) + 1
     target.syncStatus = 'PENDING'
 
-    const recordsToPush: ScoutingRecord[] = [target]
+    const recordsToPush = [target]
+    recordsToPush.push(...reassessConflicts(target.matchNumber, target.teamNumber, target.eventId))
+
     try {
-      await saveRecord(target)
-      target.syncStatus = 'SYNCED'
-    } catch {
-      // Keep pending for P2P sync
+      const [{ useEventStore }] = await Promise.all([import('@/stores/events')])
+      const eventStore = useEventStore()
+      if (eventStore.isHost) {
+        await saveRecord(target)
+        target.syncStatus = 'SYNCED'
+      }
+    } catch (e) {
+      console.warn('[RecordStore] Failed to sync deleted tombstone to backend:', e)
     }
+
     return { success: true, recordsToPush }
   }
 
@@ -302,14 +316,23 @@ export const useRecordStore = defineStore('records', () => {
         if (local) {
           const incV = inc.version || 0
           const localV = local.version || 0
-          // LWW： version 大的胜出；相等时以 updatedAt 比较
+          const incHostSeq = inc.hostSeq ?? 0
+          const localHostSeq = local.hostSeq ?? 0
+
+          // LWW：version 大的胜出；version 相等时有 hostSeq 权威序列号者胜出；均相等时以 updatedAt 比较
           const shouldAccept = incV > localV ||
-            (incV === localV && inc.updatedAt > local.updatedAt)
+            (incV === localV && incHostSeq > localHostSeq) ||
+            (incV === localV && incHostSeq === localHostSeq && inc.updatedAt > local.updatedAt)
+
           if (shouldAccept) {
             // 追踪覆写前的旧坐标（冲突可能在旧坐标处消失）
-            coordsToReassess.add(`${local.matchNumber}:${local.teamNumber}`)
+            coordsToReassess.add(`${local.eventId}:${local.matchNumber}:${local.teamNumber}`)
             records.value[idx] = inc
-            savedLocal = records.value[idx]
+            savedLocal = records.value[idx] ?? null
+          } else if (incV === localV && incHostSeq === localHostSeq && inc.syncStatus === 'SYNCED' && local.syncStatus !== 'SYNCED') {
+            // 版本与序列号均相同时，平滑吸收 Host 的 authoritative SYNCED 确认状态
+            local.syncStatus = 'SYNCED'
+            savedLocal = local
           }
         }
       } else {
@@ -319,13 +342,14 @@ export const useRecordStore = defineStore('records', () => {
 
       if (savedLocal) {
         acceptedRecords.push(savedLocal)
-        // 追踪新坐标
-        coordsToReassess.add(`${savedLocal.matchNumber}:${savedLocal.teamNumber}`)
+        // 追踪新坐标（附带 eventId 避免跨赛事碰撞）
+        coordsToReassess.add(`${savedLocal.eventId}:${savedLocal.matchNumber}:${savedLocal.teamNumber}`)
         
-        // 冲突检测 (非删除记录才检测冲突)
+        // 冲突检测 (非删除记录才检测冲突，且必须限定在相同 eventId 下)
         if (!savedLocal.isDeleted) {
           const conflictRecords = records.value.filter(r =>
             !r.isDeleted &&
+            r.eventId === savedLocal!.eventId &&
             r.matchNumber === savedLocal!.matchNumber &&
             r.teamNumber === savedLocal!.teamNumber &&
             r.scoutId !== savedLocal!.scoutId
@@ -336,7 +360,7 @@ export const useRecordStore = defineStore('records', () => {
               if (!r.isConflict) {
                 r.isConflict = true
                 r.updatedAt = new Date().toISOString()
-                r.version = (r.version || 0) + 1  // 冲突状态变更也要递增 version
+                r.version = (r.version || 0) + 1
                 r.syncStatus = 'PENDING'
                 recordsToBroadcast.push(r)
               }
@@ -348,8 +372,8 @@ export const useRecordStore = defineStore('records', () => {
 
     // 重评所有受影响坐标，清除已不成立的冲突标志
     for (const key of coordsToReassess) {
-      const [matchStr, teamStr] = key.split(':')
-      const cleared = reassessConflicts(Number(matchStr), Number(teamStr))
+      const [evId, matchStr, teamStr] = key.split(':')
+      const cleared = reassessConflicts(Number(matchStr), Number(teamStr), evId)
       recordsToBroadcast.push(...cleared)
     }
 
@@ -509,6 +533,7 @@ export const useRecordStore = defineStore('records', () => {
 
   return {
     records,
+    currentRecords,
     activeRecords,
     officialMatches,
     bannedTeams,

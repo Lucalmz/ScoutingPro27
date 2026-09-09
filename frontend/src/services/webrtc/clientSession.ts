@@ -38,8 +38,8 @@ export interface ClientSessionContext {
   getClientDc: () => RTCDataChannel | null
   setClientDc: (dc: RTCDataChannel | null) => void
   setClientSender: (sender: DataChannelSender | null) => void
-  getClientPendingCandidates: () => RTCIceCandidateInit[]
-  setClientPendingCandidates: (cands: RTCIceCandidateInit[]) => void
+  getClientPendingCandidates: () => any[]
+  setClientPendingCandidates: (cands: any[]) => void
   getClientForceRelay: () => boolean
   setClientForceRelay: (force: boolean) => void
   isExplicitlyClosed: () => boolean
@@ -53,7 +53,8 @@ export interface ClientSessionContext {
 
 export function createClientSession(ctx: ClientSessionContext) {
   let reconnectAttempts = 0
-  let reconnectTimer: NodeJS.Timeout | null = null
+  let reconnectTimer: any = null
+  let isRebuilding = false
 
   function clearReconnectTimer() {
     if (reconnectTimer) {
@@ -67,7 +68,7 @@ export function createClientSession(ctx: ClientSessionContext) {
   }
 
   function triggerClientReconnect() {
-    if (ctx.isExplicitlyClosed() || ctx.getStatus() === 'long_offline' || ctx.getStatus() === 'offline') return
+    if (ctx.isExplicitlyClosed() || ctx.getStatus() === 'long_offline') return
 
     clearReconnectTimer()
 
@@ -89,17 +90,28 @@ export function createClientSession(ctx: ClientSessionContext) {
   }
 
   async function setupClientConnection(forceRelay = false) {
+    clearReconnectTimer()
     if (forceRelay) {
       ctx.setClientForceRelay(true)
     }
     ctx.setClientPendingCandidates([])
-    const oldPc = ctx.getClientPc()
-    if (oldPc) {
-      oldPc.close()
-    }
-    const oldDc = ctx.getClientDc()
-    if (oldDc) {
-      oldDc.close()
+
+    isRebuilding = true
+    try {
+      const oldDc = ctx.getClientDc()
+      if (oldDc) {
+        try { oldDc.close() } catch (_) {}
+      }
+      const oldPc = ctx.getClientPc()
+      if (oldPc) {
+        oldPc.onicecandidate = null
+        oldPc.oniceconnectionstatechange = null
+        oldPc.onconnectionstatechange = null
+        oldPc.ondatachannel = null
+        try { oldPc.close() } catch (_) {}
+      }
+    } finally {
+      isRebuilding = false
     }
 
     const pc = ctx.peerMgr.createPeerConnection(
@@ -126,7 +138,8 @@ export function createClientSession(ctx: ClientSessionContext) {
     }
     dc.onclose = () => {
       ctx.setClientSender(null)
-      if (ctx.getStatus() !== 'long_offline' && ctx.getStatus() !== 'offline') {
+      if (isRebuilding) return
+      if (!ctx.isExplicitlyClosed() && ctx.getStatus() !== 'long_offline') {
         triggerClientReconnect()
       }
     }
@@ -282,7 +295,8 @@ export function createClientSession(ctx: ClientSessionContext) {
     const clientPc = ctx.getClientPc()
 
     if (data.type === 'host_hello') {
-      console.log('[WebRTC] Received host_hello, reconnecting immediately.')
+      console.log('[WebRTC] Received host_hello, checking session state.')
+      const isSameHostSession = Boolean(data.hostSessionId && data.hostSessionId === ctx.getCurrentHostSessionId())
       if (data.hostSessionId) {
         ctx.setCurrentHostSessionId(data.hostSessionId)
       }
@@ -295,17 +309,48 @@ export function createClientSession(ctx: ClientSessionContext) {
           console.warn('[WebRTC Client] Failed to derive shared AES key or evaluate trust from host_hello:', e)
         }
       }
-      clearReconnectTimer()
-      reconnectAttempts = 0
       ctx.setClientHostSenderId(data.sender)
-      await setupClientConnection()
+
+      const curPc = ctx.getClientPc()
+      const curDc = ctx.getClientDc()
+      const isActivelyConnectingOrOpen =
+        curPc &&
+        ['new', 'connecting', 'connected'].includes(curPc.connectionState) &&
+        curDc &&
+        curDc.readyState !== 'closed'
+
+      const hostSessionChanged = Boolean(
+        data.hostSessionId &&
+        ctx.getCurrentHostSessionId() &&
+        data.hostSessionId !== ctx.getCurrentHostSessionId()
+      )
+
+      if (!isActivelyConnectingOrOpen || hostSessionChanged) {
+        clearReconnectTimer()
+        reconnectAttempts = 0
+        await setupClientConnection()
+      } else {
+        console.log('[WebRTC Client] Connection actively negotiating or open with host; preserving peer connection.')
+      }
     } else if (data.type === 'HOST_LEAVING') {
       console.log('[WebRTC] Host explicitly left the room.')
       clearReconnectTimer()
       const curPc = ctx.getClientPc()
       const curDc = ctx.getClientDc()
-      if (curPc) curPc.close()
-      if (curDc) curDc.close()
+      if (curDc) {
+        curDc.onmessage = null
+        curDc.onopen = null
+        curDc.onclose = null
+        curDc.onerror = null
+        try { curDc.close() } catch (_) {}
+      }
+      if (curPc) {
+        curPc.onicecandidate = null
+        curPc.oniceconnectionstatechange = null
+        curPc.onconnectionstatechange = null
+        curPc.ondatachannel = null
+        try { curPc.close() } catch (_) {}
+      }
       ctx.setStatus('offline')
     } else if (data.answer && clientPc) {
       try {
@@ -338,10 +383,20 @@ export function createClientSession(ctx: ClientSessionContext) {
         const sortedPending = sortCandidatesPreferIpv6(ctx.getClientPendingCandidates())
         for (const c of sortedPending) {
           try {
-            if (c && c.candidate) {
-              c.candidate = optimizeCandidatePriority(c.candidate)
+            let candidateObj: any = c
+            if (candidateObj && candidateObj.ciphertext && sas.clientSharedAesKey) {
+              try {
+                const decStr = await decryptSignalingData(sas.clientSharedAesKey, candidateObj)
+                candidateObj = JSON.parse(decStr)
+              } catch (err) {
+                console.warn('[WebRTC Client] Error decrypting pending candidate:', err)
+                continue
+              }
             }
-            await clientPc.addIceCandidate(toIceCandidate(c))
+            if (candidateObj && candidateObj.candidate) {
+              candidateObj.candidate = optimizeCandidatePriority(candidateObj.candidate)
+            }
+            await clientPc.addIceCandidate(toIceCandidate(candidateObj))
           } catch (candidateErr) {
             console.warn('[WebRTC Client] Failed to add pending candidate:', candidateErr)
           }

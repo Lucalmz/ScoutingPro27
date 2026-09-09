@@ -33,6 +33,13 @@ public class ScheduleRoutes {
         // 1. 获取赛事的完整赛程与排班
         routes.get("/api/events/{id}/schedule", ctx -> {
             String eventId = ctx.pathParam("id");
+            String userId = ctx.attribute("userId");
+            if (userId != null) {
+                boolean isMember = jdbi.withExtension(EventDao.class, dao -> dao.isMember(eventId, userId));
+                if (!isMember) {
+                    throw new io.javalin.http.ForbiddenResponse("Not a member of this event");
+                }
+            }
             List<MatchScheduleItem> schedules = jdbi.withExtension(ScheduleDao.class, dao -> dao.findSchedulesByEvent(eventId));
             List<ScoutAssignment> assignments = jdbi.withExtension(ScheduleDao.class, dao -> dao.findAssignmentsByEvent(eventId));
 
@@ -45,6 +52,14 @@ public class ScheduleRoutes {
         // 2. 批量导入/保存赛程
         routes.post("/api/events/{id}/schedule/batch", ctx -> {
             String eventId = ctx.pathParam("id");
+            String userId = ctx.attribute("userId");
+            if (userId != null) {
+                boolean isHost = jdbi.withExtension(EventDao.class, dao -> dao.isHost(eventId, userId));
+                if (!isHost) {
+                    throw new io.javalin.http.ForbiddenResponse("Only the event host can modify match schedule or assignments");
+                }
+            }
+
             ScoutingEvent event = jdbi.withExtension(EventDao.class, dao -> dao.findById(eventId));
             if (event == null) {
                 ctx.status(404).result("Event not found");
@@ -98,6 +113,32 @@ public class ScheduleRoutes {
                     initStationAssignment(dao, eventId, item.getMatchNumber(), item.getTournamentLevel(), "blue1", item.getBlue1());
                     initStationAssignment(dao, eventId, item.getMatchNumber(), item.getTournamentLevel(), "blue2", item.getBlue2());
                 }
+
+                if (body.has("assignments") && body.get("assignments").isJsonArray()) {
+                    JsonArray arr = body.getAsJsonArray("assignments");
+                    for (JsonElement el : arr) {
+                        if (!el.isJsonObject()) continue;
+                        JsonObject obj = el.getAsJsonObject();
+                        int matchNumber = obj.has("matchNumber") ? obj.get("matchNumber").getAsInt() : 0;
+                        String station = obj.has("station") ? obj.get("station").getAsString() : "";
+                        if (matchNumber <= 0 || station.isBlank()) continue;
+
+                        String tournamentLevel = obj.has("tournamentLevel") && !obj.get("tournamentLevel").isJsonNull()
+                                ? obj.get("tournamentLevel").getAsString()
+                                : "QUALIFICATION";
+                        int teamNumber = obj.has("teamNumber") ? obj.get("teamNumber").getAsInt() : 0;
+                        String scoutId = obj.has("scoutId") && !obj.get("scoutId").isJsonNull() ? obj.get("scoutId").getAsString() : null;
+                        String scoutName = obj.has("scoutName") && !obj.get("scoutName").isJsonNull() ? obj.get("scoutName").getAsString() : null;
+                        if (scoutId != null && scoutId.isBlank()) scoutId = null;
+                        if (scoutName != null && scoutName.isBlank()) scoutName = null;
+
+                        String id = obj.has("id") && !obj.get("id").isJsonNull() && !obj.get("id").getAsString().isBlank()
+                                ? obj.get("id").getAsString()
+                                : eventId + "_" + tournamentLevel + "_" + matchNumber + "_" + station;
+
+                        dao.upsertAssignment(new ScoutAssignment(id, eventId, matchNumber, tournamentLevel, station, teamNumber, scoutId, scoutName));
+                    }
+                }
             });
 
             ctx.status(200).result(gson.toJson(Map.of("success", true, "count", items.size()))).contentType("application/json");
@@ -106,6 +147,14 @@ public class ScheduleRoutes {
         // 3. 清空赛程与排班
         routes.delete("/api/events/{id}/schedule", ctx -> {
             String eventId = ctx.pathParam("id");
+            String userId = ctx.attribute("userId");
+            if (userId != null) {
+                boolean isHost = jdbi.withExtension(EventDao.class, dao -> dao.isHost(eventId, userId));
+                if (!isHost) {
+                    throw new io.javalin.http.ForbiddenResponse("Only the event host can modify match schedule or assignments");
+                }
+            }
+
             jdbi.useTransaction(handle -> {
                 ScheduleDao dao = handle.attach(ScheduleDao.class);
                 dao.clearAssignmentsByEvent(eventId);
@@ -117,6 +166,14 @@ public class ScheduleRoutes {
         // 4. 批量更新排班 (支持留空)
         routes.put("/api/events/{id}/assignments", ctx -> {
             String eventId = ctx.pathParam("id");
+            String userId = ctx.attribute("userId");
+            if (userId != null) {
+                boolean isHost = jdbi.withExtension(EventDao.class, dao -> dao.isHost(eventId, userId));
+                if (!isHost) {
+                    throw new io.javalin.http.ForbiddenResponse("Only the event host can modify match schedule or assignments");
+                }
+            }
+
             JsonObject body = gson.fromJson(ctx.body(), JsonObject.class);
             if (body == null || !body.has("assignments") || !body.get("assignments").isJsonArray()) {
                 ctx.status(400).result("assignments array required");
@@ -144,7 +201,7 @@ public class ScheduleRoutes {
 
                 String id = obj.has("id") && !obj.get("id").isJsonNull() && !obj.get("id").getAsString().isBlank()
                         ? obj.get("id").getAsString()
-                        : eventId + "_" + matchNumber + "_" + station;
+                        : eventId + "_" + tournamentLevel + "_" + matchNumber + "_" + station;
 
                 list.add(new ScoutAssignment(id, eventId, matchNumber, tournamentLevel, station, teamNumber, scoutId, scoutName));
             }
@@ -161,9 +218,26 @@ public class ScheduleRoutes {
     }
 
     private void initStationAssignment(ScheduleDao dao, String eventId, int matchNumber, String level, String station, int teamNumber) {
-        String id = eventId + "_" + matchNumber + "_" + station;
-        // 初始工位保持 scoutId 和 scoutName 为 null（永远支持留空）
-        ScoutAssignment a = new ScoutAssignment(id, eventId, matchNumber, level, station, teamNumber, null, null);
-        dao.upsertAssignment(a);
+        String tournamentLevel = (level != null && !level.isBlank()) ? level : "QUALIFICATION";
+        String id = eventId + "_" + tournamentLevel + "_" + matchNumber + "_" + station;
+        ScoutAssignment existing = dao.findAssignment(eventId, matchNumber, tournamentLevel, station);
+        if (existing == null) {
+            // 初始工位保持 scoutId 和 scoutName 为 null（永远支持留空）
+            ScoutAssignment a = new ScoutAssignment(id, eventId, matchNumber, tournamentLevel, station, teamNumber, null, null);
+            dao.upsertAssignment(a);
+        } else if (existing.getTeamNumber() != teamNumber) {
+            // 已有工位排班：仅更新队伍编号，严格保留原有已排班人员 scoutId 和 scoutName
+            ScoutAssignment updated = new ScoutAssignment(
+                    existing.getId() != null ? existing.getId() : id,
+                    eventId,
+                    matchNumber,
+                    tournamentLevel,
+                    station,
+                    teamNumber,
+                    existing.getScoutId(),
+                    existing.getScoutName()
+            );
+            dao.upsertAssignment(updated);
+        }
     }
 }

@@ -197,6 +197,13 @@ public class Main {
 
             final Javalin app = startServerWithFallback(apiRoutes, targetPort);
 
+            Runtime.getRuntime().addShutdownHook(new Thread(() -> {
+                try {
+                    apiRoutes.shutdown();
+                    app.stop();
+                } catch (Throwable ignored) {}
+            }, "app-shutdown-hook"));
+
             String localUrl = "http://localhost:" + app.port() + "/index.html";
             System.out.println("Javalin 运行在: " + localUrl + " (监听 0.0.0.0:" + app.port() + ")");
             
@@ -344,6 +351,7 @@ public class Main {
 
     private static Javalin createJavalinApp(ApiRoutes apiRoutes) {
         return Javalin.create(config -> {
+            config.http.maxRequestSize = 15_000_000L; // 允许最大 15MB 请求体（支持移动端多张高清特写照片 Base64 批量回传）
             config.staticFiles.add(staticFiles -> {
                 staticFiles.hostedPath = "/";
                 staticFiles.directory = "/public";

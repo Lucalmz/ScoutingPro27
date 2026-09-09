@@ -104,4 +104,56 @@ describe('rankings analytics', () => {
     expect(rankings[1]!.teamNumber).toBe(2002)
     expect(rankings[1]!.avgRating).toBe(40)
   })
+
+  it('does not wrongly deduct penalties across different tournament levels with identical match numbers', () => {
+    const officialMatches: OfficialMatch[] = [
+      {
+        matchNum: 1,
+        tournamentLevel: 'QUALIFICATION',
+        scores: {
+          red: { totalPointsNp: 100, penaltyPointsCommitted: 40 }, // 40 penalty points in Q1
+          blue: { totalPointsNp: 100, penaltyPointsCommitted: 0 }
+        },
+        teams: [
+          { teamNumber: 27570, alliance: 'red' }
+        ]
+      },
+      {
+        matchNum: 1,
+        tournamentLevel: 'PLAYOFF',
+        scores: {
+          red: { totalPointsNp: 150, penaltyPointsCommitted: 0 }, // 0 penalty points in P1
+          blue: { totalPointsNp: 120, penaltyPointsCommitted: 0 }
+        },
+        teams: [
+          { teamNumber: 27570, alliance: 'red' }
+        ]
+      }
+    ]
+
+    const records: ScoutingRecord[] = [
+      {
+        id: 'r_p1',
+        eventId: 'e1',
+        matchNumber: 1,
+        teamNumber: 27570,
+        scoutId: 's1',
+        scoutName: 'Scout 1',
+        totalScore: 100,
+        autoScore: 30,
+        teleopScore: 50,
+        endgameScore: 20,
+        rawData: JSON.stringify({ tournamentLevel: 'PLAYOFF' }),
+        syncStatus: 'SYNCED',
+        version: 1,
+        createdAt: '2026-01-01T12:00:00Z',
+        updatedAt: '2026-01-01T12:00:00Z'
+      }
+    ]
+
+    // In Playoff 1, red alliance penalty committed was 0, so realTotalScore should remain 100, NOT 100 - (40/2) = 80!
+    const rankings = calculateRankings(records, officialMatches, {})
+    expect(rankings[0]!.maxScore).toBe(100)
+    expect(rankings[0]!.avgRating).toBe(100)
+  })
 })

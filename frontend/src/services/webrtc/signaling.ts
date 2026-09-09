@@ -5,7 +5,8 @@ import {
   signSignalingPayload,
   verifySignalingPayload,
   generateNonce,
-  NonceLruCache
+  NonceLruCache,
+  sha256Hex
 } from '@/utils/crypto'
 
 /**
@@ -32,11 +33,7 @@ export class SignalingChannel {
     } catch (e) {
       console.warn('[Signaling] Failed to derive HMAC key:', e)
     }
-    const encoder = new TextEncoder()
-    const data = encoder.encode(this.room + '-scoutingpro27')
-    const hashBuffer = await crypto.subtle.digest('SHA-256', data)
-    const hashArray = Array.from(new Uint8Array(hashBuffer))
-    const hashHex = hashArray.map((b) => b.toString(16).padStart(2, '0')).join('')
+    const hashHex = await sha256Hex(this.room + '-scoutingpro27')
     this.topic = `scoutingpro27/signal/${hashHex}`
   }
 

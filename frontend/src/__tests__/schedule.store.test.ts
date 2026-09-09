@@ -268,4 +268,86 @@ describe('Schedule Store', () => {
       expect(store.isMatchSelected(2)).toBe(false)
     })
   })
+
+  describe('Composite Keys and Multi-Level Isolation', () => {
+    it('toggleMatchSelection and isMatchSelected isolate by tournamentLevel', () => {
+      const store = useScheduleStore()
+
+      store.toggleMatchSelection(1, 'QUALIFICATION')
+      store.toggleMatchSelection(1, 'PLAYOFF')
+
+      expect(store.isMatchSelected(1, 'QUALIFICATION')).toBe(true)
+      expect(store.isMatchSelected(1, 'PLAYOFF')).toBe(true)
+      expect(store.selectedCount).toBe(2)
+
+      // Toggle off QUALIFICATION_1
+      store.toggleMatchSelection(1, 'QUALIFICATION')
+      expect(store.isMatchSelected(1, 'QUALIFICATION')).toBe(false)
+      expect(store.isMatchSelected(1, 'PLAYOFF')).toBe(true)
+      expect(store.selectedCount).toBe(1)
+    })
+
+    it('batchAssignSelected isolates playoff and qualification matches on identical match numbers', async () => {
+      const store = useScheduleStore()
+      store.schedules = [
+        { id: 'q1', eventId: 'e1', matchNumber: 1, tournamentLevel: 'QUALIFICATION', red1: 111, red2: 112, blue1: 113, blue2: 114 },
+        { id: 'p1', eventId: 'e1', matchNumber: 1, tournamentLevel: 'PLAYOFF', red1: 991, red2: 992, blue1: 993, blue2: 994 }
+      ]
+
+      store.selectedMatches.clear()
+      store.toggleMatchSelection(1, 'PLAYOFF')
+
+      await store.batchAssignSelected('e1', 'red1', 'scout_playoff', 'Playoff Scout', 'PLAYOFF')
+
+      const playoffAssign = store.getStationAssignment(1, 'red1', 'PLAYOFF')
+      expect(playoffAssign).toBeDefined()
+      expect(playoffAssign?.scoutId).toBe('scout_playoff')
+      expect(playoffAssign?.teamNumber).toBe(991)
+
+      const qualAssign = store.getStationAssignment(1, 'red1', 'QUALIFICATION')
+      expect(qualAssign?.scoutId).toBeUndefined()
+    })
+
+    it('myAssignments correctly associates match schedules across different tournament levels', () => {
+      const store = useScheduleStore()
+      store.schedules = [
+        { id: 'q1', eventId: 'e1', matchNumber: 1, tournamentLevel: 'QUALIFICATION', red1: 111, red2: 112, blue1: 113, blue2: 114 },
+        { id: 'p1', eventId: 'e1', matchNumber: 1, tournamentLevel: 'PLAYOFF', red1: 991, red2: 992, blue1: 993, blue2: 994 }
+      ]
+
+      store.assignments = {
+        'QUALIFICATION_1_red1': {
+          id: 'a1',
+          eventId: 'e1',
+          matchNumber: 1,
+          tournamentLevel: 'QUALIFICATION',
+          station: 'red1',
+          teamNumber: 111,
+          scoutId: 'scout_multi',
+          scoutName: 'Multi Scout'
+        },
+        'PLAYOFF_1_blue2': {
+          id: 'a2',
+          eventId: 'e1',
+          matchNumber: 1,
+          tournamentLevel: 'PLAYOFF',
+          station: 'blue2',
+          teamNumber: 994,
+          scoutId: 'scout_multi',
+          scoutName: 'Multi Scout'
+        }
+      }
+
+      const assigned = store.myAssignments('scout_multi')
+      expect(assigned).toHaveLength(2)
+
+      const qualItem = assigned.find((a) => a.assignment.tournamentLevel === 'QUALIFICATION')
+      expect(qualItem).toBeDefined()
+      expect(qualItem?.schedule?.red1).toBe(111)
+
+      const playoffItem = assigned.find((a) => a.assignment.tournamentLevel === 'PLAYOFF')
+      expect(playoffItem).toBeDefined()
+      expect(playoffItem?.schedule?.blue2).toBe(994)
+    })
+  })
 })

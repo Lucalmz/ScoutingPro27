@@ -1,18 +1,26 @@
 package com.bear27570.app.routes;
 
+import com.bear27570.app.dao.EventDao;
 import com.bear27570.app.dao.PitScoutDao;
 import com.bear27570.app.model.OfficialTeam;
 import com.bear27570.app.model.PitScoutingRecord;
 import com.google.gson.Gson;
 import com.google.gson.reflect.TypeToken;
 import io.javalin.config.RoutesConfig;
+import io.javalin.http.ForbiddenResponse;
 import org.jdbi.v3.core.Jdbi;
 
 import com.bear27570.app.db.AppConfig;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
 import java.io.File;
+import java.io.IOException;
 import java.lang.reflect.Type;
+import java.nio.file.AtomicMoveNotSupportedException;
 import java.nio.file.Files;
+import java.nio.file.Path;
+import java.nio.file.StandardCopyOption;
 import java.util.Base64;
 import java.util.List;
 import java.util.Map;
@@ -20,6 +28,7 @@ import java.util.UUID;
 
 public class PitScoutRoutes {
 
+    private static final Logger logger = LoggerFactory.getLogger(PitScoutRoutes.class);
     private final Jdbi jdbi;
     private final Gson gson;
 
@@ -36,6 +45,11 @@ public class PitScoutRoutes {
                 ctx.status(400).result("Invalid eventId");
                 return;
             }
+            String userId = ctx.attribute("userId");
+            boolean isMember = jdbi.withExtension(EventDao.class, dao -> dao.isMember(eventId, userId));
+            if (!isMember) {
+                throw new ForbiddenResponse("Not a member of this event");
+            }
 
             Map<String, Object> result = jdbi.withExtension(PitScoutDao.class, dao -> {
                 List<PitScoutingRecord> records = dao.findActivePitRecordsByEvent(eventId);
@@ -49,6 +63,12 @@ public class PitScoutRoutes {
         // 2. 提交 / 更新单条 Pit 侦察记录
         routes.post("/api/events/{eventId}/pit-records", ctx -> {
             String eventId = ctx.pathParam("eventId");
+            String userId = ctx.attribute("userId");
+            boolean isMember = jdbi.withExtension(EventDao.class, dao -> dao.isMember(eventId, userId));
+            if (!isMember) {
+                throw new ForbiddenResponse("Not a member of this event");
+            }
+
             PitScoutingRecord record = gson.fromJson(ctx.body(), PitScoutingRecord.class);
             if (record == null) {
                 ctx.status(400).result("Invalid PitScoutingRecord payload");
@@ -57,6 +77,9 @@ public class PitScoutRoutes {
 
             if (record.getId() == null || record.getId().isBlank()) {
                 record.setId(UUID.randomUUID().toString());
+            }
+            if (record.getScoutId() == null || record.getScoutId().isBlank()) {
+                record.setScoutId(userId);
             }
             record.setEventId(eventId);
 
@@ -68,6 +91,12 @@ public class PitScoutRoutes {
         // 3. 批量同步 Pit 侦察记录 (用于对账与重连持久化)
         routes.post("/api/events/{eventId}/pit-records/batch", ctx -> {
             String eventId = ctx.pathParam("eventId");
+            String userId = ctx.attribute("userId");
+            boolean isMember = jdbi.withExtension(EventDao.class, dao -> dao.isMember(eventId, userId));
+            if (!isMember) {
+                throw new ForbiddenResponse("Not a member of this event");
+            }
+
             Type listType = new TypeToken<List<PitScoutingRecord>>() {}.getType();
             List<PitScoutingRecord> records = gson.fromJson(ctx.body(), listType);
             if (records == null || records.isEmpty()) {
@@ -81,6 +110,9 @@ public class PitScoutRoutes {
                     if (r.getId() == null || r.getId().isBlank()) {
                         r.setId(UUID.randomUUID().toString());
                     }
+                    if (r.getScoutId() == null || r.getScoutId().isBlank()) {
+                        r.setScoutId(userId);
+                    }
                     r.setEventId(eventId);
                     dao.upsertPitRecord(r);
                 }
@@ -92,6 +124,12 @@ public class PitScoutRoutes {
         // 4. 批量保存 / 同步 FTC 官方参赛战队名录底册
         routes.post("/api/events/{eventId}/official-teams/sync", ctx -> {
             String eventId = ctx.pathParam("eventId");
+            String userId = ctx.attribute("userId");
+            boolean isMember = jdbi.withExtension(EventDao.class, dao -> dao.isMember(eventId, userId));
+            if (!isMember) {
+                throw new ForbiddenResponse("Not a member of this event");
+            }
+
             Type listType = new TypeToken<List<OfficialTeam>>() {}.getType();
             List<OfficialTeam> teams = gson.fromJson(ctx.body(), listType);
             if (teams == null || teams.isEmpty()) {
@@ -113,6 +151,12 @@ public class PitScoutRoutes {
         // 5. 单独获取官方参赛名录
         routes.get("/api/events/{eventId}/official-teams", ctx -> {
             String eventId = ctx.pathParam("eventId");
+            String userId = ctx.attribute("userId");
+            boolean isMember = jdbi.withExtension(EventDao.class, dao -> dao.isMember(eventId, userId));
+            if (!isMember) {
+                throw new ForbiddenResponse("Not a member of this event");
+            }
+
             List<OfficialTeam> teams = jdbi.withExtension(PitScoutDao.class, dao -> dao.findOfficialTeamsByEvent(eventId));
             ctx.result(gson.toJson(teams)).contentType("application/json");
         });
@@ -123,6 +167,11 @@ public class PitScoutRoutes {
             if (eventId.isBlank() || !eventId.matches("^[a-zA-Z0-9_\\-]+$")) {
                 ctx.status(400).result("Invalid eventId");
                 return;
+            }
+            String userId = ctx.attribute("userId");
+            boolean isMember = jdbi.withExtension(EventDao.class, dao -> dao.isMember(eventId, userId));
+            if (!isMember) {
+                throw new ForbiddenResponse("Not a member of this event");
             }
 
             @SuppressWarnings("unchecked")
@@ -164,13 +213,28 @@ public class PitScoutRoutes {
             }
 
             File targetFile = new File(baseDir, key + ".webp");
+            Path basePath = baseDir.toPath().toAbsolutePath().normalize();
+            Path targetPath = targetFile.toPath().toAbsolutePath().normalize();
             // 路径穿越安全防护 (Path Traversal Guard)
-            if (!targetFile.getCanonicalPath().startsWith(baseDir.getCanonicalPath())) {
+            if (!targetPath.startsWith(basePath)) {
                 ctx.status(400).result("Illegal path traversal detected");
                 return;
             }
 
-            Files.write(targetFile.toPath(), imageBytes);
+            try {
+                // 原子写入：先写入临时文件，再原子重命名替换，防止损坏残留
+                File tempFile = File.createTempFile("pit_", ".tmp", baseDir);
+                Files.write(tempFile.toPath(), imageBytes);
+                try {
+                    Files.move(tempFile.toPath(), targetPath, StandardCopyOption.ATOMIC_MOVE, StandardCopyOption.REPLACE_EXISTING);
+                } catch (AtomicMoveNotSupportedException e) {
+                    Files.move(tempFile.toPath(), targetPath, StandardCopyOption.REPLACE_EXISTING);
+                }
+            } catch (IOException e) {
+                logger.error("Failed to write pit photo to disk: {}", e.getMessage(), e);
+                ctx.status(500).result("Failed to save photo to disk");
+                return;
+            }
 
             ctx.result(gson.toJson(Map.of(
                     "success", true,
@@ -192,8 +256,10 @@ public class PitScoutRoutes {
 
             File baseDir = new File(AppConfig.resolveBaseDataDir(), "pit_photos" + File.separator + eventId);
             File targetFile = new File(baseDir, key + ".webp");
+            Path basePath = baseDir.toPath().toAbsolutePath().normalize();
+            Path targetPath = targetFile.toPath().toAbsolutePath().normalize();
 
-            if (!targetFile.getCanonicalPath().startsWith(baseDir.getCanonicalPath())) {
+            if (!targetPath.startsWith(basePath)) {
                 ctx.status(400).result("Illegal path traversal detected");
                 return;
             }
@@ -203,10 +269,54 @@ public class PitScoutRoutes {
                 return;
             }
 
-            byte[] bytes = Files.readAllBytes(targetFile.toPath());
-            ctx.contentType("image/webp");
-            ctx.header("Cache-Control", "public, max-age=31536000, immutable");
-            ctx.result(bytes);
+            try {
+                byte[] bytes = Files.readAllBytes(targetPath);
+                ctx.contentType("image/webp");
+                ctx.header("Cache-Control", "public, max-age=31536000, immutable");
+                ctx.result(bytes);
+            } catch (IOException e) {
+                logger.error("Failed to read photo {}: {}", key, e.getMessage());
+                ctx.status(500).result("Failed to read photo file");
+            }
+        });
+
+        // 8. 删除废弃展位特写照片
+        routes.delete("/api/events/{eventId}/pit/photos/{key}", ctx -> {
+            String eventId = ctx.pathParam("eventId");
+            String key = ctx.pathParam("key");
+
+            if (eventId.isBlank() || !eventId.matches("^[a-zA-Z0-9_\\-]+$") ||
+                key.isBlank() || !key.matches("^[a-zA-Z0-9_\\-]+$")) {
+                ctx.status(400).result("Invalid eventId or key");
+                return;
+            }
+
+            String userId = ctx.attribute("userId");
+            boolean isMember = jdbi.withExtension(EventDao.class, dao -> dao.isMember(eventId, userId));
+            if (!isMember) {
+                throw new ForbiddenResponse("Not a member of this event");
+            }
+
+            File baseDir = new File(AppConfig.resolveBaseDataDir(), "pit_photos" + File.separator + eventId);
+            File targetFile = new File(baseDir, key + ".webp");
+            Path basePath = baseDir.toPath().toAbsolutePath().normalize();
+            Path targetPath = targetFile.toPath().toAbsolutePath().normalize();
+
+            if (!targetPath.startsWith(basePath)) {
+                ctx.status(400).result("Illegal path traversal detected");
+                return;
+            }
+
+            if (targetFile.exists() && targetFile.isFile()) {
+                try {
+                    Files.delete(targetPath);
+                } catch (IOException e) {
+                    logger.error("Failed to delete photo {}: {}", key, e.getMessage());
+                    ctx.status(500).result("Failed to delete photo file");
+                    return;
+                }
+            }
+            ctx.status(200).result(gson.toJson(Map.of("success", true, "key", key))).contentType("application/json");
         });
     }
 }

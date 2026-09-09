@@ -35,6 +35,10 @@ public class FtcProxyRoutes {
                 return;
             }
             String tournamentLevel = ctx.queryParam("tournamentLevel");
+            if (tournamentLevel != null && !tournamentLevel.isBlank() && !tournamentLevel.matches("^(?i)(QUAL|QUALIFICATION|PLAYOFF)$")) {
+                ctx.status(400).result("Invalid tournamentLevel");
+                return;
+            }
 
             try {
                 var matches = ftcApiClient.fetchNormalizedMatches(season, eventCode, tournamentLevel);
@@ -63,6 +67,10 @@ public class FtcProxyRoutes {
                 return;
             }
             String tournamentLevel = ctx.queryParam("tournamentLevel");
+            if (tournamentLevel != null && !tournamentLevel.isBlank() && !tournamentLevel.matches("^(?i)(QUAL|QUALIFICATION|PLAYOFF)$")) {
+                ctx.status(400).result("Invalid tournamentLevel");
+                return;
+            }
 
             try {
                 var scores = ftcApiClient.fetchScoreBreakdown(season, eventCode, tournamentLevel);

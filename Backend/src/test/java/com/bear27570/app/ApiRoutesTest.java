@@ -1096,6 +1096,102 @@ class ApiRoutesTest {
             assertThat(ticketReq.body().string()).contains("User is not a member of this event");
         });
     }
+
+    @Test
+    void testScheduleAndPitRecordsNonMemberForbidden() {
+        JavalinTest.test(app, (server, client) -> {
+            RoomFixture f = setupRoomFixture(client);
+
+            // Outsider attempts to fetch schedule
+            var schedRes = client.get("/api/events/" + f.eventId + "/schedule",
+                    b -> b.header("Authorization", "Bearer " + f.outsiderToken));
+            assertThat(schedRes.code()).isEqualTo(403);
+
+            // Outsider attempts to fetch pit records
+            var pitRes = client.get("/api/events/" + f.eventId + "/pit-records",
+                    b -> b.header("Authorization", "Bearer " + f.outsiderToken));
+            assertThat(pitRes.code()).isEqualTo(403);
+
+            // Member (scoutA) can access both
+            var memberSchedRes = client.get("/api/events/" + f.eventId + "/schedule",
+                    b -> b.header("Authorization", "Bearer " + f.scoutAToken));
+            assertThat(memberSchedRes.code()).isEqualTo(200);
+
+            var memberPitRes = client.get("/api/events/" + f.eventId + "/pit-records",
+                    b -> b.header("Authorization", "Bearer " + f.scoutAToken));
+            assertThat(memberPitRes.code()).isEqualTo(200);
+        });
+    }
+
+    @Test
+    void testFtcConfigInvalidYearReturns400() {
+        JavalinTest.test(app, (server, client) -> {
+            RoomFixture f = setupRoomFixture(client);
+
+            var invalidRes = client.put("/api/events/" + f.eventId + "/ftc-config",
+                    "{\"ftcYear\":\"invalid_year\",\"ftcEventCode\":\"TEST\"}",
+                    b -> b.header("Authorization", "Bearer " + f.hostToken));
+            assertThat(invalidRes.code()).isEqualTo(400);
+            assertThat(invalidRes.body().string()).contains("Invalid ftcYear format");
+        });
+    }
+
+    @Test
+    void testScheduleBatchHostOnlyAndValidation() {
+        JavalinTest.test(app, (server, client) -> {
+            RoomFixture f = setupRoomFixture(client);
+
+            String validBatch = """
+                {
+                    "clearExisting": false,
+                    "items": [
+                        {
+                            "matchNumber": 1,
+                            "tournamentLevel": "QUALIFICATION",
+                            "red1": 11111,
+                            "red2": 22222,
+                            "blue1": 33333,
+                            "blue2": 44444
+                        }
+                    ],
+                    "assignments": [
+                        {
+                            "matchNumber": 1,
+                            "tournamentLevel": "QUALIFICATION",
+                            "station": "red1",
+                            "teamNumber": 11111,
+                            "scoutId": "%s",
+                            "scoutName": "Scout Alice"
+                        }
+                    ]
+                }
+            """.formatted(f.scoutAId);
+
+            // 1. Non-host (scoutA) attempts to modify schedule -> 403 Forbidden
+            var nonHostRes = client.post("/api/events/" + f.eventId + "/schedule/batch", validBatch,
+                    b -> b.header("Authorization", "Bearer " + f.scoutAToken));
+            assertThat(nonHostRes.code()).isEqualTo(403);
+            assertThat(nonHostRes.body().string()).contains("Only the event host can modify match schedule");
+
+            // 2. Malformed JSON without items -> 400 Bad Request
+            var malformedRes = client.post("/api/events/" + f.eventId + "/schedule/batch", "{\"clearExisting\":false}",
+                    b -> b.header("Authorization", "Bearer " + f.hostToken));
+            assertThat(malformedRes.code()).isEqualTo(400);
+
+            // 3. Host successfully imports batch schedule -> 200 OK
+            var hostRes = client.post("/api/events/" + f.eventId + "/schedule/batch", validBatch,
+                    b -> b.header("Authorization", "Bearer " + f.hostToken));
+            assertThat(hostRes.code()).isEqualTo(200);
+            assertThat(hostRes.body().string()).contains("\"count\":1");
+
+            // 4. Verify schedule is accessible to member
+            var fetchRes = client.get("/api/events/" + f.eventId + "/schedule",
+                    b -> b.header("Authorization", "Bearer " + f.scoutAToken));
+            assertThat(fetchRes.code()).isEqualTo(200);
+            assertThat(fetchRes.body().string()).contains("11111");
+            assertThat(fetchRes.body().string()).contains("Scout Alice");
+        });
+    }
 }
 
 

@@ -7,6 +7,15 @@ import { safeJsonParse } from '@/utils/json'
 export const useInboxStore = defineStore('inbox', () => {
   const messages = ref<SystemMessage[]>([])
   const outbox = ref<DirectMessageOutboxItem[]>([])
+  const isOpen = ref(false)
+
+  function toggleOpen() {
+    isOpen.value = !isOpen.value
+  }
+
+  function setOpen(val: boolean) {
+    isOpen.value = val
+  }
   
   const unreadCount = computed(() => messages.value.filter(m => !m.read).length)
   const pendingOutboxCount = computed(() => outbox.value.filter(m => m.status === 'PENDING_DELIVERY' || m.status === 'DELIVERING').length)
@@ -66,8 +75,12 @@ export const useInboxStore = defineStore('inbox', () => {
     saveMessages()
   }, { deep: true })
 
-  function addMessage(msg: Omit<SystemMessage, 'id' | 'read' | 'timestamp'>) {
-    const id = typeof crypto !== 'undefined' && crypto.randomUUID ? crypto.randomUUID() : `msg-${Date.now()}`
+  function addMessage(msg: Omit<SystemMessage, 'id' | 'read' | 'timestamp'> & { id?: string }) {
+    const id = msg.id || (typeof crypto !== 'undefined' && crypto.randomUUID ? crypto.randomUUID() : `msg-${Date.now()}`)
+    // 幂等去重：若已存在相同 messageId，不重复压栈
+    if (messages.value.some((m) => m.id === id)) {
+      return
+    }
     messages.value.unshift({
       ...msg,
       id,
@@ -81,6 +94,20 @@ export const useInboxStore = defineStore('inbox', () => {
     if (msg) {
       msg.read = true
     }
+  }
+
+  function markAllRead() {
+    for (const msg of messages.value) {
+      msg.read = true
+    }
+  }
+
+  function deleteMessage(id: string) {
+    messages.value = messages.value.filter(m => m.id !== id)
+  }
+
+  function clearAllMessages() {
+    messages.value = []
   }
 
   async function sendDirectMessage(
@@ -180,10 +207,16 @@ export const useInboxStore = defineStore('inbox', () => {
   return {
     messages,
     outbox,
+    isOpen,
+    toggleOpen,
+    setOpen,
     unreadCount,
     pendingOutboxCount,
     addMessage,
     markRead,
+    markAllRead,
+    deleteMessage,
+    clearAllMessages,
     sendDirectMessage,
     updateDeliveryStatus,
     flushOutbox,

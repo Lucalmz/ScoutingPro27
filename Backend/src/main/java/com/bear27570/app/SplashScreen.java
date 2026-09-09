@@ -66,6 +66,7 @@ public class SplashScreen extends JWindow {
     private float displayedProgress = 0f; // eased toward targetProgress each frame, for a smooth fill
 
     private final BufferedImage bearLogo;
+    private final Timer animTimer;
 
     public SplashScreen() {
         setSize(560, 380); // wide enough to comfortably fit label + logo
@@ -77,7 +78,7 @@ public class SplashScreen extends JWindow {
 
         add(contentPanel, BorderLayout.CENTER);
 
-        Timer animTimer = new Timer(16, e -> {
+        animTimer = new Timer(16, e -> {
             displayedProgress += (targetProgress - displayedProgress) * 0.08f;
             if (Math.abs(targetProgress - displayedProgress) < 0.1f) {
                 displayedProgress = targetProgress;
@@ -127,6 +128,9 @@ public class SplashScreen extends JWindow {
             opacity[0] -= 0.07f;
             if (opacity[0] <= 0f) {
                 fade.stop();
+                if (animTimer != null && animTimer.isRunning()) {
+                    animTimer.stop();
+                }
                 dispose();
                 if (onClosed != null) onClosed.run();
             } else {
@@ -134,6 +138,14 @@ public class SplashScreen extends JWindow {
             }
         });
         fade.start();
+    }
+
+    @Override
+    public void dispose() {
+        if (animTimer != null && animTimer.isRunning()) {
+            animTimer.stop();
+        }
+        super.dispose();
     }
 
     private float entranceProgress() {

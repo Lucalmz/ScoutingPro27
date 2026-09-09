@@ -2137,5 +2137,235 @@ describe('WebRTC Security Hardening & SAS Gating (v2)', () => {
   })
 })
 
+describe('WebRTC Pit Scouting & Batch Sync Protocol', () => {
+  let mockMqttClient: any
+
+  beforeEach(() => {
+    vi.clearAllMocks()
+    clearSecurityStoreForTesting()
+    localStorage.clear()
+    ;(globalThis as any).__TEST_ALLOW_UNSIGNED_SIGNALING__ = true
+
+    mockMqttClient = {
+      subscribe: vi.fn(),
+      publish: vi.fn(),
+      on: vi.fn(),
+      unsubscribe: vi.fn(),
+      end: vi.fn()
+    }
+    vi.mocked(mqtt.connect).mockReturnValue(mockMqttClient as any)
+  })
+
+  it('dispatches PIT_SCOUT_UPDATE and Host forwards to other connected clients', async () => {
+    const callbacks = {
+      onStatusChange: vi.fn(),
+      onRecordsReceived: vi.fn(),
+      onAckReceived: vi.fn(),
+      onRequestSync: vi.fn(),
+      onPitScoutUpdateReceived: vi.fn()
+    }
+
+    const hostService = createWebRtcService(callbacks)
+    await hostService.host('room-pit-1')
+
+    const onMessage = mockMqttClient.on.mock.calls.find((c: any) => c[0] === 'message')?.[1]
+
+    let dc1: any, dc2: any
+    global.RTCPeerConnection = vi.fn().mockImplementation(() => ({
+      setRemoteDescription: vi.fn().mockResolvedValue(undefined),
+      createAnswer: vi.fn().mockResolvedValue({ type: 'answer', sdp: 'answer-sdp' }),
+      setLocalDescription: vi.fn().mockResolvedValue(undefined),
+      addIceCandidate: vi.fn().mockResolvedValue(undefined),
+      close: vi.fn(),
+      connectionState: 'connected'
+    })) as any
+
+    // Client 1 connects
+    onMessage('topic', new TextEncoder().encode(JSON.stringify({
+      sender: 'client1',
+      offer: { type: 'offer', sdp: '...' }
+    })))
+    await new Promise(r => setTimeout(r, 10))
+    const pc1 = vi.mocked(global.RTCPeerConnection).mock.results[0].value
+    dc1 = { send: vi.fn(), readyState: 'open', close: vi.fn() }
+    pc1.ondatachannel({ channel: dc1 })
+
+    // Client 2 connects
+    onMessage('topic', new TextEncoder().encode(JSON.stringify({
+      sender: 'client2',
+      offer: { type: 'offer', sdp: '...' }
+    })))
+    await new Promise(r => setTimeout(r, 10))
+    const pc2 = vi.mocked(global.RTCPeerConnection).mock.results[1].value
+    dc2 = { send: vi.fn(), readyState: 'open', close: vi.fn() }
+    pc2.ondatachannel({ channel: dc2 })
+
+    // Client 1 sends PIT_SCOUT_UPDATE
+    const pitRecord: any = {
+      id: 'p-1',
+      eventId: 'evt-1',
+      teamNumber: 27570,
+      scoutId: 's1',
+      scoutName: 'Alice',
+      drivetrainType: 'mecanum',
+      weightLbs: 38,
+      sizingPassed: true,
+      mechanismType: '',
+      hangType: '',
+      odometryType: '',
+      claimedAutoScore: 60,
+      claimedAutoPieces: 3,
+      claimedAutoHangLevel: 1,
+      claimedTeleopScore: 80,
+      claimedTeleopCycleSec: 8,
+      claimedEndgameHangLevel: 2,
+      claimedEndgameTimeSec: 5,
+      claimedTotalScore: 140,
+      version: 1
+    }
+
+    dc1.onmessage({
+      data: JSON.stringify({
+        type: 'PIT_SCOUT_UPDATE',
+        record: pitRecord
+      })
+    })
+
+    // Host receives record
+    expect(callbacks.onPitScoutUpdateReceived).toHaveBeenCalledWith(pitRecord)
+
+    // Host forwards to Client 2 (but NOT back to Client 1)
+    expect(dc2.send).toHaveBeenCalled()
+    const forwardedMsg = JSON.parse(dc2.send.mock.calls[0][0])
+    expect(forwardedMsg.type).toBe('PIT_SCOUT_UPDATE')
+    expect(forwardedMsg.record.teamNumber).toBe(27570)
+    expect(dc1.send).not.toHaveBeenCalled()
+
+    hostService.disconnect()
+  })
+
+  it('dispatches PIT_SCOUT_BATCH_SYNC and Host forwards batch to other connected clients', async () => {
+    const callbacks = {
+      onStatusChange: vi.fn(),
+      onRecordsReceived: vi.fn(),
+      onAckReceived: vi.fn(),
+      onRequestSync: vi.fn(),
+      onPitScoutBatchSyncReceived: vi.fn()
+    }
+
+    const hostService = createWebRtcService(callbacks)
+    await hostService.host('room-pit-2')
+
+    const onMessage = mockMqttClient.on.mock.calls.find((c: any) => c[0] === 'message')?.[1]
+
+    let dc1: any, dc2: any
+    global.RTCPeerConnection = vi.fn().mockImplementation(() => ({
+      setRemoteDescription: vi.fn().mockResolvedValue(undefined),
+      createAnswer: vi.fn().mockResolvedValue({ type: 'answer', sdp: 'answer-sdp' }),
+      setLocalDescription: vi.fn().mockResolvedValue(undefined),
+      addIceCandidate: vi.fn().mockResolvedValue(undefined),
+      close: vi.fn(),
+      connectionState: 'connected'
+    })) as any
+
+    onMessage('topic', new TextEncoder().encode(JSON.stringify({
+      sender: 'client1',
+      offer: { type: 'offer', sdp: '...' }
+    })))
+    await new Promise(r => setTimeout(r, 10))
+    const pc1 = vi.mocked(global.RTCPeerConnection).mock.results[0].value
+    dc1 = { send: vi.fn(), readyState: 'open', close: vi.fn() }
+    pc1.ondatachannel({ channel: dc1 })
+
+    onMessage('topic', new TextEncoder().encode(JSON.stringify({
+      sender: 'client2',
+      offer: { type: 'offer', sdp: '...' }
+    })))
+    await new Promise(r => setTimeout(r, 10))
+    const pc2 = vi.mocked(global.RTCPeerConnection).mock.results[1].value
+    dc2 = { send: vi.fn(), readyState: 'open', close: vi.fn() }
+    pc2.ondatachannel({ channel: dc2 })
+
+    const batchRecords: any[] = [
+      { id: 'p-1', eventId: 'evt-1', teamNumber: 27570, version: 2 },
+      { id: 'p-2', eventId: 'evt-1', teamNumber: 25787, version: 1 }
+    ]
+
+    dc1.onmessage({
+      data: JSON.stringify({
+        type: 'PIT_SCOUT_BATCH_SYNC',
+        records: batchRecords
+      })
+    })
+
+    expect(callbacks.onPitScoutBatchSyncReceived).toHaveBeenCalledWith(batchRecords, 'client1')
+    expect(dc2.send).toHaveBeenCalled()
+    const forwarded = JSON.parse(dc2.send.mock.calls[0][0])
+    expect(forwarded.type).toBe('PIT_SCOUT_BATCH_SYNC')
+    expect(forwarded.records).toHaveLength(2)
+
+    hostService.disconnect()
+  })
+
+  it('client automatically schedules reconnection without being deadlocked when disconnected', async () => {
+    vi.useFakeTimers()
+    const callbacks = {
+      onStatusChange: vi.fn(),
+      onRecordsReceived: vi.fn(),
+      onAckReceived: vi.fn(),
+      onRequestSync: vi.fn()
+    }
+
+    let clientDc: any
+    global.RTCPeerConnection = vi.fn().mockImplementation(() => ({
+      createOffer: vi.fn().mockResolvedValue({ type: 'offer', sdp: 'offer-sdp' }),
+      setLocalDescription: vi.fn().mockResolvedValue(undefined),
+      setRemoteDescription: vi.fn().mockResolvedValue(undefined),
+      addIceCandidate: vi.fn().mockResolvedValue(undefined),
+      createDataChannel: vi.fn().mockImplementation(() => {
+        clientDc = {
+          readyState: 'open',
+          send: vi.fn(),
+          close: vi.fn()
+        }
+        return clientDc
+      }),
+      close: vi.fn(),
+      connectionState: 'connected'
+    })) as any
+
+    const clientService = createWebRtcService(callbacks)
+    await clientService.join('room-reconnect-test')
+
+    // Simulate MQTT connected event so setupClientConnection runs
+    const connectCb = mockMqttClient.on.mock.calls.find((c: any) => c[0] === 'connect')?.[1]
+    await connectCb?.()
+
+    // Simulate connection established
+    clientDc.onopen()
+    expect(callbacks.onStatusChange).toHaveBeenCalledWith('connected')
+
+    // Simulate unexpected network drop (DataChannel closed, connection state changed)
+    const pcInstance = vi.mocked(global.RTCPeerConnection).mock.results[0].value
+    pcInstance.connectionState = 'disconnected'
+    pcInstance.onconnectionstatechange()
+    expect(callbacks.onStatusChange).toHaveBeenCalledWith('unstable')
+
+    clientDc.onclose()
+
+    // Status transitions to connecting to prepare reconnect
+    expect(callbacks.onStatusChange).toHaveBeenCalledWith('connecting')
+
+    // Fast-forward delay for reconnection attempt
+    await vi.advanceTimersByTimeAsync(3000)
+
+    // Verify RTCPeerConnection was created anew for reconnection (first call on join, second on reconnect)
+    expect(vi.mocked(global.RTCPeerConnection).mock.calls.length).toBeGreaterThanOrEqual(2)
+
+    vi.useRealTimers()
+    clientService.disconnect()
+  })
+})
+
 
 

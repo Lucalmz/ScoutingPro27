@@ -18,6 +18,7 @@ export interface AllianceDiscrepancyDetail {
 
 export interface MatchDiscrepancy {
   matchNumber: number
+  tournamentLevel?: string
   rank?: number
   isTop5: boolean
   hasWarning: boolean
@@ -26,6 +27,16 @@ export interface MatchDiscrepancy {
   red?: AllianceDiscrepancyDetail
   blue?: AllianceDiscrepancyDetail
   summaryMessage: string
+}
+
+function getRecordTournamentLevel(r: ScoutingRecord): string {
+  try {
+    if (!r.rawData) return 'QUALIFICATION'
+    const parsed = typeof r.rawData === 'string' ? JSON.parse(r.rawData) : r.rawData
+    return (parsed.tournamentLevel || 'QUALIFICATION').toUpperCase()
+  } catch {
+    return 'QUALIFICATION'
+  }
 }
 
 /**
@@ -38,11 +49,12 @@ export function calculateMatchDiscrepancies(
 ): MatchDiscrepancy[] {
   if (!Array.isArray(records) || !Array.isArray(officialMatches)) return []
 
-  // 1. Deduplicate records per (matchNumber, teamNumber) keeping the latest updated active record
+  // 1. Deduplicate records per (tournamentLevel, matchNumber, teamNumber) keeping the latest updated active record
   const uniqueMap = new Map<string, ScoutingRecord>()
   for (const r of records) {
     if (r.isDeleted) continue
-    const key = `${r.matchNumber}-${r.teamNumber}`
+    const level = getRecordTournamentLevel(r)
+    const key = `${level}-${r.matchNumber}-${r.teamNumber}`
     const existing = uniqueMap.get(key)
     if (!existing || new Date(r.updatedAt || 0) >= new Date(existing.updatedAt || 0)) {
       uniqueMap.set(key, r)
@@ -56,6 +68,7 @@ export function calculateMatchDiscrepancies(
     if (!m || !m.matchNum || !m.scores) continue
 
     const matchNum = Number(m.matchNum)
+    const mLevel = (m.tournamentLevel || 'QUALIFICATION').toUpperCase()
     let redDetail: AllianceDiscrepancyDetail | undefined
     let blueDetail: AllianceDiscrepancyDetail | undefined
 
@@ -73,7 +86,7 @@ export function calculateMatchDiscrepancies(
       // Gather our scouts' records for this alliance
       const allianceRecords: ScoutingRecord[] = []
       for (const tNum of allianceTeams) {
-        const found = uniqueMap.get(`${matchNum}-${tNum}`)
+        const found = uniqueMap.get(`${mLevel}-${matchNum}-${tNum}`)
         if (found) allianceRecords.push(found)
       }
 
@@ -126,6 +139,7 @@ export function calculateMatchDiscrepancies(
 
       results.push({
         matchNumber: matchNum,
+        tournamentLevel: m.tournamentLevel || 'QUALIFICATION',
         isTop5: false,
         hasWarning,
         maxDiff,

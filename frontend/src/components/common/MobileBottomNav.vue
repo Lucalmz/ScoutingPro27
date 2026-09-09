@@ -50,18 +50,22 @@ function handleSelect(key: EventTab) {
 </script>
 
 <template>
-  <nav class="mobile-bottom-nav">
-    <button
-      v-for="item in navItems"
-      :key="item.key"
-      class="nav-item-btn"
-      :class="{ 'is-active': activeTab === item.key }"
-      @click="handleSelect(item.key)"
-    >
-      <span class="material-icons nav-icon">{{ item.icon }}</span>
-      <span class="nav-label">{{ item.label }}</span>
-    </button>
-  </nav>
+  <Teleport to="body">
+    <nav class="mobile-bottom-nav" aria-label="Mobile Navigation">
+      <div class="mobile-bottom-nav-inner">
+        <button
+          v-for="item in navItems"
+          :key="item.key"
+          class="nav-item-btn"
+          :class="{ 'is-active': activeTab === item.key }"
+          @click="handleSelect(item.key)"
+        >
+          <span class="material-icons nav-icon">{{ item.icon }}</span>
+          <span class="nav-label">{{ item.label }}</span>
+        </button>
+      </div>
+    </nav>
+  </Teleport>
 </template>
 
 <style scoped>
@@ -71,34 +75,43 @@ function handleSelect(key: EventTab) {
   bottom: 0;
   left: 0;
   right: 0;
-  height: 56px;
-  background: var(--card);
-  border-top: 1px solid var(--border);
-  z-index: 50;
+  height: calc(56px + env(safe-area-inset-bottom, 0px));
   padding-bottom: env(safe-area-inset-bottom, 0px);
-  box-shadow: 0 -2px 10px rgba(0, 0, 0, 0.15);
+  box-sizing: border-box;
+  background: rgba(18, 18, 22, 0.92);
+  backdrop-filter: blur(20px);
+  -webkit-backdrop-filter: blur(20px);
+  border-top: 1px solid rgba(255, 255, 255, 0.12);
+  z-index: 850;
+  box-shadow: 0 -4px 20px rgba(0, 0, 0, 0.45);
+  user-select: none;
 }
 
 @media (max-width: 768px) {
   .mobile-bottom-nav {
-    display: flex;
-    align-items: center;
-    justify-content: space-around;
+    display: block;
   }
+}
+
+.mobile-bottom-nav-inner {
+  height: 56px;
+  display: flex;
+  align-items: center;
+  justify-content: space-around;
+  width: 100%;
 }
 
 .nav-item-btn {
   flex: 1;
   height: 100%;
-  min-height: 48px;
   display: flex;
   flex-direction: column;
   align-items: center;
   justify-content: center;
-  gap: 2px;
+  gap: 3px;
   background: transparent;
   border: none;
-  color: var(--muted-foreground);
+  color: var(--muted-foreground, #888888);
   cursor: pointer;
   padding: 4px 0;
   transition: color 0.15s ease, transform 0.1s ease;
@@ -111,8 +124,9 @@ function handleSelect(key: EventTab) {
 }
 
 .nav-item-btn.is-active {
-  color: var(--primary);
+  color: var(--primary, #39ff14);
   font-weight: 600;
+  text-shadow: 0 0 10px rgba(57, 255, 20, 0.45);
 }
 
 .nav-icon {

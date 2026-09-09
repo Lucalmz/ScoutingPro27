@@ -4,6 +4,7 @@ import { useI18n } from 'vue-i18n'
 import { usePitScoutStore } from '@/stores/pitScout'
 import { useEventStore } from '@/stores/events'
 import { useToastStore } from '@/stores/toast'
+import { flushOfflinePhotos } from '@/services/photoStorage'
 import TeamRosterCard from './TeamRosterCard.vue'
 import PitScoutFormDrawer from './PitScoutFormDrawer.vue'
 import './PitScoutView.css'
@@ -24,6 +25,8 @@ const isSyncingRoster = ref(false)
 onMounted(() => {
   if (props.eventId) {
     pitStore.fetchPitData(props.eventId)
+    pitStore.flushPendingPitRecords(props.eventId)
+    flushOfflinePhotos(props.eventId)
   }
 })
 

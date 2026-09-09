@@ -27,6 +27,7 @@ export type WebRtcCallbacks = {
   onAssignmentUpdateReceived?: (assignment: import('@/types').ScoutAssignment) => void
   onPitScoutUpdateReceived?: (record: import('@/types').PitScoutingRecord) => void
   onPitScoutFullSyncReceived?: (records: import('@/types').PitScoutingRecord[]) => void
+  onPitScoutBatchSyncReceived?: (records: import('@/types').PitScoutingRecord[], senderId?: string) => void
   onRequestPitSync?: (senderId?: string) => void
   onOfficialRosterSyncReceived?: (teams: import('@/types').OfficialTeamInfo[]) => void
   onSessionConflict?: (
@@ -52,7 +53,7 @@ export interface ClientEntry {
   sessionId?: string
   dc?: RTCDataChannel
   sender?: DataChannelSender
-  pendingCandidates: RTCIceCandidateInit[]
+  pendingCandidates: any[]
 }
 
 export interface QueuedOfflineMessage {

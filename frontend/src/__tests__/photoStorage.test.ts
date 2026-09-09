@@ -10,7 +10,8 @@ import {
 } from '../services/photoStorage'
 
 vi.mock('../services/api', () => ({
-  uploadPitPhoto: vi.fn().mockResolvedValue({ status: 'ok', key: 'test_key' })
+  uploadPitPhoto: vi.fn().mockResolvedValue({ status: 'ok', key: 'test_key' }),
+  deletePitPhoto: vi.fn().mockResolvedValue({ success: true })
 }))
 
 describe('photoStorage Service', () => {
@@ -97,13 +98,14 @@ describe('photoStorage Service', () => {
       expect(url).toBe(`/api/events/${encodeURIComponent(eventId)}/pit/photos/${encodeURIComponent(key)}`)
     })
 
-    it('does not touch mobile cache when deleting photo on desktop', async () => {
+    it('calls backend deletePitPhoto and does not touch mobile cache when deleting photo on desktop', async () => {
       const eventId = 'evt_desktop_1'
       const key = 'photo_pc_3'
       const spyDelete = vi.spyOn(mobileCache, 'deleteMobileCachedPhoto')
 
       await deletePhoto(key, eventId)
       expect(spyDelete).not.toHaveBeenCalled()
+      expect(api.deletePitPhoto).toHaveBeenCalledWith(eventId, key)
     })
 
     it('returns 0 when flushing offline photos on desktop', async () => {
@@ -188,6 +190,17 @@ describe('photoStorage Service', () => {
 
       const remainingPending = await mobileCache.getPendingMobilePhotos(eventId)
       expect(remainingPending.length).toBe(0)
+    })
+
+    it('deletes from mobile cache and also calls backend deletePitPhoto', async () => {
+      const eventId = 'evt_mobile_1'
+      const key = 'photo_mobile_del'
+      await mobileCache.saveMobileCachedPhoto(key, 'data:del', eventId)
+
+      await deletePhoto(key, eventId)
+      const cached = await mobileCache.getMobileCachedPhoto(key)
+      expect(cached).toBeNull()
+      expect(api.deletePitPhoto).toHaveBeenCalledWith(eventId, key)
     })
   })
 })

@@ -9,7 +9,8 @@ import { useToastStore } from '@/stores/toast'
 import { useScheduleStore } from '@/stores/schedule'
 import { usePitScoutStore } from '@/stores/pitScout'
 import { createWebRtcService, type WebRtcCallbacks } from '@/services/webrtc'
-import { syncRecords } from '@/services/api'
+import { syncRecords, syncPitRecordsBatch, savePitRecord } from '@/services/api'
+import { flushOfflinePhotos } from '@/services/photoStorage'
 import type { ScoutingRecord, ScoutingEvent } from '@/types'
 
 export interface EventWebRtcBridgeOptions {
@@ -45,7 +46,7 @@ export function useEventWebRtcBridge({
       .map((r) => r.hostSeq)
       .filter((s): s is number => typeof s === 'number' && Number.isFinite(s) && s > 0)
     if (validSeqs.length > 0) {
-      const maxIncoming = Math.max(...validSeqs)
+      const maxIncoming = validSeqs.reduce((max, s) => Math.max(max, s), 0)
       if (maxIncoming > lastHostSeq.value) {
         lastHostSeq.value = maxIncoming
       }
@@ -164,6 +165,15 @@ export function useEventWebRtcBridge({
         pitStore.applyRemoteUpdate(incomingRecord)
       },
 
+      onPitScoutBatchSyncReceived: (incomingRecords) => {
+        pitStore.applyFullSync(incomingRecords)
+        if (eventStore.isHost && eventStore.currentEvent?.id) {
+          syncPitRecordsBatch(eventStore.currentEvent.id, incomingRecords).catch((e) => {
+            console.warn('[Host] Failed to persist remote pit batch to DB:', e)
+          })
+        }
+      },
+
       onPitScoutFullSyncReceived: (incomingRecords) => {
         pitStore.applyFullSync(incomingRecords)
       },
@@ -220,6 +230,7 @@ export function useEventWebRtcBridge({
 
       onIdentityMigration: async (eventIdVal: string, oldScoutId: string, newScoutId: string, newScoutName: string) => {
         recordStore.migrateScoutId(oldScoutId, newScoutId, newScoutName)
+        scheduleStore.migrateScoutId(oldScoutId, newScoutId, newScoutName)
         if (eventStore.isHost) {
           try {
             const { migrateScoutRecords } = await import('@/services/api')
@@ -287,7 +298,7 @@ export function useEventWebRtcBridge({
       return
     }
 
-    if (connStore.rtcService && !isSameEvent) {
+    if (connStore.rtcService) {
       cleanupWebRTC()
     }
 
@@ -338,7 +349,13 @@ export function useEventWebRtcBridge({
             connStore.pushRecords(myRecs)
           }
 
-          // 向 Host 请求最新的赛程与排班，以及展位侦察记录
+          // 移动端重连核心自愈 1：主动出清离线期间录入的 Pit 展位记录
+          pitStore.flushPendingPitRecords(evt.id)
+
+          // 移动端重连核心自愈 2：主动出清离线照片队列，确保特写照片落盘到 Host
+          flushOfflinePhotos(evt.id)
+
+          // 向 Host 请求最新的赛程与排班、展位侦察记录、以及战队标签
           if (connStore.rtcService) {
             connStore.rtcService.sendMessage({
               type: 'REQUEST_SCHEDULE_SYNC'
@@ -346,7 +363,13 @@ export function useEventWebRtcBridge({
             connStore.rtcService.sendMessage({
               type: 'REQUEST_PIT_SYNC'
             })
+            connStore.rtcService.requestTagsSync(evt.id).catch((e) => {
+              console.warn('[EventView] Failed to request tags sync:', e)
+            })
           }
+        } else {
+          // Host 连通或恢复后，同样主动巡检照片队列
+          flushOfflinePhotos(evt.id)
         }
       }
     }

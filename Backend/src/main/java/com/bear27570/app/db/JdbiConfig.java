@@ -12,6 +12,8 @@ public class JdbiConfig {
     public static Jdbi create(String url, String user, String password) {
         Jdbi jdbi = Jdbi.create(url, user, password);
         jdbi.installPlugin(new SqlObjectPlugin());
+        jdbi.registerColumnMapper(new StringListColumnMapper());
+        jdbi.registerArgument(new StringListArgumentFactory());
         return jdbi;
     }
 

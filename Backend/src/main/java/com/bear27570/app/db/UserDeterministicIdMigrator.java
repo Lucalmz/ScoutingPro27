@@ -128,5 +128,11 @@ public class UserDeterministicIdMigrator {
 
         // 6. team_tags (created_by)
         handle.execute("UPDATE team_tags SET created_by = ? WHERE created_by = ?", newId, oldId);
+
+        // 7. scout_assignments (scout_id)
+        handle.execute("UPDATE scout_assignments SET scout_id = ? WHERE scout_id = ?", newId, oldId);
+
+        // 8. pit_scouting_records (scout_id)
+        handle.execute("UPDATE pit_scouting_records SET scout_id = ? WHERE scout_id = ?", newId, oldId);
     }
 }

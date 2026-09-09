@@ -17,7 +17,7 @@ const props = defineProps<{
 }>()
 
 const emit = defineEmits<{
-  (e: 'startScouting', task: { matchNumber: number; teamNumber: number; allianceColor: 'red' | 'blue' }): void
+  (e: 'startScouting', task: { matchNumber: number; teamNumber: number; allianceColor: 'red' | 'blue'; tournamentLevel?: string }): void
 }>()
 
 const { t } = useI18n()
@@ -30,22 +30,31 @@ const toastStore = useToastStore()
 const showImportModal = ref(false)
 const showAuditModal = ref(false)
 const auditFocusMatch = ref<number | null>(null)
+const auditFocusLevel = ref<string | null>(null)
 const filterMode = ref<'all' | 'mine' | 'pending' | 'discrepancy'>('all')
 const searchQuery = ref('')
 
-function getMatchDiscrepancy(matchNumber: number) {
-  return recordStore.matchDiscrepancies.find((d) => d.matchNumber === matchNumber)
+function getMatchDiscrepancy(matchNumber: number, tournamentLevel?: string) {
+  const normLevel = (tournamentLevel || 'QUALIFICATION').toUpperCase()
+  return recordStore.matchDiscrepancies.find((d) => {
+    if (d.matchNumber !== matchNumber) return false
+    const dLevel = (d.tournamentLevel || 'QUALIFICATION').toUpperCase()
+    return dLevel === normLevel
+  })
 }
 
-function openAuditModal(focusMatch?: number) {
+function openAuditModal(focusMatch?: number, focusLevel?: string) {
   auditFocusMatch.value = focusMatch || null
+  auditFocusLevel.value = focusLevel || null
   showAuditModal.value = true
 }
 
-function onLocateMatchFromAudit(matchNumber: number) {
+function onLocateMatchFromAudit(matchNumber: number, tournamentLevel?: string) {
   scheduleStore.clearSelection()
-  scheduleStore.toggleMatchSelection(matchNumber)
-  const rowEl = document.querySelector(`[data-match-num="${matchNumber}"]`)
+  scheduleStore.toggleMatchSelection(matchNumber, tournamentLevel)
+  const normLevel = (tournamentLevel || 'QUALIFICATION').toUpperCase()
+  const rowEl = document.querySelector(`[data-match-num="${matchNumber}"][data-level="${normLevel}"]`) ||
+    document.querySelector(`[data-match-num="${matchNumber}"]`)
   if (rowEl) {
     rowEl.scrollIntoView({ behavior: 'smooth', block: 'center' })
   }
@@ -58,8 +67,9 @@ const bulkStationTarget = ref<StationType | 'all'>('all')
 const isMouseDown = ref(false)
 let dragMoved = false
 let dragStartMatch: number | null = null
+let dragStartLevel: string | undefined = undefined
 
-function onRowMouseDown(matchNumber: number, e: MouseEvent) {
+function onRowMouseDown(matchNumber: number, e: MouseEvent, tournamentLevel?: string) {
   if (!props.isHost) return
   const target = e.target as HTMLElement
   if (target.closest('select') || target.closest('button') || target.closest('input')) {
@@ -70,15 +80,16 @@ function onRowMouseDown(matchNumber: number, e: MouseEvent) {
   isMouseDown.value = true
   dragMoved = false
   dragStartMatch = matchNumber
+  dragStartLevel = tournamentLevel
 }
 
-function onRowMouseEnter(matchNumber: number) {
+function onRowMouseEnter(matchNumber: number, tournamentLevel?: string) {
   if (isMouseDown.value && props.isHost) {
     if (!dragMoved && dragStartMatch !== null) {
       dragMoved = true
-      scheduleStore.startDragSelection(dragStartMatch)
+      scheduleStore.startDragSelection(dragStartMatch, dragStartLevel)
     }
-    scheduleStore.dragSelectMatch(matchNumber)
+    scheduleStore.dragSelectMatch(matchNumber, tournamentLevel || dragStartLevel)
   }
 }
 
@@ -88,12 +99,13 @@ function onTableWheel(e: WheelEvent) {
     const rowEl = el?.closest('[data-match-num]')
     if (rowEl) {
       const mNum = parseInt(rowEl.getAttribute('data-match-num') || '', 10)
+      const lvl = rowEl.getAttribute('data-level') || undefined
       if (!isNaN(mNum)) {
         if (!dragMoved && dragStartMatch !== null) {
           dragMoved = true
-          scheduleStore.startDragSelection(dragStartMatch)
+          scheduleStore.startDragSelection(dragStartMatch, dragStartLevel)
         }
-        scheduleStore.dragSelectMatch(mNum)
+        scheduleStore.dragSelectMatch(mNum, lvl || dragStartLevel)
       }
     }
   }
@@ -107,17 +119,18 @@ function onWindowMouseUp() {
     }
     dragMoved = false
     dragStartMatch = null
+    dragStartLevel = undefined
   }
 }
 
-function onRowClick(matchNumber: number, e: MouseEvent) {
+function onRowClick(matchNumber: number, e: MouseEvent, tournamentLevel?: string) {
   if (!props.isHost) return
   const target = e.target as HTMLElement
   if (target.closest('select') || target.closest('button') || target.closest('input')) {
     return
   }
   if (dragMoved) return
-  scheduleStore.toggleMatchSelection(matchNumber)
+  scheduleStore.toggleMatchSelection(matchNumber, tournamentLevel)
 }
 
 onMounted(() => {
@@ -161,7 +174,8 @@ const displayedSchedules = computed(() => {
   if (searchQuery.value.trim()) {
     const q = searchQuery.value.trim().toLowerCase()
     list = list.filter((s) => {
-      const matchStr = `q${s.matchNumber} ${s.matchNumber}`
+      const prefix = (s.tournamentLevel || 'QUALIFICATION').toUpperCase() === 'PLAYOFF' ? 'p' : 'q'
+      const matchStr = `${prefix}${s.matchNumber} ${s.matchNumber} ${s.tournamentLevel || ''}`.toLowerCase()
       const teamsStr = `${s.red1} ${s.red2} ${s.blue1} ${s.blue2}`
       return matchStr.includes(q) || teamsStr.includes(q)
     })
@@ -170,10 +184,10 @@ const displayedSchedules = computed(() => {
   if (filterMode.value === 'mine') {
     const myId = userStore.userId
     list = list.filter((s) => {
-      const a1 = scheduleStore.getStationAssignment(s.matchNumber, 'red1')
-      const a2 = scheduleStore.getStationAssignment(s.matchNumber, 'red2')
-      const a3 = scheduleStore.getStationAssignment(s.matchNumber, 'blue1')
-      const a4 = scheduleStore.getStationAssignment(s.matchNumber, 'blue2')
+      const a1 = scheduleStore.getStationAssignment(s.matchNumber, 'red1', s.tournamentLevel)
+      const a2 = scheduleStore.getStationAssignment(s.matchNumber, 'red2', s.tournamentLevel)
+      const a3 = scheduleStore.getStationAssignment(s.matchNumber, 'blue1', s.tournamentLevel)
+      const a4 = scheduleStore.getStationAssignment(s.matchNumber, 'blue2', s.tournamentLevel)
       return (
         a1?.scoutId === myId ||
         a2?.scoutId === myId ||
@@ -186,12 +200,12 @@ const displayedSchedules = computed(() => {
       // 检查是否有工位尚未录入
       const hasUnscouted = ['red1', 'red2', 'blue1', 'blue2'].some((st) => {
         const teamNum = getTeamNumber(s, st as StationType)
-        return !isTeamScouted(s.matchNumber, teamNum)
+        return !isTeamScouted(s.matchNumber, teamNum, s.tournamentLevel)
       })
       return hasUnscouted
     })
   } else if (filterMode.value === 'discrepancy') {
-    list = list.filter((s) => Boolean(getMatchDiscrepancy(s.matchNumber)?.hasWarning))
+    list = list.filter((s) => Boolean(getMatchDiscrepancy(s.matchNumber, s.tournamentLevel)?.hasWarning))
   }
 
   return list
@@ -201,16 +215,45 @@ function getTeamNumber(sched: MatchScheduleItem, station: StationType): number {
   return (sched as any)[station] || 0
 }
 
-function isTeamScouted(matchNumber: number, teamNumber: number): boolean {
-  return !teamNumber ? false : recordStore.activeRecords.some((r) => r.matchNumber === matchNumber && r.teamNumber === teamNumber)
+function isTeamScouted(matchNumber: number, teamNumber: number, tournamentLevel?: string): boolean {
+  if (!teamNumber) return false
+  const targetLevel = (tournamentLevel || 'QUALIFICATION').toUpperCase()
+  return recordStore.activeRecords.some((r) => {
+    if (r.matchNumber !== matchNumber || r.teamNumber !== teamNumber) return false
+    try {
+      if (!r.rawData) return targetLevel === 'QUALIFICATION'
+      const parsed = typeof r.rawData === 'string' ? JSON.parse(r.rawData) : r.rawData
+      const rLevel = (parsed.tournamentLevel || 'QUALIFICATION').toUpperCase()
+      return rLevel === targetLevel
+    } catch {
+      return targetLevel === 'QUALIFICATION'
+    }
+  })
 }
 
-function isTeamScoutedByMe(matchNumber: number, teamNumber: number): boolean {
-  return !teamNumber || !userStore.userId ? false : recordStore.activeRecords.some((r) => r.matchNumber === matchNumber && r.teamNumber === teamNumber && r.scoutId === userStore.userId)
+function isTeamScoutedByMe(matchNumber: number, teamNumber: number, tournamentLevel?: string): boolean {
+  if (!teamNumber || !userStore.userId) return false
+  const targetLevel = (tournamentLevel || 'QUALIFICATION').toUpperCase()
+  return recordStore.activeRecords.some((r) => {
+    if (r.matchNumber !== matchNumber || r.teamNumber !== teamNumber || r.scoutId !== userStore.userId) return false
+    try {
+      if (!r.rawData) return targetLevel === 'QUALIFICATION'
+      const parsed = typeof r.rawData === 'string' ? JSON.parse(r.rawData) : r.rawData
+      const rLevel = (parsed.tournamentLevel || 'QUALIFICATION').toUpperCase()
+      return rLevel === targetLevel
+    } catch {
+      return targetLevel === 'QUALIFICATION'
+    }
+  })
 }
 
-function getOfficialScore(matchNumber: number): { red: number; blue: number } | null {
-  const m = recordStore.officialMatches.find((om) => om.matchNum === matchNumber)
+function getOfficialScore(matchNumber: number, tournamentLevel?: string): { red: number; blue: number } | null {
+  const normLevel = (tournamentLevel || 'QUALIFICATION').toUpperCase()
+  const m = recordStore.officialMatches.find((om) => {
+    if (om.matchNum !== matchNumber) return false
+    const omLevel = (om.tournamentLevel || 'QUALIFICATION').toUpperCase()
+    return omLevel === normLevel
+  })
   return m && m.scores ? { red: m.scores.red.totalPointsNp, blue: m.scores.blue.totalPointsNp } : null
 }
 
@@ -228,7 +271,8 @@ function handleStationScoutChange(sched: MatchScheduleItem, station: StationType
     station,
     scoutId,
     scoutName,
-    true
+    true,
+    sched.tournamentLevel
   )
 }
 
@@ -250,8 +294,8 @@ async function handleBatchAssign(scoutId: string | null, scoutName: string | nul
 }
 
 // 跳转到表单去打分
-function handleGoToScout(matchNumber: number, teamNumber: number, alliance: 'red' | 'blue') {
-  emit('startScouting', { matchNumber, teamNumber, allianceColor: alliance })
+function handleGoToScout(matchNumber: number, teamNumber: number, alliance: 'red' | 'blue', tournamentLevel?: string) {
+  emit('startScouting', { matchNumber, teamNumber, allianceColor: alliance, tournamentLevel })
 }
 
 // 清空赛程确认
@@ -429,17 +473,18 @@ async function handleClearSchedule() {
         <tbody>
           <tr
             v-for="sched in displayedSchedules"
-            :key="sched.matchNumber"
+            :key="`${sched.tournamentLevel || 'QUALIFICATION'}_${sched.matchNumber}`"
             :data-match-num="sched.matchNumber"
+            :data-level="sched.tournamentLevel || 'QUALIFICATION'"
             class="match-row"
-            :class="{ selected: scheduleStore.isMatchSelected(sched.matchNumber) }"
-            @mousedown="onRowMouseDown(sched.matchNumber, $event)"
-            @mouseenter="onRowMouseEnter(sched.matchNumber)"
-            @click="onRowClick(sched.matchNumber, $event)"
+            :class="{ selected: scheduleStore.isMatchSelected(sched.matchNumber, sched.tournamentLevel) }"
+            @mousedown="onRowMouseDown(sched.matchNumber, $event, sched.tournamentLevel)"
+            @mouseenter="onRowMouseEnter(sched.matchNumber, sched.tournamentLevel)"
+            @click="onRowClick(sched.matchNumber, $event, sched.tournamentLevel)"
           >
             <!-- 场次标识 -->
             <td class="td-match">
-              <div class="match-badge">Q{{ sched.matchNumber }}</div>
+              <div class="match-badge">{{ (sched.tournamentLevel || '').toUpperCase() === 'PLAYOFF' ? 'P' : 'Q' }}{{ sched.matchNumber }}</div>
             </td>
 
             <!-- 红方联盟 -->
@@ -450,22 +495,22 @@ async function handleClearSchedule() {
                   :key="st.station"
                   class="station-card red"
                   :class="{
-                    'scouted': isTeamScouted(sched.matchNumber, st.team),
-                    'assigned-to-me': scheduleStore.getStationAssignment(sched.matchNumber, st.station)?.scoutId === userStore.userId
+                    'scouted': isTeamScouted(sched.matchNumber, st.team, sched.tournamentLevel),
+                    'assigned-to-me': scheduleStore.getStationAssignment(sched.matchNumber, st.station, sched.tournamentLevel)?.scoutId === userStore.userId
                   }"
                 >
                   <div class="station-top">
                     <span class="station-badge">{{ st.label }}</span>
                     <span class="team-number">#{{ st.team }}</span>
                     <PitStatusIndicator :team-number="st.team" size="sm" />
-                    <span v-if="isTeamScouted(sched.matchNumber, st.team)" class="material-icons scouted-icon" :title="t('schedule.scouted')">check</span>
+                    <span v-if="isTeamScouted(sched.matchNumber, st.team, sched.tournamentLevel)" class="material-icons scouted-icon" :title="t('schedule.scouted')">check</span>
                   </div>
 
                   <!-- Host 下拉排班 (支持留空) -->
                   <div v-if="isHost" class="assignment-control" @mousedown.stop>
                     <select
                       class="scout-select"
-                      :value="scheduleStore.getStationAssignment(sched.matchNumber, st.station)?.scoutId || ''"
+                      :value="scheduleStore.getStationAssignment(sched.matchNumber, st.station, sched.tournamentLevel)?.scoutId || ''"
                       @change="handleStationScoutChange(sched, st.station, $event)"
                     >
                       <option value="">{{ t('schedule.unassigned') }}</option>
@@ -478,14 +523,14 @@ async function handleClearSchedule() {
                   <!-- Scout 只读与跳转打分 -->
                   <div v-else class="scout-view-box">
                     <span class="scout-name-tag">
-                      {{ scheduleStore.getStationAssignment(sched.matchNumber, st.station)?.scoutName || t('schedule.unassigned') }}
+                      {{ scheduleStore.getStationAssignment(sched.matchNumber, st.station, sched.tournamentLevel)?.scoutName || t('schedule.unassigned') }}
                     </span>
                     <button
-                      v-if="scheduleStore.getStationAssignment(sched.matchNumber, st.station)?.scoutId === userStore.userId"
+                      v-if="scheduleStore.getStationAssignment(sched.matchNumber, st.station, sched.tournamentLevel)?.scoutId === userStore.userId"
                       class="btn-go-scout red"
-                      @click.stop="handleGoToScout(sched.matchNumber, st.team, 'red')"
+                      @click.stop="handleGoToScout(sched.matchNumber, st.team, 'red', sched.tournamentLevel)"
                     >
-                      {{ isTeamScoutedByMe(sched.matchNumber, st.team) ? t('schedule.btn_scouted_again') : t('schedule.btn_go_scout') }}
+                      {{ isTeamScoutedByMe(sched.matchNumber, st.team, sched.tournamentLevel) ? t('schedule.btn_scouted_again') : t('schedule.btn_go_scout') }}
                     </button>
                   </div>
                 </div>
@@ -500,21 +545,21 @@ async function handleClearSchedule() {
                   :key="st.station"
                   class="station-card blue"
                   :class="{
-                    'scouted': isTeamScouted(sched.matchNumber, st.team),
-                    'assigned-to-me': scheduleStore.getStationAssignment(sched.matchNumber, st.station)?.scoutId === userStore.userId
+                    'scouted': isTeamScouted(sched.matchNumber, st.team, sched.tournamentLevel),
+                    'assigned-to-me': scheduleStore.getStationAssignment(sched.matchNumber, st.station, sched.tournamentLevel)?.scoutId === userStore.userId
                   }"
                 >
                   <div class="station-top">
                     <span class="station-badge">{{ st.label }}</span>
                     <span class="team-number">#{{ st.team }}</span>
                     <PitStatusIndicator :team-number="st.team" size="sm" />
-                    <span v-if="isTeamScouted(sched.matchNumber, st.team)" class="material-icons scouted-icon" :title="t('schedule.scouted')">check</span>
+                    <span v-if="isTeamScouted(sched.matchNumber, st.team, sched.tournamentLevel)" class="material-icons scouted-icon" :title="t('schedule.scouted')">check</span>
                   </div>
 
                   <div v-if="isHost" class="assignment-control" @mousedown.stop>
                     <select
                       class="scout-select"
-                      :value="scheduleStore.getStationAssignment(sched.matchNumber, st.station)?.scoutId || ''"
+                      :value="scheduleStore.getStationAssignment(sched.matchNumber, st.station, sched.tournamentLevel)?.scoutId || ''"
                       @change="handleStationScoutChange(sched, st.station, $event)"
                     >
                       <option value="">{{ t('schedule.unassigned') }}</option>
@@ -526,14 +571,14 @@ async function handleClearSchedule() {
 
                   <div v-else class="scout-view-box">
                     <span class="scout-name-tag">
-                      {{ scheduleStore.getStationAssignment(sched.matchNumber, st.station)?.scoutName || t('schedule.unassigned') }}
+                      {{ scheduleStore.getStationAssignment(sched.matchNumber, st.station, sched.tournamentLevel)?.scoutName || t('schedule.unassigned') }}
                     </span>
                     <button
-                      v-if="scheduleStore.getStationAssignment(sched.matchNumber, st.station)?.scoutId === userStore.userId"
+                      v-if="scheduleStore.getStationAssignment(sched.matchNumber, st.station, sched.tournamentLevel)?.scoutId === userStore.userId"
                       class="btn-go-scout blue"
-                      @click.stop="handleGoToScout(sched.matchNumber, st.team, 'blue')"
+                      @click.stop="handleGoToScout(sched.matchNumber, st.team, 'blue', sched.tournamentLevel)"
                     >
-                      {{ isTeamScoutedByMe(sched.matchNumber, st.team) ? t('schedule.btn_scouted_again') : t('schedule.btn_go_scout') }}
+                      {{ isTeamScoutedByMe(sched.matchNumber, st.team, sched.tournamentLevel) ? t('schedule.btn_scouted_again') : t('schedule.btn_go_scout') }}
                     </button>
                   </div>
                 </div>
@@ -542,24 +587,24 @@ async function handleClearSchedule() {
 
             <!-- 官方比分展示与对账差额告警 -->
             <td class="td-score">
-              <div v-if="getOfficialScore(sched.matchNumber)" class="official-score-box">
-                <span class="score-num red">{{ getOfficialScore(sched.matchNumber)!.red }}</span>
+              <div v-if="getOfficialScore(sched.matchNumber, sched.tournamentLevel)" class="official-score-box">
+                <span class="score-num red">{{ getOfficialScore(sched.matchNumber, sched.tournamentLevel)!.red }}</span>
                 <span class="score-split">:</span>
-                <span class="score-num blue">{{ getOfficialScore(sched.matchNumber)!.blue }}</span>
+                <span class="score-num blue">{{ getOfficialScore(sched.matchNumber, sched.tournamentLevel)!.blue }}</span>
               </div>
               <span v-else class="score-pending">—</span>
 
               <!-- 差额异常告警胶囊 -->
               <div
-                v-if="getMatchDiscrepancy(sched.matchNumber)?.hasWarning"
+                v-if="getMatchDiscrepancy(sched.matchNumber, sched.tournamentLevel)?.hasWarning"
                 class="discrepancy-pill"
-                :class="{ 'rank-top5': getMatchDiscrepancy(sched.matchNumber)?.isTop5 }"
-                :title="getMatchDiscrepancy(sched.matchNumber)?.summaryMessage || t('schedule.discrepancy_warning_tooltip')"
-                @click.stop="openAuditModal(sched.matchNumber)"
+                :class="{ 'rank-top5': getMatchDiscrepancy(sched.matchNumber, sched.tournamentLevel)?.isTop5 }"
+                :title="getMatchDiscrepancy(sched.matchNumber, sched.tournamentLevel)?.summaryMessage || t('schedule.discrepancy_warning_tooltip')"
+                @click.stop="openAuditModal(sched.matchNumber, sched.tournamentLevel)"
               >
                 <span class="material-icons warning-mini-icon">warning</span>
                 <span class="diff-tag">
-                  {{ getMatchDiscrepancy(sched.matchNumber)?.rank && getMatchDiscrepancy(sched.matchNumber)!.rank! <= 5 ? `Top${getMatchDiscrepancy(sched.matchNumber)!.rank} ` : '' }}±{{ getMatchDiscrepancy(sched.matchNumber)!.maxDiff }}
+                  {{ getMatchDiscrepancy(sched.matchNumber, sched.tournamentLevel)?.rank && getMatchDiscrepancy(sched.matchNumber, sched.tournamentLevel)!.rank! <= 5 ? `Top${getMatchDiscrepancy(sched.matchNumber, sched.tournamentLevel)!.rank} ` : '' }}±{{ getMatchDiscrepancy(sched.matchNumber, sched.tournamentLevel)!.maxDiff }}
                 </span>
               </div>
             </td>
