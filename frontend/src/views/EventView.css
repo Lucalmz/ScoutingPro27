@@ -21,7 +21,8 @@
   gap: 12px;
 }
 
-.user-tag-btn {
+.user-tag-btn,
+.topbar-btn {
   display: inline-flex;
   align-items: center;
   gap: 4px;
@@ -35,7 +36,8 @@
   transition: all 0.34s ease;
 }
 
-.user-tag-btn:hover {
+.user-tag-btn:hover,
+.topbar-btn:hover {
   background: rgba(57, 255, 20, 0.12);
   border-color: var(--primary, #39ff14);
   color: var(--primary, #39ff14);
@@ -330,6 +332,56 @@
   font-size: 16px;
 }
 
+.standby-host-banner {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 8px 16px;
+  background: rgba(234, 179, 8, 0.15);
+  border-bottom: 1px solid rgba(234, 179, 8, 0.35);
+  font-size: 13px;
+  color: var(--foreground);
+}
+
+.standby-banner-left {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.standby-icon {
+  font-size: 18px;
+  color: #eab308;
+  flex-shrink: 0;
+}
+
+.standby-text {
+  line-height: 1.4;
+}
+
+.btn-takeover-host {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 4px 12px;
+  border-radius: 6px;
+  background: #eab308;
+  color: #000;
+  font-weight: 600;
+  font-size: 12px;
+  border: none;
+  cursor: pointer;
+  white-space: nowrap;
+  transition: all 0.2s ease;
+  flex-shrink: 0;
+}
+
+.btn-takeover-host:hover {
+  background: #facc15;
+  box-shadow: 0 2px 8px rgba(234, 179, 8, 0.35);
+}
+
 @media (max-width: 768px) {
   .tab-bar {
     display: none !important;
@@ -340,8 +392,7 @@
   .topbar {
     padding: 10px 14px;
   }
-  .user-tag-btn.host-qr-btn .username-text,
-  .user-tag-btn.inbox-topbar-btn .username-text {
+  .topbar-btn .topbar-btn-text {
     display: none;
   }
 }

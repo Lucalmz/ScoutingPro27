@@ -41,6 +41,7 @@ export interface SystemMessage {
   deliveryStatus?: MessageDeliveryStatus
   conflictMatchNumber?: number
   conflictTeamNumber?: number
+  conflictTournamentLevel?: string
 }
 
 // --- Event ---

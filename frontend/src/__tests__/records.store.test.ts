@@ -11,7 +11,17 @@ vi.mock('../services/api', () => ({
   markRecordsSynced: vi.fn()
 }))
 
-const createDummyRecord = (id: string, teamNumber: number, autoScore: number, teleopScore: number, endgameScore: number, scoutId = 's1', syncStatus = 'PENDING', allianceColor = 'none'): ScoutingRecord => ({
+const createDummyRecord = (
+  id: string,
+  teamNumber: number,
+  autoScore: number,
+  teleopScore: number,
+  endgameScore: number,
+  scoutId = 's1',
+  syncStatus = 'PENDING',
+  allianceColor = 'none',
+  tournamentLevel = 'QUALIFICATION'
+): ScoutingRecord => ({
   id,
   eventId: 'e1',
   scoutId,
@@ -23,7 +33,7 @@ const createDummyRecord = (id: string, teamNumber: number, autoScore: number, te
   endgameScore,
   totalScore: autoScore + teleopScore + endgameScore,
   notes: '',
-  rawData: JSON.stringify({ allianceColor }),
+  rawData: JSON.stringify({ allianceColor, tournamentLevel }),
   syncStatus: syncStatus as any,
   createdAt: '',
   updatedAt: ''
@@ -139,6 +149,51 @@ describe('Records Store', () => {
     expect(modified.map(m => m.id).sort()).toEqual(['r1', 'r2'])
   })
 
+  it('bulkSync does NOT trigger conflict between qualification and playoff records for the same match and team', async () => {
+    const store = useRecordStore()
+
+    // Scout 1 submits Match 1 Team 9999 for QUALIFICATION
+    store.records = [
+      { ...createDummyRecord('r_qual', 9999, 10, 10, 10, 'scout1', 'PENDING', 'none', 'QUALIFICATION'), version: 1 }
+    ]
+
+    // Scout 2 submits Match 1 Team 9999 for PLAYOFF
+    const incoming = [
+      { ...createDummyRecord('r_playoff', 9999, 15, 15, 15, 'scout2', 'PENDING', 'none', 'PLAYOFF'), version: 1 }
+    ]
+
+    const modified = await store.bulkSync(incoming)
+
+    // Only incoming should be in modified (as accepted record), neither should be flagged as conflict
+    const rQual = store.records.find(r => r.id === 'r_qual')
+    const rPlayoff = store.records.find(r => r.id === 'r_playoff')
+    expect(rQual?.isConflict).toBeFalsy()
+    expect(rPlayoff?.isConflict).toBeFalsy()
+    expect(rQual?.version).toBe(1)
+    expect(rPlayoff?.version).toBe(1)
+    expect(modified.map(m => m.id)).toEqual(['r_playoff'])
+  })
+
+  it('reassessConflicts isolates conflict resolution by tournamentLevel', async () => {
+    const store = useRecordStore()
+
+    // Setup 2 conflicting scouts in QUALIFICATION Match 1 Team 9999
+    const q1 = { ...createDummyRecord('q1', 9999, 10, 10, 10, 'scout1', 'PENDING', 'none', 'QUALIFICATION'), isConflict: true, version: 2 }
+    const q2 = { ...createDummyRecord('q2', 9999, 12, 12, 12, 'scout2', 'PENDING', 'none', 'QUALIFICATION'), isConflict: true, version: 2 }
+
+    // And 1 non-conflicting scout in PLAYOFF Match 1 Team 9999
+    const p1 = { ...createDummyRecord('p1', 9999, 20, 20, 20, 'scout3', 'PENDING', 'none', 'PLAYOFF'), isConflict: false, version: 1 }
+
+    store.records = [q1, q2, p1]
+
+    // Soft delete q2 (resolving qualification conflict)
+    await store.deleteRecord('q2')
+
+    // q1 should have its conflict cleared, p1 remains non-conflicted
+    expect(store.records.find(r => r.id === 'q1')?.isConflict).toBe(false)
+    expect(store.records.find(r => r.id === 'p1')?.isConflict).toBe(false)
+  })
+
   it('handles soft-delete tombstone and excludes from rankings', async () => {
     const store = useRecordStore()
     vi.mocked(api.saveRecord).mockResolvedValue(undefined)
@@ -216,6 +271,28 @@ describe('Records Store', () => {
     expect(store.teamTags).toHaveLength(2)
     expect(store.getTagsForTeam(27570)).toHaveLength(1)
     expect(store.getTagsForTeam(19600)).toHaveLength(1)
+  })
+
+  it('isolates tags across different events during applyTagsFullSync and getTagsForTeam', () => {
+    const store = useRecordStore()
+    store.teamTags = [
+      { id: 'tag-prev', eventId: 'event-A', teamNumber: 27570, tag: 'Event-A-Specific', color: 'green', isPreset: false }
+    ]
+
+    const newTagsEventB: TeamTagItem[] = [
+      { id: 'tag-new', eventId: 'event-B', teamNumber: 27570, tag: 'Event-B-Specific', color: 'blue', isPreset: false }
+    ]
+
+    store.applyTagsFullSync(newTagsEventB, 'event-B')
+    expect(store.teamTags).toHaveLength(2)
+
+    const tagsA = store.getTagsForTeam(27570, 'event-A')
+    expect(tagsA).toHaveLength(1)
+    expect(tagsA[0].tag).toBe('Event-A-Specific')
+
+    const tagsB = store.getTagsForTeam(27570, 'event-B')
+    expect(tagsB).toHaveLength(1)
+    expect(tagsB[0].tag).toBe('Event-B-Specific')
   })
 
   it('migrates scoutId and scoutName across all historical records upon user rename', () => {
@@ -429,6 +506,44 @@ describe('Records Store', () => {
     store.bulkSync([incoming])
     const found = store.records.find((r) => r.id === 'r_sync_1')
     expect(found?.syncStatus).toBe('SYNCED')
+  })
+
+  it('addRecord detects local conflicts when another scout already recorded the same match and team', async () => {
+    const store = useRecordStore()
+    vi.mocked(api.saveRecord).mockResolvedValue(undefined)
+
+    // Scout 1 record exists locally
+    const r1 = { ...createDummyRecord('r_local_1', 9999, 10, 10, 10, 'scout_alice'), matchNumber: 1 }
+    await store.addRecord(r1)
+    expect(store.records.find(r => r.id === 'r_local_1')?.isConflict).toBeFalsy()
+
+    // Scout 2 adds record for same match and team
+    const r2 = { ...createDummyRecord('r_local_2', 9999, 20, 20, 20, 'scout_bob'), matchNumber: 1 }
+    const res = await store.addRecord(r2)
+
+    // Both records should be flagged as conflict and returned in recordsToPush
+    expect(store.records.find(r => r.id === 'r_local_1')?.isConflict).toBe(true)
+    expect(store.records.find(r => r.id === 'r_local_2')?.isConflict).toBe(true)
+    expect(res.recordsToPush.map(r => r.id).sort()).toEqual(['r_local_1', 'r_local_2'])
+  })
+
+  it('migrateScoutId automatically resolves conflict when conflicting records merge to the same user', async () => {
+    const store = useRecordStore()
+
+    // Alice-Phone and Alice-Main both scouted Match 1 Team 9999 (flagged as conflict)
+    const rPhone = { ...createDummyRecord('r_phone', 9999, 10, 10, 10, 'alice_phone_id'), matchNumber: 1, isConflict: true, version: 2 }
+    const rMain = { ...createDummyRecord('r_main', 9999, 12, 12, 12, 'alice_main_id'), matchNumber: 1, isConflict: true, version: 2 }
+    store.records = [rPhone, rMain]
+
+    // Execute identity migration: Alice-Phone merged into Alice-Main
+    store.migrateScoutId('alice_phone_id', 'alice_main_id', 'Alice-Main')
+
+    // Conflict should be automatically cleared because both records are now owned by the same scout
+    const recPhoneAfter = store.records.find(r => r.id === 'r_phone')
+    const recMainAfter = store.records.find(r => r.id === 'r_main')
+    expect(recPhoneAfter?.scoutId).toBe('alice_main_id')
+    expect(recPhoneAfter?.isConflict).toBe(false)
+    expect(recMainAfter?.isConflict).toBe(false)
   })
 })
 

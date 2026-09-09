@@ -14,6 +14,7 @@ const props = defineProps<{
 const emit = defineEmits<{
   (e: 'update:visible', value: boolean): void
   (e: 'renamed', newName: string): void
+  (e: 'openMerge'): void
 }>()
 
 const { t } = useI18n()
@@ -66,6 +67,12 @@ function handleClose() {
   } else {
     emit('update:visible', false)
   }
+}
+
+function handleOpenMerge() {
+  if (saving.value) return
+  emit('update:visible', false)
+  emit('openMerge')
 }
 
 function onGlobalKeyDown(e: KeyboardEvent) {
@@ -260,14 +267,20 @@ async function handleSave() {
           </div>
         </div>
 
-        <div class="modal-actions">
-          <button class="btn btn-secondary" :disabled="saving" @click="handleClose">
-            {{ t('common.cancel') || t('user.btn_cancel') || '取消' }}
+        <div class="modal-footer-row">
+          <button type="button" class="btn-merge-link" :disabled="saving" @click="handleOpenMerge">
+            <span class="material-icons merge-icon">merge_type</span>
+            <span>{{ t('user.merge_modal_title') || '合并已有账号' }}</span>
           </button>
-          <button class="btn btn-primary" :disabled="saving || !newUsername.trim()" @click="handleSave">
-            <span v-if="saving" class="material-icons spinning" style="font-size: 16px; margin-right: 4px;">sync</span>
-            {{ saving ? (t('user.btn_saving') || '保存中...') : (t('user.btn_save') || '保存修改') }}
-          </button>
+          <div class="modal-actions">
+            <button class="btn btn-secondary" :disabled="saving" @click="handleClose">
+              {{ t('common.cancel') || t('user.btn_cancel') || '取消' }}
+            </button>
+            <button class="btn btn-primary" :disabled="saving || !newUsername.trim()" @click="handleSave">
+              <span v-if="saving" class="material-icons spinning" style="font-size: 16px; margin-right: 4px;">sync</span>
+              {{ saving ? (t('user.btn_saving') || '保存中...') : (t('user.btn_save') || '保存修改') }}
+            </button>
+          </div>
         </div>
       </div>
     </div>
@@ -541,11 +554,46 @@ async function handleSave() {
   border-top: 1px solid var(--border, #262626);
 }
 
+.modal-footer-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-top: 20px;
+  gap: 12px;
+}
+
+.btn-merge-link {
+  background: transparent;
+  border: none;
+  color: var(--primary, #39ff14);
+  font-size: 0.85rem;
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  cursor: pointer;
+  padding: 6px 0;
+  transition: opacity 0.2s;
+  font-family: inherit;
+}
+
+.btn-merge-link:hover:not(:disabled) {
+  opacity: 0.8;
+  text-decoration: underline;
+}
+
+.btn-merge-link:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.merge-icon {
+  font-size: 16px;
+}
+
 .modal-actions {
   display: flex;
   justify-content: flex-end;
   gap: 12px;
-  margin-top: 20px;
 }
 
 .btn {

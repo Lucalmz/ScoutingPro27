@@ -349,5 +349,56 @@ describe('Schedule Store', () => {
       expect(playoffItem).toBeDefined()
       expect(playoffItem?.schedule?.blue2).toBe(994)
     })
+
+    it('myAssignments sorts qualification matches before playoff matches chronologically', () => {
+      const store = useScheduleStore()
+      store.schedules = [
+        { id: 'q1', eventId: 'e1', matchNumber: 1, tournamentLevel: 'QUALIFICATION', red1: 111, red2: 112, blue1: 113, blue2: 114 },
+        { id: 'q2', eventId: 'e1', matchNumber: 2, tournamentLevel: 'QUALIFICATION', red1: 211, red2: 212, blue1: 213, blue2: 214 },
+        { id: 'p1', eventId: 'e1', matchNumber: 1, tournamentLevel: 'PLAYOFF', red1: 991, red2: 992, blue1: 993, blue2: 994 }
+      ]
+
+      store.assignments = {
+        'QUALIFICATION_1_red1': {
+          id: 'a_q1',
+          eventId: 'e1',
+          matchNumber: 1,
+          tournamentLevel: 'QUALIFICATION',
+          station: 'red1',
+          teamNumber: 111,
+          scoutId: 'scout_order',
+          scoutName: 'Order Scout'
+        },
+        'QUALIFICATION_2_red1': {
+          id: 'a_q2',
+          eventId: 'e1',
+          matchNumber: 2,
+          tournamentLevel: 'QUALIFICATION',
+          station: 'red1',
+          teamNumber: 211,
+          scoutId: 'scout_order',
+          scoutName: 'Order Scout'
+        },
+        'PLAYOFF_1_red1': {
+          id: 'a_p1',
+          eventId: 'e1',
+          matchNumber: 1,
+          tournamentLevel: 'PLAYOFF',
+          station: 'red1',
+          teamNumber: 991,
+          scoutId: 'scout_order',
+          scoutName: 'Order Scout'
+        }
+      }
+
+      const assigned = store.myAssignments('scout_order')
+      expect(assigned).toHaveLength(3)
+      // Chronological order MUST be: Q1, Q2, then P1 (not Q1, P1, Q2)
+      expect(assigned.map(a => `${a.assignment.tournamentLevel}_${a.matchNumber}`)).toEqual([
+        'QUALIFICATION_1',
+        'QUALIFICATION_2',
+        'PLAYOFF_1'
+      ])
+    })
   })
 })

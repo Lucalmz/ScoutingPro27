@@ -42,7 +42,8 @@ function handleMessageClick(msg: SystemMessage) {
   if (msg.type === 'conflict' && msg.conflictMatchNumber && msg.conflictTeamNumber) {
     const eventId = route.params.eventId
     if (eventId) {
-      router.push(`/event/${eventId}?tab=history&highlightMatch=${msg.conflictMatchNumber}&highlightTeam=${msg.conflictTeamNumber}`)
+      const levelQuery = msg.conflictTournamentLevel ? `&highlightLevel=${msg.conflictTournamentLevel}` : ''
+      router.push(`/event/${eventId}?tab=history&highlightMatch=${msg.conflictMatchNumber}&highlightTeam=${msg.conflictTeamNumber}${levelQuery}`)
       inboxStore.setOpen(false)
     } else {
       alert('Please enter the event first to view the conflict.')
@@ -131,6 +132,12 @@ function handleMessageClick(msg: SystemMessage) {
   backdrop-filter: blur(2px);
   -webkit-backdrop-filter: blur(2px);
   z-index: 999;
+}
+
+@media (min-width: 769px) {
+  .inbox-backdrop {
+    display: none;
+  }
 }
 
 .inbox-morph-container {

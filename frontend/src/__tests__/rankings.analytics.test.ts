@@ -156,4 +156,82 @@ describe('rankings analytics', () => {
     expect(rankings[0]!.maxScore).toBe(100)
     expect(rankings[0]!.avgRating).toBe(100)
   })
+
+  it('correctly sorts chronological progression across qualification and playoff for trend calculation', () => {
+    const records: ScoutingRecord[] = [
+      {
+        id: 'r_q1',
+        eventId: 'e1',
+        matchNumber: 1,
+        teamNumber: 27570,
+        scoutId: 's1',
+        scoutName: 'Scout 1',
+        totalScore: 50,
+        autoScore: 20,
+        teleopScore: 20,
+        endgameScore: 10,
+        rawData: JSON.stringify({ tournamentLevel: 'QUALIFICATION' }),
+        syncStatus: 'SYNCED',
+        version: 1,
+        createdAt: '2026-01-01T09:00:00Z',
+        updatedAt: '2026-01-01T09:00:00Z'
+      },
+      {
+        id: 'r_q2',
+        eventId: 'e1',
+        matchNumber: 2,
+        teamNumber: 27570,
+        scoutId: 's1',
+        scoutName: 'Scout 1',
+        totalScore: 50,
+        autoScore: 20,
+        teleopScore: 20,
+        endgameScore: 10,
+        rawData: JSON.stringify({ tournamentLevel: 'QUALIFICATION' }),
+        syncStatus: 'SYNCED',
+        version: 1,
+        createdAt: '2026-01-01T10:00:00Z',
+        updatedAt: '2026-01-01T10:00:00Z'
+      },
+      {
+        id: 'r_q3',
+        eventId: 'e1',
+        matchNumber: 3,
+        teamNumber: 27570,
+        scoutId: 's1',
+        scoutName: 'Scout 1',
+        totalScore: 50,
+        autoScore: 20,
+        teleopScore: 20,
+        endgameScore: 10,
+        rawData: JSON.stringify({ tournamentLevel: 'QUALIFICATION' }),
+        syncStatus: 'SYNCED',
+        version: 1,
+        createdAt: '2026-01-01T11:00:00Z',
+        updatedAt: '2026-01-01T11:00:00Z'
+      },
+      {
+        id: 'r_p1',
+        eventId: 'e1',
+        matchNumber: 1,
+        teamNumber: 27570,
+        scoutId: 's1',
+        scoutName: 'Scout 1',
+        totalScore: 100, // performed well in playoff match 1
+        autoScore: 30,
+        teleopScore: 40,
+        endgameScore: 30,
+        rawData: JSON.stringify({ tournamentLevel: 'PLAYOFF' }),
+        syncStatus: 'SYNCED',
+        version: 1,
+        createdAt: '2026-01-01T14:00:00Z',
+        updatedAt: '2026-01-01T14:00:00Z'
+      }
+    ]
+
+    const rankings = calculateRankings(records, [], {})
+    // Chronological progression: Q1 (50) -> Q2 (50) -> Q3 (50) -> P1 (100)
+    // Previous average: 50. Last match: 100. Trend must be 'up', NOT 'down'!
+    expect(rankings[0]!.trend).toBe('up')
+  })
 })

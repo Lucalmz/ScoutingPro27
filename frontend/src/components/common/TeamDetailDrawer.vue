@@ -6,6 +6,7 @@ import { useRecordStore } from '@/stores/records'
 import { useNavigationStore } from '@/stores/navigation'
 import TagPicker from '@/components/common/TagPicker.vue'
 import type { RankingRow, ScoutingRecord } from '@/types'
+import { sortRecordsChronologically, getMatchLevelPrefix } from '@/utils/tournament'
 
 const props = defineProps<{
   /** 当前展示的队伍编号，null 表示关闭状态 */
@@ -52,9 +53,9 @@ async function fetchTeamData(teamNum: number) {
 
     // 从 recordStore 读取数据（响应式，同步即可）
     rankInfo.value = recordStore.rankings.find(r => r.teamNumber === teamNum) ?? null
-    teamMatches.value = recordStore.records
-      .filter(r => r.teamNumber === teamNum && !r.isDeleted)
-      .sort((a, b) => a.matchNumber - b.matchNumber)
+    teamMatches.value = sortRecordsChronologically(
+      recordStore.activeRecords.filter(r => (!props.eventId || r.eventId === props.eventId) && r.teamNumber === teamNum)
+    )
   } finally {
     if (myId === currentFetchId) {
       isLoading.value = false
@@ -232,7 +233,7 @@ onUnmounted(() => {
               :class="{ 'is-broken': match.isBroken }"
             >
               <div class="match-row-header">
-                <span class="match-num">{{ t('team_drawer.match_num', { n: match.matchNumber }) }}</span>
+                <span class="match-num">{{ t('team_drawer.match_num', { n: `${getMatchLevelPrefix(match)}${match.matchNumber}` }) }}</span>
                 <span v-if="match.isBroken" class="broken-tag">
                   <span class="material-icons" style="font-size:11px">build</span>
                   {{ t('team_drawer.broken') }}

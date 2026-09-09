@@ -242,7 +242,7 @@ async function applyImport() {
     const res = await executeBatchSyncImport({
       scanResult: scanResult.value,
       targetEventId: currentEvent.value?.id || '',
-      isHost: isHost.value,
+      isHost: isHost.value && !connStore.isStandbyHost,
       events: eventStore.events,
       bulkSync: recordStore.bulkSync,
       stampHostSeq: connStore.stampHostSeq,

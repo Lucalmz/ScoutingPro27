@@ -107,4 +107,50 @@ class UserDeterministicIdMigratorTest {
             assertThat(pitScoutId).isEqualTo(newDeterministicId);
         });
     }
+
+    @Test
+    void testMigrateWithPreExistingDeterministicIdUser() {
+        String username = "Bob";
+        String legacyOldId = "legacy-uuid-bob-999";
+        String deterministicId = UserUtil.generateDeterministicUserId(username);
+
+        jdbi.useHandle(handle -> {
+            handle.execute("SET REFERENTIAL_INTEGRITY FALSE");
+            // Older account with legacy UUID
+            handle.execute("INSERT INTO users (id, username, password, created_at) VALUES (?, ?, ?, '2024-01-01 10:00:00')",
+                    legacyOldId, username, "bob-hash");
+            // Newer account/placeholder that already has the target deterministic ID
+            handle.execute("INSERT INTO users (id, username, password, created_at) VALUES (?, ?, ?, '2024-02-01 10:00:00')",
+                    deterministicId, username, "");
+
+            handle.execute("INSERT INTO events (id, name, invite_code, host_id) VALUES (?, ?, ?, ?)", "evt_bob", "Bob Event", "BOB123", legacyOldId);
+            handle.execute("INSERT INTO scouting_records (id, event_id, scout_id, scout_name, match_number, team_number) VALUES (?, ?, ?, ?, ?, ?)",
+                    "rec_bob", "evt_bob", legacyOldId, username, 1, 27570);
+            handle.execute("SET REFERENTIAL_INTEGRITY TRUE");
+        });
+
+        // Run full migrator
+        UserDeterministicIdMigrator.migrate(jdbi);
+
+        jdbi.useHandle(handle -> {
+            // Verify that legacyOldId row is removed and only deterministicId exists
+            int legacyCount = handle.createQuery("SELECT COUNT(*) FROM users WHERE id = ?").bind(0, legacyOldId).mapTo(Integer.class).one();
+            assertThat(legacyCount).isEqualTo(0);
+
+            User migratedUser = handle.createQuery("SELECT id, username, password FROM users WHERE id = ?")
+                    .bind(0, deterministicId)
+                    .mapToBean(User.class)
+                    .one();
+            assertThat(migratedUser.getUsername()).isEqualTo(username);
+            assertThat(migratedUser.getPassword()).isEqualTo("bob-hash");
+
+            // Verify foreign keys repointed to deterministicId
+            String eventHostId = handle.createQuery("SELECT host_id FROM events WHERE id = 'evt_bob'").mapTo(String.class).one();
+            assertThat(eventHostId).isEqualTo(deterministicId);
+
+            String recordScoutId = handle.createQuery("SELECT scout_id FROM scouting_records WHERE id = 'rec_bob'").mapTo(String.class).one();
+            assertThat(recordScoutId).isEqualTo(deterministicId);
+        });
+    }
 }
+

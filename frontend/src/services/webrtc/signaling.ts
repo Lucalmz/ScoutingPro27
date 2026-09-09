@@ -18,8 +18,8 @@ import {
 export class SignalingChannel {
   private client: mqtt.MqttClient | null = null
   private topic: string = ''
-  private clientId: string
-  private messageCallback: ((data: unknown) => void) | null = null
+  readonly clientId: string
+  private messageCallback: ((data: unknown) => void | Promise<void>) | null = null
   private hmacKey: CryptoKey | null = null
   private nonceCache: NonceLruCache = new NonceLruCache(5000, 30000)
 
@@ -38,7 +38,7 @@ export class SignalingChannel {
   }
 
   connect(callbacks: {
-    onMessage: (data: unknown) => void
+    onMessage: (data: unknown) => void | Promise<void>
     onConnect?: () => void
     onError?: (err?: Error) => void
   }): void {
@@ -132,6 +132,9 @@ export class SignalingChannel {
         'candidate',
         'host_hello',
         'client_hello',
+        'host_probe',
+        'host_heartbeat',
+        'host_takeover',
         'HOST_LEAVING',
         'key_exchange'
       ]
@@ -142,7 +145,7 @@ export class SignalingChannel {
         return
       }
 
-      this.messageCallback?.(msg)
+      await this.messageCallback?.(msg)
     })
   }
 

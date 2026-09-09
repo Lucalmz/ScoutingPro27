@@ -29,7 +29,7 @@ export interface MessageDispatcherContext {
   getCurrentEventMetadata?: () => ScoutingEvent | null
   clients: Map<string, ClientEntry>
   stagedClients?: Map<string, ClientEntry>
-  scoutIdToClientId: Map<string, string>
+  scoutIdToClientIds: Map<string, Set<string>>
   clientIdToScoutId?: Map<string, string>
   clientIdToScoutName?: Map<string, string>
   offlineMessages: OfflineMessageManager
@@ -162,7 +162,12 @@ export function createMessageDispatcher(ctx: MessageDispatcherContext) {
       ctx.stagedClients?.delete(newClientId)
     }
 
-    ctx.scoutIdToClientId.set(userId, newClientId)
+    let clientSet = ctx.scoutIdToClientIds.get(userId)
+    if (!clientSet) {
+      clientSet = new Set<string>()
+      ctx.scoutIdToClientIds.set(userId, clientSet)
+    }
+    clientSet.add(newClientId)
     ctx.clientIdToScoutId?.set(newClientId, userId)
     ctx.clientIdToScoutName?.set(newClientId, username)
     ctx.onClientConnected?.(userId, username)
@@ -296,10 +301,19 @@ export function createMessageDispatcher(ctx: MessageDispatcherContext) {
     }
 
     if (ctx.isHostMode()) {
-      const clientId = ctx.scoutIdToClientId.get(payload.targetId)
+      const targetClientIds = ctx.scoutIdToClientIds.get(payload.targetId)
       let sent = false
-      if (clientId) {
-        const targetClient = ctx.clients.get(clientId)
+      if (targetClientIds && targetClientIds.size > 0) {
+        for (const cid of targetClientIds) {
+          const targetClient = ctx.clients.get(cid)
+          if (targetClient && targetClient.dc && targetClient.dc.readyState === 'open') {
+            if (!targetClient.sender) targetClient.sender = new DataChannelSender(targetClient.dc)
+            await targetClient.sender.enqueueSend(JSON.stringify(directMsg))
+            sent = true
+          }
+        }
+      } else {
+        const targetClient = ctx.clients.get(payload.targetId)
         if (targetClient && targetClient.dc && targetClient.dc.readyState === 'open') {
           if (!targetClient.sender) targetClient.sender = new DataChannelSender(targetClient.dc)
           await targetClient.sender.enqueueSend(JSON.stringify(directMsg))

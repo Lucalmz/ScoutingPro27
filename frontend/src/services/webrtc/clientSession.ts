@@ -296,7 +296,13 @@ export function createClientSession(ctx: ClientSessionContext) {
 
     if (data.type === 'host_hello') {
       console.log('[WebRTC] Received host_hello, checking session state.')
-      const isSameHostSession = Boolean(data.hostSessionId && data.hostSessionId === ctx.getCurrentHostSessionId())
+      const previousHostSessionId = ctx.getCurrentHostSessionId()
+      const isSameHostSession = Boolean(data.hostSessionId && data.hostSessionId === previousHostSessionId)
+      const hostSessionChanged = Boolean(
+        data.hostSessionId &&
+        previousHostSessionId &&
+        data.hostSessionId !== previousHostSessionId
+      )
       if (data.hostSessionId) {
         ctx.setCurrentHostSessionId(data.hostSessionId)
       }
@@ -319,12 +325,6 @@ export function createClientSession(ctx: ClientSessionContext) {
         curDc &&
         curDc.readyState !== 'closed'
 
-      const hostSessionChanged = Boolean(
-        data.hostSessionId &&
-        ctx.getCurrentHostSessionId() &&
-        data.hostSessionId !== ctx.getCurrentHostSessionId()
-      )
-
       if (!isActivelyConnectingOrOpen || hostSessionChanged) {
         clearReconnectTimer()
         reconnectAttempts = 0
@@ -332,6 +332,17 @@ export function createClientSession(ctx: ClientSessionContext) {
       } else {
         console.log('[WebRTC Client] Connection actively negotiating or open with host; preserving peer connection.')
       }
+    } else if (data.type === 'host_takeover') {
+      console.log('[WebRTC Client] Received host_takeover by new host session:', data.newHostSessionId)
+      if (data.newHostSessionId) {
+        ctx.setCurrentHostSessionId(data.newHostSessionId)
+      }
+      if (data.sender) {
+        ctx.setClientHostSenderId(data.sender)
+      }
+      clearReconnectTimer()
+      reconnectAttempts = 0
+      await setupClientConnection()
     } else if (data.type === 'HOST_LEAVING') {
       console.log('[WebRTC] Host explicitly left the room.')
       clearReconnectTimer()
@@ -352,6 +363,7 @@ export function createClientSession(ctx: ClientSessionContext) {
         try { curPc.close() } catch (_) {}
       }
       ctx.setStatus('offline')
+      ctx.callbacks.onActiveHostLeft?.()
     } else if (data.answer && clientPc) {
       try {
         ctx.setClientHostSenderId(data.sender)

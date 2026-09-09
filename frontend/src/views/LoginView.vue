@@ -114,7 +114,7 @@ async function handleLogin() {
       <div class="logo-area">
         <img src="/logo_transparent.png" alt="SP27" class="login-brand-logo" />
         <h1>ScoutingPro 27</h1>
-        <p class="powered-by">developed by 27570 B.E.A.R. and 25787 TechBY</p>
+        <p class="powered-by">developed by 27570 B.E.A.R.</p>
       </div>
 
       <div v-if="pendingInviteCode" class="invite-banner">

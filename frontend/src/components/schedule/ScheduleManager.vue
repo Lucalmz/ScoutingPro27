@@ -10,6 +10,7 @@ import { useToastStore } from '@/stores/toast'
 import ScheduleImportModal from './ScheduleImportModal.vue'
 import ScheduleAuditModal from './ScheduleAuditModal.vue'
 import PitStatusIndicator from '@/components/pit/PitStatusIndicator.vue'
+import { getRecordTournamentLevel } from '@/utils/tournament'
 
 const props = defineProps<{
   event: ScoutingEvent | null
@@ -219,15 +220,9 @@ function isTeamScouted(matchNumber: number, teamNumber: number, tournamentLevel?
   if (!teamNumber) return false
   const targetLevel = (tournamentLevel || 'QUALIFICATION').toUpperCase()
   return recordStore.activeRecords.some((r) => {
-    if (r.matchNumber !== matchNumber || r.teamNumber !== teamNumber) return false
-    try {
-      if (!r.rawData) return targetLevel === 'QUALIFICATION'
-      const parsed = typeof r.rawData === 'string' ? JSON.parse(r.rawData) : r.rawData
-      const rLevel = (parsed.tournamentLevel || 'QUALIFICATION').toUpperCase()
-      return rLevel === targetLevel
-    } catch {
-      return targetLevel === 'QUALIFICATION'
-    }
+    return Number(r.matchNumber) === Number(matchNumber) &&
+      Number(r.teamNumber) === Number(teamNumber) &&
+      getRecordTournamentLevel(r) === targetLevel
   })
 }
 
@@ -235,15 +230,10 @@ function isTeamScoutedByMe(matchNumber: number, teamNumber: number, tournamentLe
   if (!teamNumber || !userStore.userId) return false
   const targetLevel = (tournamentLevel || 'QUALIFICATION').toUpperCase()
   return recordStore.activeRecords.some((r) => {
-    if (r.matchNumber !== matchNumber || r.teamNumber !== teamNumber || r.scoutId !== userStore.userId) return false
-    try {
-      if (!r.rawData) return targetLevel === 'QUALIFICATION'
-      const parsed = typeof r.rawData === 'string' ? JSON.parse(r.rawData) : r.rawData
-      const rLevel = (parsed.tournamentLevel || 'QUALIFICATION').toUpperCase()
-      return rLevel === targetLevel
-    } catch {
-      return targetLevel === 'QUALIFICATION'
-    }
+    return Number(r.matchNumber) === Number(matchNumber) &&
+      Number(r.teamNumber) === Number(teamNumber) &&
+      r.scoutId === userStore.userId &&
+      getRecordTournamentLevel(r) === targetLevel
   })
 }
 
@@ -530,7 +520,7 @@ async function handleClearSchedule() {
                       class="btn-go-scout red"
                       @click.stop="handleGoToScout(sched.matchNumber, st.team, 'red', sched.tournamentLevel)"
                     >
-                      {{ isTeamScoutedByMe(sched.matchNumber, st.team, sched.tournamentLevel) ? t('schedule.btn_scouted_again') : t('schedule.btn_go_scout') }}
+                      {{ isTeamScouted(sched.matchNumber, st.team, sched.tournamentLevel) ? t('schedule.btn_scouted_again') : t('schedule.btn_go_scout') }}
                     </button>
                   </div>
                 </div>
@@ -578,7 +568,7 @@ async function handleClearSchedule() {
                       class="btn-go-scout blue"
                       @click.stop="handleGoToScout(sched.matchNumber, st.team, 'blue', sched.tournamentLevel)"
                     >
-                      {{ isTeamScoutedByMe(sched.matchNumber, st.team, sched.tournamentLevel) ? t('schedule.btn_scouted_again') : t('schedule.btn_go_scout') }}
+                      {{ isTeamScouted(sched.matchNumber, st.team, sched.tournamentLevel) ? t('schedule.btn_scouted_again') : t('schedule.btn_go_scout') }}
                     </button>
                   </div>
                 </div>

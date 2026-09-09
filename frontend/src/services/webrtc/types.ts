@@ -46,6 +46,10 @@ export type WebRtcCallbacks = {
   onSasVerified?: (peerId: string) => void
   onSasRejected?: (peerId: string, reason?: string) => void
   onIceStalled?: (isStalled: boolean) => void
+  onHostStandby?: (info: { hostSessionId: string; hostDeviceId?: string }) => void
+  onHostPromoted?: () => void
+  onHostDemoted?: (info?: { hostSessionId: string; hostDeviceId?: string }) => void
+  onActiveHostLeft?: () => void
 }
 
 export interface ClientEntry {
@@ -54,6 +58,8 @@ export interface ClientEntry {
   dc?: RTCDataChannel
   sender?: DataChannelSender
   pendingCandidates: any[]
+  deviceId?: string
+  deviceType?: 'desktop' | 'mobile'
 }
 
 export interface QueuedOfflineMessage {
@@ -76,6 +82,8 @@ export interface WebRtcService {
   requestTakeover: (username: string, userId?: string) => Promise<void>
   sendTakeoverDecision: (username: string, permit: boolean) => Promise<void>
   sendIdentityMigration: (eventId: string, oldScoutId: string, newScoutId: string, newScoutName: string) => Promise<void> | undefined
+  takeoverHost: () => Promise<void>
+  isStandbyHost: () => boolean
   reconnectNow: () => Promise<boolean>
   disconnect: () => void
   initHostSeq: (maxDbSeq: number) => void

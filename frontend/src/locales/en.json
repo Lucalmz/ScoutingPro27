@@ -383,7 +383,27 @@
     "name_required": "Username cannot be empty",
     "no_changes": "No changes detected",
     "old_password_incorrect": "Incorrect current password, please try again",
-    "name_taken": "Username is already taken, please choose another"
+    "name_taken": "Username is already taken, please choose another",
+    "merge_account": "Merge Account",
+    "merge_account_title": "Merge Account into Primary Account",
+    "merge_account_desc": "Merge all scouting records, schedule assignments, and data from this device ({username}) into an existing primary account.",
+    "target_username_label": "Primary Account Username",
+    "target_username_placeholder": "e.g., bear_main",
+    "target_password_label": "Primary Account Password",
+    "target_password_placeholder": "Enter primary account password for authorization",
+    "target_password_hint": "Password is used to verify ownership through an encrypted channel.",
+    "btn_merging": "Merging and migrating data...",
+    "btn_confirm_merge": "Confirm & Merge Account",
+    "merge_into_self": "Cannot merge user into itself. Please enter a different account.",
+    "target_user_not_found": "Primary account not found. Please check the username.",
+    "invalid_target_password": "Incorrect primary account password.",
+    "merge_failed": "Failed to merge account. Please verify credentials.",
+    "merge_exception": "Account merge error: ",
+    "enter_target_username": "Please enter primary account username",
+    "enter_target_password": "Please enter primary account password",
+    "merge_modal_title": "Merge Existing Account",
+    "merge_account_link": "Merge Existing Account Data...",
+    "merge_success_toast": "Account successfully merged into {username}, refreshing..."
   },
   "offline_sync": {
     "title": "Offline Packet Sync (USB Drive)",
@@ -552,6 +572,8 @@
   "pit_scout": {
     "title": "Pit Scouting",
     "subtitle": "Scout team pits to inspect hardware specs & claimed capabilities",
+    "tab_title": "Pit Scouting",
+    "header_title": "Pit Scouting Dashboard",
     "recorded_stat": "Recorded: {recorded} / {total}",
     "sync_official": "Sync Official Roster",
     "syncing": "Syncing...",
@@ -592,15 +614,19 @@
       "other": "Other"
     },
     "hang": {
+      "none": "No Hang",
       "winch": "Winch",
       "slide": "Slide Lift",
-      "passive": "Passive Hook",
-      "none": "No Hang"
+      "telescopic": "Slide Lift",
+      "linkage": "Linkage Lock",
+      "passive": "Passive Hook"
     },
     "mechanism": {
       "slide_claw": "Slide + Claw",
       "slide_roller": "Slide + Roller",
       "linkage_arm": "Linkage Arm",
+      "pivot_arm": "Pivot Arm",
+      "specialized": "Specialized Mechanism",
       "other": "Other"
     },
     "odometry": {

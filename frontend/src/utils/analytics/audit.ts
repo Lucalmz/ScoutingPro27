@@ -1,4 +1,6 @@
 import type { ScoutingRecord, OfficialMatch } from '@/types'
+import { getRecordTournamentLevel } from '@/utils/tournament'
+import { i18n } from '@/i18n'
 
 export interface AllianceDiscrepancyDetail {
   alliance: 'red' | 'blue'
@@ -27,16 +29,6 @@ export interface MatchDiscrepancy {
   red?: AllianceDiscrepancyDetail
   blue?: AllianceDiscrepancyDetail
   summaryMessage: string
-}
-
-function getRecordTournamentLevel(r: ScoutingRecord): string {
-  try {
-    if (!r.rawData) return 'QUALIFICATION'
-    const parsed = typeof r.rawData === 'string' ? JSON.parse(r.rawData) : r.rawData
-    return (parsed.tournamentLevel || 'QUALIFICATION').toUpperCase()
-  } catch {
-    return 'QUALIFICATION'
-  }
 }
 
 /**
@@ -131,11 +123,16 @@ export function calculateMatchDiscrepancies(
       const hasWarning = maxDiff >= 20 || (maxRatio >= 0.25 && maxDiff >= 10)
 
       const dominant = (redDiff >= blueDiff ? redDetail : blueDetail) || redDetail || blueDetail
-      const dominantName = dominant?.alliance === 'red' ? '红方' : '蓝方'
+      const isZh = (i18n?.global?.locale?.value || i18n?.global?.locale) === 'zh'
+      const dominantName = dominant?.alliance === 'red'
+        ? (isZh ? '红方' : 'Red Alliance')
+        : (isZh ? '蓝方' : 'Blue Alliance')
       const signStr = (dominant?.signedDiff || 0) >= 0 ? `+${dominant?.signedDiff}` : `${dominant?.signedDiff}`
       const summaryMessage = dominant
-        ? `${dominantName}侦察总分 ${dominant.scoutScore}分 vs 官方 ${dominant.officialScore}分 (偏差 ${signStr}分, ${(dominant.ratio * 100).toFixed(0)}%)`
-        : `差额 ±${maxDiff}分`
+        ? (isZh
+            ? `${dominantName}侦察总分 ${dominant.scoutScore}分 vs 官方 ${dominant.officialScore}分 (偏差 ${signStr}分, ${(dominant.ratio * 100).toFixed(0)}%)`
+            : `${dominantName} Scouted ${dominant.scoutScore} vs Official ${dominant.officialScore} (Diff ${signStr} pts, ${(dominant.ratio * 100).toFixed(0)}%)`)
+        : (isZh ? `差额 ±${maxDiff}分` : `Diff ±${maxDiff} pts`)
 
       results.push({
         matchNumber: matchNum,

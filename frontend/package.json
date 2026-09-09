@@ -12,7 +12,9 @@
     "test": "vitest run",
     "test:e2e": "node e2e/multi-client.test.js",
     "test:e2e:ui": "cross-env SHOW_UI=1 node e2e/multi-client.test.js",
-    "test:e2e:motion": "node e2e/motion-and-sheet.e2e.js"
+    "test:e2e:motion": "node e2e/motion-and-sheet.e2e.js",
+    "test:e2e:inbox": "node e2e/inbox-lifecycle.e2e.js",
+    "test:e2e:qr": "node e2e/qr-mobile-join.e2e.js"
   },
   "dependencies": {
     "@types/dompurify": "^3.0.5",

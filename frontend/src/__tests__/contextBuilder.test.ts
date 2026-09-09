@@ -307,6 +307,82 @@ describe('buildEventDataContext', () => {
     expect(result).toContain('Pit Profiles: 1')
     expect(result).toContain('19600 | mecanum | slide_roller | passive | two_wheel | 30 pts (2 pcs, Hang L1) | 60 pts (8s/cycle) | L1 (8s) | 100 pts | Pending (No Matches)')
   })
+
+  it('sorts detailed match records chronologically and distinguishes playoff matches from qualification matches', () => {
+    const records: ScoutingRecord[] = [
+      {
+        id: 'rec_p1',
+        eventId: 'evt_1',
+        scoutId: 's1',
+        scoutName: 'Alice',
+        matchNumber: 1,
+        teamNumber: 27570,
+        autoScore: 70,
+        teleopScore: 90,
+        endgameScore: 30,
+        totalScore: 190,
+        notes: 'Playoff finals win',
+        rawData: JSON.stringify({ tournamentLevel: 'PLAYOFF' }),
+        syncStatus: 'SYNCED',
+        createdAt: '2026-08-20T16:00:00Z',
+        updatedAt: '2026-08-20T16:00:00Z',
+        version: 1
+      },
+      {
+        id: 'rec_q2',
+        eventId: 'evt_1',
+        scoutId: 's1',
+        scoutName: 'Alice',
+        matchNumber: 2,
+        teamNumber: 27570,
+        autoScore: 50,
+        teleopScore: 70,
+        endgameScore: 20,
+        totalScore: 140,
+        notes: 'Qual 2',
+        rawData: JSON.stringify({ tournamentLevel: 'QUALIFICATION' }),
+        syncStatus: 'SYNCED',
+        createdAt: '2026-08-20T11:00:00Z',
+        updatedAt: '2026-08-20T11:00:00Z',
+        version: 1
+      },
+      {
+        id: 'rec_q1',
+        eventId: 'evt_1',
+        scoutId: 's1',
+        scoutName: 'Alice',
+        matchNumber: 1,
+        teamNumber: 27570,
+        autoScore: 40,
+        teleopScore: 60,
+        endgameScore: 20,
+        totalScore: 120,
+        notes: 'Qual 1',
+        rawData: '{}',
+        syncStatus: 'SYNCED',
+        createdAt: '2026-08-20T10:00:00Z',
+        updatedAt: '2026-08-20T10:00:00Z',
+        version: 1
+      }
+    ]
+
+    const result = buildEventDataContext({
+      event: null,
+      rankings: [],
+      records
+    })
+
+    const q1Idx = result.indexOf('Match 1 | Team 27570 | Alice | 120')
+    const q2Idx = result.indexOf('Match 2 | Team 27570 | Alice | 140')
+    const p1Idx = result.indexOf('Playoff Match 1 | Team 27570 | Alice | 190')
+
+    expect(q1Idx).toBeGreaterThan(-1)
+    expect(q2Idx).toBeGreaterThan(-1)
+    expect(p1Idx).toBeGreaterThan(-1)
+    // Chronological order: Qual 1 < Qual 2 < Playoff 1
+    expect(q1Idx).toBeLessThan(q2Idx)
+    expect(q2Idx).toBeLessThan(p1Idx)
+  })
 })
 
 

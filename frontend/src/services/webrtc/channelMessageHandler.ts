@@ -20,7 +20,7 @@ export interface ChannelMessageHandlerContext {
   callbacks: WebRtcCallbacks
   clients: Map<string, ClientEntry>
   stagedClients: Map<string, ClientEntry>
-  scoutIdToClientId: Map<string, string>
+  scoutIdToClientIds: Map<string, Set<string>>
   clientIdToScoutId: Map<string, string>
   clientIdToScoutName: Map<string, string>
   pendingTakeovers: Map<string, { newClientId: string; oldClientId?: string; username: string; timeoutTimer: any }>
@@ -65,50 +65,48 @@ export function createChannelMessageHandler(ctx: ChannelMessageHandlerContext) {
           const senderUserName = msg.senderUserName
 
           if (senderUserId) {
-            // Mode 1: SAME USER ID Conflict (Same Person, Multiple Devices)
-            const existingClientId = ctx.scoutIdToClientId.get(senderUserId)
-            if (existingClientId && existingClientId !== senderId) {
-              const existingClient = ctx.clients.get(existingClientId)
-              if (existingClient && existingClient.dc && existingClient.dc.readyState === 'open') {
-                console.warn(
-                  `[WebRTC Host] Detected active session conflict for scout "${senderUserName}" (${senderUserId}) from new connection ${senderId} vs existing ${existingClientId}`
-                )
-                ctx.sendMessage(
-                  {
-                    type: 'SESSION_CONFLICT',
-                    conflictType: 'SAME_USER',
-                    conflictingUsername: senderUserName || '',
-                    conflictingUserId: senderUserId,
-                    authCode: currentInviteCode
-                  },
-                  senderId
-                )
-                return
-              } else {
-                if (existingClient) {
-                  if (existingClient.dc) existingClient.dc.onclose = null
-                  existingClient.pc.close()
-                  ctx.clients.delete(existingClientId)
+            // Mode 1: SAME USER ID - Multi-Device Coexistence!
+            // Clean up any stale/closed clients for this user first
+            const existingClientIds = ctx.scoutIdToClientIds.get(senderUserId)
+            if (existingClientIds) {
+              for (const cid of Array.from(existingClientIds)) {
+                if (cid === senderId) continue
+                const existingClient = ctx.clients.get(cid)
+                if (!existingClient || !existingClient.dc || existingClient.dc.readyState !== 'open') {
+                  if (existingClient) {
+                    if (existingClient.dc) existingClient.dc.onclose = null
+                    existingClient.pc.close()
+                    ctx.clients.delete(cid)
+                  }
+                  existingClientIds.delete(cid)
+                  ctx.clientIdToScoutId.delete(cid)
+                  ctx.clientIdToScoutName.delete(cid)
+                  ctx.cleanupPeerResources(cid)
                 }
-                ctx.clientIdToScoutId.delete(existingClientId)
-                ctx.clientIdToScoutName.delete(existingClientId)
-                ctx.cleanupPeerResources(existingClientId)
+              }
+              if (existingClientIds.size === 0) {
+                ctx.scoutIdToClientIds.delete(senderUserId)
               }
             }
 
             // Mode 2: DUPLICATE NAME Conflict (Different Person, Same Display Name)
             if (senderUserName) {
               let duplicateNameClientId: string | null = null
-              for (const [boundScoutId, boundClientId] of ctx.scoutIdToClientId.entries()) {
-                if (boundScoutId !== senderUserId && boundClientId !== senderId) {
-                  const boundName = ctx.clientIdToScoutName.get(boundClientId)
-                  if (boundName && boundName.trim().toLowerCase() === senderUserName.trim().toLowerCase()) {
-                    const peerClient = ctx.clients.get(boundClientId)
-                    if (peerClient && peerClient.dc && peerClient.dc.readyState === 'open') {
-                      duplicateNameClientId = boundClientId
-                      break
+              for (const [boundScoutId, boundClientIds] of ctx.scoutIdToClientIds.entries()) {
+                if (boundScoutId !== senderUserId) {
+                  for (const boundClientId of boundClientIds) {
+                    if (boundClientId !== senderId) {
+                      const boundName = ctx.clientIdToScoutName.get(boundClientId)
+                      if (boundName && boundName.trim().toLowerCase() === senderUserName.trim().toLowerCase()) {
+                        const peerClient = ctx.clients.get(boundClientId)
+                        if (peerClient && peerClient.dc && peerClient.dc.readyState === 'open') {
+                          duplicateNameClientId = boundClientId
+                          break
+                        }
+                      }
                     }
                   }
+                  if (duplicateNameClientId) break
                 }
               }
 
@@ -146,7 +144,12 @@ export function createChannelMessageHandler(ctx: ChannelMessageHandlerContext) {
               ctx.stagedClients.delete(senderId)
             }
 
-            ctx.scoutIdToClientId.set(senderUserId, senderId)
+            let clientSet = ctx.scoutIdToClientIds.get(senderUserId)
+            if (!clientSet) {
+              clientSet = new Set<string>()
+              ctx.scoutIdToClientIds.set(senderUserId, clientSet)
+            }
+            clientSet.add(senderId)
             ctx.clientIdToScoutId.set(senderId, senderUserId)
             if (senderUserName) {
               ctx.clientIdToScoutName.set(senderId, senderUserName)
@@ -177,27 +180,6 @@ export function createChannelMessageHandler(ctx: ChannelMessageHandlerContext) {
           const senderUserId = msg.senderUserId
           const senderUserName = msg.senderUserName
           if (senderUserId) {
-            const existingClientId = ctx.scoutIdToClientId.get(senderUserId)
-            if (existingClientId && existingClientId !== senderId) {
-              const existingClient = ctx.clients.get(existingClientId)
-              if (existingClient && existingClient.dc && existingClient.dc.readyState === 'open') {
-                console.warn(
-                  `[WebRTC Host] Detected session conflict on SYNC_DATA for scout "${senderUserName}" (${senderUserId}) between existing ${existingClientId} and incoming ${senderId}`
-                )
-                ctx.sendMessage(
-                  {
-                    type: 'SESSION_CONFLICT',
-                    conflictType: 'SAME_USER',
-                    conflictingUsername: senderUserName || '',
-                    conflictingUserId: senderUserId,
-                    authCode: currentInviteCode
-                  },
-                  senderId
-                )
-                return
-              }
-            }
-
             const staged = ctx.stagedClients.get(senderId)
             if (staged) {
               const oldActive = ctx.clients.get(senderId)
@@ -212,7 +194,12 @@ export function createChannelMessageHandler(ctx: ChannelMessageHandlerContext) {
               ctx.stagedClients.delete(senderId)
             }
 
-            ctx.scoutIdToClientId.set(senderUserId, senderId)
+            let clientSet = ctx.scoutIdToClientIds.get(senderUserId)
+            if (!clientSet) {
+              clientSet = new Set<string>()
+              ctx.scoutIdToClientIds.set(senderUserId, clientSet)
+            }
+            clientSet.add(senderId)
             ctx.clientIdToScoutId.set(senderId, senderUserId)
             if (senderUserName) {
               ctx.clientIdToScoutName.set(senderId, senderUserName)
@@ -366,12 +353,29 @@ export function createChannelMessageHandler(ctx: ChannelMessageHandlerContext) {
         // Host 负责星型拓扑下的私信转发
         if (isHostMode) {
           if (msg.targetId && msg.targetId !== myUserId && msg.targetId !== 'host') {
-            const targetClientId = ctx.scoutIdToClientId.get(msg.targetId) || msg.targetId
-            const targetClient = ctx.clients.get(targetClientId)
-            if (targetClient && targetClient.dc && targetClient.dc.readyState === 'open') {
-              if (!targetClient.sender) targetClient.sender = new DataChannelSender(targetClient.dc)
-              targetClient.sender.enqueueSend(JSON.stringify(msg))
+            const targetClientIds = ctx.scoutIdToClientIds.get(msg.targetId)
+            let forwarded = false
+            if (targetClientIds && targetClientIds.size > 0) {
+              for (const cid of targetClientIds) {
+                if (cid === senderId) continue // Do not echo back to the sender's device socket
+                const targetClient = ctx.clients.get(cid)
+                if (targetClient && targetClient.dc && targetClient.dc.readyState === 'open') {
+                  if (!targetClient.sender) targetClient.sender = new DataChannelSender(targetClient.dc)
+                  targetClient.sender.enqueueSend(JSON.stringify(msg))
+                  forwarded = true
+                }
+              }
             } else {
+              const targetClient = ctx.clients.get(msg.targetId)
+              if (targetClient && targetClient.dc && targetClient.dc.readyState === 'open') {
+                if (msg.targetId !== senderId) {
+                  if (!targetClient.sender) targetClient.sender = new DataChannelSender(targetClient.dc)
+                  targetClient.sender.enqueueSend(JSON.stringify(msg))
+                  forwarded = true
+                }
+              }
+            }
+            if (!forwarded) {
               ctx.offlineMessages.enqueue(msg.targetId, msg)
             }
           }
@@ -514,7 +518,8 @@ export function createChannelMessageHandler(ctx: ChannelMessageHandlerContext) {
         }
         ctx.takeoverCooldowns.set(username, now)
 
-        const oldClientId = ctx.scoutIdToClientId.get(userId)
+        const clientIds = ctx.scoutIdToClientIds.get(userId)
+        const oldClientId = clientIds ? Array.from(clientIds).find((cid) => cid !== senderId) : undefined
         const oldClient = oldClientId ? ctx.clients.get(oldClientId) : undefined
 
         if (!oldClientId || !oldClient || !oldClient.dc || oldClient.dc.readyState !== 'open') {
@@ -626,8 +631,21 @@ export function createChannelMessageHandler(ctx: ChannelMessageHandlerContext) {
           }
           if (isHostMode) {
             if (senderId) {
-              ctx.scoutIdToClientId.delete(msg.oldScoutId)
-              ctx.scoutIdToClientId.set(msg.newScoutId, senderId)
+              const oldSet = ctx.scoutIdToClientIds.get(msg.oldScoutId)
+              ctx.scoutIdToClientIds.delete(msg.oldScoutId)
+              let targetSet = ctx.scoutIdToClientIds.get(msg.newScoutId)
+              if (!targetSet) {
+                targetSet = new Set<string>()
+                ctx.scoutIdToClientIds.set(msg.newScoutId, targetSet)
+              }
+              if (oldSet) {
+                for (const cid of oldSet) {
+                  targetSet.add(cid)
+                  ctx.clientIdToScoutId.set(cid, msg.newScoutId)
+                  ctx.clientIdToScoutName.set(cid, msg.newScoutName)
+                }
+              }
+              targetSet.add(senderId)
               ctx.clientIdToScoutId.set(senderId, msg.newScoutId)
               ctx.clientIdToScoutName.set(senderId, msg.newScoutName)
             }

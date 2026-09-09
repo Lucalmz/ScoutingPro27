@@ -41,6 +41,14 @@ export function createWebRtcService(callbacks: WebRtcCallbacks): WebRtcService {
   let currentHostSessionId = ''
   let currentEventMetadata: ScoutingEvent | null = null
 
+  // Host Mutex & Standby State
+  let isStandbyHostMode = false
+  let isProbing = false
+  let probeTimer: any = null
+  let hostHeartbeatTimer: any = null
+  let activeHostSessionId = ''
+  let activeHostDeviceId = ''
+
   // Ephemeral / Persistent ECDH Key Pair & Identity State
   let localEcdhKeyPair: CryptoKeyPair | null = null
   let localEcdhPubHex = ''
@@ -60,7 +68,7 @@ export function createWebRtcService(callbacks: WebRtcCallbacks): WebRtcService {
   const stagedClients = new Map<string, ClientEntry>()
   const preOfferCandidates = new Map<string, any[]>()
   const hostQueues = new Map<string, Promise<void>>()
-  const scoutIdToClientId = new Map<string, string>()
+  const scoutIdToClientIds = new Map<string, Set<string>>()
   const clientIdToScoutId = new Map<string, string>()
   const clientIdToScoutName = new Map<string, string>()
   const pendingTakeovers = new Map<string, {
@@ -132,6 +140,16 @@ export function createWebRtcService(callbacks: WebRtcCallbacks): WebRtcService {
       sas.cleanupPeerResources(targetSender)
       hostQueues.delete(targetSender)
       preOfferCandidates.delete(targetSender)
+      const scoutId = clientIdToScoutId.get(targetSender)
+      if (scoutId) {
+        const set = scoutIdToClientIds.get(scoutId)
+        if (set) {
+          set.delete(targetSender)
+          if (set.size === 0) scoutIdToClientIds.delete(scoutId)
+        }
+        clientIdToScoutId.delete(targetSender)
+      }
+      clientIdToScoutName.delete(targetSender)
     },
     updateHostStatus,
     getClientDcState: () => clientDc?.readyState,
@@ -146,7 +164,7 @@ export function createWebRtcService(callbacks: WebRtcCallbacks): WebRtcService {
     getCurrentEventMetadata: () => currentEventMetadata,
     clients,
     stagedClients,
-    scoutIdToClientId,
+    scoutIdToClientIds,
     clientIdToScoutId,
     clientIdToScoutName,
     offlineMessages,
@@ -201,7 +219,7 @@ export function createWebRtcService(callbacks: WebRtcCallbacks): WebRtcService {
     callbacks,
     clients,
     stagedClients,
-    scoutIdToClientId,
+    scoutIdToClientIds,
     clientIdToScoutId,
     clientIdToScoutName,
     pendingTakeovers,
@@ -214,6 +232,16 @@ export function createWebRtcService(callbacks: WebRtcCallbacks): WebRtcService {
       sas.cleanupPeerResources(peerId)
       hostQueues.delete(peerId)
       preOfferCandidates.delete(peerId)
+      const scoutId = clientIdToScoutId.get(peerId)
+      if (scoutId) {
+        const set = scoutIdToClientIds.get(scoutId)
+        if (set) {
+          set.delete(peerId)
+          if (set.size === 0) scoutIdToClientIds.delete(scoutId)
+        }
+        clientIdToScoutId.delete(peerId)
+      }
+      clientIdToScoutName.delete(peerId)
     },
     stampHostSeq,
     getHostSeqCounter: () => hostSeqCounter,
@@ -361,11 +389,145 @@ export function createWebRtcService(callbacks: WebRtcCallbacks): WebRtcService {
     callbacks
   })
 
+  function startHostHeartbeat() {
+    stopHostHeartbeat()
+    if (isHostMode && signaling) {
+      signaling.send({
+        type: 'host_heartbeat',
+        hostSessionId,
+        deviceId: localDeviceId,
+        timestamp: Date.now()
+      })
+    }
+    hostHeartbeatTimer = setInterval(() => {
+      if (isHostMode && signaling) {
+        signaling.send({
+          type: 'host_heartbeat',
+          hostSessionId,
+          deviceId: localDeviceId,
+          timestamp: Date.now()
+        })
+      }
+    }, 3000)
+  }
+
+  function stopHostHeartbeat() {
+    if (hostHeartbeatTimer) {
+      clearInterval(hostHeartbeatTimer)
+      hostHeartbeatTimer = null
+    }
+  }
+
+  async function enterStandbyMode(existingHostSessionId: string, existingDeviceId?: string) {
+    console.log(`[WebRTC Host] Entering standby mode. Existing active host: ${existingHostSessionId}`)
+    stopHostHeartbeat()
+    if (probeTimer) {
+      clearTimeout(probeTimer)
+      probeTimer = null
+    }
+    isProbing = false
+    isHostMode = false
+    isStandbyHostMode = true
+    activeHostSessionId = existingHostSessionId
+    activeHostDeviceId = existingDeviceId || ''
+    callbacks.onHostStandby?.({ hostSessionId: existingHostSessionId, hostDeviceId: existingDeviceId })
+
+    if (localEcdhPubHex) {
+      signaling?.send({ type: 'client_hello', ecdhPublicKey: localEcdhPubHex, deviceId: localDeviceId })
+    }
+    const isConnectedAndOpen = clientPc && clientPc.connectionState === 'connected' && clientDc && clientDc.readyState === 'open'
+    if (!isConnectedAndOpen) {
+      await clientSession.setupClientConnection()
+    }
+  }
+
+  async function demoteToStandby(newHostSessionId: string, newDeviceId?: string) {
+    console.log(`[WebRTC Host] Demoted to Standby by new host: ${newHostSessionId}`)
+    stopHostHeartbeat()
+    isHostMode = false
+    isStandbyHostMode = true
+    activeHostSessionId = newHostSessionId
+    activeHostDeviceId = newDeviceId || ''
+
+    clients.forEach((c) => {
+      if (c.dc) c.dc.onclose = null
+      c.pc.onconnectionstatechange = null
+      c.pc.oniceconnectionstatechange = null
+      c.dc?.close()
+      c.pc.close()
+    })
+    clients.clear()
+    stagedClients.forEach((c) => {
+      if (c.dc) c.dc.onclose = null
+      c.pc.onconnectionstatechange = null
+      c.pc.oniceconnectionstatechange = null
+      c.dc?.close()
+      c.pc.close()
+    })
+    stagedClients.clear()
+    scoutIdToClientIds.clear()
+    clientIdToScoutId.clear()
+    clientIdToScoutName.clear()
+    hostQueues.clear()
+    preOfferCandidates.clear()
+
+    callbacks.onHostDemoted?.({ hostSessionId: newHostSessionId, hostDeviceId: newDeviceId })
+
+    if (localEcdhPubHex) {
+      signaling?.send({ type: 'client_hello', ecdhPublicKey: localEcdhPubHex, deviceId: localDeviceId })
+    }
+    await clientSession.setupClientConnection()
+  }
+
+  async function takeoverHost(): Promise<void> {
+    console.log('[WebRTC Host] Standby device initiating takeover to become Active Host!')
+    const newHostSessionId = `host-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`
+    hostSessionId = newHostSessionId
+
+    signaling?.send({
+      type: 'host_takeover',
+      oldHostSessionId: activeHostSessionId,
+      newHostSessionId,
+      deviceId: localDeviceId
+    })
+
+    if (clientDc) {
+      clientDc.onclose = null
+      clientDc.close()
+      clientDc = null
+    }
+    if (clientPc) {
+      clientPc.close()
+      clientPc = null
+    }
+
+    scoutIdToClientIds.clear()
+    clientIdToScoutId.clear()
+    clientIdToScoutName.clear()
+    hostQueues.clear()
+    preOfferCandidates.clear()
+
+    isStandbyHostMode = false
+    isHostMode = true
+
+    signaling?.send({
+      type: 'host_hello',
+      hostSessionId: newHostSessionId,
+      ecdhPublicKey: localEcdhPubHex,
+      deviceId: localDeviceId
+    })
+    startHostHeartbeat()
+    callbacks.onHostPromoted?.()
+    updateHostStatus()
+  }
+
   // =====================================================
   // Host: create room & wait for client offer
   // =====================================================
   async function host(inviteCode: string, eventMetadata?: ScoutingEvent): Promise<void> {
     isHostMode = true
+    isStandbyHostMode = false
+    isProbing = true
     isExplicitlyClosed = false
     currentInviteCode = inviteCode
     if (eventMetadata) {
@@ -395,15 +557,110 @@ export function createWebRtcService(callbacks: WebRtcCallbacks): WebRtcService {
     signaling = new SignalingChannel(inviteCode)
     await signaling.initTopic()
 
+    const onHostSignalingMessage = async (data: any) => {
+      if (!data) return
+
+      // When another device is actively probing, if this device is the Active Host, reply immediately!
+      if (data.type === 'host_probe') {
+        if (isHostMode && !isStandbyHostMode && data.hostSessionId !== hostSessionId) {
+          await signaling?.send({
+            type: 'host_heartbeat',
+            hostSessionId,
+            deviceId: localDeviceId,
+            timestamp: Date.now()
+          })
+        }
+        return
+      }
+
+      if (isProbing) {
+        if (
+          (data.type === 'host_heartbeat' || data.type === 'host_hello') &&
+          data.hostSessionId !== hostSessionId
+        ) {
+          console.log(`[WebRTC Host] Discovered existing host during probe: ${data.hostSessionId} (${data.sender})`)
+          if (probeTimer) {
+            clearTimeout(probeTimer)
+            probeTimer = null
+          }
+          isProbing = false
+          await enterStandbyMode(data.hostSessionId, data.deviceId)
+          return
+        }
+      }
+
+      if (data.type === 'host_heartbeat' || data.type === 'host_hello') {
+        if (data.hostSessionId && data.hostSessionId !== hostSessionId) {
+          if (isStandbyHostMode) {
+            activeHostSessionId = data.hostSessionId
+            activeHostDeviceId = data.deviceId || ''
+            return
+          }
+          if (isHostMode) {
+            // Deterministic tie-breaker: lexicographically larger sessionId yields to smaller (secondary: deviceId)
+            console.warn(`[WebRTC Host] Split-brain collision detected with another host: ${data.hostSessionId} vs local ${hostSessionId}`)
+            const idComp = hostSessionId.localeCompare(data.hostSessionId)
+            const shouldYield = idComp > 0 || (idComp === 0 && localDeviceId.localeCompare(data.deviceId || '') > 0)
+            if (shouldYield) {
+              console.log(`[WebRTC Host] Local host session yields to winning host: ${data.hostSessionId}`)
+              await demoteToStandby(data.hostSessionId, data.deviceId)
+              return
+            } else {
+              // Local host wins; re-broadcast heartbeat to notify other host to yield
+              await signaling?.send({
+                type: 'host_heartbeat',
+                hostSessionId,
+                deviceId: localDeviceId,
+                timestamp: Date.now()
+              })
+              return
+            }
+          }
+        }
+        return
+      }
+
+      if (data.type === 'host_takeover') {
+        if (isHostMode && data.sender !== signaling?.clientId) {
+          await demoteToStandby(data.newHostSessionId, data.deviceId)
+          return
+        }
+      }
+
+      if (isHostMode) {
+        hostSignalingHandler(data)
+      } else {
+        await clientSession.handleClientSignalingMessage(data)
+      }
+    }
+
     signaling.connect({
       onConnect: () => {
-        updateHostStatus()
-        signaling!.send({ type: 'host_hello', hostSessionId, ecdhPublicKey: localEcdhPubHex, deviceId: localDeviceId })
+        const probeMs = (globalThis as any).__TEST_PROBE_MS__ ?? 1200
+        isProbing = true
+        // Actively probe for existing active host
+        signaling!.send({
+          type: 'host_probe',
+          hostSessionId,
+          deviceId: localDeviceId
+        })
+        probeTimer = setTimeout(() => {
+          if (isProbing) {
+            isProbing = false
+            probeTimer = null
+            isStandbyHostMode = false
+            isHostMode = true
+            updateHostStatus()
+            signaling!.send({ type: 'host_hello', hostSessionId, ecdhPublicKey: localEcdhPubHex, deviceId: localDeviceId })
+            startHostHeartbeat()
+            callbacks.onHostPromoted?.()
+          }
+        }, probeMs)
       },
       onError: () => {
         updateHostStatus()
       },
-      onMessage: hostSignalingHandler
+      onMessage: onHostSignalingMessage
     })
   }
 
@@ -509,6 +766,14 @@ export function createWebRtcService(callbacks: WebRtcCallbacks): WebRtcService {
     selfHealing.dispose()
     clientSession.clearReconnectTimer()
 
+    if (probeTimer) {
+      clearTimeout(probeTimer)
+      probeTimer = null
+    }
+    isProbing = false
+    stopHostHeartbeat()
+    isStandbyHostMode = false
+
     if (isHostMode) {
       if (signaling) {
         signaling.send({ type: 'HOST_LEAVING' })
@@ -533,7 +798,7 @@ export function createWebRtcService(callbacks: WebRtcCallbacks): WebRtcService {
       hostQueues.clear()
       preOfferCandidates.clear()
       offlineMessages.clear()
-      scoutIdToClientId.clear()
+      scoutIdToClientIds.clear()
       clientIdToScoutId.clear()
       clientIdToScoutName.clear()
       pendingTakeovers.forEach((p) => clearTimeout(p.timeoutTimer))
@@ -577,6 +842,8 @@ export function createWebRtcService(callbacks: WebRtcCallbacks): WebRtcService {
     requestTakeover,
     sendTakeoverDecision,
     sendIdentityMigration,
+    takeoverHost,
+    isStandbyHost: () => isStandbyHostMode,
     reconnectNow,
     disconnect,
     initHostSeq,

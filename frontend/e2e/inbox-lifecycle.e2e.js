@@ -70,22 +70,24 @@ function killProcessTree(pid) {
 }
 
 async function runE2E() {
-  console.log('=== [E2E] Building frontend before testing ===');
-  try {
-    execSync('npm run build', { cwd: path.join(__dirname, '..'), stdio: 'inherit' });
-    const mavenCmd = os.platform() === 'win32' ? 'mvn.cmd' : 'mvn';
-    execSync(`${mavenCmd} process-resources -DskipTests`, { cwd: path.join(__dirname, '../../Backend'), stdio: 'inherit' });
-  } catch (e) {
-    console.error('Build failed. Aborting test.', e);
-    process.exit(1);
+  if (process.env.SKIP_BUILD !== '1') {
+    console.log('=== [E2E] Building frontend before testing ===');
+    try {
+      execSync('npm run build', { cwd: path.join(__dirname, '..'), stdio: 'inherit' });
+      const mavenCmd = os.platform() === 'win32' ? 'mvn.cmd' : 'mvn';
+      execSync(`${mavenCmd} process-resources -DskipTests`, { cwd: path.join(__dirname, '../../Backend'), stdio: 'inherit' });
+    } catch (e) {
+      console.error('Build failed. Aborting test.', e);
+      process.exit(1);
+    }
   }
 
   console.log(`=== [E2E] Starting Java backend on port ${PORT}... ===`);
   const mavenCmd = os.platform() === 'win32' ? 'mvn.cmd' : 'mvn';
   const backendProcess = spawn(mavenCmd, [
     'exec:java', 
-    '-Dexec.mainClass=com.bear27570.app.Main', 
-    '-Dexec.args=--headless',
+    os.platform() === 'win32' ? '"-Dexec.mainClass=com.bear27570.app.Main"' : '-Dexec.mainClass=com.bear27570.app.Main', 
+    os.platform() === 'win32' ? '"-Dexec.args=--headless"' : '-Dexec.args=--headless',
     '-DENABLE_TEST_CLEANUP=true'
   ], {
     cwd: path.join(__dirname, '../../Backend'),
@@ -96,22 +98,16 @@ async function runE2E() {
 
   await new Promise((resolve, reject) => {
     const timeout = setTimeout(() => reject(new Error("Backend failed to start")), 60000);
-    backendProcess.stdout.on('data', data => {
+    const onData = (data) => {
       const s = data.toString();
-      if (s.includes('Listening on http://localhost:')) {
+      if (s.includes('Listening on http://') || s.includes('Javalin')) {
         clearTimeout(timeout);
         console.log('✅ Backend is up and running on port ' + PORT);
         resolve();
       }
-    });
-    backendProcess.stderr.on('data', data => {
-      const s = data.toString();
-      if (s.includes('Listening on http://localhost:')) {
-        clearTimeout(timeout);
-        console.log('✅ Backend is up and running on port ' + PORT);
-        resolve();
-      }
-    });
+    };
+    backendProcess.stdout.on('data', onData);
+    backendProcess.stderr.on('data', onData);
   });
 
   console.log('=== [E2E] Launching Chrome via Puppeteer ===');

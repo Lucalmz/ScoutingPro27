@@ -139,8 +139,8 @@ async function runDemo() {
   const mavenCmd = os.platform() === 'win32' ? 'mvn.cmd' : 'mvn';
   const backendProcess = spawn(mavenCmd, [
     'exec:java', 
-    '-Dexec.mainClass=com.bear27570.app.Main', 
-    '-Dexec.args=--headless',
+    os.platform() === 'win32' ? '"-Dexec.mainClass=com.bear27570.app.Main"' : '-Dexec.mainClass=com.bear27570.app.Main', 
+    os.platform() === 'win32' ? '"-Dexec.args=--headless"' : '-Dexec.args=--headless',
     '-DENABLE_TEST_CLEANUP=true'
   ], {
     cwd: path.join(__dirname, '../../Backend'),
@@ -158,21 +158,17 @@ async function runDemo() {
   await new Promise((resolve, reject) => {
     const timeout = setTimeout(() => reject(new Error("Backend failed to start (Timeout)")), 60000);
     
-    backendProcess.stdout.on('data', data => {
+    const onData = (data) => {
       const str = data.toString();
-      if (str.includes('Listening on http://localhost:')) {
+      if (str.includes('Listening on http://') || str.includes('Javalin')) {
         clearTimeout(timeout);
         resolve();
       }
-    });
+    };
 
-    backendProcess.stderr.on('data', data => {
-      const str = data.toString();
-      if (str.includes('Listening on http://localhost:')) {
-        clearTimeout(timeout);
-        resolve();
-      }
-    });
+    backendProcess.stdout.on('data', onData);
+    backendProcess.stderr.on('data', onData);
+  });
     
     backendProcess.on('exit', code => {
       clearTimeout(timeout);

@@ -623,12 +623,13 @@ describe('webrtc service', () => {
     consoleWarnSpy.mockRestore()
   })
 
-  it('Host detects session conflict when duplicate identity connects without takeover', async () => {
+  it('Host allows same user to connect simultaneously on two devices without conflict', async () => {
     const callbacks = {
       onStatusChange: vi.fn(),
       onRecordsReceived: vi.fn().mockImplementation((recs) => Promise.resolve(recs)),
       onAckReceived: vi.fn(),
-      onRequestSync: vi.fn()
+      onRequestSync: vi.fn(),
+      onClientConnected: vi.fn()
     }
     const service = createWebRtcService(callbacks)
     await service.host('test-code')
@@ -673,16 +674,11 @@ describe('webrtc service', () => {
       })
     })
 
-    // Host should send SESSION_CONFLICT to the second device
-    expect(dc2.send).toHaveBeenCalledWith(
-      expect.stringContaining('"type":"SESSION_CONFLICT"')
-    )
-    expect(dc2.send).toHaveBeenCalledWith(
-      expect.stringContaining('"conflictType":"SAME_USER"')
-    )
-    expect(dc2.send).toHaveBeenCalledWith(
-      expect.stringContaining('"conflictingUsername":"Alice"')
-    )
+    // Second device does NOT receive SESSION_CONFLICT, and device 1 remains open
+    const conflictCall = dc2.send.mock.calls.find((c: any) => c[0].includes('"type":"SESSION_CONFLICT"'))
+    expect(conflictCall).toBeUndefined()
+    expect(dc1.close).not.toHaveBeenCalled()
+    expect(callbacks.onClientConnected).toHaveBeenCalledWith('scout_alice', 'Alice')
   })
 
   it('Host detects DUPLICATE_NAME conflict when different identity uses same username', async () => {

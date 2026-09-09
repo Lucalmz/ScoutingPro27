@@ -1,5 +1,6 @@
 import type { ScoutingRecord, RankingRow, ScoutingEvent, TeamTagItem, PitScoutingRecord } from '@/types'
 import { calculateBragIndex } from '@/utils/bragIndex'
+import { getRecordTournamentLevel, getTournamentLevelOrder } from '@/utils/tournament'
 
 export interface ContextOptions {
   event?: ScoutingEvent | null
@@ -139,12 +140,18 @@ export function buildEventDataContext(options: ContextOptions): string {
     lines.push('\n[Detailed Match Scouting Records]')
     lines.push('Match # | Team # | Scouter | Total Score | Auto | TeleOp | Endgame | Broken | Notes')
     lines.push('---|---|---|---|---|---|---|---|---')
-    // Sort by matchNumber ascending, then teamNumber ascending
-    const sorted = [...activeRecords].sort((a, b) => a.matchNumber - b.matchNumber || a.teamNumber - b.teamNumber)
+    // Sort chronologically by tournament level progression (QUALIFICATION first, then PLAYOFF), then matchNumber and teamNumber
+    const sorted = [...activeRecords].sort((a, b) => {
+      const diffLevel = getTournamentLevelOrder(getRecordTournamentLevel(a)) - getTournamentLevelOrder(getRecordTournamentLevel(b))
+      if (diffLevel !== 0) return diffLevel
+      return a.matchNumber - b.matchNumber || a.teamNumber - b.teamNumber
+    })
     for (const rec of sorted) {
-      const cleanNotes = (rec.notes || '').replace(/[\r\n]+/g, ' ').trim() || '-'
+      const cleanNotes = (rec.notes || '').replace(/\|/g, '/').replace(/[\r\n]+/g, ' ').trim() || '-'
       const brokenStr = rec.isBroken ? 'YES (Broken)' : 'NO'
-      lines.push(`Match ${rec.matchNumber} | Team ${rec.teamNumber} | ${rec.scoutName || 'Scout'} | ${rec.totalScore} | ${rec.autoScore} | ${rec.teleopScore} | ${rec.endgameScore} | ${brokenStr} | ${cleanNotes}`)
+      const level = getRecordTournamentLevel(rec)
+      const matchLabel = level === 'PLAYOFF' ? `Playoff Match ${rec.matchNumber}` : `Match ${rec.matchNumber}`
+      lines.push(`${matchLabel} | Team ${rec.teamNumber} | ${rec.scoutName || 'Scout'} | ${rec.totalScore} | ${rec.autoScore} | ${rec.teleopScore} | ${rec.endgameScore} | ${brokenStr} | ${cleanNotes}`)
     }
   }
 

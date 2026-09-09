@@ -11,6 +11,7 @@ import io.javalin.http.ForbiddenResponse;
 import org.jdbi.v3.core.Jdbi;
 
 import com.bear27570.app.db.AppConfig;
+import com.bear27570.app.util.DbUtil;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -22,6 +23,7 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.StandardCopyOption;
 import java.util.Base64;
+import java.util.Comparator;
 import java.util.List;
 import java.util.Map;
 import java.util.UUID;
@@ -83,7 +85,16 @@ public class PitScoutRoutes {
             }
             record.setEventId(eventId);
 
-            jdbi.useExtension(PitScoutDao.class, dao -> dao.upsertPitRecord(record));
+            try {
+                synchronized (DbUtil.RECORD_WRITE_LOCK) {
+                    DbUtil.withDeadlockRetry(() -> {
+                        jdbi.useExtension(PitScoutDao.class, dao -> dao.upsertPitRecord(record));
+                    });
+                }
+            } catch (Exception e) {
+                ctx.status(500).result("Save pit record failed: " + e.getMessage());
+                return;
+            }
 
             ctx.result(gson.toJson(Map.of("success", true, "record", record))).contentType("application/json");
         });
@@ -104,19 +115,29 @@ public class PitScoutRoutes {
                 return;
             }
 
-            jdbi.useTransaction(handle -> {
-                PitScoutDao dao = handle.attach(PitScoutDao.class);
-                for (PitScoutingRecord r : records) {
-                    if (r.getId() == null || r.getId().isBlank()) {
-                        r.setId(UUID.randomUUID().toString());
-                    }
-                    if (r.getScoutId() == null || r.getScoutId().isBlank()) {
-                        r.setScoutId(userId);
-                    }
-                    r.setEventId(eventId);
-                    dao.upsertPitRecord(r);
+            records.sort(Comparator.comparing(r -> r.getId() != null ? r.getId() : ""));
+            try {
+                synchronized (DbUtil.RECORD_WRITE_LOCK) {
+                    DbUtil.withDeadlockRetry(() -> {
+                        jdbi.useTransaction(handle -> {
+                            PitScoutDao dao = handle.attach(PitScoutDao.class);
+                            for (PitScoutingRecord r : records) {
+                                if (r.getId() == null || r.getId().isBlank()) {
+                                    r.setId(UUID.randomUUID().toString());
+                                }
+                                if (r.getScoutId() == null || r.getScoutId().isBlank()) {
+                                    r.setScoutId(userId);
+                                }
+                                r.setEventId(eventId);
+                                dao.upsertPitRecord(r);
+                            }
+                        });
+                    });
                 }
-            });
+            } catch (Exception e) {
+                ctx.status(500).result("Batch pit sync failed: " + e.getMessage());
+                return;
+            }
 
             ctx.result(gson.toJson(Map.of("success", true, "count", records.size()))).contentType("application/json");
         });
@@ -137,13 +158,21 @@ public class PitScoutRoutes {
                 return;
             }
 
-            jdbi.useTransaction(handle -> {
-                PitScoutDao dao = handle.attach(PitScoutDao.class);
-                for (OfficialTeam t : teams) {
-                    t.setEventId(eventId);
-                    dao.upsertOfficialTeam(t);
-                }
-            });
+            teams.sort(Comparator.comparing(OfficialTeam::getTeamNumber));
+            try {
+                DbUtil.withDeadlockRetry(() -> {
+                    jdbi.useTransaction(handle -> {
+                        PitScoutDao dao = handle.attach(PitScoutDao.class);
+                        for (OfficialTeam t : teams) {
+                            t.setEventId(eventId);
+                            dao.upsertOfficialTeam(t);
+                        }
+                    });
+                });
+            } catch (Exception e) {
+                ctx.status(500).result("Official teams sync failed: " + e.getMessage());
+                return;
+            }
 
             ctx.result(gson.toJson(Map.of("success", true, "count", teams.size()))).contentType("application/json");
         });

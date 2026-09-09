@@ -207,4 +207,78 @@ describe('End-to-End Scouting Workflow Integration', () => {
     // Max endgame score is now 28, confirming the claimed Level 3 high hang!
     expect(updatedBrag?.label).toContain('高杠已证实')
   })
+
+  it('verifies that teammate covering an assignment clears pending task for the assigned scout', async () => {
+    const { isAssignmentCompleted } = await import('@/utils/tournament')
+    const scheduleStore = useScheduleStore()
+    const recordStore = useRecordStore()
+
+    const eventId = 'evt_coverage_test'
+    const aliceId = 'scout_alice_unique'
+    const bobId = 'scout_bob_unique'
+
+    await scheduleStore.importSchedules(
+      eventId,
+      [
+        {
+          id: `${eventId}_QUALIFICATION_1`,
+          eventId,
+          matchNumber: 1,
+          tournamentLevel: 'QUALIFICATION',
+          red1: 99999,
+          red2: 11111,
+          blue1: 22222,
+          blue2: 33333
+        }
+      ],
+      true,
+      false
+    )
+
+    await scheduleStore.assignStation(
+      eventId,
+      1,
+      'red1',
+      aliceId,
+      'Alice',
+      false,
+      'QUALIFICATION'
+    )
+
+    const aliceTasks = scheduleStore.myAssignments(aliceId)
+    expect(aliceTasks).toHaveLength(1)
+    const task = {
+      matchNumber: aliceTasks[0].matchNumber,
+      teamNumber: aliceTasks[0].teamNumber,
+      tournamentLevel: aliceTasks[0].assignment.tournamentLevel
+    }
+
+    // Initially uncompleted
+    expect(isAssignmentCompleted(task, aliceId, recordStore.activeRecords, { matchAnyScout: true })).toBe(false)
+
+    // Bob records Match 1 for team 99999 on behalf of Alice
+    const bobRecord: ScoutingRecord = {
+      id: 'rec_bob_cover_1',
+      eventId,
+      scoutId: bobId,
+      scoutName: 'Bob',
+      matchNumber: 1,
+      teamNumber: 99999,
+      autoScore: 20,
+      teleopScore: 30,
+      endgameScore: 10,
+      totalScore: 60,
+      notes: 'Covered for Alice',
+      rawData: JSON.stringify({ allianceColor: 'red', tournamentLevel: 'QUALIFICATION' }),
+      syncStatus: 'SYNCED',
+      version: 1,
+      createdAt: new Date().toISOString(),
+      updatedAt: new Date().toISOString()
+    }
+
+    await recordStore.addRecord(bobRecord)
+
+    // With matchAnyScout: true, Alice's task is completed/covered!
+    expect(isAssignmentCompleted(task, aliceId, recordStore.activeRecords, { matchAnyScout: true })).toBe(true)
+  })
 })

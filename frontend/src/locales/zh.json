@@ -383,7 +383,27 @@
     "name_required": "用户名不能为空",
     "no_changes": "未检测到任何修改",
     "old_password_incorrect": "原密码错误，请核对后重试",
-    "name_taken": "该用户名已被占用，请使用其他名称"
+    "name_taken": "该用户名已被占用，请使用其他名称",
+    "merge_account": "合并账号",
+    "merge_account_title": "合并账号到主账号",
+    "merge_account_desc": "将当前设备（{username}）上的比赛记录、排班任务与数据合并至已有主账号。",
+    "target_username_label": "目标主账号用户名",
+    "target_username_placeholder": "例如: bear_main",
+    "target_password_label": "目标主账号密码",
+    "target_password_placeholder": "输入目标主账号密码进行授权验证",
+    "target_password_hint": "密码用于验证主账号归属权，通过加密通道进行身份核验。",
+    "btn_merging": "正在合并迁移数据...",
+    "btn_confirm_merge": "确认并合并账号",
+    "merge_into_self": "无法将账号合并到自身，请输入不同的目标主账号",
+    "target_user_not_found": "未找到目标主账号，请检查用户名是否输入正确",
+    "invalid_target_password": "目标主账号密码错误，验证失败",
+    "merge_failed": "账号合并失败，请检查账号密码",
+    "merge_exception": "账号合并异常: ",
+    "enter_target_username": "请输入目标主账号用户名",
+    "enter_target_password": "请输入目标主账号密码",
+    "merge_modal_title": "合并已有账号",
+    "merge_account_link": "合并已有账号数据...",
+    "merge_success_toast": "账号已成功合并至 {username}，正在刷新..."
   },
   "offline_sync": {
     "title": "离线数据包同步 (U盘同步)",
@@ -550,6 +570,8 @@
     "history": "历史"
   },
   "pit_scout": {
+    "title": "展位侦察",
+    "subtitle": "走访队伍展位，登记硬件参数与自述能力",
     "tab_title": "展位侦察",
     "header_title": "Pit 展位侦察大盘",
     "recorded_stat": "已录入 {recorded} / {total} 支战队",
@@ -557,6 +579,7 @@
     "syncing": "同步中...",
     "sync_success": "成功同步官方名单：新增 {count} 支战队！",
     "sync_failed": "同步战队名单失败: ",
+    "sync_unconfigured": "当前活动尚未配置 FTC 赛季年份与活动代码",
     "search_placeholder": "搜索战队编号或队名...",
     "filter_all_status": "全部状态",
     "filter_recorded": "已录入展位",
@@ -593,6 +616,7 @@
     "hang": {
       "none": "无悬挂结构",
       "winch": "卷扬绳索攀爬",
+      "slide": "级联滑轨抬升",
       "telescopic": "级联滑轨抬升",
       "linkage": "连杆摆臂锁定",
       "passive": "被动卡扣勾挂"
@@ -600,8 +624,10 @@
     "mechanism": {
       "slide_claw": "滑轨延伸 + 夹爪",
       "slide_roller": "滑轨延伸 + 滚刷吸取",
+      "linkage_arm": "连杆摆臂锁定",
       "pivot_arm": "单/双自由度摆臂",
-      "specialized": "特种复合机构"
+      "specialized": "特种复合机构",
+      "other": "其它构型"
     },
     "odometry": {
       "none": "无 (纯电机编码器)",

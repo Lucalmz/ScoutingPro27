@@ -47,9 +47,25 @@ public class UserDeterministicIdMigrator {
 
                     // Update primary user ID if changed
                     if (!primaryOldId.equals(primaryTargetId)) {
-                        handle.execute("UPDATE users SET id = ? WHERE id = ?", primaryTargetId, primaryOldId);
-                        updateForeignKeys(handle, primaryOldId, primaryTargetId);
-                        logger.info("Migrated user '{}' ID from {} to deterministic {}", primaryUsername, primaryOldId, primaryTargetId);
+                        boolean targetExists = handle.createQuery("SELECT COUNT(*) FROM users WHERE id = ?")
+                                .bind(0, primaryTargetId)
+                                .mapTo(Integer.class)
+                                .one() > 0;
+
+                        if (targetExists) {
+                            // Target user row already exists; redirect foreign keys and merge into target
+                            updateForeignKeys(handle, primaryOldId, primaryTargetId);
+                            if (primaryPassword != null && !primaryPassword.isBlank()) {
+                                handle.execute("UPDATE users SET password = ? WHERE id = ? AND (password IS NULL OR password = '')",
+                                        primaryPassword, primaryTargetId);
+                            }
+                            handle.execute("DELETE FROM users WHERE id = ?", primaryOldId);
+                            logger.info("Target user {} already existed; merged legacy user {} into it", primaryTargetId, primaryOldId);
+                        } else {
+                            handle.execute("UPDATE users SET id = ? WHERE id = ?", primaryTargetId, primaryOldId);
+                            updateForeignKeys(handle, primaryOldId, primaryTargetId);
+                            logger.info("Migrated user '{}' ID from {} to deterministic {}", primaryUsername, primaryOldId, primaryTargetId);
+                        }
                     }
 
                     // Handle subsequent users in the same normalized group
@@ -57,6 +73,10 @@ public class UserDeterministicIdMigrator {
                     for (int i = 1; i < group.size(); i++) {
                         com.bear27570.app.model.User secondaryUser = group.get(i);
                         String secOldId = secondaryUser.getId();
+                        if (secOldId.equals(primaryTargetId)) {
+                            // Already the target primary user row
+                            continue;
+                        }
                         String secUsername = secondaryUser.getUsername();
                         String secPassword = secondaryUser.getPassword();
 
@@ -70,14 +90,22 @@ public class UserDeterministicIdMigrator {
                             handle.execute("DELETE FROM users WHERE id = ?", secOldId);
                             logger.info("Merged duplicate user '{}' ({}) into primary user {}", secUsername, secOldId, primaryTargetId);
                         } else {
-                            // Secondary account with different password -> create alias
-                            String aliasUsername = primaryUsername + " (legacy-" + legacyAliasIndex + ")";
-                            legacyAliasIndex++;
-                            String aliasId = UserUtil.generateDeterministicUserId(aliasUsername);
+                            // Secondary account with different password -> create unique alias
+                            String aliasUsername;
+                            String aliasId;
+                            do {
+                                aliasUsername = primaryUsername + " (legacy-" + legacyAliasIndex + ")";
+                                aliasId = UserUtil.generateDeterministicUserId(aliasUsername);
+                                legacyAliasIndex++;
+                            } while (!aliasId.equals(secOldId) && handle.createQuery("SELECT COUNT(*) FROM users WHERE id = ?").bind(0, aliasId).mapTo(Integer.class).one() > 0);
 
-                            handle.execute("UPDATE users SET id = ?, username = ? WHERE id = ?",
-                                    aliasId, aliasUsername, secOldId);
-                            updateForeignKeys(handle, secOldId, aliasId);
+                            if (!secOldId.equals(aliasId)) {
+                                handle.execute("UPDATE users SET id = ?, username = ? WHERE id = ?",
+                                        aliasId, aliasUsername, secOldId);
+                                updateForeignKeys(handle, secOldId, aliasId);
+                            } else {
+                                handle.execute("UPDATE users SET username = ? WHERE id = ?", aliasUsername, secOldId);
+                            }
                             logger.info("Migrated conflicting user '{}' ({}) to alias '{}' ({})",
                                     secUsername, secOldId, aliasUsername, aliasId);
                         }
@@ -103,6 +131,27 @@ public class UserDeterministicIdMigrator {
 
         // 3. Delete old user row
         handle.execute("DELETE FROM users WHERE id = ?", oldId);
+    }
+
+    public static void mergeUserInto(Handle handle, String sourceId, String targetId, String targetUsername) {
+        if (sourceId == null || targetId == null || sourceId.equals(targetId)) return;
+
+        // 1. Update display names, scout_id, version, and updated_at ONLY on records belonging to sourceId
+        if (targetUsername != null && !targetUsername.isBlank()) {
+            handle.execute("UPDATE scouting_records SET scout_name = ?, scout_id = ?, version = COALESCE(version, 1) + 1, updated_at = CURRENT_TIMESTAMP WHERE scout_id = ?", targetUsername, targetId, sourceId);
+            handle.execute("UPDATE scout_assignments SET scout_name = ?, scout_id = ?, updated_at = CURRENT_TIMESTAMP WHERE scout_id = ?", targetUsername, targetId, sourceId);
+            handle.execute("UPDATE pit_scouting_records SET scout_name = ?, scout_id = ?, version = COALESCE(version, 1) + 1, updated_at = CURRENT_TIMESTAMP WHERE scout_id = ?", targetUsername, targetId, sourceId);
+        } else {
+            handle.execute("UPDATE scouting_records SET scout_id = ?, version = COALESCE(version, 1) + 1, updated_at = CURRENT_TIMESTAMP WHERE scout_id = ?", targetId, sourceId);
+            handle.execute("UPDATE scout_assignments SET scout_id = ?, updated_at = CURRENT_TIMESTAMP WHERE scout_id = ?", targetId, sourceId);
+            handle.execute("UPDATE pit_scouting_records SET scout_id = ?, version = COALESCE(version, 1) + 1, updated_at = CURRENT_TIMESTAMP WHERE scout_id = ?", targetId, sourceId);
+        }
+
+        // 2. Cascade all other foreign keys to target user (events, event_users, ai_settings, ai_chat_sessions, team_tags)
+        updateForeignKeys(handle, sourceId, targetId);
+
+        // 3. Delete source user row
+        handle.execute("DELETE FROM users WHERE id = ?", sourceId);
     }
 
     public static void updateForeignKeys(Handle handle, String oldId, String newId) {

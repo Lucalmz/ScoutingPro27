@@ -4,6 +4,7 @@ import { useRoute } from 'vue-router'
 import { useI18n } from 'vue-i18n'
 import type { ScoutingRecord } from '@/types'
 import { useRecordStore } from '@/stores/records'
+import { getRecordTournamentLevel, sortRecordsChronologically } from '@/utils/tournament'
 
 const { t } = useI18n()
 const recordStore = useRecordStore()
@@ -20,22 +21,33 @@ const emit = defineEmits<{
 const route = useRoute()
 const highlightMatch = computed(() => Number(route.query.highlightMatch))
 const highlightTeam = computed(() => Number(route.query.highlightTeam))
+const highlightLevel = computed(() => route.query.highlightLevel ? String(route.query.highlightLevel).toUpperCase() : null)
 
 function isConflictHighlighted(rec: ScoutingRecord) {
-  return highlightMatch.value === rec.matchNumber && highlightTeam.value === rec.teamNumber
+  if (highlightMatch.value !== rec.matchNumber || highlightTeam.value !== rec.teamNumber) return false
+  if (highlightLevel.value) {
+    return getRecordTournamentLevel(rec) === highlightLevel.value
+  }
+  return true
 }
+
+const sortedRecords = computed(() => sortRecordsChronologically(props.records))
 
 const hasScrolled = ref(false)
 
 // Reset scroll flag if the URL highlight targets change
-watch([highlightMatch, highlightTeam], () => {
+watch([highlightMatch, highlightTeam, highlightLevel], () => {
   hasScrolled.value = false
 })
 
-watch([highlightMatch, highlightTeam, () => props.records], async ([m, t]) => {
-  if (m && t && !hasScrolled.value && props.records.length > 0) {
+watch([highlightMatch, highlightTeam, highlightLevel, () => sortedRecords.value], async ([m, t]) => {
+  if (m && t && !hasScrolled.value && sortedRecords.value.length > 0) {
     await nextTick()
-    const targetRec = props.records.find(r => r.matchNumber === m && r.teamNumber === t)
+    const targetRec = sortedRecords.value.find(r => 
+      r.matchNumber === m && 
+      r.teamNumber === t && 
+      (!highlightLevel.value || getRecordTournamentLevel(r) === highlightLevel.value)
+    )
     if (targetRec) {
       const el = document.getElementById('history-card-' + targetRec.id)
       if (el) {
@@ -126,7 +138,7 @@ function enter(el: Element, done: () => void) {
 <template>
   <div class="history-panel">
     <div v-if="loading" class="loading-msg">{{ t('history.loading') }}</div>
-    <div v-else-if="records.length === 0" class="empty-state">
+    <div v-else-if="sortedRecords.length === 0" class="empty-state">
       <p>{{ t('history.no_data') }}</p>
     </div>
     <transition-group 
@@ -144,7 +156,7 @@ function enter(el: Element, done: () => void) {
     >
       <div class="hover-highlight" :style="highlightStyle" key="highlight-bg"></div>
       <div
-        v-for="(rec, index) in records"
+        v-for="(rec, index) in sortedRecords"
         :key="rec.id"
         :data-index="index"
         :id="'history-card-' + rec.id"
@@ -158,7 +170,7 @@ function enter(el: Element, done: () => void) {
         <div class="card-main">
           <div class="card-info">
             <span class="card-teams">
-              {{ t('history.match') }} #{{ rec.matchNumber }} | {{ t('history.team') }} #{{ rec.teamNumber }}
+              {{ t('history.match') }} #{{ (getRecordTournamentLevel(rec) === 'PLAYOFF' ? 'P' : 'Q') }}{{ rec.matchNumber }} | {{ t('history.team') }} #{{ rec.teamNumber }}
             </span>
             <span class="card-date">{{ formatDate(rec.createdAt) }}</span>
           </div>

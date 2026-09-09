@@ -9,6 +9,7 @@ import { useToastStore } from '@/stores/toast'
 import { useInboxStore } from '@/stores/inbox'
 import { isDesktopHost } from '@/services/photoStorage'
 import RenameModal from '@/components/common/RenameModal.vue'
+import AccountMergeModal from '@/components/common/AccountMergeModal.vue'
 
 const { t } = useI18n()
 const toastStore = useToastStore()
@@ -20,12 +21,20 @@ const inboxStore = useInboxStore()
 const showCreateModal = ref(false)
 const showJoinModal = ref(false)
 const showRenameModal = ref(false)
+const showMergeModal = ref(false)
 const eventFileInputRef = ref<HTMLInputElement | null>(null)
 const newEventName = ref('')
 const inviteCode = ref('')
 const creating = ref(false)
 const joining = ref(false)
 const enteringEventId = ref<string | null>(null)
+
+async function onAccountMerged(newUsername: string) {
+  toastStore.showToast(`账号已成功合并至 ${newUsername}，正在刷新赛事...`, 'success')
+  if (userStore.userId) {
+    await eventStore.fetchEvents(userStore.userId)
+  }
+}
 
 async function onEventFileSelected(e: Event) {
   const file = (e.target as HTMLInputElement).files?.[0]
@@ -167,16 +176,16 @@ function handleOpenRenameModal() {
       </div>
       <div class="topbar-right">
         <button
-          class="user-tag-btn inbox-topbar-btn"
+          class="topbar-btn inbox-topbar-btn"
           @click="inboxStore.toggleOpen()"
           title="Inbox"
         >
           <span class="material-icons" style="font-size: 18px; margin-right: 4px;">inbox</span>
-          <span class="username-text">Inbox</span>
+          <span class="topbar-btn-text">Inbox</span>
           <span v-if="inboxStore.unreadCount > 0" class="topbar-unread-badge">{{ inboxStore.unreadCount }}</span>
         </button>
         <button
-          class="user-tag-btn"
+          class="user-tag-btn user-profile-btn"
           @click="handleOpenRenameModal"
           :title="t('user.edit_nickname')"
           :style="{ viewTransitionName: !showRenameModal ? 'user-profile-box' : 'none' }"
@@ -187,6 +196,14 @@ function handleOpenRenameModal() {
             :style="{ viewTransitionName: !showRenameModal ? 'user-profile-text' : 'none' }"
           >{{ userStore.username }}</span>
           <span class="material-icons edit-icon" style="font-size: 14px; margin-left: 4px;">edit</span>
+        </button>
+        <button
+          class="topbar-btn account-merge-btn"
+          @click="showMergeModal = true"
+          :title="t('user.merge_account')"
+        >
+          <span class="material-icons" style="font-size: 18px; margin-right: 4px;">merge_type</span>
+          <span class="topbar-btn-text">{{ t('user.merge_account') }}</span>
         </button>
         <button class="btn-logout" @click="handleLogout">{{ t('dashboard.logout') }}</button>
       </div>
@@ -304,7 +321,10 @@ function handleOpenRenameModal() {
     </Transition>
 
     <!-- Rename User Modal -->
-    <RenameModal v-model:visible="showRenameModal" />
+    <RenameModal v-model:visible="showRenameModal" @open-merge="showMergeModal = true" />
+
+    <!-- Merge Account Modal -->
+    <AccountMergeModal v-model:visible="showMergeModal" @merged="onAccountMerged" />
   </div>
 </template>
 

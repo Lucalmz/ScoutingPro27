@@ -69,7 +69,12 @@ async function request<T>(
   }
 
   if (!res.ok) {
-    const isAuthExempt = path.startsWith('/user/rename') || path.startsWith('/user/login') || path.startsWith('/webrtc/verify-ticket')
+    const isAuthExempt =
+      path.startsWith('/user/rename') ||
+      path.startsWith('/user/login') ||
+      path.startsWith('/webrtc/verify-ticket') ||
+      path.startsWith('/users/merge') ||
+      path.startsWith('/user/merge')
     if (res.status === 401 && !isAuthExempt) {
       // Clear token and force reload
       localStorage.removeItem('scoutingpro-user')
@@ -125,6 +130,15 @@ export function renameUser(
     ? { newUsername: paramsOrUsername, newId: maybeNewId }
     : paramsOrUsername
   return request<LoginResponse>('POST', '/user/rename', body)
+}
+
+export interface MergeUserParams {
+  targetUsername: string
+  targetPassword: string
+}
+
+export function mergeUser(params: MergeUserParams): Promise<LoginResponse> {
+  return request<LoginResponse>('POST', '/users/merge', params)
 }
 
 export function migrateScoutRecords(

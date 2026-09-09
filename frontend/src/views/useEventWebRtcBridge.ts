@@ -83,7 +83,7 @@ export function useEventWebRtcBridge({
       // 返回真正被接受的记录，Host 端用此打 hostSeq + 广播
       onRecordsReceived: async (records: ScoutingRecord[], senderId?: string): Promise<ScoutingRecord[]> => {
         const accepted = await recordStore.bulkSync(records)
-        if (!eventStore.isHost) {
+        if (!eventStore.isHost || connStore.isStandbyHost) {
           advanceLastHostSeq(records)
         }
         return accepted
@@ -96,7 +96,7 @@ export function useEventWebRtcBridge({
         if (acceptedIds.length > 0) {
           recordStore.markSynced(acceptedIds)
         }
-        if (stampedRecords && stampedRecords.length > 0 && !eventStore.isHost) {
+        if (stampedRecords && stampedRecords.length > 0 && (!eventStore.isHost || connStore.isStandbyHost)) {
           for (const stamped of stampedRecords) {
             const local = recordStore.records.find((r) => r.id === stamped.id)
             if (local && stamped.hostSeq) {
@@ -231,6 +231,7 @@ export function useEventWebRtcBridge({
       onIdentityMigration: async (eventIdVal: string, oldScoutId: string, newScoutId: string, newScoutName: string) => {
         recordStore.migrateScoutId(oldScoutId, newScoutId, newScoutName)
         scheduleStore.migrateScoutId(oldScoutId, newScoutId, newScoutName)
+        pitStore.migrateScoutId(oldScoutId, newScoutId, newScoutName)
         if (eventStore.isHost) {
           try {
             const { migrateScoutRecords } = await import('@/services/api')
@@ -277,6 +278,33 @@ export function useEventWebRtcBridge({
 
       onIceStalled: (isStalled) => {
         connStore.setIsIceStalled(isStalled)
+      },
+
+      onHostStandby: (info) => {
+        connStore.setStandbyHost(true, info)
+        toastStore.showToast('检测到当前赛事已有活跃主机，本机已自动进入【备用监控模式】', 'info')
+      },
+
+      onHostPromoted: () => {
+        connStore.setStandbyHost(false)
+        const dbMaxSeq = recordStore.records
+          .filter((r) => r.eventId === eventId.value)
+          .reduce((m, r) => Math.max(m, r.hostSeq || 0), 0)
+        connStore.initHostSeq(Math.max(dbMaxSeq, lastHostSeq.value))
+        toastStore.showToast('本机已成功激活/接管为主机 (Active Host)', 'success')
+      },
+
+      onHostDemoted: (info?: { hostSessionId: string; hostDeviceId?: string }) => {
+        connStore.setStandbyHost(true, info)
+        toastStore.showToast('收到其他设备接管通知，本机已平滑退位为【备用监控端】', 'warning')
+      },
+
+      onActiveHostLeft: () => {
+        if (connStore.isStandbyHost) {
+          toastStore.showToast('主控设备已退出，本机作为备用端可立即一键接管为主机', 'warning', 7000)
+        } else {
+          toastStore.showToast('赛事主控设备已退出房间', 'info')
+        }
       }
     }
 
@@ -379,6 +407,7 @@ export function useEventWebRtcBridge({
     connStore.rtcService?.disconnect()
     connStore.setRtcService(null)
     connStore.clearConnectedScouts()
+    connStore.setStandbyHost(false)
     connStore.setStatus('offline')
   }
 

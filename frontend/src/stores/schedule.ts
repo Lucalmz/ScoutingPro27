@@ -8,6 +8,7 @@ import {
   saveScoutAssignments
 } from '@/services/api'
 import { useConnectionStore } from './connection'
+import { getTournamentLevelOrder } from '@/utils/tournament'
 
 /**
  * Deduplicate and normalize schedule items by numeric matchNumber
@@ -46,13 +47,7 @@ export function deduplicateSchedules(list: MatchScheduleItem[]): MatchScheduleIt
     } : normalized)
   }
   return Array.from(map.values()).sort((a, b) => {
-    const levelOrder = (lvl?: string) => {
-      const l = (lvl || 'QUALIFICATION').toUpperCase()
-      if (l === 'QUALIFICATION') return 1
-      if (l === 'PLAYOFF') return 2
-      return 3
-    }
-    const diffLevel = levelOrder(a.tournamentLevel) - levelOrder(b.tournamentLevel)
+    const diffLevel = getTournamentLevelOrder(a.tournamentLevel) - getTournamentLevelOrder(b.tournamentLevel)
     if (diffLevel !== 0) return diffLevel
     return a.matchNumber - b.matchNumber
   })
@@ -148,7 +143,11 @@ export const useScheduleStore = defineStore('schedule', () => {
         }
       }
 
-      return list.sort((a, b) => Number(a.matchNumber) - Number(b.matchNumber))
+      return list.sort((a, b) => {
+        const diffLevel = getTournamentLevelOrder(a.assignment.tournamentLevel) - getTournamentLevelOrder(b.assignment.tournamentLevel)
+        if (diffLevel !== 0) return diffLevel
+        return Number(a.matchNumber) - Number(b.matchNumber)
+      })
     }
   })
 

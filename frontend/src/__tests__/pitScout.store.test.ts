@@ -108,6 +108,30 @@ describe('PitScout Store & Unified Team Roster', () => {
     expect(team33333?.matchCount).toBe(1)
   })
 
+  it('strictly isolates unifiedTeamList to currentEventId', () => {
+    const pitStore = usePitScoutStore()
+    const recordStore = useRecordStore()
+
+    pitStore.currentEventId = 'event-current'
+
+    // Add teams/records for another event
+    pitStore.records = [
+      { id: 'p-other', eventId: 'event-other', teamNumber: 99999, version: 1 } as PitScoutingRecord,
+      { id: 'p-curr', eventId: 'event-current', teamNumber: 11111, version: 1 } as PitScoutingRecord
+    ]
+    recordStore.records = [
+      { id: 'r-other', eventId: 'event-other', teamNumber: 88888, version: 1, isDeleted: false } as any,
+      { id: 'r-curr', eventId: 'event-current', teamNumber: 11111, version: 1, isDeleted: false } as any
+    ]
+    recordStore.teamTags = [
+      { id: 't-other', eventId: 'event-other', teamNumber: 77777, tag: 'foreign', color: 'red', isPreset: false }
+    ]
+
+    const list = pitStore.unifiedTeamList
+    // Only team 11111 from event-current should appear
+    expect(list.map(t => t.teamNumber)).toEqual([11111])
+  })
+
   it('updates records and applies LWW correctly', () => {
     const pitStore = usePitScoutStore()
     pitStore.currentEventId = 'e1'
@@ -541,6 +565,73 @@ describe('PitScout Store & Unified Team Roster', () => {
     expect(rec600?.claimedTotalScore).toBe(160)
     // savePitRecord should NOT have been called
     expect(savePitRecord).not.toHaveBeenCalled()
+  })
+
+  it('migrateScoutId migrates scoutId and scoutName on local pit records, increments version, and marks PENDING', () => {
+    const pitStore = usePitScoutStore()
+    pitStore.currentEventId = 'test-event-1'
+
+    pitStore.records = [
+      {
+        id: 'p1',
+        eventId: 'test-event-1',
+        teamNumber: 100,
+        scoutId: 'old_uuid_1',
+        scoutName: 'OldScout',
+        drivetrainType: 'mecanum',
+        weightLbs: 30,
+        sizingPassed: true,
+        mechanismType: 'intake',
+        hangType: 'none',
+        odometryType: 'none',
+        claimedAutoScore: 50,
+        claimedAutoPieces: 2,
+        claimedAutoHangLevel: 0,
+        claimedTeleopScore: 50,
+        claimedTeleopCycleSec: 8,
+        claimedEndgameHangLevel: 0,
+        claimedEndgameTimeSec: 0,
+        claimedTotalScore: 100,
+        version: 1,
+        syncStatus: 'SYNCED'
+      } as PitScoutingRecord,
+      {
+        id: 'p2',
+        eventId: 'test-event-1',
+        teamNumber: 200,
+        scoutId: 'other_scout',
+        scoutName: 'OtherScout',
+        drivetrainType: 'tank',
+        weightLbs: 28,
+        sizingPassed: true,
+        mechanismType: 'claw',
+        hangType: 'none',
+        odometryType: 'none',
+        claimedAutoScore: 30,
+        claimedAutoPieces: 1,
+        claimedAutoHangLevel: 0,
+        claimedTeleopScore: 40,
+        claimedTeleopCycleSec: 10,
+        claimedEndgameHangLevel: 0,
+        claimedEndgameTimeSec: 0,
+        claimedTotalScore: 70,
+        version: 1,
+        syncStatus: 'SYNCED'
+      } as PitScoutingRecord
+    ]
+
+    pitStore.migrateScoutId('old_uuid_1', 'master_uuid_2', 'MasterScout')
+
+    const rec1 = pitStore.records.find(r => r.teamNumber === 100)
+    expect(rec1?.scoutId).toBe('master_uuid_2')
+    expect(rec1?.scoutName).toBe('MasterScout')
+    expect(rec1?.version).toBe(2)
+    expect(rec1?.syncStatus).toBe('PENDING')
+
+    const rec2 = pitStore.records.find(r => r.teamNumber === 200)
+    expect(rec2?.scoutId).toBe('other_scout')
+    expect(rec2?.scoutName).toBe('OtherScout')
+    expect(rec2?.version).toBe(1)
   })
 })
 

@@ -26,7 +26,8 @@ export const useConnectionStore = defineStore('connection', () => {
     ecdhPublicKey?: string
     fingerprint: string
   } | null>(null)
-
+  const isStandbyHost = ref(false)
+  const standbyHostInfo = ref<{ hostSessionId: string; hostDeviceId?: string } | null>(null)
 
   const isConnected = computed(() => status.value === 'connected')
   const isOffline = computed(() => status.value === 'offline')
@@ -58,6 +59,20 @@ export const useConnectionStore = defineStore('connection', () => {
     status.value = s
     if (s === 'offline' || s === 'long_offline') {
       transportInfo.value = null
+    }
+  }
+
+  function setStandbyHost(isStandby: boolean, info?: { hostSessionId: string; hostDeviceId?: string }) {
+    isStandbyHost.value = isStandby
+    if (info) standbyHostInfo.value = info
+    else if (!isStandby) standbyHostInfo.value = null
+  }
+
+  async function takeoverHost() {
+    if (rtcService.value) {
+      await rtcService.value.takeoverHost()
+      isStandbyHost.value = false
+      standbyHostInfo.value = null
     }
   }
 
@@ -234,5 +249,9 @@ export const useConnectionStore = defineStore('connection', () => {
     addConnectedScout,
     clearConnectedScouts,
     broadcastTagUpdate,
+    isStandbyHost,
+    standbyHostInfo,
+    setStandbyHost,
+    takeoverHost,
   }
 })

@@ -1,14 +1,5 @@
 import type { ScoutingRecord, OfficialMatch, RankingRow } from '@/types'
-
-function getRecordTournamentLevel(r: ScoutingRecord): string {
-  try {
-    if (!r.rawData) return 'QUALIFICATION'
-    const parsed = typeof r.rawData === 'string' ? JSON.parse(r.rawData) : r.rawData
-    return (parsed.tournamentLevel || 'QUALIFICATION').toUpperCase()
-  } catch {
-    return 'QUALIFICATION'
-  }
-}
+import { getRecordTournamentLevel, getTournamentLevelOrder } from '@/utils/tournament'
 
 /**
  * Calculates reliability rating ('low' | 'high') for each scout based on
@@ -105,8 +96,12 @@ export function calculateRankings(
 
   const rows: RankingRow[] = []
   for (const [teamNumber, teamRecs] of map) {
-    // Sort records by matchNumber ascending to find the true progression
-    const sortedRecs = teamRecs.sort((a, b) => a.matchNumber - b.matchNumber)
+    // Sort records by tournament level progression (QUALIFICATION first, then PLAYOFF) and matchNumber ascending
+    const sortedRecs = teamRecs.slice().sort((a, b) => {
+      const diffLevel = getTournamentLevelOrder(getRecordTournamentLevel(a)) - getTournamentLevelOrder(getRecordTournamentLevel(b))
+      if (diffLevel !== 0) return diffLevel
+      return a.matchNumber - b.matchNumber
+    })
     const matchCount = sortedRecs.length
 
     let weightSum = 0

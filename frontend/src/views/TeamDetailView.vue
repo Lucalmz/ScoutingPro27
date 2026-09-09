@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref, computed, onMounted, onUnmounted } from 'vue'
+import { ref, computed, watch, onMounted, onUnmounted } from 'vue'
 import { useRouter, onBeforeRouteLeave } from 'vue-router'
 import { useI18n } from 'vue-i18n'
 import { useRecordStore } from '@/stores/records'
@@ -9,6 +9,7 @@ import ConnectionStatus from '@/components/common/ConnectionStatus.vue'
 import { usePitScoutStore } from '@/stores/pitScout'
 import PitScoutFormDrawer from '@/components/pit/PitScoutFormDrawer.vue'
 import type { ScoutingRecord } from '@/types'
+import { sortRecordsChronologically, getMatchLevelPrefix } from '@/utils/tournament'
 
 const props = defineProps<{
   eventId: string
@@ -35,9 +36,9 @@ const detailBragLabel = computed(() => {
 })
 
 const teamMatches = computed<ScoutingRecord[]>(() => {
-  return recordStore.activeRecords
-    .filter(r => r.teamNumber === parseInt(props.teamNumber))
-    .sort((a, b) => a.matchNumber - b.matchNumber)
+  return sortRecordsChronologically(
+    recordStore.activeRecords.filter(r => (!props.eventId || r.eventId === props.eventId) && r.teamNumber === parseInt(props.teamNumber))
+  )
 })
 
 const editingMatchId = ref<string | null>(null)
@@ -64,9 +65,33 @@ function onGlobalKeyDown(e: KeyboardEvent) {
   }
 }
 
+function loadEventData(eventId: string) {
+  if (!eventId) return
+  recordStore.currentEventId = eventId
+  pitStore.currentEventId = eventId
+  if (recordStore.records.length === 0 || !recordStore.records.some(r => r.eventId === eventId)) {
+    recordStore.fetchRecords(eventId)
+  }
+  if (pitStore.records.length === 0 || !pitStore.records.some(r => r.eventId === eventId)) {
+    pitStore.fetchPitData(eventId)
+  }
+}
+
 onMounted(() => {
   window.addEventListener('keydown', onGlobalKeyDown)
+  if (props.eventId) {
+    loadEventData(props.eventId)
+  }
 })
+
+watch(
+  () => props.eventId,
+  (newId) => {
+    if (newId) {
+      loadEventData(newId)
+    }
+  }
+)
 
 onUnmounted(() => {
   window.removeEventListener('keydown', onGlobalKeyDown)
@@ -191,7 +216,7 @@ async function saveComment(match: ScoutingRecord) {
       <div v-else class="matches-list">
         <div v-for="match in teamMatches" :key="match.id" class="match-card" :class="{ 'is-broken': match.isBroken }">
           <div class="match-header">
-            <h3>{{ t('team_detail.match') }} {{ match.matchNumber }}</h3>
+            <h3>{{ t('team_detail.match') }} #{{ getMatchLevelPrefix(match) }}{{ match.matchNumber }}</h3>
             <span v-if="match.isBroken" class="broken-badge">
               <span class="material-icons" style="font-size: 14px;">build</span>
               {{ t('team_detail.is_broken') }}

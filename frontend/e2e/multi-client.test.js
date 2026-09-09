@@ -111,8 +111,8 @@ async function runTest() {
   const mavenCmd = os.platform() === 'win32' ? 'mvn.cmd' : 'mvn';
   const backendProcess = spawn(mavenCmd, [
     'exec:java', 
-    '-Dexec.mainClass=com.bear27570.app.Main', 
-    '-Dexec.args=--headless',
+    os.platform() === 'win32' ? '"-Dexec.mainClass=com.bear27570.app.Main"' : '-Dexec.mainClass=com.bear27570.app.Main', 
+    os.platform() === 'win32' ? '"-Dexec.args=--headless"' : '-Dexec.args=--headless',
     '-DENABLE_TEST_CLEANUP=true'
   ], {
     cwd: path.join(__dirname, '../../Backend'),
@@ -123,20 +123,16 @@ async function runTest() {
 
   await new Promise((resolve, reject) => {
     const timeout = setTimeout(() => reject(new Error("Backend failed to start")), 60000);
-    backendProcess.stdout.on('data', data => {
-      if (data.toString().includes('Listening on http://localhost:')) {
+    const onData = (data) => {
+      const s = data.toString();
+      if (s.includes('Listening on http://') || s.includes('Javalin')) {
         clearTimeout(timeout);
         console.log('✅ Backend is up and running!');
         resolve();
       }
-    });
-    backendProcess.stderr.on('data', data => {
-      if (data.toString().includes('Listening on http://localhost:')) {
-        clearTimeout(timeout);
-        console.log('✅ Backend is up and running!');
-        resolve();
-      }
-    });
+    };
+    backendProcess.stdout.on('data', onData);
+    backendProcess.stderr.on('data', onData);
   });
 
   console.log(`Launching Puppeteer (SHOW_UI=${SHOW_UI})...`);
@@ -260,16 +256,24 @@ async function runTest() {
     console.log('✅ Form submitted by all three!');
     console.timeEnd('Step 3 Duration');
 
+    const goToHistoryTab = async (page) => {
+      await page.evaluate(() => {
+        const tabs = Array.from(document.querySelectorAll('.tab-btn'));
+        const historyTab = tabs.find(b => {
+          const text = (b.textContent || '').trim();
+          return text.includes('历史') || text.includes('History');
+        }) || (tabs.length > 4 ? tabs[4] : null);
+        if (historyTab) historyTab.click();
+      });
+      await waitForTransition(page);
+    };
+
     console.log('\n=== Step 4: Verify Conflicts Appears ===');
     console.time('Step 4 Duration');
     // Give it a moment to sync and detect conflicts
     await delay(3000);
     // Go to history tab on Client1 to see if conflict badge is there
-    await pageClient1.evaluate(() => {
-      const tabs = document.querySelectorAll('.tab-btn');
-      if (tabs.length >= 3) tabs[2].click(); // History Tab
-    });
-    await waitForTransition(pageClient1);
+    await goToHistoryTab(pageClient1);
     
     let hasConflict = false;
     for (let i = 0; i < 20; i++) {
@@ -327,14 +331,10 @@ async function runTest() {
     console.log('\n=== Step 6: Host and Client2 correct their records while Client1 is offline ===');
     console.time('Step 6 Duration');
     const correctRecord = async (page, newTeamNumber) => {
-      // Assuming already on History tab
-      await page.evaluate(() => {
-        const tabs = document.querySelectorAll('.tab-btn');
-        tabs[2].click();
-      });
-      await waitForTransition(page);
+      await goToHistoryTab(page);
       await page.waitForSelector('.btn-edit-conflict');
       await page.click('.btn-edit-conflict');
+      await waitForTransition(page);
       
       // We are back at Scout Form, let's change the team number
       await page.waitForSelector('input[placeholder="1-999"]');
@@ -347,6 +347,7 @@ async function runTest() {
       await inputs[1].type(newTeamNumber);
       
       await page.click('.btn-submit');
+      await page.waitForSelector('.submit-status-msg', { timeout: 5000 }).catch(() => {});
       await delay(1000);
     };
 
@@ -390,6 +391,9 @@ async function runTest() {
     // Wait for connection to restore
     await pageClient1.waitForSelector('.connection-status.connected', { timeout: 30000 });
     console.log('✅ Client1 reconnected.');
+    
+    // Make sure Client1 is on History tab to check conflicts
+    await goToHistoryTab(pageClient1);
     
     // Check if Client1's conflict is automatically resolved with polling loop
     let hasConflictAtEnd = true;

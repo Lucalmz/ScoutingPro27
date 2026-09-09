@@ -49,7 +49,7 @@ public class CustomTitleBar extends JPanel {
         leftPanel.add(titleLabel);
 
         // Cyberpunk Badge
-        JLabel badgeLabel = new JLabel(" FTC 27570 × 25787 ");
+        JLabel badgeLabel = new JLabel(" FTC 27570 B.E.A.R. ");
         badgeLabel.setFont(new Font("Segoe UI", Font.PLAIN, 10));
         badgeLabel.setForeground(NEON_GREEN);
         badgeLabel.setBorder(BorderFactory.createCompoundBorder(

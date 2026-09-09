@@ -64,39 +64,42 @@ export const usePitScoutStore = defineStore('pitScout', () => {
   const unifiedTeamList = computed<UnifiedTeamItem[]>(() => {
     const scheduleStore = useScheduleStore()
     const recordStore = useRecordStore()
+    const targetEventId = currentEventId.value
 
     // 1. 汇集所有数据源的战队号并去重
     const teamNumberSet = new Set<number>()
 
     officialTeams.value.forEach((t) => {
-      if (t.teamNumber > 0) teamNumberSet.add(t.teamNumber)
+      if ((!targetEventId || !t.eventId || t.eventId === targetEventId) && t.teamNumber > 0) teamNumberSet.add(t.teamNumber)
     })
 
     scheduleStore.schedules.forEach((s) => {
-      if (s.red1 > 0) teamNumberSet.add(s.red1)
-      if (s.red2 > 0) teamNumberSet.add(s.red2)
-      if (s.blue1 > 0) teamNumberSet.add(s.blue1)
-      if (s.blue2 > 0) teamNumberSet.add(s.blue2)
+      if (!targetEventId || !s.eventId || s.eventId === targetEventId) {
+        if (s.red1 > 0) teamNumberSet.add(s.red1)
+        if (s.red2 > 0) teamNumberSet.add(s.red2)
+        if (s.blue1 > 0) teamNumberSet.add(s.blue1)
+        if (s.blue2 > 0) teamNumberSet.add(s.blue2)
+      }
     })
 
     recordStore.activeRecords.forEach((r) => {
-      if (r.teamNumber > 0) teamNumberSet.add(r.teamNumber)
+      if ((!targetEventId || r.eventId === targetEventId) && r.teamNumber > 0) teamNumberSet.add(r.teamNumber)
     })
 
     recordStore.teamTags.forEach((t) => {
-      if (t.teamNumber > 0) teamNumberSet.add(t.teamNumber)
+      if ((!targetEventId || t.eventId === targetEventId) && t.teamNumber > 0) teamNumberSet.add(t.teamNumber)
     })
 
     activeRecords.value.forEach((p) => {
-      if (p.teamNumber > 0) teamNumberSet.add(p.teamNumber)
+      if ((!targetEventId || p.eventId === targetEventId) && p.teamNumber > 0) teamNumberSet.add(p.teamNumber)
     })
 
     // 2. 为每支战队构建统一对象
     const allTeams: UnifiedTeamItem[] = Array.from(teamNumberSet).map((teamNumber) => {
-      const official = officialTeams.value.find((t) => t.teamNumber === teamNumber)
-      const pitRec = activeRecords.value.find((p) => p.teamNumber === teamNumber) || null
-      const teamMatches = recordStore.activeRecords.filter((r) => r.teamNumber === teamNumber)
-      const tags = recordStore.getTagsForTeam(teamNumber)
+      const official = officialTeams.value.find((t) => t.teamNumber === teamNumber && (!targetEventId || !t.eventId || t.eventId === targetEventId))
+      const pitRec = activeRecords.value.find((p) => p.teamNumber === teamNumber && (!targetEventId || p.eventId === targetEventId)) || null
+      const teamMatches = recordStore.activeRecords.filter((r) => r.teamNumber === teamNumber && (!targetEventId || r.eventId === targetEventId))
+      const tags = recordStore.getTagsForTeam(teamNumber, targetEventId || undefined)
 
       const matchCount = teamMatches.length
       const avgTotalScore = matchCount > 0
@@ -461,6 +464,29 @@ export const usePitScoutStore = defineStore('pitScout', () => {
     }
   }
 
+  function migrateScoutId(oldScoutId: string, newScoutId: string, newScoutName?: string) {
+    if (!oldScoutId) return
+    const effectiveNewId = newScoutId || oldScoutId
+    let changed = false
+    records.value = records.value.map((r) => {
+      if (r.scoutId === oldScoutId) {
+        changed = true
+        return {
+          ...r,
+          scoutId: effectiveNewId,
+          scoutName: newScoutName || r.scoutName,
+          version: (r.version || 1) + 1,
+          updatedAt: new Date().toISOString(),
+          syncStatus: 'PENDING' as const
+        }
+      }
+      return r
+    })
+    if (changed && currentEventId.value) {
+      saveToLocalStorage(currentEventId.value)
+    }
+  }
+
   return {
     currentEventId,
     records,
@@ -482,6 +508,7 @@ export const usePitScoutStore = defineStore('pitScout', () => {
     applyRemoteUpdate,
     applyFullSync,
     syncFtcRoster,
-    applyOfficialRosterSync
+    applyOfficialRosterSync,
+    migrateScoutId
   }
 })

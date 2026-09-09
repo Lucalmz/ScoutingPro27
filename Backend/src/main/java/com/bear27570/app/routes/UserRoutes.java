@@ -1,7 +1,9 @@
 package com.bear27570.app.routes;
 
 import com.bear27570.app.dao.UserDao;
+import com.bear27570.app.db.UserDeterministicIdMigrator;
 import com.bear27570.app.model.User;
+import com.bear27570.app.util.DbUtil;
 import com.bear27570.app.util.JwtUtil;
 import com.google.gson.Gson;
 import io.javalin.config.RoutesConfig;
@@ -169,50 +171,54 @@ public class UserRoutes {
             String newPassword = asString(body.get("newPassword"));
 
             try {
-                User updated = jdbi.inTransaction(handle -> {
-                    UserDao dao = handle.attach(UserDao.class);
-                    User existing = dao.findById(oldId);
-                    if (existing == null) {
-                        throw new NotFoundResponse("User not found");
-                    }
-
-                    String targetUsername = (newUsername != null && !newUsername.isBlank()) ? newUsername.trim() : existing.getUsername();
-                    if (targetUsername.length() > 50) {
-                        throw new BadRequestResponse("newUsername too long");
-                    }
-
-                    // Check username conflict if username changed
-                    if (!targetUsername.equalsIgnoreCase(existing.getUsername())) {
-                        User conflict = dao.findRegisteredByUsername(targetUsername);
-                        if (conflict != null && !conflict.getId().equals(oldId)) {
-                            throw new ConflictResponse("Username already taken");
-                        }
-                    }
-
-                    // If changing password, verify old password
-                    String newHashedPassword = null;
-                    if (newPassword != null && !newPassword.isBlank()) {
-                        if (existing.getPassword() != null && !existing.getPassword().isBlank()) {
-                            if (oldPassword == null || oldPassword.isBlank() || !BCrypt.checkpw(oldPassword, existing.getPassword())) {
-                                throw new UnauthorizedResponse("Incorrect old password");
+                User updated = DbUtil.withDeadlockRetry(() -> {
+                    synchronized (DbUtil.RECORD_WRITE_LOCK) {
+                        return jdbi.inTransaction(handle -> {
+                            UserDao dao = handle.attach(UserDao.class);
+                            User existing = dao.findById(oldId);
+                            if (existing == null) {
+                                throw new NotFoundResponse("User not found");
                             }
-                        }
-                        newHashedPassword = BCrypt.hashpw(newPassword, BCrypt.gensalt(12));
-                    }
 
-                    // User ID is IMMUTABLE: do not change ID or cascade migrate ID across tables
-                    if (newHashedPassword != null) {
-                        handle.execute("UPDATE users SET username = ?, password = ? WHERE id = ?", targetUsername, newHashedPassword, oldId);
-                    } else {
-                        handle.execute("UPDATE users SET username = ? WHERE id = ?", targetUsername, oldId);
-                    }
+                            String targetUsername = (newUsername != null && !newUsername.isBlank()) ? newUsername.trim() : existing.getUsername();
+                            if (targetUsername.length() > 50) {
+                                throw new BadRequestResponse("newUsername too long");
+                            }
 
-                    // Update scout_name in local records for UI consistency, but scout_id remains unchanged
-                    handle.execute("UPDATE scouting_records SET scout_name = ? WHERE scout_id = ?", targetUsername, oldId);
-                    handle.execute("UPDATE scout_assignments SET scout_name = ? WHERE scout_id = ?", targetUsername, oldId);
-                    handle.execute("UPDATE pit_scouting_records SET scout_name = ? WHERE scout_id = ?", targetUsername, oldId);
-                    User u = dao.findById(oldId);
-                    return u != null ? u : new User(oldId, targetUsername);
+                            // Check username conflict if username changed
+                            if (!targetUsername.equalsIgnoreCase(existing.getUsername())) {
+                                User conflict = dao.findRegisteredByUsername(targetUsername);
+                                if (conflict != null && !conflict.getId().equals(oldId)) {
+                                    throw new ConflictResponse("Username already taken");
+                                }
+                            }
+
+                            // If changing password, verify old password
+                            String newHashedPassword = null;
+                            if (newPassword != null && !newPassword.isBlank()) {
+                                if (existing.getPassword() != null && !existing.getPassword().isBlank()) {
+                                    if (oldPassword == null || oldPassword.isBlank() || !BCrypt.checkpw(oldPassword, existing.getPassword())) {
+                                        throw new UnauthorizedResponse("Incorrect old password");
+                                    }
+                                }
+                                newHashedPassword = BCrypt.hashpw(newPassword, BCrypt.gensalt(12));
+                            }
+
+                            // User ID is IMMUTABLE: do not change ID or cascade migrate ID across tables
+                            if (newHashedPassword != null) {
+                                handle.execute("UPDATE users SET username = ?, password = ? WHERE id = ?", targetUsername, newHashedPassword, oldId);
+                            } else {
+                                handle.execute("UPDATE users SET username = ? WHERE id = ?", targetUsername, oldId);
+                            }
+
+                            // Update scout_name in local records for UI consistency, bumping version & updated_at so synced peers receive updates
+                            handle.execute("UPDATE scouting_records SET scout_name = ?, version = COALESCE(version, 1) + 1, updated_at = CURRENT_TIMESTAMP WHERE scout_id = ?", targetUsername, oldId);
+                            handle.execute("UPDATE scout_assignments SET scout_name = ?, updated_at = CURRENT_TIMESTAMP WHERE scout_id = ?", targetUsername, oldId);
+                            handle.execute("UPDATE pit_scouting_records SET scout_name = ?, version = COALESCE(version, 1) + 1, updated_at = CURRENT_TIMESTAMP WHERE scout_id = ?", targetUsername, oldId);
+                            User u = dao.findById(oldId);
+                            return u != null ? u : new User(oldId, targetUsername);
+                        });
+                    }
                 });
 
                 String newToken = JwtUtil.generateToken(updated.getId(), updated.getUsername());
@@ -228,5 +234,67 @@ public class UserRoutes {
                 ctx.status(500).result("Internal Server Error: " + e.getMessage());
             }
         });
+
+        io.javalin.http.Handler mergeHandler = ctx -> {
+            String sourceId = ctx.attribute("userId");
+            if (sourceId == null || sourceId.isBlank()) {
+                throw new UnauthorizedResponse("Unauthorized");
+            }
+            @SuppressWarnings("unchecked")
+            Map<String, Object> body = gson.fromJson(ctx.body(), Map.class);
+            if (body == null) {
+                ctx.status(400).result("Invalid JSON body");
+                return;
+            }
+            String targetUsername = asString(body.get("targetUsername"));
+            String targetPassword = asString(body.get("targetPassword"));
+
+            if (targetUsername == null || targetUsername.isBlank() || targetPassword == null || targetPassword.isBlank()) {
+                throw new BadRequestResponse("targetUsername and targetPassword required");
+            }
+
+            try {
+                User targetUser = DbUtil.withDeadlockRetry(() -> {
+                    synchronized (DbUtil.RECORD_WRITE_LOCK) {
+                        return jdbi.inTransaction(handle -> {
+                            UserDao dao = handle.attach(UserDao.class);
+                            User sourceUser = dao.findById(sourceId);
+                            if (sourceUser == null) {
+                                throw new NotFoundResponse("Source user not found");
+                            }
+                            User target = dao.findRegisteredByUsername(targetUsername.trim());
+                            if (target == null) {
+                                throw new NotFoundResponse("Target user not found");
+                            }
+                            if (target.getId().equals(sourceId)) {
+                                throw new BadRequestResponse("Cannot merge user into itself");
+                            }
+                            if (target.getPassword() == null || target.getPassword().isBlank() || !BCrypt.checkpw(targetPassword, target.getPassword())) {
+                                throw new UnauthorizedResponse("Invalid target account password");
+                            }
+
+                            // Perform atomic cascade migration from sourceId to target.getId()
+                            UserDeterministicIdMigrator.mergeUserInto(handle, sourceId, target.getId(), target.getUsername());
+                            return target;
+                        });
+                    }
+                });
+
+                String newToken = JwtUtil.generateToken(targetUser.getId(), targetUser.getUsername());
+                ctx.result(gson.toJson(Map.of(
+                        "id", targetUser.getId(),
+                        "username", targetUser.getUsername(),
+                        "token", newToken
+                ))).contentType("application/json");
+            } catch (HttpResponseException e) {
+                throw e;
+            } catch (Exception e) {
+                System.err.println("User merge error: " + e.getMessage());
+                ctx.status(500).result("Internal Server Error: " + e.getMessage());
+            }
+        };
+
+        routes.post("/api/user/merge", mergeHandler);
+        routes.post("/api/users/merge", mergeHandler);
     }
 }

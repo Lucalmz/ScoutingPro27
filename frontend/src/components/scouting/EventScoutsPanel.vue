@@ -9,6 +9,7 @@ import { useInboxStore } from '@/stores/inbox'
 import { useToastStore } from '@/stores/toast'
 import { updateEventFtcConfig, fetchEventMembers, type EventMemberItem } from '@/services/api'
 import { downloadCSV } from '@/utils/csvExport'
+import { sortRecordsChronologically, getRecordTournamentLevel } from '@/utils/tournament'
 import OfflineSyncModal from '@/components/common/OfflineSyncModal.vue'
 
 const props = defineProps<{
@@ -121,9 +122,11 @@ function exportRankingsCSV() {
 }
 
 function exportRecordsCSV() {
-  const headers = ['Record ID', 'Match', 'Team', 'Scout', 'Auto', 'Teleop', 'Endgame', 'Total Score', 'Is Broken', 'Created At']
-  const rows = recordStore.activeRecords.map(r => [
+  const headers = ['Record ID', 'Level', 'Match', 'Team', 'Scout', 'Auto', 'Teleop', 'Endgame', 'Total Score', 'Is Broken', 'Created At']
+  const sorted = sortRecordsChronologically(recordStore.activeRecords)
+  const rows = sorted.map(r => [
     r.id,
+    getRecordTournamentLevel(r),
     r.matchNumber,
     r.teamNumber,
     r.scoutName,

@@ -22,11 +22,13 @@ import ScheduleManager from '@/components/schedule/ScheduleManager.vue'
 import SessionConflictModal from '@/components/common/SessionConflictModal.vue'
 import TakeoverPromptModal from '@/components/common/TakeoverPromptModal.vue'
 import RenameModal from '@/components/common/RenameModal.vue'
+import AccountMergeModal from '@/components/common/AccountMergeModal.vue'
 import OfflineSyncModal from '@/components/common/OfflineSyncModal.vue'
 import MobileQrModal from '@/components/common/MobileQrModal.vue'
 import MobileBottomNav from '@/components/common/MobileBottomNav.vue'
 import { syncRecords } from '@/services/api'
 import { transitionState } from '@/utils/transitionState'
+import { useToastStore } from '@/stores/toast'
 import { useEventWebRtcBridge } from './useEventWebRtcBridge'
 import { useEventTransitions } from './useEventTransitions'
 
@@ -35,6 +37,7 @@ const router = useRouter()
 const userStore = useUserStore()
 const eventStore = useEventStore()
 const recordStore = useRecordStore()
+const toastStore = useToastStore()
 
 const activeScoutTask = ref<{ matchNumber: number; teamNumber: number; allianceColor: 'red' | 'blue'; tournamentLevel?: string } | null>(null)
 
@@ -49,8 +52,21 @@ const pitStore = usePitScoutStore()
 const { t } = useI18n()
 
 const showRenameModal = ref(false)
+const showMergeModal = ref(false)
 const showOfflineSyncModal = ref(false)
 const showMobileQrModal = ref(false)
+
+async function onAccountMerged(newUsername: string, meta?: { oldId?: string, newId?: string }) {
+  toastStore.showToast(t('user.merge_success_toast', { username: newUsername }) || `账号已成功合并至 ${newUsername}，正在刷新...`, 'success')
+  const activeEventId = (route.params.eventId as string) || event.value?.id
+  if (activeEventId && meta?.oldId && meta?.newId) {
+    connStore.rtcService?.sendIdentityMigration(activeEventId, meta.oldId, meta.newId, newUsername)
+    connStore.requestSync(0, undefined, meta.newId, newUsername)
+  }
+  if (userStore.userId) {
+    await eventStore.fetchEvents(userStore.userId)
+  }
+}
 function handleOpenRenameModal() {
   if (typeof document !== 'undefined' && 'startViewTransition' in document) {
     document.documentElement.dataset.transitionType = 'user-profile'
@@ -244,8 +260,8 @@ async function onRecordSubmitted(recordOrRecords: ScoutingRecord | ScoutingRecor
   if (anyOk && allToPush.length > 0) {
     // 按 id 严格去重，避免重复引用导致同一条记录多次自增 hostSeq
     const deduplicatedRecords = Array.from(new Map(allToPush.map((r) => [r.id, r])).values())
-    // Host 本地写入也要打 hostSeq 并持久化落库，确保重启后单调递增及 Client 重连能增量同步
-    if (eventStore.isHost) {
+    // Host 本地写入也要打 hostSeq 并持久化落库，确保重启后单调递增及 Client 重连能增量同步（Standby 备用端不打序号，由主控端统一处理）
+    if (eventStore.isHost && !connStore.isStandbyHost) {
       connStore.stampHostSeq(deduplicatedRecords)
       try {
         await syncRecords(deduplicatedRecords)
@@ -256,6 +272,15 @@ async function onRecordSubmitted(recordOrRecords: ScoutingRecord | ScoutingRecor
     connStore.pushIfNeeded(deduplicatedRecords)
   }
   editingRecord.value = null // clear edit state after submit
+}
+
+async function handleTakeoverHost() {
+  try {
+    await connStore.takeoverHost()
+  } catch (e: any) {
+    console.error('[EventView] Failed to takeover host:', e)
+    toastStore.showError(e?.message || '接管主机失败')
+  }
 }
 </script>
 
@@ -288,33 +313,33 @@ async function onRecordSubmitted(recordOrRecords: ScoutingRecord | ScoutingRecor
       </div>
       <div class="topbar-right" :style="{ viewTransitionName: 'event-status' }">
         <button
-          class="user-tag-btn inbox-topbar-btn"
+          class="topbar-btn inbox-topbar-btn"
           @click="inboxStore.toggleOpen()"
           title="Inbox"
         >
           <span class="material-icons" style="font-size: 18px; margin-right: 4px;">inbox</span>
-          <span class="username-text">Inbox</span>
+          <span class="topbar-btn-text">Inbox</span>
           <span v-if="inboxStore.unreadCount > 0" class="topbar-unread-badge">{{ inboxStore.unreadCount }}</span>
         </button>
         <button
-          v-if="eventStore.isHost"
-          class="user-tag-btn host-qr-btn"
+          v-if="isHost"
+          class="topbar-btn host-qr-btn"
           @click="showMobileQrModal = true"
           :title="t('event.mobile_qr_title')"
         >
           <span class="material-icons" style="font-size: 18px; margin-right: 4px;">qr_code_2</span>
-          <span class="username-text">{{ t('event.mobile_qr_btn') }}</span>
+          <span class="topbar-btn-text">{{ t('event.mobile_qr_btn') }}</span>
         </button>
         <button
-          class="user-tag-btn"
+          class="topbar-btn offline-sync-btn"
           @click="showOfflineSyncModal = true"
           :title="t('offline_sync.title')"
         >
           <span class="material-icons" style="font-size: 18px; margin-right: 4px;">usb</span>
-          <span class="username-text">{{ t('offline_sync.open_modal') }}</span>
+          <span class="topbar-btn-text">{{ t('offline_sync.open_modal') }}</span>
         </button>
         <button
-          class="user-tag-btn"
+          class="user-tag-btn user-profile-btn"
           @click="handleOpenRenameModal"
           :title="t('user.edit_nickname')"
           :style="{ viewTransitionName: !showRenameModal ? 'user-profile-box' : 'none' }"
@@ -334,6 +359,20 @@ async function onRecordSubmitted(recordOrRecords: ScoutingRecord | ScoutingRecor
     <div v-if="connStore.isCongested" class="congestion-banner">
       <span class="material-icons banner-icon">warning</span>
       <span>{{ t('connection.congested_banner') }}</span>
+    </div>
+
+    <!-- Standby Host Banner -->
+    <div v-if="connStore.isStandbyHost" class="standby-host-banner">
+      <div class="standby-banner-left">
+        <span class="material-icons standby-icon">sensors</span>
+        <span class="standby-text">
+          本机为<strong>【备用监控端】</strong>（当前赛事已由主控设备主持中，本机保持实时数据镜像）。
+        </span>
+      </div>
+      <button class="btn-takeover-host" @click="handleTakeoverHost">
+        <span class="material-icons" style="font-size: 16px; margin-right: 4px;">offline_bolt</span>
+        一键接管为主控机
+      </button>
     </div>
 
     <!-- Tab Bar -->
@@ -397,10 +436,11 @@ async function onRecordSubmitted(recordOrRecords: ScoutingRecord | ScoutingRecor
 
     <SessionConflictModal />
     <TakeoverPromptModal />
-    <RenameModal v-model:visible="showRenameModal" :event-id="event?.id" />
+    <RenameModal v-model:visible="showRenameModal" :event-id="event?.id" @open-merge="showMergeModal = true" />
+    <AccountMergeModal v-model:visible="showMergeModal" @merged="onAccountMerged" />
     <OfflineSyncModal v-model:visible="showOfflineSyncModal" :event-id="event?.id" />
     <MobileQrModal
-      v-if="eventStore.isHost && event"
+      v-if="isHost && event"
       v-model="showMobileQrModal"
       :invite-code="event.inviteCode"
     />

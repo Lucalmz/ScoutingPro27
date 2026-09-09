@@ -27,6 +27,8 @@ function loadFromStorage<T>(key: string, defaultVal: T): T {
     return defaultVal
   }
 }
+import { getRecordTournamentLevel, getTournamentLevelOrder } from '@/utils/tournament'
+export { getRecordTournamentLevel, getTournamentLevelOrder }
 
 export const useRecordStore = defineStore('records', () => {
   const records = ref<ScoutingRecord[]>(loadFromStorage('scoutingpro_records', []))
@@ -208,10 +210,21 @@ export const useRecordStore = defineStore('records', () => {
     }
   }
 
-  function reassessConflicts(matchNumber: number, teamNumber: number, targetEventId?: string): ScoutingRecord[] {
+  function reassessConflicts(
+    matchNumber: number,
+    teamNumber: number,
+    tournamentLevel?: string,
+    targetEventId?: string
+  ): ScoutingRecord[] {
     const eid = targetEventId || currentEventId.value
     const pool = eid ? records.value.filter(r => r.eventId === eid) : currentRecords.value
-    const coordsRecords = pool.filter(r => !r.isDeleted && r.matchNumber === matchNumber && r.teamNumber === teamNumber)
+    const targetLevel = (tournamentLevel || 'QUALIFICATION').toUpperCase()
+    const coordsRecords = pool.filter(r =>
+      !r.isDeleted &&
+      r.matchNumber === matchNumber &&
+      r.teamNumber === teamNumber &&
+      getRecordTournamentLevel(r) === targetLevel
+    )
     const uniqueScouts = new Set(coordsRecords.map(r => r.scoutId))
     const updatedRecords: ScoutingRecord[] = []
     
@@ -225,6 +238,16 @@ export const useRecordStore = defineStore('records', () => {
           updatedRecords.push(r)
         }
       }
+    } else {
+      for (const r of coordsRecords) {
+        if (!r.isConflict) {
+          r.isConflict = true
+          r.updatedAt = new Date().toISOString()
+          r.version = (r.version || 0) + 1  // 冲突状态变更也要递增 version
+          r.syncStatus = 'PENDING'
+          updatedRecords.push(r)
+        }
+      }
     }
     return updatedRecords
   }
@@ -232,8 +255,11 @@ export const useRecordStore = defineStore('records', () => {
   // --- save a new record locally ---
   async function addRecord(record: ScoutingRecord): Promise<{ success: boolean, recordsToPush: ScoutingRecord[] }> {
     const idx = records.value.findIndex(r => r.id === record.id)
-    const oldMatch = idx >= 0 ? records.value[idx]?.matchNumber ?? null : null
-    const oldTeam = idx >= 0 ? records.value[idx]?.teamNumber ?? null : null
+    const oldRec = idx >= 0 ? records.value[idx] : null
+    const oldMatch = oldRec ? oldRec.matchNumber : null
+    const oldTeam = oldRec ? oldRec.teamNumber : null
+    const oldLevel = oldRec ? getRecordTournamentLevel(oldRec) : null
+    const newLevel = getRecordTournamentLevel(record)
 
     // 用户显式编辑永远更新时间戳和状态
     record.updatedAt = new Date().toISOString()
@@ -248,10 +274,11 @@ export const useRecordStore = defineStore('records', () => {
 
     const recordsToPush: ScoutingRecord[] = [record]
 
-    if (oldMatch !== null && oldTeam !== null && (oldMatch !== record.matchNumber || oldTeam !== record.teamNumber)) {
-      recordsToPush.push(...reassessConflicts(oldMatch, oldTeam, record.eventId))
+    if (oldMatch !== null && oldTeam !== null && (oldMatch !== record.matchNumber || oldTeam !== record.teamNumber || oldLevel !== newLevel)) {
+      recordsToPush.push(...reassessConflicts(oldMatch, oldTeam, oldLevel || undefined, record.eventId))
     }
-    recordsToPush.push(...reassessConflicts(record.matchNumber, record.teamNumber, record.eventId))
+    recordsToPush.push(...reassessConflicts(record.matchNumber, record.teamNumber, newLevel, record.eventId))
+    const uniqueRecordsToPush = Array.from(new Map(recordsToPush.map(r => [r.id, r])).values())
 
     try {
       const [{ useUserStore }, { useEventStore }] = await Promise.all([
@@ -264,11 +291,11 @@ export const useRecordStore = defineStore('records', () => {
         await saveRecord(record)
         record.syncStatus = 'SYNCED'
       }
-      return { success: true, recordsToPush }
+      return { success: true, recordsToPush: uniqueRecordsToPush }
     } catch (e: any) {
       error.value = e.message ?? 'Failed to save record'
       // It's still successfully stored locally, will be synced via WebRTC
-      return { success: true, recordsToPush }
+      return { success: true, recordsToPush: uniqueRecordsToPush }
     }
   }
 
@@ -282,8 +309,10 @@ export const useRecordStore = defineStore('records', () => {
     target.version = (target.version || 0) + 1
     target.syncStatus = 'PENDING'
 
+    const targetLevel = getRecordTournamentLevel(target)
     const recordsToPush = [target]
-    recordsToPush.push(...reassessConflicts(target.matchNumber, target.teamNumber, target.eventId))
+    recordsToPush.push(...reassessConflicts(target.matchNumber, target.teamNumber, targetLevel, target.eventId))
+    const uniqueRecordsToPush = Array.from(new Map(recordsToPush.map(r => [r.id, r])).values())
 
     try {
       const [{ useEventStore }] = await Promise.all([import('@/stores/events')])
@@ -296,7 +325,7 @@ export const useRecordStore = defineStore('records', () => {
       console.warn('[RecordStore] Failed to sync deleted tombstone to backend:', e)
     }
 
-    return { success: true, recordsToPush }
+    return { success: true, recordsToPush: uniqueRecordsToPush }
   }
 
   // --- bulk upsert from peer sync ---
@@ -325,8 +354,9 @@ export const useRecordStore = defineStore('records', () => {
             (incV === localV && incHostSeq === localHostSeq && inc.updatedAt > local.updatedAt)
 
           if (shouldAccept) {
-            // 追踪覆写前的旧坐标（冲突可能在旧坐标处消失）
-            coordsToReassess.add(`${local.eventId}:${local.matchNumber}:${local.teamNumber}`)
+            // 追踪覆写前的旧坐标（冲突可能在旧坐标处消失，包含 tournamentLevel 避免跨赛制碰撞）
+            const oldLevel = getRecordTournamentLevel(local)
+            coordsToReassess.add(`${local.eventId}:${oldLevel}:${local.matchNumber}:${local.teamNumber}`)
             records.value[idx] = inc
             savedLocal = records.value[idx] ?? null
           } else if (incV === localV && incHostSeq === localHostSeq && inc.syncStatus === 'SYNCED' && local.syncStatus !== 'SYNCED') {
@@ -342,16 +372,18 @@ export const useRecordStore = defineStore('records', () => {
 
       if (savedLocal) {
         acceptedRecords.push(savedLocal)
-        // 追踪新坐标（附带 eventId 避免跨赛事碰撞）
-        coordsToReassess.add(`${savedLocal.eventId}:${savedLocal.matchNumber}:${savedLocal.teamNumber}`)
+        // 追踪新坐标（附带 eventId 与 tournamentLevel 避免跨赛事碰撞）
+        const incLevel = getRecordTournamentLevel(savedLocal)
+        coordsToReassess.add(`${savedLocal.eventId}:${incLevel}:${savedLocal.matchNumber}:${savedLocal.teamNumber}`)
         
-        // 冲突检测 (非删除记录才检测冲突，且必须限定在相同 eventId 下)
+        // 冲突检测 (非删除记录才检测冲突，且必须限定在相同 eventId 和 tournamentLevel 下)
         if (!savedLocal.isDeleted) {
           const conflictRecords = records.value.filter(r =>
             !r.isDeleted &&
             r.eventId === savedLocal!.eventId &&
             r.matchNumber === savedLocal!.matchNumber &&
             r.teamNumber === savedLocal!.teamNumber &&
+            getRecordTournamentLevel(r) === incLevel &&
             r.scoutId !== savedLocal!.scoutId
           )
           if (conflictRecords.length > 0) {
@@ -372,8 +404,8 @@ export const useRecordStore = defineStore('records', () => {
 
     // 重评所有受影响坐标，清除已不成立的冲突标志
     for (const key of coordsToReassess) {
-      const [evId, matchStr, teamStr] = key.split(':')
-      const cleared = reassessConflicts(Number(matchStr), Number(teamStr), evId)
+      const [evId, level, matchStr, teamStr] = key.split(':')
+      const cleared = reassessConflicts(Number(matchStr), Number(teamStr), level, evId)
       recordsToBroadcast.push(...cleared)
     }
 
@@ -498,19 +530,29 @@ export const useRecordStore = defineStore('records', () => {
     }
   }
 
-  function applyTagsFullSync(tags: TeamTagItem[]) {
-    if (Array.isArray(tags)) {
+  function applyTagsFullSync(tags: TeamTagItem[], eventId?: string) {
+    if (!Array.isArray(tags)) return
+    const firstTag = tags[0]
+    const targetEventId = eventId || (firstTag?.eventId ? firstTag.eventId : currentEventId.value)
+    if (targetEventId) {
+      const otherEventsTags = teamTags.value.filter(t => t.eventId !== targetEventId)
+      teamTags.value = [...otherEventsTags, ...tags]
+    } else {
       teamTags.value = tags
     }
+    flushStorage()
   }
 
   function migrateScoutId(oldId: string, newId: string, newScoutName: string) {
     if (!oldId) return
     const effectiveNewId = newId || oldId
     let changed = false
+    const coordsToReassess = new Set<string>()
     records.value = records.value.map(r => {
       if (r.scoutId === oldId) {
         changed = true
+        const level = getRecordTournamentLevel(r)
+        coordsToReassess.add(`${r.eventId}:${level}:${r.matchNumber}:${r.teamNumber}`)
         return {
           ...r,
           scoutId: effectiveNewId,
@@ -522,13 +564,18 @@ export const useRecordStore = defineStore('records', () => {
       }
       return r
     })
+    for (const key of coordsToReassess) {
+      const [evId, level, matchStr, teamStr] = key.split(':')
+      reassessConflicts(Number(matchStr), Number(teamStr), level, evId)
+    }
     if (changed) {
       flushStorage()
     }
   }
 
-  const getTagsForTeam = (teamNumber: number): TeamTagItem[] => {
-    return teamTags.value.filter(t => t.teamNumber === teamNumber)
+  const getTagsForTeam = (teamNumber: number, eventId?: string): TeamTagItem[] => {
+    const eid = eventId || currentEventId.value
+    return teamTags.value.filter(t => t.teamNumber === teamNumber && (!eid || t.eventId === eid))
   }
 
   return {

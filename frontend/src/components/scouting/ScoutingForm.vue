@@ -8,6 +8,7 @@ import { hapticFeedback } from '@/utils/haptics'
 import type { ScoutingRecord, ScoutingFormData } from '@/types'
 import TagPicker from '@/components/common/TagPicker.vue'
 import PitStatusIndicator from '@/components/pit/PitStatusIndicator.vue'
+import { isAssignmentCompleted, getRecordTournamentLevel } from '@/utils/tournament'
 
 const { t } = useI18n()
 
@@ -164,18 +165,12 @@ const nextPendingAssignment = computed(() => {
   if (!props.scoutId) return null
   const myTasks = scheduleStore.myAssignments(props.scoutId)
   for (const t of myTasks) {
-    const isDone = recordStore.activeRecords.some((r) => {
-      if (r.matchNumber !== t.matchNumber || r.teamNumber !== t.teamNumber || r.scoutId !== props.scoutId) {
-        return false
-      }
-      try {
-        const parsed = JSON.parse(r.rawData)
-        if (t.assignment.tournamentLevel && parsed.tournamentLevel) {
-          return parsed.tournamentLevel.toUpperCase() === t.assignment.tournamentLevel.toUpperCase()
-        }
-      } catch {}
-      return true
-    })
+    const isDone = isAssignmentCompleted(
+      { matchNumber: t.matchNumber, teamNumber: t.teamNumber, tournamentLevel: t.assignment.tournamentLevel },
+      props.scoutId,
+      recordStore.activeRecords,
+      { matchAnyScout: true }
+    )
     if (!isDone) {
       const color: 'red' | 'blue' = t.station.startsWith('red') ? 'red' : 'blue'
       return {
@@ -227,17 +222,11 @@ async function handleSubmit() {
   for (const team of activeTeams) {
     const matchNum = parseInt(matchNumber.value)
     const teamNum = parseInt(team.teamNumber)
+    const curLevel = (currentTournamentLevel.value || 'QUALIFICATION').toUpperCase()
     const existing = recordStore.activeRecords.find(r => {
       if (r.matchNumber !== matchNum || r.teamNumber !== teamNum || r.scoutId !== props.scoutId) return false
       if (props.editRecord && r.id === props.editRecord.id) return false
-      try {
-        const raw = JSON.parse(r.rawData)
-        const rLevel = (raw.tournamentLevel || 'QUALIFICATION').toUpperCase()
-        const curLevel = (currentTournamentLevel.value || 'QUALIFICATION').toUpperCase()
-        return rLevel === curLevel
-      } catch {
-        return true
-      }
+      return getRecordTournamentLevel(r) === curLevel
     })
     if (existing) {
       submitStatus.value = 'error'
@@ -303,7 +292,9 @@ async function handleSubmit() {
     }
 
     submitStatus.value = 'success'
-    matchNumber.value = String(parseInt(matchNumber.value) + 1)
+    if (!props.editRecord) {
+      matchNumber.value = String(parseInt(matchNumber.value) + 1)
+    }
     // reset teams
     if (props.editRecord && previousScoutMode.value === 'alliance') {
       scoutMode.value = 'alliance'
