@@ -3,7 +3,7 @@
 <p align="left">
   <img src="https://img.shields.io/badge/FTC_Team-27570_B.E.A.R.-FF6F00?style=for-the-badge&logo=target&logoColor=white" alt="FTC 27570" />
   <img src="https://img.shields.io/badge/Architecture-Public_P2P_Mesh-00B0FF?style=for-the-badge&logo=webrtc&logoColor=white" alt="P2P" />
-  <img src="https://img.shields.io/badge/Security-Zero_Trust_&_SAS-00C853?style=for-the-badge&logo=auth0&logoColor=white" alt="Security" />
+  <img src="https://img.shields.io/badge/Security-Zero_Trust_%26_SAS-00C853?style=for-the-badge&logo=auth0&logoColor=white" alt="Security" />
   <img src="https://img.shields.io/badge/Vue.js_3-35495E?style=for-the-badge&logo=vue.js&logoColor=4FC08D" alt="Vue.js" />
   <img src="https://img.shields.io/badge/TypeScript-007ACC?style=for-the-badge&logo=typescript&logoColor=white" alt="TypeScript" />
   <img src="https://img.shields.io/badge/Java_21-ED8B00?style=for-the-badge&logo=openjdk&logoColor=white" alt="Java" />
@@ -100,7 +100,7 @@ ScoutingPro27 在整个 FIRST 社区最大的创新与突破，在于**将先进
 3. **TOFU (Trust-On-First-Use) 设备资产信任**：
    - 首次连接成功后，设备私钥指纹自动存入设备隔离区。后续连接自动免密放行；**若同一设备在活跃会话中公钥突变（典型的黑客劫持攻击特征），系统立即触发红色安全熔断，瞬间切断连接并弹窗报警！**
 4. **防篡改与防重放攻击**：
-   - 所有通信报文带有基于房间专属盐值的 **HMAC-SHA256 签名**；内置 $\pm 30\text{s}$ 时间戳窗口与 **5000 容量的 Nonce LRU 内存排重池**，赛场恶意抓包重发直接被硬件级丢弃。
+   - 所有通信报文带有基于房间专属盐值的 **HMAC-SHA256 签名**；内置 ±30s 时间戳窗口与 **5000 容量的 Nonce LRU 内存排重池**，赛场恶意抓包重发直接被硬件级丢弃。
 5. **本地密钥保护**：
    - 接入 AI 战术军师所用的 API Key 均在本地通过 AES-256 加密存盘，仅在推理时由后端内存解密调用，**绝不通过网络广播上行，杜绝泄密隐患**。
 
@@ -178,10 +178,10 @@ ScoutingPro27 在整个 FIRST 社区最大的创新与突破，在于**将先进
 ### 2.7 第六步：战力天梯榜与“吹牛指数”量化对账 (Brag Index)
 赛场数据汇总后，电脑端会自动排出全场战力积分榜。系统内置了革命性的 **“吹牛指数”量化对账模型**：
 - **它是怎么算的？** 系统会自动拿队伍在展位填报的“自述综合理论总分”，与他们在真实排位赛中打出的“最高分与平均分基线”进行动态核算：
-  - 🎯 **【真实守信 ($\le 1.15\times$)】**：实战得分与自报基本一致，实力硬核，靠谱首选！
-  - 🟡 **【略偏乐观 ($1.15\times \sim 1.45\times$)】**：略微偏高，但赛场实战发挥稳定，基本能胜任既定战术。
-  - ⚠️ **【夸大其词 ($1.45\times \sim 2.00\times$)】**：得分缩水明显，自报水分较大，挑选联盟时需谨慎评估。
-  - 🔥 **【吹破牛皮 ($> 2.00\times$)】**：实际得分不足自报的一半，存在严重虚报，直接标红预警避坑！
+  - 🎯 **【真实守信 (≤ 1.15x)】**：实战得分与自报基本一致，实力硬核，靠谱首选！
+  - 🟡 **【略偏乐观 (1.15x ~ 1.45x)】**：略微偏高，但赛场实战发挥稳定，基本能胜任既定战术。
+  - ⚠️ **【夸大其词 (1.45x ~ 2.00x)】**：得分缩水明显，自报水分较大，挑选联盟时需谨慎评估。
+  - 🔥 **【吹破牛皮 (> 2.00x)】**：实际得分不足自报的一半，存在严重虚报，直接标红预警避坑！
 - **高悬挂常规赛留力特赦机制**：  
   如果一支强队自述能挂高杠，但资格赛前两场没挂，是他们说谎吗？**系统很聪明**！算法明白强队往往为了保护机械机构选择在常规赛留力。系统会自动点亮 **【常规赛留力特赦 🛡️】**，避免误伤真正的王牌战队！
 
@@ -210,9 +210,16 @@ ScoutingPro27 在整个 FIRST 社区最大的创新与突破，在于**将先进
 ### 3.1 公网 P2P 穿透与盲信令协同网络 (Architecture Diagram)
 ScoutingPro27 采用**离线优先的去中心化分布式架构**。主机端承载本地微服务、H2 嵌入式数据库与磁盘存储，客户端通过 WebRTC DataChannel 与主机互联，公共 MQTT Broker 仅用于交换握手参数（公钥、SDP、网络候选），不存储任何业务明文。
 
+<p align="center">
+  <img src="docs/images/architecture.svg" alt="公网 P2P 穿透与盲信令协同网络架构图" width="100%" />
+</p>
+
+<details>
+<summary><b>🔍 点击展开 Mermaid 架构流程图原生源码 (View Source)</b></summary>
+
 ```mermaid
-graph TB
-    subgraph SignalingLayer["公共盲信令通道 (Public Blind Signaling Layer)"]
+flowchart TB
+    subgraph Signaling["公共盲信令通道 (Public Blind Signaling Layer)"]
         MQTT["MQTT over WSS (broker.emqx.io:8084)<br/>• 动态加密房间频道: scoutingpro/signal/{roomHash}<br/>• 仅作为端到端握手盲转交 (Blind Relay)，无明文数据"]
     end
 
@@ -229,8 +236,8 @@ graph TB
         Javalin --> HostSafety
     end
 
-    subgraph P2PLink["WebRTC P2P 加密直连通道 (DataChannel)"]
-        DirectPipe["AES-256-GCM 认证加密数据管道<br/>• 4位 SAS 短认证码物理核验<br/>• TOFU 首次信任设备资产库<br/>• 背压感应分片传输 (赛程/排班/打分/照片)"]
+    subgraph P2PPipe["WebRTC P2P 加密直连数据管道 (DataChannel)"]
+        DirectPipe["AES-256-GCM 认证加密传输<br/>• 4位 SAS 短认证码物理核验<br/>• TOFU 首次信任设备资产库<br/>• 背压感应分片传输 (赛程/排班/打分/照片)"]
     end
 
     subgraph ClientNode["Scout 手机端 (H5 / 响应式 Web / 离线优先)"]
@@ -244,15 +251,25 @@ graph TB
         ScoutUI --> CursorSync
     end
 
-    HostApp <-->|WSS 信令握手| MQTT
-    ClientNode <-->|WSS 信令握手| MQTT
-    HostApp <===>|WebRTC P2P 点对点穿透直连| ClientNode
+    Signaling -.->|WSS 房间信令交换| HostApp
+    Signaling -.->|WSS 房间信令交换| ClientNode
+    HostApp <===>|WebRTC 直连数据管道| DirectPipe
+    DirectPipe <===>|WebRTC 直连数据管道| ClientNode
 ```
+
+</details>
 
 ---
 
 ### 3.2 零信任安全与双向身份校验流程 (Zero-Trust Security Flow)
 在建立连接的过程中，系统执行一套严格的密码学双向核验流程，杜绝赛场嗅探、中间人替换攻击（MITM）以及会话伪造攻击：
+
+<p align="center">
+  <img src="docs/images/security-flow.svg" alt="零信任安全与双向身份校验时序图" width="100%" />
+</p>
+
+<details>
+<summary><b>🔍 点击展开 Mermaid 时序流程图原生源码 (View Source)</b></summary>
 
 ```mermaid
 sequenceDiagram
@@ -269,29 +286,38 @@ sequenceDiagram
     Host->>Signaling: 广播 JOIN_ACCEPT (附带 Host ECDH 公钥)
     Note over Host,Scout: 交换 SDP Offer/Answer 与 ICE 候选，建立 WebRTC DataChannel
 
-    rect rgb(235, 248, 255)
+    rect rgb(240, 248, 255)
     Note over Host,Scout: 零信任密码学核验阶段 (SAS & TOFU)
-    Host->>Host: 计算 4 位可视短认证码: SAS = SHA256(MinKey || MaxKey || Code)
-    Scout->>Scout: 同步计算本地 4 位可视短认证码 SAS
-    Host-->>Lead: 电脑屏幕展示 SAS 码 (如: D157-A8BB)
-    Scout-->>ScoutUser: 手机屏幕展示 SAS 码 (如: D157-A8BB)
-    Lead->>ScoutUser: 现场目测口头核验：“是 D157 吗？” -> “是的！”
+    Host->>Host: 计算 4 位短认证码: SAS = SHA256(MinKey + MaxKey + Code)
+    Scout->>Scout: 同步计算本地 4 位短认证码 SAS
+    Host-->>Lead: 电脑屏幕展示 SAS 码 (如: D157)
+    Scout-->>ScoutUser: 手机屏幕展示 SAS 码 (如: D157)
+    Lead->>ScoutUser: 现场目测口头核验：“是 D157 吗？” 回应：“是的！”
     Scout->>Scout: TOFU 比对: 首次连接存入 IndexedDB；若公钥突变则秒级切断报警！
     end
 
     rect rgb(240, 255, 240)
     Note over Host,Scout: 业务报文加密传输阶段
     Scout->>Host: 提交现场侦察打分 (HMAC-SHA256 签名 + 随机 Nonce + 时间戳)
-    Host->>Host: 校验时间戳窗口 (<=30s) + Nonce LRU 查重 + 验签
+    Host->>Host: 校验时间戳窗口 (≤30秒) + Nonce LRU 查重 + 验签
     Host->>Host: 写入本地 H2 数据库并分配单调自增 hostSeq
     Host-->>Scout: 返回回执与增量状态更新
     end
 ```
 
+</details>
+
 ---
 
 ### 3.3 分布式单调时钟与冲突自动消解 (Data Sync & Conflict Resolution)
 各手机本地时间可能因时区、电池耗尽等原因出现偏差。ScoutingPro27 舍弃传统的本地时间戳对比，**改由 Host 统一下发单调自增的逻辑时钟游标 `hostSeq`**：
+
+<p align="center">
+  <img src="docs/images/state-sync.svg" alt="分布式单调时钟与冲突自动消解状态机" width="100%" />
+</p>
+
+<details>
+<summary><b>🔍 点击展开 Mermaid 状态机图原生源码 (View Source)</b></summary>
 
 ```mermaid
 stateDiagram-v2
@@ -313,8 +339,8 @@ stateDiagram-v2
     弱网或断网离线 --> 网络恢复自动重连: 检测到 ICE 通道恢复
     
     state 网络恢复自动重连 {
-        发起增量请求: REQUEST_SYNC(sinceSeq = lastHostSeq)
-        检索增量差量: Host 查询 hostSeq > lastHostSeq 记录
+        发起增量请求: REQUEST_SYNC (sinceSeq = lastHostSeq)
+        检索增量差量: Host 查询大于 lastHostSeq 的增量记录
         三向安全合并: 3-Way Guarded Merge (内存 + 缓存 + 增量)
         自动冲刷发件箱: Flush Outbox 自动补发离线记录
         消解冲突卡片: 消除界面冲突报警标签
@@ -323,37 +349,59 @@ stateDiagram-v2
     网络恢复自动重连 --> 正常联机状态: 同步完毕，重回协同网
 ```
 
+</details>
+
 ---
 
 ### 3.4 “吹牛指数”算法与常规赛留力特赦状态机 (Brag Index State Machine)
 系统在战队综合能力评估中，将展位量化填报指标与赛场多轮真实比赛进行动态交叉比对：
 
-$$\text{OverallRatio} = \frac{\text{ClaimedTotalScore}}{\max(\text{MaxActualScore}, \text{AvgActualScore} \times 1.05, 1)}$$
+$$
+\text{OverallRatio} = \frac{\text{ClaimedTotalScore}}{\max(\text{MaxActualScore}, \text{AvgActualScore} \times 1.05, 1)}
+$$
+
+> 📌 **算法核算基准**：  
+> `OverallRatio = ClaimedTotalScore / max(MaxActualScore, AvgActualScore × 1.05, 1)`
+
+<p align="center">
+  <img src="docs/images/brag-index.svg" alt="吹牛指数算法与常规赛留力特赦状态机流程图" width="100%" />
+</p>
+
+<details>
+<summary><b>🔍 点击展开 Mermaid 决策流图原生源码 (View Source)</b></summary>
 
 ```mermaid
 flowchart TD
     A([采集数据]) --> B[读取 Pit 展位自述得分]
     A --> C[读取排位赛多场实战打分]
-    B & C --> D{有效场次 >= 1 ?}
+    B --> D{有效场次 ≥ 1 ?}
+    C --> D
     D -- 否 --> E[判定: ⏳ 待实测]
     D -- 是 --> F[计算综合倍率 Ratio]
     
     F --> G{Ratio 判定}
-    G -- "Ratio <= 1.15" --> T1[🎯 真实守信]
-    G -- "1.15 < Ratio <= 1.45" --> T2[🟡 略偏乐观]
-    G -- "1.45 < Ratio <= 2.0" --> T3[⚠️ 夸大其词]
+    G -- "Ratio ≤ 1.15" --> T1[🎯 真实守信]
+    G -- "1.15 < Ratio ≤ 1.45" --> T2[🟡 略偏乐观]
+    G -- "1.45 < Ratio ≤ 2.0" --> T3[⚠️ 夸大其词]
     G -- "Ratio > 2.0" --> T4[🔥 吹破牛皮]
 
-    T1 & T2 & T3 & T4 --> H{自述包含高悬挂 Level >= 2 ?}
+    T1 --> H{自述包含高悬挂 Level ≥ 2 ?}
+    T2 --> H
+    T3 --> H
+    T4 --> H
     H -- 否 --> EndNode([出具最终信誉标签])
-    H -- 是 --> I{实战终局得分 >= 15分 ?}
+    H -- 是 --> I{实战终局得分 ≥ 15分 ?}
     I -- 是 --> J[点亮: 高杠已证实 🧗]
-    I -- 否 --> K{出场次数 >= 2场 ?}
+    I -- 否 --> K{出场次数 ≥ 2场 ?}
     K -- 是 --> L[触发特赦: 常规赛留力特赦免责 🛡️]
     K -- 否 --> M[标记: 高挂待验证 ⏳]
     
-    J & L & M --> EndNode
+    J --> EndNode
+    L --> EndNode
+    M --> EndNode
 ```
+
+</details>
 
 ---
 
