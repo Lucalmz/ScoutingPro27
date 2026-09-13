@@ -7,6 +7,7 @@ import {
   markRecordsSynced,
   fetchBannedTeams as apiFetchBannedTeams,
   banTeam as apiBanTeam,
+  unbanTeam as apiUnbanTeam,
   fetchEventTags as apiFetchEventTags,
   addTeamTag as apiAddTeamTag,
   deleteTeamTag as apiDeleteTeamTag
@@ -387,6 +388,7 @@ export const useRecordStore = defineStore('records', () => {
             r.scoutId !== savedLocal!.scoutId
           )
           if (conflictRecords.length > 0) {
+            let newlyConflicted = false
             const allConflicting = [savedLocal, ...conflictRecords]
             for (const r of allConflicting) {
               if (!r.isConflict) {
@@ -395,6 +397,23 @@ export const useRecordStore = defineStore('records', () => {
                 r.version = (r.version || 0) + 1
                 r.syncStatus = 'PENDING'
                 recordsToBroadcast.push(r)
+                newlyConflicted = true
+              }
+            }
+            if (newlyConflicted) {
+              try {
+                const inboxStore = useInboxStore()
+                inboxStore.addMessage({
+                  title: `数据冲突: Match #${savedLocal.matchNumber} 战队 ${savedLocal.teamNumber}`,
+                  body: `检测到多位侦察员针对同一场次相同战队提交了不同记录，请前往对账解决。`,
+                  type: 'conflict',
+                  conflictMatchNumber: savedLocal.matchNumber,
+                  conflictTeamNumber: savedLocal.teamNumber,
+                  conflictTournamentLevel: incLevel,
+                  eventId: savedLocal.eventId
+                })
+              } catch (e) {
+                console.warn('[RecordStore] Failed to post conflict message to inbox:', e)
               }
             }
           }
@@ -462,6 +481,11 @@ export const useRecordStore = defineStore('records', () => {
     await apiBanTeam(eventId, teamNumber)
   }
 
+  async function unbanTeam(eventId: string, teamNumber: number) {
+    bannedTeams.value = bannedTeams.value.filter((num) => num !== teamNumber)
+    await apiUnbanTeam(eventId, teamNumber)
+  }
+
   // --- Custom Team Tags ---
   async function fetchTags(eventId: string) {
     try {
@@ -513,10 +537,19 @@ export const useRecordStore = defineStore('records', () => {
     }
   }
 
+  function normalizeTag(str?: string): string {
+    if (!str) return ''
+    if (/^[A-Za-z0-9 _#-]+$/.test(str)) {
+      return str.toLowerCase()
+    }
+    return str
+  }
+
   function applyTagUpdate(tag: TeamTagItem, action: 'ADD' | 'REMOVE') {
+    const targetTag = normalizeTag(tag.tag)
     if (action === 'ADD') {
       const idx = teamTags.value.findIndex(
-        t => t.eventId === tag.eventId && t.teamNumber === tag.teamNumber && t.tag === tag.tag
+        t => t.eventId === tag.eventId && t.teamNumber === tag.teamNumber && normalizeTag(t.tag) === targetTag
       )
       if (idx >= 0) {
         teamTags.value[idx] = tag
@@ -525,7 +558,7 @@ export const useRecordStore = defineStore('records', () => {
       }
     } else if (action === 'REMOVE') {
       teamTags.value = teamTags.value.filter(
-        t => !(t.eventId === tag.eventId && t.teamNumber === tag.teamNumber && t.tag === tag.tag)
+        t => !(t.eventId === tag.eventId && t.teamNumber === tag.teamNumber && normalizeTag(t.tag) === targetTag)
       )
     }
   }
@@ -602,6 +635,7 @@ export const useRecordStore = defineStore('records', () => {
     updateRecord,
     migrateScoutId,
     banTeam,
+    unbanTeam,
     fetchTags,
     addTag,
     removeTag,

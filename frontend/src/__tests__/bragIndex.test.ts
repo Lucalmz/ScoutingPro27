@@ -20,7 +20,7 @@ const createDummyMatch = (matchNumber: number, autoScore: number, teleopScore: n
   updatedAt: ''
 })
 
-const createClaimedRecord = (claimedAuto: number, claimedTeleop: number, claimedHang: number, claimedTotal: number): PitScoutingRecord => ({
+const createClaimedRecord = (claimedAuto: number, claimedTeleop: number, claimedEndgame: number, claimedTotal: number): PitScoutingRecord => ({
   id: 'pit_1',
   eventId: 'evt_test',
   teamNumber: 27570,
@@ -28,17 +28,16 @@ const createClaimedRecord = (claimedAuto: number, claimedTeleop: number, claimed
   scoutName: 'Scout 1',
   drivetrainType: 'mecanum',
   weightLbs: 38.0,
-  sizingPassed: true,
-  mechanismType: 'slide_claw',
-  hangType: 'winch',
+  ballCompatibility: 'universal',
+  launcherType: '差速双飞轮',
+  flowerMechanism: '垂直级联高抬升',
+  hasColorSensor: true,
   odometryType: 'two_wheel',
+  claimedAutoStrategy: '3 balls',
   claimedAutoScore: claimedAuto,
-  claimedAutoPieces: 3,
-  claimedAutoHangLevel: 1,
+  claimedTeleopCycles: 6,
   claimedTeleopScore: claimedTeleop,
-  claimedTeleopCycleSec: 8.0,
-  claimedEndgameHangLevel: claimedHang,
-  claimedEndgameTimeSec: 4.0,
+  claimedEndgameScore: claimedEndgame,
   claimedTotalScore: claimedTotal,
   version: 1
 })
@@ -56,7 +55,7 @@ describe('Brag Index Calculator (吹牛指数算法)', () => {
     expect(res?.label).toContain('待实测')
   })
 
-  it('identifies realistic team (真实守信, ratio <= 1.15)', () => {
+  it('identifies realistic team (真实守信, ratio <= 1.25)', () => {
     const claimed = createClaimedRecord(50, 60, 2, 130)
     const matches = [
       createDummyMatch(1, 45, 55, 20), // total 120
@@ -65,11 +64,11 @@ describe('Brag Index Calculator (吹牛指数算法)', () => {
     const res = calculateBragIndex(claimed, matches)
     expect(res).toBeDefined()
     expect(res?.tier).toBe('realistic')
-    expect(res?.overallRatio).toBeLessThanOrEqual(1.15)
+    expect(res?.overallRatio).toBeLessThanOrEqual(1.25)
     expect(res?.hangUnfulfilled).toBe(false)
   })
 
-  it('identifies optimistic team (略偏乐观, 1.15 < ratio <= 1.45)', () => {
+  it('identifies optimistic team (略偏乐观, 1.25 < ratio <= 1.65)', () => {
     const claimed = createClaimedRecord(70, 80, 2, 170)
     const matches = [
       createDummyMatch(1, 45, 55, 20), // 120
@@ -78,11 +77,11 @@ describe('Brag Index Calculator (吹牛指数算法)', () => {
     const res = calculateBragIndex(claimed, matches)
     expect(res).toBeDefined()
     expect(res?.tier).toBe('optimistic')
-    expect(res?.overallRatio).toBeGreaterThan(1.15)
-    expect(res?.overallRatio).toBeLessThanOrEqual(1.45)
+    expect(res?.overallRatio).toBeGreaterThan(1.25)
+    expect(res?.overallRatio).toBeLessThanOrEqual(1.65)
   })
 
-  it('identifies overclaimed team (夸大其词, 1.45 < ratio <= 2.0)', () => {
+  it('identifies overclaimed team (夸大其词, 1.65 < ratio <= 2.2)', () => {
     const claimed = createClaimedRecord(90, 100, 2, 210)
     const matches = [
       createDummyMatch(1, 40, 50, 20), // 110
@@ -91,11 +90,11 @@ describe('Brag Index Calculator (吹牛指数算法)', () => {
     const res = calculateBragIndex(claimed, matches)
     expect(res).toBeDefined()
     expect(res?.tier).toBe('overclaimed')
-    expect(res?.overallRatio).toBeGreaterThan(1.45)
-    expect(res?.overallRatio).toBeLessThanOrEqual(2.0)
+    expect(res?.overallRatio).toBeGreaterThan(1.65)
+    expect(res?.overallRatio).toBeLessThanOrEqual(2.2)
   })
 
-  it('identifies mythical team (吹破牛皮, ratio > 2.0)', () => {
+  it('identifies mythical team (吹破牛皮, ratio > 2.2)', () => {
     const claimed = createClaimedRecord(120, 140, 3, 290)
     const matches = [
       createDummyMatch(1, 30, 40, 10), // 80
@@ -104,11 +103,11 @@ describe('Brag Index Calculator (吹牛指数算法)', () => {
     const res = calculateBragIndex(claimed, matches)
     expect(res).toBeDefined()
     expect(res?.tier).toBe('mythical')
-    expect(res?.overallRatio).toBeGreaterThan(2.0)
+    expect(res?.overallRatio).toBeGreaterThan(2.2)
   })
 
-  it('grants pardon for high hang unfulfilled (claimed high hang but never scored hang in 3 matches, pardoned due to reset difficulty)', () => {
-    const claimed = createClaimedRecord(50, 60, 3, 130)
+  it('grants pardon for endgame flower unfulfilled (claimed flower but never scored in 3 matches, pardoned due to strategy)', () => {
+    const claimed = createClaimedRecord(50, 60, 15, 130)
     const matches = [
       createDummyMatch(1, 40, 50, 0),
       createDummyMatch(2, 45, 55, 0),
@@ -116,26 +115,26 @@ describe('Brag Index Calculator (吹牛指数算法)', () => {
     ]
     const res = calculateBragIndex(claimed, matches)
     expect(res).toBeDefined()
-    expect(res?.hangUnfulfilled).toBe(true)
-    expect(res?.hangPardoned).toBe(true)
+    expect(res?.endgameUnfulfilled).toBe(true)
+    expect(res?.endgamePardoned).toBe(true)
     // 130 / 100 = 1.30x => optimistic, NOT penalized to mythical or overclaimed
     expect(res?.tier).toBe('optimistic')
-    expect(res?.label).toContain('高挂待验证')
+    expect(res?.label).toContain('花朵待验证')
   })
 
-  it('confirms high hang verified (as long as at least 1 match scored high hang, proves they did not lie)', () => {
-    const claimed = createClaimedRecord(50, 60, 3, 140)
+  it('confirms endgame flower verified (as long as at least 1 match scored flower >= 10 pts, proves they did not lie)', () => {
+    const claimed = createClaimedRecord(50, 60, 15, 140)
     const matches = [
       createDummyMatch(1, 40, 50, 0),
-      createDummyMatch(2, 45, 55, 30), // Achieved High Hang here!
+      createDummyMatch(2, 45, 55, 15), // Achieved Flower + Bonus here!
       createDummyMatch(3, 40, 50, 0)
     ]
     const res = calculateBragIndex(claimed, matches)
     expect(res).toBeDefined()
-    expect(res?.hangVerified).toBe(true)
-    expect(res?.hangUnfulfilled).toBe(false)
-    expect(res?.hangPardoned).toBe(false)
-    expect(res?.label).toContain('高杠已证实')
+    expect(res?.endgameVerified).toBe(true)
+    expect(res?.endgameUnfulfilled).toBe(false)
+    expect(res?.endgamePardoned).toBe(false)
+    expect(res?.label).toContain('花朵已证实')
   })
 
   it('handles 0 or unfilled claimed total score gracefully without misidentifying as realistic', () => {
@@ -150,16 +149,16 @@ describe('Brag Index Calculator (吹牛指数算法)', () => {
     expect(res?.label).toContain('自述待补充')
   })
 
-  it('rejects level 3 verification when only level 2 (15 pts) was achieved', () => {
-    const claimed = createClaimedRecord(50, 60, 3, 140) // Claims level 3 (30 pts)
+  it('rejects flower verification when claimed flower (>=10 pts) but only park (5 pts) was achieved', () => {
+    const claimed = createClaimedRecord(50, 60, 15, 140) // Claims flower (15 pts)
     const matches = [
-      createDummyMatch(1, 40, 50, 15), // Only level 2 achieved (15 pts)
-      createDummyMatch(2, 45, 55, 15)
+      createDummyMatch(1, 40, 50, 5), // Only park achieved (5 pts)
+      createDummyMatch(2, 45, 55, 5)
     ]
     const res = calculateBragIndex(claimed, matches)
     expect(res).toBeDefined()
-    expect(res?.hangVerified).toBe(false)
-    expect(res?.hangUnfulfilled).toBe(true)
-    expect(res?.label).not.toContain('高杠已证实')
+    expect(res?.endgameVerified).toBe(false)
+    expect(res?.endgameUnfulfilled).toBe(true)
+    expect(res?.label).not.toContain('花朵已证实')
   })
 })

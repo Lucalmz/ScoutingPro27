@@ -2,6 +2,7 @@ import puppeteer from 'puppeteer-core';
 import { spawn, execSync } from 'child_process';
 import path from 'path';
 import os from 'os';
+import fs from 'fs';
 import { fileURLToPath } from 'url';
 
 const __filename = fileURLToPath(import.meta.url);
@@ -118,12 +119,14 @@ async function runMotionE2ETest() {
 
   // 3. Launch Puppeteer Chrome
   console.log('\n[3/7] Launching Chrome via Puppeteer...');
+  const tempUserDataDir = fs.mkdtempSync(path.join(os.tmpdir(), 'sp27-puppeteer-motion-'));
   const browser = await puppeteer.launch({
     executablePath: CHROME_PATH,
     headless: SHOW_UI ? false : 'new',
     args: [
       '--no-sandbox',
       '--disable-setuid-sandbox',
+      `--user-data-dir=${tempUserDataDir}`,
       '--window-size=1280,920'
     ],
     defaultViewport: { width: 1280, height: 920 }
@@ -145,10 +148,10 @@ async function runMotionE2ETest() {
   try {
     const page = await browser.newPage();
     page.on('console', msg => {
-      const txt = msg.text();
-      if (txt.includes('[ERROR]') || txt.includes('Uncaught')) {
-        console.warn(`[Browser Warning] ${txt}`);
-      }
+      console.log(`[Browser Console ${msg.type()}] ${msg.text()}`);
+    });
+    page.on('pageerror', err => {
+      console.error(`[Browser Uncaught Page Error] ${err.message}`, err);
     });
 
     // -------------------------------------------------------------
@@ -201,6 +204,7 @@ async function runMotionE2ETest() {
     await page.click('.user-tag-btn');
     await page.waitForSelector('.rename-modal', { visible: true, timeout: 5000 });
     recordCheck('RenameModal opened smoothly', true);
+    await waitForTransition(page);
 
     // Press Escape to dismiss modal
     await page.keyboard.press('Escape');
@@ -400,12 +404,132 @@ async function runMotionE2ETest() {
     }, customTag);
     recordCheck('Tag badge removed smoothly with FLIP transition', tagRemoved);
 
+    // Return to EventView
+    await page.evaluate(() => {
+      const btn = document.querySelector('.team-detail-view .btn-back');
+      if (btn) btn.click();
+    });
+    await page.waitForFunction(expected => window.location.hash.endsWith(expected), { timeout: 8000 }, `/event/${eventId}`);
+    await page.waitForSelector('.team-detail-view', { hidden: true, timeout: 5000 });
+    await waitForTransition(page);
+    await delay(900);
+
+    // -------------------------------------------------------------
+    // STEP 8: Responsive Mobile Viewport & MobileBottomNav Sheet
+    // -------------------------------------------------------------
+    console.log('\n--- Step 8: Responsive Mobile Viewport & MobileBottomNav Sheet ---');
+    const step8Debug = await page.evaluate(() => ({
+      hash: window.location.hash,
+      bodyChildren: Array.from(document.body.children).map(c => c.tagName + '.' + c.className),
+      navEl: !!document.querySelector('.mobile-bottom-nav')
+    }));
+    console.log('[DEBUG Step 8]', JSON.stringify(step8Debug));
+
+    // First verify on desktop viewport (1280px), MobileBottomNav is hidden
+    const navHiddenOnDesktop = await page.evaluate(() => {
+      const nav = document.querySelector('.mobile-bottom-nav');
+      if (!nav) return true;
+      return window.getComputedStyle(nav).display === 'none';
+    });
+    recordCheck('MobileBottomNav is hidden on desktop viewport (1280px)', navHiddenOnDesktop);
+
+    // Switch to mobile viewport (390 x 844)
+    await page.setViewport({ width: 390, height: 844, isMobile: true, hasTouch: true });
+    await delay(600);
+
+    const mobileNavDetail = await page.evaluate(() => {
+      const nav = document.querySelector('.mobile-bottom-nav');
+      const children = Array.from(document.body.children).map(c => c.tagName + '.' + c.className).join(', ');
+      if (!nav) return `nav-not-found, children=[${children}], hash=${window.location.hash}`;
+      const cs = window.getComputedStyle(nav);
+      return `display=${cs.display}, innerWidth=${window.innerWidth}`;
+    });
+    recordCheck('MobileBottomNav is displayed on mobile viewport (<= 680px)', mobileNavDetail.includes('display=block'), mobileNavDetail);
+
+    // Click 5th nav button ('More' tab) to reveal more-sheet
+    await page.evaluate(() => {
+      const btn = document.querySelector('.mobile-bottom-nav .nav-item-btn:last-child');
+      if (btn) btn.click();
+    });
+    await page.waitForSelector('.more-sheet', { visible: true, timeout: 5000 });
+    const sheetOpen = await page.evaluate(() => {
+      const sheet = document.querySelector('.more-sheet');
+      const backdrop = document.querySelector('.more-sheet-backdrop');
+      return !!sheet && !!backdrop;
+    });
+    recordCheck('Clicking More opens .more-sheet and .more-sheet-backdrop', sheetOpen);
+
+    // Dismiss sheet by clicking backdrop
+    await page.evaluate(() => {
+      const backdrop = document.querySelector('.more-sheet-backdrop');
+      if (backdrop) backdrop.click();
+    });
+    await page.waitForSelector('.more-sheet', { hidden: true, timeout: 5000 });
+    await delay(350);
+    const sheetDismissed = await page.evaluate(() => !document.querySelector('.more-sheet'));
+    recordCheck('Clicking .more-sheet-backdrop dismisses more-sheet smoothly', sheetDismissed);
+
+    // Reset viewport to desktop
+    await page.setViewport({ width: 1280, height: 920, isMobile: false });
+    await delay(300);
+
+    // -------------------------------------------------------------
+    // STEP 9: Dashboard Card Slide-Out Animation Verification
+    // -------------------------------------------------------------
+    console.log('\n--- Step 9: Dashboard Card Click Slide-Out Animation ---');
+    await page.goto(`${BASE_URL}#/dashboard`);
+    await page.waitForSelector('.event-card', { visible: true, timeout: 10000 });
+    await waitForTransition(page);
+    await delay(300);
+
+    const cardSlideClass = await page.evaluate(async () => {
+      const card = document.querySelector('.event-card');
+      if (!card) return false;
+      card.click();
+      await new Promise(r => setTimeout(r, 30));
+      return card.classList.contains('slide-out-right');
+    });
+    recordCheck('Event card receives .slide-out-right on click before route change', cardSlideClass);
+
+    // Verify navigation to EventView completes smoothly after exit animation
+    await page.waitForSelector('.event-view', { visible: true, timeout: 10000 });
+    recordCheck('Navigation to EventView proceeds smoothly after card exit animation', true);
+    await waitForTransition(page);
+    await delay(400);
+
+    // -------------------------------------------------------------
+    // STEP 10: Rapid Navigation & Animation Interruption Robustness
+    // -------------------------------------------------------------
+    console.log('\n--- Step 10: Rapid Navigation & Animation Interruption Robustness ---');
+    const rapidTabs = await page.$$('.tab-btn');
+    if (rapidTabs.length >= 2) {
+      // Rapidly click tabs without waiting for transition to complete
+      await rapidTabs[1].click();
+      await delay(20);
+      await rapidTabs[0].click();
+      await delay(20);
+      await rapidTabs[1].click();
+      await delay(500);
+      await waitForTransition(page);
+
+      const stableView = await page.evaluate(() => {
+        return !!document.querySelector('.event-view') && !document.documentElement.hasAttribute('data-direction');
+      });
+      recordCheck('Rapid tab clicks handled cleanly without view transition lock or crash', stableView);
+    }
+
   } catch (err) {
     console.error('💥 E2E Test Exception:', err);
+    try {
+      console.error('💥 Current Page URL at exception:', page.url());
+    } catch (e) {}
     errors.push(err.message);
   } finally {
     console.log('\n[6/7] Closing Chrome browser...');
     await browser.close().catch(() => {});
+    try {
+      fs.rmSync(tempUserDataDir, { recursive: true, force: true });
+    } catch (e) {}
     console.log('[7/7] Terminating Java backend...');
     killProcessTree(backendProcess.pid);
   }

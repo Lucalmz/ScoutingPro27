@@ -2,12 +2,14 @@
 import { computed } from 'vue'
 import { useConnectionStore } from '@/stores/connection'
 import { useI18n } from 'vue-i18n'
+import { hapticLight } from '@/utils/haptics'
 import SasVerificationModal from './SasVerificationModal.vue'
 
 const conn = useConnectionStore()
 const { t } = useI18n()
 
 async function handleReconnect() {
+  hapticLight()
   await conn.reconnectNow()
 }
 
@@ -164,8 +166,22 @@ const transportTooltip = computed(() => {
 .connection-status.connected {
   background: var(--card);
   color: var(--status-success);
-  box-shadow: 0 0 10px rgba(34, 197, 94, 0.4);
   border: 1px solid rgba(34, 197, 94, 0.3);
+}
+
+.connection-status.connected .status-icon {
+  animation: pulse-live 3.2s ease-in-out infinite;
+}
+
+@keyframes pulse-live {
+  0%, 100% {
+    transform: scale(1);
+    opacity: 0.85;
+  }
+  50% {
+    transform: scale(1.15);
+    opacity: 1;
+  }
 }
 
 .connection-status.connecting {

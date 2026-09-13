@@ -1,14 +1,22 @@
 <script setup lang="ts">
-import { ref, watch, onMounted, computed } from 'vue'
+import { ref, watch, computed } from 'vue'
 import { useUserStore } from '@/stores/user'
 import { useConnectionStore } from '@/stores/connection'
+import { useEventStore } from '@/stores/events'
+import { useToastStore } from '@/stores/toast'
 import { useI18n } from 'vue-i18n'
 
 const { t } = useI18n()
 const userStore = useUserStore()
 const connStore = useConnectionStore()
+const eventStore = useEventStore()
+const toastStore = useToastStore()
 
 const newNickname = ref('')
+const targetPassword = ref('')
+const renaming = ref(false)
+const merging = ref(false)
+const mergeErrorMsg = ref<string | null>(null)
 const isTakeoverRequested = ref(false)
 const cooldownSeconds = ref(0)
 let cooldownTimer: any = null
@@ -25,29 +33,84 @@ watch(conflictData, (data) => {
       newNickname.value = `${data.conflictingUsername}-${Math.floor(Math.random() * 90 + 10)}`
     }
     isTakeoverRequested.value = false
+    targetPassword.value = ''
+    mergeErrorMsg.value = null
+    renaming.value = false
+    merging.value = false
   }
 }, { immediate: true })
 
 async function handleRename() {
-  if (!newNickname.value || !newNickname.value.trim()) return
+  if (!newNickname.value || !newNickname.value.trim() || renaming.value || merging.value) return
   const trimmed = newNickname.value.trim()
   const oldId = userStore.userId
 
-  // 1. Rename locally (updates userStore and migrates local recordStore)
-  const res = await userStore.rename(trimmed)
+  renaming.value = true
+  try {
+    // 1. Rename locally (updates userStore and migrates local recordStore)
+    const res = await userStore.rename(trimmed)
 
-  // 2. Broadcast IDENTITY_MIGRATION to Host so Host DB and all peers migrate records
-  const eventStore = (await import('@/stores/events')).useEventStore()
-  const currentEventId = eventStore.currentEvent?.id
-  if (currentEventId && oldId && res.newId) {
-    connStore.rtcService?.sendIdentityMigration(currentEventId, oldId, res.newId, res.newUsername)
+    // 2. Broadcast IDENTITY_MIGRATION to Host so Host DB and all peers migrate records
+    const currentEventId = eventStore.currentEvent?.id
+    if (currentEventId && oldId && res.newId) {
+      connStore.rtcService?.sendIdentityMigration(currentEventId, oldId, res.newId, res.newUsername)
+    }
+
+    // 3. Clear conflict modal
+    connStore.clearSessionConflict()
+
+    // 4. Re-request sync with updated nickname and deterministic ID
+    connStore.requestSync(0, undefined, userStore.userId, userStore.username)
+  } catch (err: any) {
+    console.error('Rename error during conflict resolution:', err)
+  } finally {
+    renaming.value = false
   }
+}
 
-  // 3. Clear conflict modal
-  connStore.clearSessionConflict()
+async function handleMergeAccount() {
+  const pwd = targetPassword.value
+  const targetName = conflictData.value?.conflictingUsername?.trim()
+  if (!targetName || !pwd || merging.value || renaming.value) return
 
-  // 4. Re-request sync with updated nickname and deterministic ID
-  connStore.requestSync(0, undefined, userStore.userId, userStore.username)
+  merging.value = true
+  mergeErrorMsg.value = null
+
+  try {
+    const res = await userStore.mergeAccount(targetName, pwd)
+    if (res.success) {
+      const currentEventId = eventStore.currentEvent?.id
+      if (currentEventId && res.oldId && res.newId) {
+        connStore.rtcService?.sendIdentityMigration(currentEventId, res.oldId, res.newId, res.newUsername)
+      }
+
+      connStore.clearSessionConflict()
+      connStore.requestSync(0, undefined, res.newId, res.newUsername)
+      toastStore.showToast(t('user.merge_success_toast', { username: res.newUsername }) || `账号已成功合并至 ${res.newUsername}`, 'success')
+    } else {
+      let msg = res.error || t('user.merge_failed')
+      if (msg.includes('401') || msg.includes('Invalid target account password')) {
+        msg = t('conflict.merge_invalid_password') || t('user.invalid_target_password')
+      } else if (msg.includes('404') || msg.includes('Target user not found')) {
+        msg = t('user.target_user_not_found')
+      } else if (msg.includes('Cannot merge user into itself')) {
+        msg = t('user.merge_into_self')
+      }
+      mergeErrorMsg.value = msg
+    }
+  } catch (err: any) {
+    let msg = err?.message || t('user.merge_failed')
+    if (msg.includes('401') || msg.includes('Invalid target account password')) {
+      msg = t('conflict.merge_invalid_password') || t('user.invalid_target_password')
+    } else if (msg.includes('404') || msg.includes('Target user not found')) {
+      msg = t('user.target_user_not_found')
+    } else if (msg.includes('Cannot merge user into itself')) {
+      msg = t('user.merge_into_self')
+    }
+    mergeErrorMsg.value = msg
+  } finally {
+    merging.value = false
+  }
 }
 
 function handleTakeover() {
@@ -90,35 +153,106 @@ function handleTakeover() {
       </div>
 
       <div class="options-container">
-        <!-- Option 1: Rename (Always available) -->
-        <div class="option-block">
-          <h4 class="option-title">
-            {{ isDuplicateName ? t('conflict.btn_rename') : t('conflict.option_rename') }}
-          </h4>
-          <p class="option-hint">
-            {{ isDuplicateName ? t('conflict.duplicate_name_hint') : t('conflict.rename_hint') }}
-          </p>
-          <div class="input-row">
-            <input
-              v-model="newNickname"
-              type="text"
-              class="form-input"
-              :placeholder="t('conflict.nickname_placeholder')"
-              maxlength="30"
-              @keydown.enter="handleRename"
-            />
-            <button class="btn btn-primary" :disabled="!newNickname.trim()" @click="handleRename">
-              {{ t('conflict.btn_rename') }}
-            </button>
+        <!-- Mode A: DUPLICATE_NAME Conflict -> Choose Rename OR Merge -->
+        <template v-if="isDuplicateName">
+          <!-- Option 1: Different Person (Rename) -->
+          <div class="option-block">
+            <h4 class="option-title">
+              {{ t('conflict.option_duplicate_rename_title') || '两位不同成员：修改昵称' }}
+            </h4>
+            <p class="option-hint">
+              {{ t('conflict.option_duplicate_rename_hint') || '如果您是不同成员恰好重名，请修改昵称以区分比赛打分数据：' }}
+            </p>
+            <div class="input-row">
+              <input
+                v-model="newNickname"
+                type="text"
+                class="form-input"
+                :placeholder="t('conflict.nickname_placeholder')"
+                maxlength="30"
+                :disabled="renaming || merging"
+                @keydown.enter="handleRename"
+              />
+              <button
+                class="btn btn-primary"
+                :disabled="!newNickname.trim() || renaming || merging"
+                @click="handleRename"
+              >
+                {{ renaming ? (t('user.btn_saving') || '保存中...') : (t('conflict.btn_confirm_rename') || '确认改名并进入') }}
+              </button>
+            </div>
           </div>
-        </div>
 
-        <!-- Option 2: Takeover (Only for Same-User Session Conflict) -->
-        <template v-if="!isDuplicateName">
           <div class="divider">
             <span>{{ t('conflict.or') }}</span>
           </div>
 
+          <!-- Option 2: Same Person (Merge into Primary Account) -->
+          <div class="option-block merge-block">
+            <h4 class="option-title">
+              {{ t('conflict.option_duplicate_merge_title') || '同一位成员：合并至已有主账号' }}
+            </h4>
+            <p class="option-hint">
+              {{ t('conflict.option_duplicate_merge_hint') || '如果这是您在其他设备上的已有主账号，请输入该账号密码验证所有权并合并本机数据：' }}
+            </p>
+
+            <div v-if="mergeErrorMsg" class="alert-banner error compact">
+              <span class="icon">error_outline</span>
+              <span>{{ mergeErrorMsg }}</span>
+            </div>
+
+            <div class="input-row">
+              <input
+                v-model="targetPassword"
+                type="password"
+                class="form-input"
+                :placeholder="t('conflict.target_password_placeholder') || '请输入主账号密码验证所有权'"
+                :disabled="renaming || merging"
+                @keydown.enter="handleMergeAccount"
+              />
+              <button
+                class="btn btn-accent"
+                :disabled="!targetPassword.trim() || renaming || merging"
+                @click="handleMergeAccount"
+              >
+                <span v-if="merging" class="spinner-small" style="margin-right: 4px;"></span>
+                {{ merging ? (t('conflict.btn_merging') || '正在验证并合并...') : (t('conflict.btn_confirm_merge') || '验证密码并合并') }}
+              </button>
+            </div>
+          </div>
+        </template>
+
+        <!-- Mode B: SAME_USER Session Conflict (multi-tab / session takeover) -->
+        <template v-else>
+          <!-- Option 1: Rename (Temporary Nickname) -->
+          <div class="option-block">
+            <h4 class="option-title">{{ t('conflict.option_rename') }}</h4>
+            <p class="option-hint">{{ t('conflict.rename_hint') }}</p>
+            <div class="input-row">
+              <input
+                v-model="newNickname"
+                type="text"
+                class="form-input"
+                :placeholder="t('conflict.nickname_placeholder')"
+                maxlength="30"
+                :disabled="renaming"
+                @keydown.enter="handleRename"
+              />
+              <button
+                class="btn btn-primary"
+                :disabled="!newNickname.trim() || renaming"
+                @click="handleRename"
+              >
+                {{ renaming ? (t('user.btn_saving') || '保存中...') : t('conflict.btn_rename') }}
+              </button>
+            </div>
+          </div>
+
+          <div class="divider">
+            <span>{{ t('conflict.or') }}</span>
+          </div>
+
+          <!-- Option 2: Takeover -->
           <div class="option-block">
             <h4 class="option-title">{{ t('conflict.option_takeover') }}</h4>
             <p class="option-hint">{{ t('conflict.takeover_hint') }}</p>
@@ -238,6 +372,39 @@ function handleTakeover() {
   border: 1px solid var(--border, #262626);
   border-radius: 8px;
   padding: 1rem;
+}
+
+.option-block.merge-block {
+  border-color: rgba(245, 158, 11, 0.3);
+  background: rgba(245, 158, 11, 0.04);
+}
+
+.alert-banner.compact {
+  padding: 0.4rem 0.6rem;
+  font-size: 0.8rem;
+  margin-bottom: 0.5rem;
+}
+
+.btn-accent {
+  background: #f59e0b;
+  color: #000000;
+  box-shadow: 0 0 10px rgba(245, 158, 11, 0.3);
+}
+
+.btn-accent:hover:not(:disabled) {
+  filter: brightness(1.1);
+  box-shadow: 0 0 15px rgba(245, 158, 11, 0.5);
+}
+
+.spinner-small {
+  width: 12px;
+  height: 12px;
+  border: 2px solid rgba(0, 0, 0, 0.2);
+  border-top-color: #000000;
+  border-radius: 50%;
+  animation: spin 0.8s linear infinite;
+  display: inline-block;
+  vertical-align: middle;
 }
 
 .option-title {

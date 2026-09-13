@@ -1,4 +1,5 @@
 import { ref, type Ref } from 'vue'
+import { useToastStore } from '@/stores/toast'
 
 export interface ChatMessage {
   id: string
@@ -40,7 +41,7 @@ export function useAiChatStream(options: UseAiChatStreamOptions) {
   async function sendMessage() {
     if (!options.chatInput.value.trim() || isSending.value) return
     if (options.keyLostError.value) {
-      alert(options.t('ai.key_lost_alert'))
+      useToastStore().showError(options.t('ai.key_lost_alert'))
       return
     }
 
@@ -124,7 +125,7 @@ export function useAiChatStream(options: UseAiChatStreamOptions) {
         options.onSaveHistory()
 
         options.chatInput.value = content // restore input for retry
-        alert(options.t('ai.error_prefix') + errMsg)
+        useToastStore().showError(options.t('ai.error_prefix') + errMsg)
         return
       }
 
@@ -214,7 +215,7 @@ export function useAiChatStream(options: UseAiChatStreamOptions) {
           if (userIdx !== -1) options.chatHistory.value.splice(userIdx, 1)
           options.onSaveHistory()
           options.chatInput.value = content
-          alert(options.t('ai.network_error_prefix') + e.message)
+          useToastStore().showError(options.t('ai.network_error_prefix') + e.message)
         } else {
           target.content += `\n\n[${options.t('ai.network_error_prefix')}${e.message}]`
           options.onSaveHistory()

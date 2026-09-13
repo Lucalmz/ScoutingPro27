@@ -185,17 +185,16 @@ describe('buildEventDataContext', () => {
         scoutName: 'Alice',
         drivetrainType: 'swerve',
         weightLbs: 38.5,
-        sizingPassed: true,
-        mechanismType: 'slide_claw',
-        hangType: 'winch',
+        ballCompatibility: 'universal',
+        launcherType: 'dual_flywheel',
+        flowerMechanism: 'cascade_lift',
+        hasColorSensor: true,
         odometryType: 'pinpoint_otos',
-        claimedAutoPieces: 3,
+        claimedAutoStrategy: '3 balls',
         claimedAutoScore: 40,
-        claimedAutoHangLevel: 1,
-        claimedTeleopCycleSec: 6,
+        claimedTeleopCycles: 8,
         claimedTeleopScore: 80,
-        claimedEndgameHangLevel: 3,
-        claimedEndgameTimeSec: 5,
+        claimedEndgameScore: 30,
         claimedTotalScore: 150,
         syncStatus: 'SYNCED',
         createdAt: '2026-08-20T10:00:00Z',
@@ -210,17 +209,15 @@ describe('buildEventDataContext', () => {
         scoutName: 'Bob',
         drivetrainType: 'tank',
         weightLbs: 35,
-        sizingPassed: true,
-        mechanismType: 'linkage_arm',
-        hangType: 'none',
+        ballCompatibility: 'pollen_only',
+        launcherType: '',
+        flowerMechanism: '',
+        hasColorSensor: false,
         odometryType: 'none',
-        claimedAutoPieces: 0,
         claimedAutoScore: 0,
-        claimedAutoHangLevel: 0,
-        claimedTeleopCycleSec: 0,
+        claimedTeleopCycles: 0,
         claimedTeleopScore: 0,
-        claimedEndgameHangLevel: 0,
-        claimedEndgameTimeSec: 0,
+        claimedEndgameScore: 0,
         claimedTotalScore: 0,
         syncStatus: 'SYNCED',
         createdAt: '2026-08-20T10:00:00Z',
@@ -261,9 +258,9 @@ describe('buildEventDataContext', () => {
 
     expect(result).toContain('Pit Profiles: 1')
     expect(result).toContain('[Pit Scouting & Robot Hardware Profiles (Self-Reported Specs & Brag Audit)]')
-    expect(result).toContain('Team # | Drivetrain | Mechanism | Hang Type | Odom | Claimed Auto | Claimed TeleOp | Claimed Hang | Claimed Total | Brag Index (Audit)')
-    expect(result).toContain('27570 | swerve | slide_claw | winch | pinpoint_otos | 40 pts (3 pcs, Hang L1) | 80 pts (6s/cycle) | L3 (5s) | 150 pts')
-    expect(result).toContain('1.02x (realistic, High Hang Verified)')
+    expect(result).toContain('Team # | Drivetrain | Ball Compat | Launcher | Flower Mech | Sensor | Odom | Claimed Auto | Claimed TeleOp | Claimed Endgame | Claimed Total | Brag Index (Audit)')
+    expect(result).toContain('27570 | swerve | universal | dual_flywheel | cascade_lift | Yes | pinpoint_otos | 40 pts (3 balls) | 80 pts (8 cycles) | 30 pts | 150 pts')
+    expect(result).toContain('1.02x (realistic, Flower Verified)')
     // Deleted pit record must not appear
     expect(result).not.toContain('99999')
   })
@@ -278,17 +275,16 @@ describe('buildEventDataContext', () => {
         scoutName: 'Charlie',
         drivetrainType: 'mecanum',
         weightLbs: 32,
-        sizingPassed: true,
-        mechanismType: 'slide_roller',
-        hangType: 'passive',
+        ballCompatibility: 'universal',
+        launcherType: 'slide_roller',
+        flowerMechanism: 'passive',
+        hasColorSensor: false,
         odometryType: 'two_wheel',
-        claimedAutoPieces: 2,
+        claimedAutoStrategy: '2 pcs',
         claimedAutoScore: 30,
-        claimedAutoHangLevel: 1,
-        claimedTeleopCycleSec: 8,
+        claimedTeleopCycles: 6,
         claimedTeleopScore: 60,
-        claimedEndgameHangLevel: 1,
-        claimedEndgameTimeSec: 8,
+        claimedEndgameScore: 10,
         claimedTotalScore: 100,
         syncStatus: 'SYNCED',
         createdAt: '2026-08-20T10:00:00Z',
@@ -305,7 +301,7 @@ describe('buildEventDataContext', () => {
     })
 
     expect(result).toContain('Pit Profiles: 1')
-    expect(result).toContain('19600 | mecanum | slide_roller | passive | two_wheel | 30 pts (2 pcs, Hang L1) | 60 pts (8s/cycle) | L1 (8s) | 100 pts | Pending (No Matches)')
+    expect(result).toContain('19600 | mecanum | universal | slide_roller | passive | No | two_wheel | 30 pts (2 pcs) | 60 pts (6 cycles) | 10 pts | 100 pts | Pending (No Matches)')
   })
 
   it('sorts detailed match records chronologically and distinguishes playoff matches from qualification matches', () => {
@@ -382,6 +378,64 @@ describe('buildEventDataContext', () => {
     // Chronological order: Qual 1 < Qual 2 < Playoff 1
     expect(q1Idx).toBeLessThan(q2Idx)
     expect(q2Idx).toBeLessThan(p1Idx)
+  })
+
+  it('formats BIOBUZZ pit scouting profiles with ball compatibility and cycle count', () => {
+    const mockBiobuzzPit: PitScoutingRecord = {
+      id: 'pit_bb_1',
+      eventId: 'evt_1',
+      teamNumber: 27570,
+      scoutId: 's1',
+      scoutName: 'Alice',
+      drivetrainType: 'swerve',
+      weightLbs: 38.5,
+      ballCompatibility: 'universal',
+      launcherType: 'dual_flywheel',
+      flowerMechanism: 'cascade_lift',
+      hasColorSensor: true,
+      odometryType: 'pinpoint_otos',
+      claimedAutoStrategy: 'preload + 2 garden + park',
+      claimedAutoScore: 45,
+      claimedTeleopCycles: 7,
+      claimedTeleopScore: 70,
+      claimedEndgameScore: 25,
+      claimedTotalScore: 140,
+      syncStatus: 'SYNCED',
+      createdAt: '2026-08-20T10:00:00Z',
+      updatedAt: '2026-08-20T10:00:00Z',
+      version: 1
+    }
+
+    const mockMatchRecord: ScoutingRecord = {
+      id: 'rec_bb_1',
+      eventId: 'evt_1',
+      scoutId: 's1',
+      scoutName: 'Alice',
+      matchNumber: 1,
+      teamNumber: 27570,
+      autoScore: 40,
+      teleopScore: 70,
+      endgameScore: 25,
+      totalScore: 135,
+      notes: 'Solid cycle performance',
+      rawData: '{}',
+      syncStatus: 'SYNCED',
+      createdAt: '2026-08-20T10:00:00Z',
+      updatedAt: '2026-08-20T10:00:00Z',
+      isBroken: false,
+      version: 1
+    }
+
+    const result = buildEventDataContext({
+      event: null,
+      rankings: [{ teamNumber: 27570, matchCount: 1, avgAutoScore: 40, avgTeleopScore: 70, avgEndgameScore: 25, avgTipsPerMatch: 3.2, maxScore: 135, avgRating: 135, brokenCount: 0, trend: 'new' }],
+      records: [mockMatchRecord],
+      pitRecords: [mockBiobuzzPit]
+    })
+
+    expect(result).toContain('Team # | Drivetrain | Ball Compat | Launcher | Flower Mech | Sensor | Odom | Claimed Auto | Claimed TeleOp | Claimed Endgame | Claimed Total | Brag Index (Audit)')
+    expect(result).toContain('27570 | swerve | universal | dual_flywheel | cascade_lift | Yes | pinpoint_otos | 45 pts (preload + 2 garden + park) | 70 pts (7 cycles) | 25 pts | 140 pts | 0.99x (realistic, Flower Verified)')
+    expect(result).toContain('Avg Tips')
   })
 })
 

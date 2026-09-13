@@ -38,20 +38,18 @@ describe('PitStatusIndicator.vue', () => {
         scoutName: 'Alice',
         drivetrainType: 'mecanum',
         weightLbs: 38,
-        sizingPassed: true,
-        mechanismType: '',
-        hangType: '',
-        odometryType: '',
+        ballCompatibility: 'universal',
+        launcherType: '差速双飞轮',
+        flowerMechanism: '垂直级联高抬升',
+        hasColorSensor: true,
+        odometryType: 'two_wheel',
         claimedAutoScore: 60,
-        claimedAutoPieces: 2,
-        claimedAutoHangLevel: 0,
+        claimedTeleopCycles: 7,
         claimedTeleopScore: 70,
-        claimedTeleopCycleSec: 8,
-        claimedEndgameHangLevel: 1,
-        claimedEndgameTimeSec: 4,
+        claimedEndgameScore: 15,
         claimedTotalScore: 135,
         version: 1
-      } as PitScoutingRecord
+      }
     ]
 
     recordStore.records = [

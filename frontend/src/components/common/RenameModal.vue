@@ -14,7 +14,6 @@ const props = defineProps<{
 const emit = defineEmits<{
   (e: 'update:visible', value: boolean): void
   (e: 'renamed', newName: string): void
-  (e: 'openMerge'): void
 }>()
 
 const { t } = useI18n()
@@ -54,25 +53,20 @@ watch(() => props.visible, (val) => {
 function handleClose() {
   if (saving.value) return
   if (typeof document !== 'undefined' && 'startViewTransition' in document) {
-    isTransitioning.value = true
+    isTransitioning.value = false
     document.documentElement.dataset.transitionType = 'user-profile'
-    const vt = document.startViewTransition(async () => {
+    const vt = (document as any).startViewTransition(async () => {
       emit('update:visible', false)
       await nextTick()
     })
-    vt.finished.finally(() => {
-      isTransitioning.value = false
+    vt.ready?.catch(() => {})
+    vt.updateCallbackDone?.catch(() => {})
+    vt.finished.catch(() => {}).finally(() => {
       document.documentElement.removeAttribute('data-transition-type')
     })
   } else {
     emit('update:visible', false)
   }
-}
-
-function handleOpenMerge() {
-  if (saving.value) return
-  emit('update:visible', false)
-  emit('openMerge')
 }
 
 function onGlobalKeyDown(e: KeyboardEvent) {
@@ -134,14 +128,15 @@ async function handleSave() {
       toastStore.showToast(t('user.rename_success'), 'info')
       emit('renamed', res.newUsername)
       if (typeof document !== 'undefined' && 'startViewTransition' in document) {
-        isTransitioning.value = true
+        isTransitioning.value = false
         document.documentElement.dataset.transitionType = 'user-profile'
-        const vt = document.startViewTransition(async () => {
+        const vt = (document as any).startViewTransition(async () => {
           emit('update:visible', false)
           await nextTick()
         })
-        vt.finished.finally(() => {
-          isTransitioning.value = false
+        vt.ready?.catch(() => {})
+        vt.updateCallbackDone?.catch(() => {})
+        vt.finished.catch(() => {}).finally(() => {
           document.documentElement.removeAttribute('data-transition-type')
         })
       } else {
@@ -187,7 +182,7 @@ async function handleSave() {
         <!-- Username Field with View Transition Target -->
         <div class="form-group">
           <label class="form-label">{{ t('user.nickname_label') || '用户名 / 昵称' }}</label>
-          <div class="input-wrapper" :style="{ viewTransitionName: visible ? 'user-profile-box' : 'none' }">
+          <div class="input-wrapper" :style="{ viewTransitionName: isTransitioning && visible ? 'user-profile-box' : 'none' }">
             <span class="material-icons field-icon">person</span>
             <input
               v-model="newUsername"
@@ -267,20 +262,14 @@ async function handleSave() {
           </div>
         </div>
 
-        <div class="modal-footer-row">
-          <button type="button" class="btn-merge-link" :disabled="saving" @click="handleOpenMerge">
-            <span class="material-icons merge-icon">merge_type</span>
-            <span>{{ t('user.merge_modal_title') || '合并已有账号' }}</span>
+        <div class="modal-actions">
+          <button class="btn btn-secondary" :disabled="saving" @click="handleClose">
+            {{ t('common.cancel') || t('user.btn_cancel') || '取消' }}
           </button>
-          <div class="modal-actions">
-            <button class="btn btn-secondary" :disabled="saving" @click="handleClose">
-              {{ t('common.cancel') || t('user.btn_cancel') || '取消' }}
-            </button>
-            <button class="btn btn-primary" :disabled="saving || !newUsername.trim()" @click="handleSave">
-              <span v-if="saving" class="material-icons spinning" style="font-size: 16px; margin-right: 4px;">sync</span>
-              {{ saving ? (t('user.btn_saving') || '保存中...') : (t('user.btn_save') || '保存修改') }}
-            </button>
-          </div>
+          <button class="btn btn-primary" :disabled="saving || !newUsername.trim()" @click="handleSave">
+            <span v-if="saving" class="material-icons spinning" style="font-size: 16px; margin-right: 4px;">sync</span>
+            {{ saving ? (t('user.btn_saving') || '保存中...') : (t('user.btn_save') || '保存修改') }}
+          </button>
         </div>
       </div>
     </div>
@@ -554,46 +543,11 @@ async function handleSave() {
   border-top: 1px solid var(--border, #262626);
 }
 
-.modal-footer-row {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  margin-top: 20px;
-  gap: 12px;
-}
-
-.btn-merge-link {
-  background: transparent;
-  border: none;
-  color: var(--primary, #39ff14);
-  font-size: 0.85rem;
-  display: inline-flex;
-  align-items: center;
-  gap: 4px;
-  cursor: pointer;
-  padding: 6px 0;
-  transition: opacity 0.2s;
-  font-family: inherit;
-}
-
-.btn-merge-link:hover:not(:disabled) {
-  opacity: 0.8;
-  text-decoration: underline;
-}
-
-.btn-merge-link:disabled {
-  opacity: 0.5;
-  cursor: not-allowed;
-}
-
-.merge-icon {
-  font-size: 16px;
-}
-
 .modal-actions {
   display: flex;
   justify-content: flex-end;
   gap: 12px;
+  margin-top: 20px;
 }
 
 .btn {

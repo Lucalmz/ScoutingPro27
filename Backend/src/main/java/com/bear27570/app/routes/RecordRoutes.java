@@ -14,6 +14,7 @@ import java.lang.reflect.Type;
 import java.util.Comparator;
 import java.util.List;
 import java.util.Map;
+import java.util.Objects;
 
 import static com.bear27570.app.routes.ApiRoutes.asString;
 
@@ -83,7 +84,7 @@ public class RecordRoutes {
                             } else {
                                 // Existing record: only original author or event host can update
                                 boolean isHost = eventDao.isHost(record.getEventId(), userId);
-                                if (!existing.getScoutId().equals(userId) && !isHost) {
+                                if (!Objects.equals(existing.getScoutId(), userId) && !isHost) {
                                     throw new io.javalin.http.ForbiddenResponse("Cannot modify another scout's record");
                                 }
                                 if (!isHost) {
@@ -144,18 +145,18 @@ public class RecordRoutes {
                                     // Ordinary scouts can only sync their own unstamped records
                                     if (r.getScoutId() == null || r.getScoutId().isBlank()) {
                                         r.setScoutId(userId);
-                                    } else if (!r.getScoutId().equals(userId)) {
+                                    } else if (!Objects.equals(r.getScoutId(), userId)) {
                                         throw new io.javalin.http.ForbiddenResponse("Cannot sync records belonging to another scout");
                                     }
                                     
-                                    if (existing != null && !existing.getScoutId().equals(userId)) {
+                                    if (existing != null && !Objects.equals(existing.getScoutId(), userId)) {
                                         throw new io.javalin.http.ForbiddenResponse("Cannot modify another scout's record");
                                     }
                                 } else {
                                     if (r.getScoutId() == null || r.getScoutId().isBlank()) {
                                         r.setScoutId(existing != null ? existing.getScoutId() : userId);
                                     }
-                                    if (existing != null && !existing.getScoutId().equals(r.getScoutId())) {
+                                    if (existing != null && !Objects.equals(existing.getScoutId(), r.getScoutId())) {
                                         throw new io.javalin.http.ForbiddenResponse("Cannot alter the author of an existing record");
                                     }
                                 }

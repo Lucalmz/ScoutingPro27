@@ -2,6 +2,7 @@
 import { ref, computed, watch, onMounted } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { useAiStore } from '@/stores/ai'
+import { useToastStore } from '@/stores/toast'
 import { OPENAI_PRESETS, DEFAULT_PRESET, getPresetById, findPresetByBaseUrl } from '@/components/ai/presets'
 import type { AiSettings } from '@/types'
 
@@ -133,14 +134,15 @@ async function saveSettings() {
     proxyPort: proxyPort.value === '' || proxyPort.value == null ? null : Number(proxyPort.value),
     systemPrompt: systemPromptState.value
   }
+  const toastStore = useToastStore()
   const success = await aiStore.saveSettings(payload)
   isSaving.value = false
   if (success) {
-    alert(t('ai.save_success'))
+    toastStore.showToast(t('ai.save_success'), 'success')
     loadFormForProvider()
     emit('saved', payload)
   } else {
-    alert(t('ai.save_failed'))
+    toastStore.showError(t('ai.save_failed'))
   }
 }
 

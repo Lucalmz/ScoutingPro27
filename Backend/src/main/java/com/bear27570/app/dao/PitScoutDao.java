@@ -36,11 +36,11 @@ public interface PitScoutDao {
         MERGE INTO pit_scouting_records AS target
         USING (VALUES (
             :id, :eventId, :teamNumber, :scoutId, :scoutName, :robotName,
-            :drivetrainType, :weightLbs, :sizingPassed, :mechanismType, :hangType, :odometryType,
-            :claimedAutoScore, :claimedAutoPieces, :claimedAutoHangLevel,
-            :claimedTeleopScore, :claimedTeleopCycleSec,
-            :claimedEndgameHangLevel, :claimedEndgameTimeSec,
-            :claimedTotalScore, :photoKeys, :version, :hostSeq, :isDeleted,
+            :drivetrainType, :weightLbs, :odometryType,
+            :ballCompatibility, :launcherType, :flowerMechanism, :hasColorSensor,
+            :claimedAutoStrategy, :claimedAutoScore, :claimedTeleopCycles, :claimedTeleopScore,
+            :claimedEndgameScore, :claimedTotalScore,
+            :photoKeys, :version, :hostSeq, :isDeleted,
             COALESCE(NULLIF(TRIM(:createdAt), ''), CURRENT_TIMESTAMP),
             CASE 
                 WHEN NULLIF(TRIM(:updatedAt), '') IS NOT NULL AND NULLIF(TRIM(:updatedAt), '') > DATEADD('SECOND', 5, CURRENT_TIMESTAMP) THEN CURRENT_TIMESTAMP
@@ -48,11 +48,11 @@ public interface PitScoutDao {
             END
         )) AS src (
             id, event_id, team_number, scout_id, scout_name, robot_name,
-            drivetrain_type, weight_lbs, sizing_passed, mechanism_type, hang_type, odometry_type,
-            claimed_auto_score, claimed_auto_pieces, claimed_auto_hang_level,
-            claimed_teleop_score, claimed_teleop_cycle_sec,
-            claimed_endgame_hang_level, claimed_endgame_time_sec,
-            claimed_total_score, photo_keys, version, host_seq, is_deleted,
+            drivetrain_type, weight_lbs, odometry_type,
+            ball_compatibility, launcher_type, flower_mechanism, has_color_sensor,
+            claimed_auto_strategy, claimed_auto_score, claimed_teleop_cycles, claimed_teleop_score,
+            claimed_endgame_score, claimed_total_score,
+            photo_keys, version, host_seq, is_deleted,
             created_at, updated_at
         )
         ON target.event_id = src.event_id AND target.team_number = src.team_number
@@ -76,17 +76,16 @@ public interface PitScoutDao {
             robot_name                  = src.robot_name,
             drivetrain_type             = src.drivetrain_type,
             weight_lbs                  = src.weight_lbs,
-            sizing_passed               = src.sizing_passed,
-            mechanism_type              = src.mechanism_type,
-            hang_type                   = src.hang_type,
             odometry_type               = src.odometry_type,
+            ball_compatibility          = src.ball_compatibility,
+            launcher_type               = src.launcher_type,
+            flower_mechanism            = src.flower_mechanism,
+            has_color_sensor            = src.has_color_sensor,
+            claimed_auto_strategy       = src.claimed_auto_strategy,
             claimed_auto_score          = src.claimed_auto_score,
-            claimed_auto_pieces         = src.claimed_auto_pieces,
-            claimed_auto_hang_level     = src.claimed_auto_hang_level,
+            claimed_teleop_cycles       = src.claimed_teleop_cycles,
             claimed_teleop_score        = src.claimed_teleop_score,
-            claimed_teleop_cycle_sec    = src.claimed_teleop_cycle_sec,
-            claimed_endgame_hang_level  = src.claimed_endgame_hang_level,
-            claimed_endgame_time_sec    = src.claimed_endgame_time_sec,
+            claimed_endgame_score       = src.claimed_endgame_score,
             claimed_total_score         = src.claimed_total_score,
             photo_keys                  = src.photo_keys,
             version                     = src.version,
@@ -99,25 +98,25 @@ public interface PitScoutDao {
         WHEN NOT MATCHED THEN
           INSERT (
             id, event_id, team_number, scout_id, scout_name, robot_name,
-            drivetrain_type, weight_lbs, sizing_passed, mechanism_type, hang_type, odometry_type,
-            claimed_auto_score, claimed_auto_pieces, claimed_auto_hang_level,
-            claimed_teleop_score, claimed_teleop_cycle_sec,
-            claimed_endgame_hang_level, claimed_endgame_time_sec,
-            claimed_total_score, photo_keys, version, host_seq, is_deleted,
+            drivetrain_type, weight_lbs, odometry_type,
+            ball_compatibility, launcher_type, flower_mechanism, has_color_sensor,
+            claimed_auto_strategy, claimed_auto_score, claimed_teleop_cycles, claimed_teleop_score,
+            claimed_endgame_score, claimed_total_score,
+            photo_keys, version, host_seq, is_deleted,
             created_at, updated_at
           ) VALUES (
             src.id, src.event_id, src.team_number, src.scout_id, src.scout_name, src.robot_name,
-            src.drivetrain_type, src.weight_lbs, src.sizing_passed, src.mechanism_type, src.hang_type, src.odometry_type,
-            src.claimed_auto_score, src.claimed_auto_pieces, src.claimed_auto_hang_level,
-            src.claimed_teleop_score, src.claimed_teleop_cycle_sec,
-            src.claimed_endgame_hang_level, src.claimed_endgame_time_sec,
-            src.claimed_total_score, src.photo_keys, src.version, src.host_seq, src.is_deleted,
+            src.drivetrain_type, src.weight_lbs, src.odometry_type,
+            src.ball_compatibility, src.launcher_type, src.flower_mechanism, src.has_color_sensor,
+            src.claimed_auto_strategy, src.claimed_auto_score, src.claimed_teleop_cycles, src.claimed_teleop_score,
+            src.claimed_endgame_score, src.claimed_total_score,
+            src.photo_keys, src.version, src.host_seq, src.is_deleted,
             src.created_at, src.updated_at
           )
     """)
     void upsertPitRecord(@BindBean PitScoutingRecord record);
 
-    @SqlUpdate("UPDATE pit_scouting_records SET is_deleted = TRUE, updated_at = CURRENT_TIMESTAMP WHERE event_id = :eventId AND team_number = :teamNumber")
+    @SqlUpdate("UPDATE pit_scouting_records SET is_deleted = TRUE, version = COALESCE(version, 1) + 1, updated_at = CURRENT_TIMESTAMP WHERE event_id = :eventId AND team_number = :teamNumber")
     int softDeletePitRecord(@Bind("eventId") String eventId, @Bind("teamNumber") int teamNumber);
 
     @SqlUpdate("DELETE FROM pit_scouting_records WHERE event_id = :eventId")

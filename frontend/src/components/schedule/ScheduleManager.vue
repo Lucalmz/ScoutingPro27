@@ -11,6 +11,7 @@ import ScheduleImportModal from './ScheduleImportModal.vue'
 import ScheduleAuditModal from './ScheduleAuditModal.vue'
 import PitStatusIndicator from '@/components/pit/PitStatusIndicator.vue'
 import { getRecordTournamentLevel } from '@/utils/tournament'
+import { useConfirm } from '@/composables/useConfirm'
 
 const props = defineProps<{
   event: ScoutingEvent | null
@@ -288,10 +289,19 @@ function handleGoToScout(matchNumber: number, teamNumber: number, alliance: 'red
   emit('startScouting', { matchNumber, teamNumber, allianceColor: alliance, tournamentLevel })
 }
 
+const { showConfirm } = useConfirm()
+
 // 清空赛程确认
 async function handleClearSchedule() {
   if (!props.event?.id) return
-  if (confirm(t('schedule.clear_confirm') || '确定清空当前赛事的全部赛程与排班数据吗？此操作不可逆。')) {
+  const ok = await showConfirm({
+    title: t('confirm_dialog.title'),
+    message: t('schedule.clear_confirm') || '确定清空当前赛事的全部赛程与排班数据吗？此操作不可逆。',
+    type: 'danger',
+    confirmText: t('confirm_dialog.danger_confirm'),
+    cancelText: t('confirm_dialog.cancel')
+  })
+  if (ok) {
     await scheduleStore.clearSchedule(props.event.id)
     toastStore.showToast(t('schedule.clear_success') || '赛程已清空', 'info')
   }

@@ -8,22 +8,21 @@ public class PitScoutingRecord {
     private String scoutName;
     private String robotName;
 
-    // 核心硬件构型 (Hardware Essentials)
+    // 核心硬件构型 (Hardware Essentials - 2026-2027 BIOBUZZ)
     private String drivetrainType = "mecanum";
     private double weightLbs = 0.0;
-    private boolean sizingPassed = true;
-    private String mechanismType = "slide_claw";
-    private String hangType = "winch";
     private String odometryType = "none";
+    private String ballCompatibility = "universal";
+    private String launcherType = "";
+    private String flowerMechanism = "";
+    private boolean hasColorSensor = false;
 
-    // 核心量化自述指标 (Claimed Quantitative Performance)
+    // 核心量化自述指标 (Claimed Quantitative Performance - 2026-2027 BIOBUZZ)
+    private String claimedAutoStrategy = "";
     private int claimedAutoScore = 0;
-    private int claimedAutoPieces = 0;
-    private int claimedAutoHangLevel = 0;
+    private int claimedTeleopCycles = 0;
     private int claimedTeleopScore = 0;
-    private double claimedTeleopCycleSec = 0.0;
-    private int claimedEndgameHangLevel = 0;
-    private double claimedEndgameTimeSec = 0.0;
+    private int claimedEndgameScore = 0;
     private int claimedTotalScore = 0;
 
     // 图片与版本
@@ -61,38 +60,36 @@ public class PitScoutingRecord {
     public double getWeightLbs() { return weightLbs; }
     public void setWeightLbs(double weightLbs) { this.weightLbs = weightLbs; }
 
-    public boolean isSizingPassed() { return sizingPassed; }
-    public void setSizingPassed(boolean sizingPassed) { this.sizingPassed = sizingPassed; }
-
-    public String getMechanismType() { return mechanismType; }
-    public void setMechanismType(String mechanismType) { this.mechanismType = mechanismType; }
-
-    public String getHangType() { return hangType; }
-    public void setHangType(String hangType) { this.hangType = hangType; }
-
     public String getOdometryType() { return odometryType; }
     public void setOdometryType(String odometryType) { this.odometryType = odometryType; }
+
+    public String getBallCompatibility() { return ballCompatibility; }
+    public void setBallCompatibility(String ballCompatibility) { this.ballCompatibility = ballCompatibility; }
+
+    public String getLauncherType() { return launcherType; }
+    public void setLauncherType(String launcherType) { this.launcherType = launcherType; }
+
+    public String getFlowerMechanism() { return flowerMechanism; }
+    public void setFlowerMechanism(String flowerMechanism) { this.flowerMechanism = flowerMechanism; }
+
+    public boolean isHasColorSensor() { return hasColorSensor; }
+    public boolean getHasColorSensor() { return hasColorSensor; }
+    public void setHasColorSensor(boolean hasColorSensor) { this.hasColorSensor = hasColorSensor; }
+
+    public String getClaimedAutoStrategy() { return claimedAutoStrategy; }
+    public void setClaimedAutoStrategy(String claimedAutoStrategy) { this.claimedAutoStrategy = claimedAutoStrategy; }
 
     public int getClaimedAutoScore() { return claimedAutoScore; }
     public void setClaimedAutoScore(int claimedAutoScore) { this.claimedAutoScore = claimedAutoScore; }
 
-    public int getClaimedAutoPieces() { return claimedAutoPieces; }
-    public void setClaimedAutoPieces(int claimedAutoPieces) { this.claimedAutoPieces = claimedAutoPieces; }
-
-    public int getClaimedAutoHangLevel() { return claimedAutoHangLevel; }
-    public void setClaimedAutoHangLevel(int claimedAutoHangLevel) { this.claimedAutoHangLevel = claimedAutoHangLevel; }
+    public int getClaimedTeleopCycles() { return claimedTeleopCycles; }
+    public void setClaimedTeleopCycles(int claimedTeleopCycles) { this.claimedTeleopCycles = claimedTeleopCycles; }
 
     public int getClaimedTeleopScore() { return claimedTeleopScore; }
     public void setClaimedTeleopScore(int claimedTeleopScore) { this.claimedTeleopScore = claimedTeleopScore; }
 
-    public double getClaimedTeleopCycleSec() { return claimedTeleopCycleSec; }
-    public void setClaimedTeleopCycleSec(double claimedTeleopCycleSec) { this.claimedTeleopCycleSec = claimedTeleopCycleSec; }
-
-    public int getClaimedEndgameHangLevel() { return claimedEndgameHangLevel; }
-    public void setClaimedEndgameHangLevel(int claimedEndgameHangLevel) { this.claimedEndgameHangLevel = claimedEndgameHangLevel; }
-
-    public double getClaimedEndgameTimeSec() { return claimedEndgameTimeSec; }
-    public void setClaimedEndgameTimeSec(double claimedEndgameTimeSec) { this.claimedEndgameTimeSec = claimedEndgameTimeSec; }
+    public int getClaimedEndgameScore() { return claimedEndgameScore; }
+    public void setClaimedEndgameScore(int claimedEndgameScore) { this.claimedEndgameScore = claimedEndgameScore; }
 
     public int getClaimedTotalScore() { return claimedTotalScore; }
     public void setClaimedTotalScore(int claimedTotalScore) { this.claimedTotalScore = claimedTotalScore; }

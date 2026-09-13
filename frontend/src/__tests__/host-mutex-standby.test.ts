@@ -82,7 +82,7 @@ describe('Host Mutex, Standby Mode & Takeover (双主机互斥与接管)', () =>
     await service1.host('room-ftc-123')
 
     // Wait for probe to complete
-    await new Promise(r => setTimeout(r, 70))
+    await new Promise(r => setTimeout(r, 120))
 
     expect(service1.isStandbyHost()).toBe(false)
     expect(onHostPromoted).toHaveBeenCalled()

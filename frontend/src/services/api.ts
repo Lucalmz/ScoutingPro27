@@ -190,6 +190,10 @@ export function banTeam(eventId: string, teamNumber: number): Promise<void> {
   return request<void>('POST', `/events/${eventId}/banned-teams`, { teamNumber })
 }
 
+export function unbanTeam(eventId: string, teamNumber: number): Promise<void> {
+  return request<void>('DELETE', `/events/${eventId}/banned-teams/${teamNumber}`)
+}
+
 // --- Records ---
 export function listRecords(eventId: string): Promise<ScoutingRecord[]> {
   return request<ScoutingRecord[]>('GET', `/records?eventId=${encodeURIComponent(eventId)}`)

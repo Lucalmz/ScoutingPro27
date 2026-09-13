@@ -45,7 +45,7 @@ public class FtcProxyRoutes {
                 ctx.result(gson.toJson(matches)).contentType("application/json");
             } catch (Exception e) {
                 System.err.println("[FTC API Proxy] Error fetching matches: " + e.getMessage());
-                ctx.status(500).result(gson.toJson(Map.of("error", e.getMessage()))).contentType("application/json");
+                ctx.status(500).result(gson.toJson(Map.of("error", e.getMessage() != null ? e.getMessage() : "Unknown error"))).contentType("application/json");
             }
         });
 
@@ -77,7 +77,7 @@ public class FtcProxyRoutes {
                 ctx.result(gson.toJson(scores)).contentType("application/json");
             } catch (Exception e) {
                 System.err.println("[FTC API Proxy] Error fetching scores: " + e.getMessage());
-                ctx.status(500).result(gson.toJson(Map.of("error", e.getMessage()))).contentType("application/json");
+                ctx.status(500).result(gson.toJson(Map.of("error", e.getMessage() != null ? e.getMessage() : "Unknown error"))).contentType("application/json");
             }
         });
 
@@ -104,7 +104,7 @@ public class FtcProxyRoutes {
                 ctx.result(gson.toJson(teams)).contentType("application/json");
             } catch (Exception e) {
                 System.err.println("[FTC API Proxy] Error fetching teams: " + e.getMessage());
-                ctx.status(500).result(gson.toJson(Map.of("error", e.getMessage()))).contentType("application/json");
+                ctx.status(500).result(gson.toJson(Map.of("error", e.getMessage() != null ? e.getMessage() : "Unknown error"))).contentType("application/json");
             }
         });
     }

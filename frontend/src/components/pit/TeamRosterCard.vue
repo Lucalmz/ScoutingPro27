@@ -36,10 +36,14 @@ const drivetrainText = computed(() => {
   return t(`pit_scout.drivetrain.${dt}`) || dt
 })
 
-const hangText = computed(() => {
-  const ht = props.team.pitRecord?.hangType
-  if (!ht) return ''
-  return t(`pit_scout.hang.${ht}`) || ht
+const ballCompatibilityText = computed(() => {
+  const bc = props.team.pitRecord?.ballCompatibility
+  if (!bc) return ''
+  return t(`pit_scout.ball_compatibility.${bc}`) || bc
+})
+
+const launcherText = computed(() => {
+  return props.team.pitRecord?.launcherType || ''
 })
 
 const bragLabel = computed(() => {
@@ -47,8 +51,6 @@ const bragLabel = computed(() => {
   if (!b) return ''
   const tierText = t(`pit_scout.brag_tiers.${b.tier}`) || b.label
   let str = `${b.overallRatio}x ${tierText}`
-  if (b.hangVerified) str += ` (${t('pit_scout.hang_verified')})`
-  else if (b.hangPardoned) str += ` (${t('pit_scout.hang_pardoned')})`
   return str
 })
 </script>
@@ -90,9 +92,13 @@ const bragLabel = computed(() => {
         <span class="material-icons pill-icon">scale</span>
         {{ team.pitRecord.weightLbs }} lbs
       </span>
-      <span v-if="team.pitRecord.hangType && team.pitRecord.hangType !== 'none'" class="pill pill-hang">
-        <span class="material-icons pill-icon">vertical_align_top</span>
-        {{ hangText }}
+      <span v-if="team.pitRecord.ballCompatibility" class="pill pill-compat">
+        <span class="material-icons pill-icon">sports_baseball</span>
+        {{ ballCompatibilityText }}
+      </span>
+      <span v-if="launcherText" class="pill pill-launcher">
+        <span class="material-icons pill-icon">rocket_launch</span>
+        {{ launcherText }}
       </span>
     </div>
 
@@ -105,13 +111,13 @@ const bragLabel = computed(() => {
       <div class="quant-item">
         <span class="quant-label">{{ t('pit_scout.claimed_auto') }}</span>
         <span class="quant-value">
-          {{ t('pit_scout.claimed_score_pieces', { score: team.pitRecord.claimedAutoScore, pieces: team.pitRecord.claimedAutoPieces }) }}
+          {{ team.pitRecord.claimedAutoScore }}分
         </span>
       </div>
       <div class="quant-item">
-        <span class="quant-label">{{ t('pit_scout.claimed_hang') }}</span>
+        <span class="quant-label">{{ t('pit_scout.claimed_teleop_cycles') }}</span>
         <span class="quant-value">
-          {{ team.pitRecord.claimedEndgameHangLevel > 0 ? t('pit_scout.hang_level', { level: team.pitRecord.claimedEndgameHangLevel }) : t('pit_scout.hang_none') }}
+          {{ t('pit_scout.claimed_cycles_unit', { cycles: team.pitRecord.claimedTeleopCycles || 0 }) }}
         </span>
       </div>
     </div>
@@ -159,7 +165,13 @@ const bragLabel = computed(() => {
   transition: all 0.2s cubic-bezier(0.16, 1, 0.3, 1);
   position: relative;
   animation: card-cascade-in var(--motion-duration-moderate, 0.4s) var(--motion-ease-out, ease-out) both;
-  animation-delay: calc(var(--card-index, 0) * 35ms);
+  animation-delay: min(calc(var(--card-index, 0) * 30ms), 240ms);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .team-roster-card {
+    animation: none !important;
+  }
 }
 
 @keyframes card-cascade-in {

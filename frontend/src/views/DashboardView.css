@@ -8,7 +8,7 @@
   display: flex;
   align-items: center;
   justify-content: space-between;
-  padding: 14px 24px;
+  padding: max(14px, var(--sat)) max(24px, var(--sar)) 14px max(24px, var(--sal));
   background: var(--card);
   border-bottom: 1px solid var(--border);
 }
@@ -19,10 +19,11 @@
 }
 
 .brand-logo {
-  width: 24px;
-  height: 24px;
+  width: 26px;
+  height: 26px;
   object-fit: contain;
-  filter: drop-shadow(0 0 6px rgba(57, 255, 20, 0.45));
+  image-rendering: -webkit-optimize-contrast;
+  filter: drop-shadow(0 0 3px rgba(57, 255, 20, 0.35));
 }
 
 .user-tag-btn,
@@ -47,6 +48,13 @@
   border-color: var(--primary, #39ff14);
   color: var(--primary, #39ff14);
   box-shadow: var(--glow-primary, 0 0 10px rgba(57, 255, 20, 0.35));
+}
+
+/* Desktop: hide topbar Inbox button (since bottom-right floating Inbox FAB is present) */
+@media (min-width: 769px) {
+  .inbox-topbar-btn {
+    display: none !important;
+  }
 }
 
 .user-tag-btn .edit-icon {
@@ -179,8 +187,8 @@ h2 {
 }
 
 .event-card.slide-out-right {
-  transform: translateX(150px);
-  opacity: 0;
+  transform: translateX(150px) !important;
+  opacity: 0 !important;
 }
 
 .event-info {
@@ -214,9 +222,15 @@ h2 {
   color: var(--muted-foreground);
 }
 
+.event-card:hover .event-arrow {
+  color: var(--primary);
+  transform: translateX(5px);
+}
+
 .event-arrow {
   font-size: 20px;
   color: var(--muted-foreground);
+  transition: transform var(--motion-duration-fast) var(--motion-ease-out), color var(--motion-duration-fast) ease;
 }
 
 .loading-msg,
@@ -329,9 +343,46 @@ h2 {
 
 @media (max-width: 768px) {
   .topbar {
-    padding: 10px 14px;
+    padding: max(10px, var(--sat)) max(14px, var(--sar)) 10px max(14px, var(--sal));
   }
   .topbar-btn .topbar-btn-text {
     display: none;
+  }
+  .main-content {
+    padding: 20px 14px max(24px, var(--sab));
+  }
+}
+
+@media (max-width: 480px) {
+  .user-tag-btn {
+    margin-right: 6px;
+    padding: 6px 8px;
+  }
+  .user-tag-btn .username-text {
+    display: none;
+  }
+  .action-buttons {
+    flex-direction: column;
+    gap: 8px;
+  }
+  .modal-card {
+    padding: 20px 16px;
+    margin: 0 12px;
+    max-width: min(400px, 92vw);
+  }
+}
+
+@media (max-width: 360px) {
+  .topbar {
+    padding: max(8px, var(--sat)) max(8px, var(--sar)) 8px max(8px, var(--sal));
+  }
+  .topbar-btn,
+  .btn-logout {
+    padding: 6px 8px;
+    font-size: 12px;
+    margin-right: 4px;
+  }
+  .brand span {
+    font-size: 16px;
   }
 }

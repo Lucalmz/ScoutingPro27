@@ -84,12 +84,9 @@ const highlightVisible = ref(false)
 
 function onCardEnter(e: MouseEvent) {
   const target = e.currentTarget as HTMLElement
-  const wrapper = target.closest('.history-list') as HTMLElement
-  if (wrapper && target) {
-    const wrapperRect = wrapper.getBoundingClientRect()
-    const targetRect = target.getBoundingClientRect()
-    highlightTop.value = targetRect.top - wrapperRect.top + wrapper.scrollTop
-    highlightHeight.value = targetRect.height
+  if (target) {
+    highlightTop.value = target.offsetTop
+    highlightHeight.value = target.offsetHeight
     highlightVisible.value = true
   }
 }
@@ -113,25 +110,23 @@ function beforeEnter(el: Element) {
 
 function enter(el: Element, done: () => void) {
   const htmlEl = el as HTMLElement
-  
-  // Force browser to paint the initial opacity: 0 state before animating
-  // eslint-disable-next-line no-unused-expressions
-  htmlEl.offsetHeight
-  
   const index = parseInt(htmlEl.dataset.index || '0', 10)
-  const delay = Math.min(index, 10) * 50
-  
-  setTimeout(() => {
-    htmlEl.style.setProperty('transition', 'all var(--motion-duration-normal) var(--motion-ease-out)', 'important')
-    htmlEl.style.opacity = '1'
-    htmlEl.style.transform = 'translateY(0)'
-    
-    // Clean up inline !important transition after animation so :active feedback is restored
+  const delay = Math.min(index, 10) * 40
+
+  requestAnimationFrame(() => {
     setTimeout(() => {
-      htmlEl.style.removeProperty('transition')
-      done()
-    }, 360)
-  }, delay)
+      htmlEl.style.setProperty('transition', 'all var(--motion-duration-normal) var(--motion-ease-out)', 'important')
+      htmlEl.style.opacity = '1'
+      htmlEl.style.transform = 'translateY(0)'
+
+      setTimeout(() => {
+        htmlEl.style.removeProperty('transition')
+        htmlEl.style.removeProperty('opacity')
+        htmlEl.style.removeProperty('transform')
+        done()
+      }, 360)
+    }, delay)
+  })
 }
 </script>
 
@@ -259,15 +254,14 @@ function enter(el: Element, done: () => void) {
 .history-card.highlight-conflict,
 .history-card.is-conflict-card {
   border-color: #ef4444 !important;
-  box-shadow: 0 0 15px rgba(239, 68, 68, 0.4);
-  animation: pulse-conflict 2s infinite;
+  box-shadow: 0 0 12px rgba(239, 68, 68, 0.4);
+  animation: pulse-conflict 2.5s infinite ease-in-out;
   background-color: rgba(239, 68, 68, 0.05);
 }
 
 @keyframes pulse-conflict {
-  0% { box-shadow: 0 0 10px rgba(239, 68, 68, 0.3); }
-  50% { box-shadow: 0 0 20px rgba(239, 68, 68, 0.7); }
-  100% { box-shadow: 0 0 10px rgba(239, 68, 68, 0.3); }
+  0%, 100% { opacity: 1; border-color: rgba(239, 68, 68, 0.95); }
+  50% { opacity: 0.85; border-color: rgba(239, 68, 68, 0.4); }
 }
 
 .conflict-badge {

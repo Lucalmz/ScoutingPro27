@@ -131,7 +131,7 @@
 
 .roster-grid {
   display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(320px, 1fr));
+  grid-template-columns: repeat(auto-fill, minmax(min(100%, 270px), 1fr));
   gap: 16px;
 }
 
@@ -169,4 +169,21 @@
 @keyframes spin {
   from { transform: rotate(0deg); }
   to { transform: rotate(360deg); }
+}
+
+@media (max-width: 680px) {
+  .pit-scout-view {
+    padding: 10px 4px;
+    gap: 12px;
+  }
+  .pit-header-banner {
+    padding: 12px 14px;
+    gap: 10px;
+  }
+  .search-box {
+    min-width: 140px;
+  }
+  .roster-grid {
+    gap: 10px;
+  }
 }

@@ -145,11 +145,17 @@ public class FtcApiClient {
                 redObj.addProperty("penaltyPointsCommitted", scoreRedFoul);
                 redObj.addProperty("totalPointsNp", redTotalNp);
                 redObj.addProperty("finalScore", scoreRedFinal);
+                if (m.has("totalTipsRed") && !m.get("totalTipsRed").isJsonNull()) {
+                    redObj.addProperty("totalTips", m.get("totalTipsRed").getAsInt());
+                }
 
                 JsonObject blueObj = new JsonObject();
                 blueObj.addProperty("penaltyPointsCommitted", scoreBlueFoul);
                 blueObj.addProperty("totalPointsNp", blueTotalNp);
                 blueObj.addProperty("finalScore", scoreBlueFinal);
+                if (m.has("totalTipsBlue") && !m.get("totalTipsBlue").isJsonNull()) {
+                    blueObj.addProperty("totalTips", m.get("totalTipsBlue").getAsInt());
+                }
 
                 scoresObj.add("red", redObj);
                 scoresObj.add("blue", blueObj);
@@ -249,6 +255,39 @@ public class FtcApiClient {
         return allTeams;
     }
 
+    /**
+     * 校验指定赛季下是否存在特定的 FTC 官方赛事代码
+     *
+     * @param season    FTC 赛季年份 (如 2024, 2025)
+     * @param eventCode 赛事代码 (如 CNCMPLB, AUCMP)
+     * @return 存在且有效则返回 true，否则返回 false
+     */
+    public boolean eventExists(int season, String eventCode) throws Exception {
+        if (eventCode == null || eventCode.isBlank()) {
+            return false;
+        }
+        String normalizedCode = eventCode.trim().toUpperCase(Locale.ROOT);
+        String path = "/v2.0/" + season + "/events?eventCode=" + normalizedCode;
+        JsonObject rawObj = fetchJsonWithCache(path);
+        if (rawObj == null || !rawObj.has("events") || rawObj.get("events").isJsonNull()) {
+            return false;
+        }
+        JsonArray events = rawObj.getAsJsonArray("events");
+        if (events.size() == 0) {
+            return false;
+        }
+        for (JsonElement eElem : events) {
+            if (!eElem.isJsonObject()) continue;
+            JsonObject eObj = eElem.getAsJsonObject();
+            if (eObj.has("code") && !eObj.get("code").isJsonNull()) {
+                if (normalizedCode.equalsIgnoreCase(eObj.get("code").getAsString())) {
+                    return true;
+                }
+            }
+        }
+        return false;
+    }
+
     private JsonObject fetchJsonWithCache(String path) throws Exception {
         CacheEntry cached = cache.get(path);
         if (cached != null && !cached.isExpired()) {
@@ -298,5 +337,110 @@ public class FtcApiClient {
 
     public void clearCache() {
         cache.clear();
+    }
+
+    public static JsonArray generateSyntheticBiobuzzMatches() {
+        JsonArray matches = new JsonArray();
+        int[][] matchPairings = {
+            {27570, 11115, 11260, 8644},
+            {8417, 18457, 18219, 19600},
+            {16461, 14295, 12808, 10011},
+            {16379, 12599, 19743, 22312},
+            {27570, 8417, 14295, 12599},
+            {11115, 18457, 11260, 16379},
+            {8644, 18219, 16461, 19743},
+            {19600, 12808, 10011, 22312},
+            {27570, 19600, 16379, 10011},
+            {11115, 12808, 8417, 22312},
+            {11260, 18219, 14295, 19743},
+            {8644, 18457, 16461, 12599}
+        };
+
+        int[] redScores = {128, 98, 115, 102, 134, 110, 88, 122, 140, 118, 95, 105};
+        int[] blueScores = {112, 105, 92, 118, 108, 125, 114, 85, 96, 102, 110, 115};
+        int[] redTips = {4, 3, 3, 2, 5, 3, 2, 4, 5, 3, 2, 3};
+        int[] blueTips = {3, 3, 2, 4, 3, 4, 3, 2, 2, 3, 3, 4};
+
+        for (int i = 0; i < matchPairings.length; i++) {
+            int matchNum = i + 1;
+            JsonObject m = new JsonObject();
+            m.addProperty("matchNum", matchNum);
+            m.addProperty("tournamentLevel", "QUALIFICATION");
+
+            JsonObject scoresObj = new JsonObject();
+            JsonObject redObj = new JsonObject();
+            redObj.addProperty("penaltyPointsCommitted", 0);
+            redObj.addProperty("totalPointsNp", redScores[i]);
+            redObj.addProperty("finalScore", redScores[i]);
+            redObj.addProperty("totalTips", redTips[i]);
+
+            JsonObject blueObj = new JsonObject();
+            blueObj.addProperty("penaltyPointsCommitted", 0);
+            blueObj.addProperty("totalPointsNp", blueScores[i]);
+            blueObj.addProperty("finalScore", blueScores[i]);
+            blueObj.addProperty("totalTips", blueTips[i]);
+
+            scoresObj.add("red", redObj);
+            scoresObj.add("blue", blueObj);
+            m.add("scores", scoresObj);
+
+            JsonArray teamsArr = new JsonArray();
+            int[] pairing = matchPairings[i];
+            addSyntheticTeam(teamsArr, pairing[0], "Red1", "Red");
+            addSyntheticTeam(teamsArr, pairing[1], "Red2", "Red");
+            addSyntheticTeam(teamsArr, pairing[2], "Blue1", "Blue");
+            addSyntheticTeam(teamsArr, pairing[3], "Blue2", "Blue");
+            m.add("teams", teamsArr);
+
+            matches.add(m);
+        }
+        return matches;
+    }
+
+    private static void addSyntheticTeam(JsonArray arr, int teamNum, String station, String alliance) {
+        JsonObject t = new JsonObject();
+        t.addProperty("teamNumber", teamNum);
+        t.addProperty("station", station);
+        t.addProperty("alliance", alliance);
+        t.addProperty("dq", false);
+        t.addProperty("onField", true);
+        arr.add(t);
+    }
+
+    public static JsonArray generateSyntheticBiobuzzTeams() {
+        JsonArray teams = new JsonArray();
+        int[] numbers = {
+            27570, 11115, 11260, 8644, 8417, 18457, 18219, 19600,
+            16461, 14295, 12808, 10011, 16379, 12599, 19743, 22312
+        };
+        String[] names = {
+            "Titanium Bear", "Gluten Free", "Up-A-Creek Robotics", "The Brainstormers",
+            "The 'Lectric Legends", "Mechanical Paradox", "Iron Bears", "Cyber Hawkeyes",
+            "Infinite Turtle", "Operation T.A.C.", "RevAmped Robotics", "Thunderbots",
+            "KookyBotz", "Overcharged", "BioVipers", "RoboSwarm"
+        };
+        String[] cities = {
+            "Chengdu", "Hollis", "Longmont", "Lexington",
+            "Lancaster", "Woodstock", "Highland Park", "Shanghai",
+            "Beijing", "Orange", "Portland", "Bellevue",
+            "San Jose", "San Diego", "Austin", "Seattle"
+        };
+        String[] countries = {
+            "China", "USA", "USA", "USA",
+            "USA", "USA", "USA", "China",
+            "China", "USA", "USA", "USA",
+            "USA", "USA", "USA", "USA"
+        };
+
+        for (int i = 0; i < numbers.length; i++) {
+            JsonObject t = new JsonObject();
+            t.addProperty("teamNumber", numbers[i]);
+            t.addProperty("nameFull", names[i]);
+            t.addProperty("robotName", "Robot " + numbers[i]);
+            t.addProperty("city", cities[i]);
+            t.addProperty("country", countries[i]);
+            teams.add(t);
+        }
+        return teams;
     }
 }

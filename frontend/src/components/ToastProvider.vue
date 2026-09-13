@@ -161,6 +161,12 @@ function resolveIcon(toast: Toast): string {
 .toast-leave-active {
   transition: all 0.35s cubic-bezier(0.16, 1, 0.3, 1);
 }
+.toast-leave-active {
+  position: absolute;
+}
+.toast-move {
+  transition: transform 0.35s cubic-bezier(0.16, 1, 0.3, 1);
+}
 .toast-enter-from {
   opacity: 0;
   transform: translateY(-24px) scale(0.92);

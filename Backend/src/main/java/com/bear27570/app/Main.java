@@ -20,17 +20,26 @@ import javax.swing.filechooser.FileNameExtensionFilter;
 import java.awt.*;
 import java.awt.event.WindowAdapter;
 import java.awt.event.WindowEvent;
+import java.awt.geom.RoundRectangle2D;
+import java.awt.image.BufferedImage;
 import java.io.File;
 import java.io.FileOutputStream;
 import java.io.IOException;
 import java.io.InputStream;
 import java.nio.file.Files;
+import java.util.ArrayList;
+import java.util.List;
 
 public class Main {
     private static final String JCEF_BUNDLE_RESOURCE = "/jcef-bundle.zip";
     private static final String JCEF_BUNDLE_TAR_RESOURCE = "/jcef-bundle.tar.gz";
 
     public static void main(String[] args) {
+        // Enforce Windows ClearType subpixel font antialiasing on all Swing components
+        System.setProperty("awt.useSystemAAFontSettings", "lcd_hrgb");
+        System.setProperty("swing.aatext", "true");
+        System.setProperty("sun.java2d.uiScale.enabled", "true");
+
         boolean headless = false;
         for (String arg : args) {
             if ("--jcef-prewarm".equals(arg)) {
@@ -75,8 +84,20 @@ public class Main {
         File targetDir = new File(System.getProperty("user.home"), ".scoutingpro27/jcef-bundle");
         File markerV3 = new File(targetDir, ".extracted_v3_ok");
         boolean isWindows = System.getProperty("os.name", "").toLowerCase().contains("win");
+        boolean isMac = System.getProperty("os.name", "").toLowerCase().contains("mac");
 
-        if (markerV3.exists()) {
+        // 检查是否已经存在完整可用的 JCEF 原生库（已解压或已被 jcefmaven 成功下载）
+        boolean hasBinaries = markerV3.exists() ||
+                (isWindows && new File(targetDir, "jcef.dll").exists() && new File(targetDir, "libcef.dll").exists()) ||
+                (isMac && (new File(targetDir, "jcef Helper.app").exists() || new File(targetDir, "libjcef.dylib").exists())) ||
+                (!isWindows && !isMac && new File(targetDir, "libjcef.so").exists());
+
+        if (hasBinaries) {
+            if (!markerV3.exists()) {
+                try {
+                    markerV3.createNewFile();
+                } catch (Exception ignored) {}
+            }
             if (!isWindows) {
                 try {
                     new ProcessBuilder("chmod", "-R", "755", targetDir.getAbsolutePath()).start().waitFor();
@@ -85,15 +106,13 @@ public class Main {
             return targetDir;
         }
 
-        // 彻底清理旧版或之前解压损坏的目录（例如缺少执行权限或丢失软链接的文件）
-        if (targetDir.exists()) {
-            deleteDir(targetDir);
-        }
-        targetDir.mkdirs();
-
         // 1. 优先尝试 tar.gz 资源（macOS/Linux 打包产物，完美保留符号链接与 POSIX 执行权限）
         try (InputStream tarIn = Main.class.getResourceAsStream(JCEF_BUNDLE_TAR_RESOURCE)) {
             if (tarIn != null) {
+                if (targetDir.exists()) {
+                    deleteDir(targetDir);
+                }
+                targetDir.mkdirs();
                 File tempTar = File.createTempFile("jcef-bundle-", ".tar.gz");
                 try {
                     try (FileOutputStream fos = new FileOutputStream(tempTar)) {
@@ -121,14 +140,22 @@ public class Main {
         // 2. 尝试 zip 资源（Windows 打包产物）
         try (InputStream in = Main.class.getResourceAsStream(JCEF_BUNDLE_RESOURCE)) {
             if (in == null) {
-                // 开发环境没打包这个资源，走原来的联网下载
+                // 开发环境未打包离线资源，保留目标目录供 jcefmaven 缓存或下载
+                targetDir.mkdirs();
                 return targetDir;
             }
+            if (targetDir.exists()) {
+                deleteDir(targetDir);
+            }
+            targetDir.mkdirs();
             try (java.util.zip.ZipInputStream zis = new java.util.zip.ZipInputStream(in)) {
                 java.util.zip.ZipEntry entry;
                 byte[] buf = new byte[16384];
                 while ((entry = zis.getNextEntry()) != null) {
                     File outFile = new File(targetDir, entry.getName());
+                    if (!outFile.toPath().normalize().startsWith(targetDir.toPath().normalize())) {
+                        throw new IOException("Zip entry outside target directory: " + entry.getName());
+                    }
                     if (entry.isDirectory()) {
                         outFile.mkdirs();
                     } else {
@@ -148,7 +175,9 @@ public class Main {
                     new ProcessBuilder("chmod", "-R", "755", targetDir.getAbsolutePath()).start().waitFor();
                 } catch (Exception ignored) {}
             }
-            new FileOutputStream(markerV3).close();
+            try {
+                markerV3.createNewFile();
+            } catch (Exception ignored) {}
         }
         return targetDir;
     }
@@ -209,7 +238,7 @@ public class Main {
             
             boolean headless = false;
             for (String arg : args) {
-                if ("--headless".equals(arg)) {
+                if (arg != null && arg.replace("\"", "").trim().equals("--headless")) {
                     headless = true;
                     break;
                 }
@@ -228,7 +257,10 @@ public class Main {
             builder.setInstallDir(ensureJcefBundle());
             builder.getCefSettings().windowless_rendering_enabled = false;
             // 允许暴露真实本地网卡 IP（包括公网 IPv6），避免 Chromium 默认用 mDNS .local 掩盖导致跨网络 IPv6 直连打洞失败
-            builder.addJcefArgs("--disable-features=WebRtcHideLocalIpsWithMdns");
+            // 同时禁用 WebUsb、MediaRouter、CalculateNativeWinOcclusion 等探测，彻底消除 Windows 下 ~6 秒启动卡顿
+            builder.addJcefArgs("--disable-features=WebRtcHideLocalIpsWithMdns,WebUsb,MediaRouter,CalculateNativeWinOcclusion");
+            builder.addJcefArgs("--disable-device-discovery-notifications");
+            builder.addJcefArgs("--disable-usb-keyboard-detect");
 
             boolean isMac = System.getProperty("os.name", "").toLowerCase().contains("mac");
             if (isMac) {
@@ -276,15 +308,25 @@ public class Main {
                 JFrame frame = new JFrame("ScoutingPro27");
                 boolean isWindows = System.getProperty("os.name", "").toLowerCase().contains("win");
 
+                // 统一全窗口深色背景，消除任何边缘和子像素间隙闪白/泛灰
+                Color windowBg = new Color(10, 10, 10);
+                frame.setBackground(windowBg);
+                if (frame.getRootPane() != null) {
+                    frame.getRootPane().setBackground(windowBg);
+                    frame.getRootPane().setBorder(null);
+                }
+                if (frame.getContentPane() != null) {
+                    frame.getContentPane().setBackground(windowBg);
+                }
+
                 if (isWindows) {
                     frame.setUndecorated(true);
 
-                    // Set taskbar and window icon
-                    try (InputStream iconIn = Main.class.getResourceAsStream("/icon.png")) {
-                        if (iconIn != null) {
-                            frame.setIconImage(ImageIO.read(iconIn));
-                        }
-                    } catch (Exception ignored) {}
+                    // Set multi-resolution taskbar and window icons across all DPI scales
+                    List<Image> appIcons = loadAppIcons();
+                    if (!appIcons.isEmpty()) {
+                        frame.setIconImages(appIcons);
+                    }
 
                     // Custom title bar replacing system default title bar on Windows
                     CustomTitleBar customTitleBar = new CustomTitleBar(frame);
@@ -294,6 +336,15 @@ public class Main {
 
                     // Attach edge & corner resizer for undecorated frame
                     WindowResizer.attach(frame);
+
+                    // 监听窗口尺寸与状态变化，自适应保持大圆角 (24px 半径)，最大化时直角满屏
+                    frame.addComponentListener(new java.awt.event.ComponentAdapter() {
+                        @Override
+                        public void componentResized(java.awt.event.ComponentEvent e) {
+                            updateWindowShape(frame);
+                        }
+                    });
+                    frame.addWindowStateListener(e -> updateWindowShape(frame));
                 } else {
                     // macOS / Linux: 保持标准原生窗口，避免 JCEF 在 macOS 无边框 NSWindowStyleMaskBorderless 下发生 native SIGTRAP 崩溃
                     frame.getContentPane().setLayout(new BorderLayout());
@@ -302,6 +353,7 @@ public class Main {
 
                 frame.setSize(1024, 768);
                 frame.setLocationRelativeTo(null);
+                updateWindowShape(frame);
 
                 frame.addWindowListener(new WindowAdapter() {
                     @Override
@@ -368,6 +420,96 @@ public class Main {
             apiRoutes.register(config.routes);
             config.events.serverStopped(apiRoutes::shutdown);
         });
+    }
+
+    public static final int WINDOW_CORNER_RADIUS = 24;
+
+    public static void updateWindowShape(JFrame frame) {
+        if (frame == null) return;
+        if (!System.getProperty("os.name", "").toLowerCase().contains("win")) return;
+        if (!frame.isUndecorated()) return;
+        if ((frame.getExtendedState() & JFrame.MAXIMIZED_BOTH) != 0) {
+            frame.setShape(null);
+        } else {
+            int w = frame.getWidth();
+            int h = frame.getHeight();
+            if (w > 0 && h > 0) {
+                frame.setShape(new RoundRectangle2D.Float(0, 0, w, h, WINDOW_CORNER_RADIUS, WINDOW_CORNER_RADIUS));
+            }
+        }
+    }
+
+    public static List<Image> loadAppIcons() {
+        List<Image> icons = new ArrayList<>();
+        BufferedImage master = null;
+        String[] paths = { "/icon.png", "/logo_transparent.png", "/logo.png", "/public/logo_transparent.png", "/app_icon.png" };
+        for (String p : paths) {
+            try (InputStream in = Main.class.getResourceAsStream(p)) {
+                if (in != null) {
+                    master = ImageIO.read(in);
+                    if (master != null) break;
+                }
+            } catch (Exception ignored) {}
+        }
+        if (master == null) return icons;
+
+        BufferedImage trimmed = trimTransparentPadding(master);
+        BufferedImage source = trimmed != null ? trimmed : master;
+
+        int[] targetSizes = { 16, 20, 24, 32, 40, 48, 64, 96, 128, 256, 512 };
+        for (int size : targetSizes) {
+            if (size <= source.getWidth() && size <= source.getHeight()) {
+                icons.add(scaleImageBicubic(source, size, size));
+            }
+        }
+        icons.add(source);
+        return icons;
+    }
+
+    private static BufferedImage trimTransparentPadding(BufferedImage src) {
+        if (src == null) return null;
+        int width = src.getWidth();
+        int height = src.getHeight();
+        int minX = width, minY = height, maxX = 0, maxY = 0;
+        boolean hasContent = false;
+
+        for (int y = 0; y < height; y++) {
+            for (int x = 0; x < width; x++) {
+                int alpha = (src.getRGB(x, y) >>> 24);
+                if (alpha > 15) {
+                    if (x < minX) minX = x;
+                    if (x > maxX) maxX = x;
+                    if (y < minY) minY = y;
+                    if (y > maxY) maxY = y;
+                    hasContent = true;
+                }
+            }
+        }
+
+        if (!hasContent) return src;
+
+        int cropW = maxX - minX + 1;
+        int cropH = maxY - minY + 1;
+        int pad = Math.max(2, Math.max(cropW, cropH) / 25);
+        int paddedX = Math.max(0, minX - pad);
+        int paddedY = Math.max(0, minY - pad);
+        int paddedW = Math.min(width - paddedX, cropW + (minX - paddedX) + pad);
+        int paddedH = Math.min(height - paddedY, cropH + (minY - paddedY) + pad);
+
+        return src.getSubimage(paddedX, paddedY, paddedW, paddedH);
+    }
+
+    private static BufferedImage scaleImageBicubic(BufferedImage src, int w, int h) {
+        BufferedImage dst = new BufferedImage(w, h, BufferedImage.TYPE_INT_ARGB);
+        Graphics2D g2 = dst.createGraphics();
+        g2.setRenderingHint(RenderingHints.KEY_ANTIALIASING, RenderingHints.VALUE_ANTIALIAS_ON);
+        g2.setRenderingHint(RenderingHints.KEY_INTERPOLATION, RenderingHints.VALUE_INTERPOLATION_BICUBIC);
+        g2.setRenderingHint(RenderingHints.KEY_RENDERING, RenderingHints.VALUE_RENDER_QUALITY);
+        g2.setRenderingHint(RenderingHints.KEY_ALPHA_INTERPOLATION, RenderingHints.VALUE_ALPHA_INTERPOLATION_QUALITY);
+        g2.setRenderingHint(RenderingHints.KEY_STROKE_CONTROL, RenderingHints.VALUE_STROKE_PURE);
+        g2.drawImage(src, 0, 0, w, h, null);
+        g2.dispose();
+        return dst;
     }
 
     private static void deleteDir(File file) {

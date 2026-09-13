@@ -62,7 +62,7 @@ watch(
 )
 
 // --- FTC Config Settings ---
-const settingsYear = ref(props.event?.ftcYear ?? 2025)
+const settingsYear = ref(props.event?.ftcYear ?? 2026)
 const settingsCode = ref(props.event?.ftcEventCode ?? '')
 const isSavingSettings = ref(false)
 
@@ -207,7 +207,7 @@ async function sendDirectMessage(scoutId: string, scoutName?: string) {
       )
     }
   } else {
-    alert(t('event.msg_not_ready'))
+    toastStore.showToast(t('event.msg_not_ready'), 'warning')
   }
 }
 </script>
@@ -221,7 +221,7 @@ async function sendDirectMessage(scoutId: string, scoutName?: string) {
       <div v-if="event?.ftcEventCode" class="ftc-bound-status-card">
         <span class="material-icons status-icon">check_circle</span>
         <div class="status-content">
-          <div class="status-title">{{ t('event.ftc_bound_title', { code: event.ftcEventCode, year: event.ftcYear || 2025 }) }}</div>
+          <div class="status-title">{{ t('event.ftc_bound_title', { code: event.ftcEventCode, year: event.ftcYear || 2026 }) }}</div>
           <div class="status-subtitle">{{ t('event.ftc_bound_desc', { count: recordStore.officialMatches.length }) }}</div>
         </div>
       </div>

@@ -293,8 +293,13 @@ function close() {
   display: flex;
   align-items: center;
   justify-content: center;
-  min-width: 224px;
-  min-height: 224px;
+  max-width: 100%;
+  box-sizing: border-box;
+}
+
+.qr-canvas-container canvas {
+  max-width: 100%;
+  height: auto !important;
 }
 
 .qr-loading-placeholder {
@@ -418,5 +423,23 @@ function close() {
   font-size: 16px;
   flex-shrink: 0;
   margin-top: 1px;
+}
+
+@media (max-width: 480px) {
+  .qr-modal-backdrop {
+    padding: 10px;
+  }
+  .qr-modal-body {
+    padding: 14px 12px;
+  }
+  .url-copy-box {
+    flex-direction: column;
+  }
+  .btn-copy {
+    justify-content: center;
+  }
+  .nic-controls {
+    flex-direction: column;
+  }
 }
 </style>

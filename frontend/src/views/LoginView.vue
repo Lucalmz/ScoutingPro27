@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref, computed, onMounted } from 'vue'
+import { ref, computed, watch, onMounted } from 'vue'
 import { useRouter, useRoute } from 'vue-router'
 import { useUserStore } from '@/stores/user'
 import { useEventStore } from '@/stores/events'
@@ -21,6 +21,10 @@ const confirmPassword = ref('')
 const isNewUser = ref<boolean | null>(null)
 const checkingUser = ref(false)
 const submitted = ref(false)
+
+watch(username, () => {
+  isNewUser.value = null
+})
 
 const pendingInviteCode = computed(() => {
   const q = route.query.join || route.query.code
@@ -69,22 +73,43 @@ async function handleUsernameBlur() {
 }
 
 async function handleLogin() {
-  if (checkingUser.value) return
-  if (!username.value.trim() || !password.value.trim()) return
-  if (isNewUser.value && password.value !== confirmPassword.value) {
-    toastStore.showError(t('login.password_mismatch'))
-    return
+  if (checkingUser.value) {
+    let attempts = 0
+    while (checkingUser.value && attempts < 40) {
+      await new Promise((r) => setTimeout(r, 50))
+      attempts++
+    }
   }
+  const uname = username.value.trim()
+  if (!uname) return
+
+  if (isNewUser.value === null) {
+    await handleUsernameBlur()
+  }
+
+  const pwd = password.value.trim()
+  if (!pwd) return
+
+  if (isNewUser.value) {
+    if (!confirmPassword.value.trim()) {
+      return
+    }
+    if (pwd !== confirmPassword.value.trim()) {
+      toastStore.showError(t('login.password_mismatch'))
+      return
+    }
+  }
+
   submitted.value = true
   let ok = false
   if (isNewUser.value) {
-    ok = await userStore.register(username.value.trim(), password.value.trim())
+    ok = await userStore.register(uname, pwd)
   } else {
-    ok = await userStore.login(username.value.trim(), password.value.trim())
+    ok = await userStore.login(uname, pwd)
   }
   submitted.value = false
   if (ok) {
-    toastStore.showToast(t('toast.welcome_back', { name: username.value.trim() }), 'success')
+    toastStore.showToast(t('toast.welcome_back', { name: uname }), 'success')
     if (pendingInviteCode.value) {
       try {
         const evt = await eventStore.join(pendingInviteCode.value, 'Joined Event')
@@ -182,8 +207,9 @@ async function handleLogin() {
 
 .lang-switcher {
   position: absolute;
-  top: 24px;
-  right: 24px;
+  top: max(16px, var(--sat, env(safe-area-inset-top, 0px)));
+  right: max(16px, var(--sar, env(safe-area-inset-right, 0px)));
+  z-index: 10;
 }
 
 .lang-btn {
@@ -294,7 +320,8 @@ async function handleLogin() {
   height: 68px;
   object-fit: contain;
   margin-bottom: 10px;
-  filter: drop-shadow(0 0 14px rgba(57, 255, 20, 0.45));
+  image-rendering: -webkit-optimize-contrast;
+  filter: drop-shadow(0 0 10px rgba(57, 255, 20, 0.40));
 }
 
 h1 {
@@ -378,5 +405,25 @@ button[type="submit"]:disabled {
 
 @keyframes spin {
   to { transform: rotate(360deg); }
+}
+
+@media (max-width: 480px) {
+  .login-screen {
+    padding: 16px 12px;
+  }
+  .login-card {
+    padding: 32px 18px;
+    border-radius: 14px;
+  }
+  h1 {
+    font-size: 22px;
+  }
+  .login-brand-logo {
+    width: 52px;
+    height: 52px;
+  }
+  .logo-area {
+    margin-bottom: 24px;
+  }
 }
 </style>

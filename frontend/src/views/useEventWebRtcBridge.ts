@@ -291,19 +291,19 @@ export function useEventWebRtcBridge({
           .filter((r) => r.eventId === eventId.value)
           .reduce((m, r) => Math.max(m, r.hostSeq || 0), 0)
         connStore.initHostSeq(Math.max(dbMaxSeq, lastHostSeq.value))
-        toastStore.showToast('本机已成功激活/接管为主机 (Active Host)', 'success')
+        toastStore.showToast(t('event.host_activated'), 'success')
       },
 
       onHostDemoted: (info?: { hostSessionId: string; hostDeviceId?: string }) => {
         connStore.setStandbyHost(true, info)
-        toastStore.showToast('收到其他设备接管通知，本机已平滑退位为【备用监控端】', 'warning')
+        toastStore.showToast(t('event.demoted_to_standby'), 'warning')
       },
 
       onActiveHostLeft: () => {
         if (connStore.isStandbyHost) {
-          toastStore.showToast('主控设备已退出，本机作为备用端可立即一键接管为主机', 'warning', 7000)
+          toastStore.showToast(t('event.host_exited_takeover_available'), 'warning', 7000)
         } else {
-          toastStore.showToast('赛事主控设备已退出房间', 'info')
+          toastStore.showToast(t('event.host_left'), 'info')
         }
       }
     }

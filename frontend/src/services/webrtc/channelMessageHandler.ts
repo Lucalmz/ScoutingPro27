@@ -7,6 +7,7 @@ import { safeJsonParse } from '@/utils/json'
 import { syncRecords } from '@/services/api'
 import { DataChannelSender } from '@/services/dataChannelSender'
 import { useInboxStore } from '@/stores/inbox'
+import { getActivePinia } from 'pinia'
 import { useUserStore } from '@/stores/user'
 import type { WebRtcCallbacks, ClientEntry } from './types'
 import type { OfflineMessageManager } from './offlineQueue'
@@ -92,27 +93,56 @@ export function createChannelMessageHandler(ctx: ChannelMessageHandlerContext) {
             // Mode 2: DUPLICATE NAME Conflict (Different Person, Same Display Name)
             if (senderUserName) {
               let duplicateNameClientId: string | null = null
-              for (const [boundScoutId, boundClientIds] of ctx.scoutIdToClientIds.entries()) {
-                if (boundScoutId !== senderUserId) {
-                  for (const boundClientId of boundClientIds) {
-                    if (boundClientId !== senderId) {
-                      const boundName = ctx.clientIdToScoutName.get(boundClientId)
-                      if (boundName && boundName.trim().toLowerCase() === senderUserName.trim().toLowerCase()) {
-                        const peerClient = ctx.clients.get(boundClientId)
-                        if (peerClient && peerClient.dc && peerClient.dc.readyState === 'open') {
-                          duplicateNameClientId = boundClientId
-                          break
+              let conflictingExistingId: string | null = null
+
+              // 1. Check against Host's own user identity
+              let hostUser: any = null
+              if (getActivePinia()) {
+                try {
+                  hostUser = useUserStore().user
+                } catch {}
+              }
+              if (!hostUser && typeof localStorage !== 'undefined') {
+                try {
+                  const raw = localStorage.getItem('scoutingpro-user')
+                  if (raw) hostUser = JSON.parse(raw)
+                } catch {}
+              }
+
+              if (
+                hostUser &&
+                hostUser.id !== senderUserId &&
+                hostUser.username &&
+                hostUser.username.trim().toLowerCase() === senderUserName.trim().toLowerCase()
+              ) {
+                conflictingExistingId = hostUser.id
+              }
+
+              // 2. Check against other connected clients
+              if (!conflictingExistingId) {
+                for (const [boundScoutId, boundClientIds] of ctx.scoutIdToClientIds.entries()) {
+                  if (boundScoutId !== senderUserId) {
+                    for (const boundClientId of boundClientIds) {
+                      if (boundClientId !== senderId) {
+                        const boundName = ctx.clientIdToScoutName.get(boundClientId)
+                        if (boundName && boundName.trim().toLowerCase() === senderUserName.trim().toLowerCase()) {
+                          const peerClient = ctx.clients.get(boundClientId)
+                          if (peerClient && peerClient.dc && peerClient.dc.readyState === 'open') {
+                            duplicateNameClientId = boundClientId
+                            conflictingExistingId = boundScoutId
+                            break
+                          }
                         }
                       }
                     }
+                    if (conflictingExistingId) break
                   }
-                  if (duplicateNameClientId) break
                 }
               }
 
-              if (duplicateNameClientId) {
+              if (conflictingExistingId) {
                 console.warn(
-                  `[WebRTC Host] Detected duplicate name conflict for username "${senderUserName}" (different userId ${senderUserId} vs existing). Prompting to rename.`
+                  `[WebRTC Host] Detected duplicate name conflict for username "${senderUserName}" (different userId ${senderUserId} vs existing ${conflictingExistingId}). Prompting to rename or merge.`
                 )
                 const randomSuffix = Math.floor(10 + Math.random() * 90)
                 ctx.sendMessage(
@@ -120,7 +150,7 @@ export function createChannelMessageHandler(ctx: ChannelMessageHandlerContext) {
                     type: 'SESSION_CONFLICT',
                     conflictType: 'DUPLICATE_NAME',
                     conflictingUsername: senderUserName,
-                    conflictingUserId: senderUserId,
+                    conflictingUserId: conflictingExistingId,
                     suggestedName: `${senderUserName}-${randomSuffix}`,
                     authCode: currentInviteCode
                   },

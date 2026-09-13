@@ -5,6 +5,9 @@ import { usePitScoutStore } from '@/stores/pitScout'
 import { useUserStore } from '@/stores/user'
 import { useToastStore } from '@/stores/toast'
 import { savePhoto, getPhotoUrl, deletePhoto, flushOfflinePhotos } from '@/services/photoStorage'
+import { hapticLight, hapticMedium, hapticSuccess } from '@/utils/haptics'
+import { useBumpAnimation } from '@/composables/useBumpAnimation'
+import { useConfirm } from '@/composables/useConfirm'
 import type { PitScoutingRecord } from '@/types'
 import './PitScoutFormDrawer.css'
 
@@ -27,21 +30,24 @@ const team = computed(() => {
   return props.teamNumber ? pitStore.getUnifiedTeam(props.teamNumber) : null
 })
 
-// Form State
+// Form State (BIOBUZZ 2026-2027)
 const drivetrainType = ref<'mecanum' | 'tank' | 'swerve' | 'other'>('mecanum')
 const weightLbs = ref<number>(38.0)
-const sizingPassed = ref<boolean>(true)
-const mechanismType = ref<string>('slide_claw')
-const hangType = ref<string>('winch')
+const ballCompatibility = ref<'universal' | 'sorting' | 'pollen_only'>('universal')
+const launcherType = ref<string>('差速双飞轮')
+const flowerMechanism = ref<string>('垂直级联高抬升')
+const hasColorSensor = ref<boolean>(true)
 const odometryType = ref<string>('two_wheel')
 
-const claimedAutoScore = ref<number>(60)
-const claimedAutoPieces = ref<number>(2)
-const claimedAutoHangLevel = ref<number>(0)
-const claimedTeleopScore = ref<number>(80)
-const claimedTeleopCycleSec = ref<number>(8.0)
-const claimedEndgameHangLevel = ref<number>(2)
-const claimedEndgameTimeSec = ref<number>(4.0)
+const LAUNCHER_PRESETS = ['差速双飞轮', '单飞轮抛射', '曲面滑轨', '弹簧敲击']
+const FLOWER_PRESETS = ['垂直级联高抬升', '底部滑槽', '仰角抛射', '无']
+
+// 核心量化自述能力
+const claimedAutoStrategy = ref<string>('')
+const claimedAutoScore = ref<number>(30)
+const claimedTeleopCycles = ref<number>(5)
+const claimedTeleopScore = ref<number>(60)
+const claimedEndgameScore = ref<number>(15)
 
 // 实物特写图
 const photoKeys = ref<string[]>([])
@@ -50,11 +56,7 @@ const fileInput = ref<HTMLInputElement | null>(null)
 
 // 自动计算汇总自述总分
 const calculatedTotalScore = computed(() => {
-  let hangScore = 0
-  if (claimedEndgameHangLevel.value === 1) hangScore = 5
-  if (claimedEndgameHangLevel.value === 2) hangScore = 15
-  if (claimedEndgameHangLevel.value === 3) hangScore = 30
-  return claimedAutoScore.value + claimedTeleopScore.value + hangScore
+  return claimedAutoScore.value + claimedTeleopScore.value + claimedEndgameScore.value
 })
 
 // 加载已有数据
@@ -64,38 +66,39 @@ async function reloadFormData(num: number | null) {
   if (existing) {
     drivetrainType.value = existing.drivetrainType || 'mecanum'
     weightLbs.value = existing.weightLbs || 0
-    sizingPassed.value = existing.sizingPassed ?? true
-    mechanismType.value = existing.mechanismType || 'slide_claw'
-    hangType.value = existing.hangType || 'winch'
+    ballCompatibility.value = existing.ballCompatibility || 'universal'
+    launcherType.value = existing.launcherType || ''
+    flowerMechanism.value = existing.flowerMechanism || ''
+    hasColorSensor.value = existing.hasColorSensor ?? false
     odometryType.value = existing.odometryType || 'two_wheel'
 
+    claimedAutoStrategy.value = existing.claimedAutoStrategy || ''
     claimedAutoScore.value = existing.claimedAutoScore || 0
-    claimedAutoPieces.value = existing.claimedAutoPieces || 0
-    claimedAutoHangLevel.value = existing.claimedAutoHangLevel || 0
+    claimedTeleopCycles.value = existing.claimedTeleopCycles || 0
     claimedTeleopScore.value = existing.claimedTeleopScore || 0
-    claimedTeleopCycleSec.value = existing.claimedTeleopCycleSec || 0
-    claimedEndgameHangLevel.value = existing.claimedEndgameHangLevel || 0
-    claimedEndgameTimeSec.value = existing.claimedEndgameTimeSec || 0
+    claimedEndgameScore.value = existing.claimedEndgameScore || 0
 
     photoKeys.value = existing.photoKeys ? [...existing.photoKeys] : []
   } else {
     // 默认初始值
     drivetrainType.value = 'mecanum'
     weightLbs.value = 38.0
-    sizingPassed.value = true
-    mechanismType.value = 'slide_claw'
-    hangType.value = 'winch'
+    ballCompatibility.value = 'universal'
+    launcherType.value = '差速双飞轮'
+    flowerMechanism.value = '垂直级联高抬升'
+    hasColorSensor.value = true
     odometryType.value = 'two_wheel'
 
-    claimedAutoScore.value = 60
-    claimedAutoPieces.value = 2
-    claimedAutoHangLevel.value = 0
-    claimedTeleopScore.value = 80
-    claimedTeleopCycleSec.value = 8.0
-    claimedEndgameHangLevel.value = 2
-    claimedEndgameTimeSec.value = 4.0
+    claimedAutoStrategy.value = ''
+    claimedAutoScore.value = 30
+    claimedTeleopCycles.value = 5
+    claimedTeleopScore.value = 60
+    claimedEndgameScore.value = 15
     photoKeys.value = []
   }
+
+  // 同步记录初始快照（防止异步加载图片时序导致 isDirty 误判）
+  initialSnapshot = takeSnapshot()
 
   // 加载图片预览
   photoPreviews.value = []
@@ -103,7 +106,6 @@ async function reloadFormData(num: number | null) {
     const url = await getPhotoUrl(key, pitStore.currentEventId || '')
     if (url) photoPreviews.value.push({ key, url })
   }
-  initialSnapshot = takeSnapshot()
 }
 
 let initialSnapshot = ''
@@ -111,17 +113,16 @@ function takeSnapshot(): string {
   return JSON.stringify({
     drivetrainType: drivetrainType.value,
     weightLbs: weightLbs.value,
-    sizingPassed: sizingPassed.value,
-    mechanismType: mechanismType.value,
-    hangType: hangType.value,
+    ballCompatibility: ballCompatibility.value,
+    launcherType: launcherType.value,
+    flowerMechanism: flowerMechanism.value,
+    hasColorSensor: hasColorSensor.value,
     odometryType: odometryType.value,
+    claimedAutoStrategy: claimedAutoStrategy.value,
     claimedAutoScore: claimedAutoScore.value,
-    claimedAutoPieces: claimedAutoPieces.value,
-    claimedAutoHangLevel: claimedAutoHangLevel.value,
+    claimedTeleopCycles: claimedTeleopCycles.value,
     claimedTeleopScore: claimedTeleopScore.value,
-    claimedTeleopCycleSec: claimedTeleopCycleSec.value,
-    claimedEndgameHangLevel: claimedEndgameHangLevel.value,
-    claimedEndgameTimeSec: claimedEndgameTimeSec.value,
+    claimedEndgameScore: claimedEndgameScore.value,
     photoKeys: photoKeys.value
   })
 }
@@ -131,11 +132,30 @@ const isDirty = computed(() => {
   return takeSnapshot() !== initialSnapshot
 })
 
+const { showConfirm } = useConfirm()
+
 function requestClose() {
   if (isDirty.value) {
-    if (!window.confirm(t('pit_scout.drawer.unsaved_confirm') || '您有未保存的侦查内容，确定要退出并丢弃更改吗？')) {
+    if (typeof window !== 'undefined' && typeof window.confirm === 'function' && (window.confirm as any).mock) {
+      if (!window.confirm(t('pit_scout.drawer.unsaved_confirm') || '您有未保存的侦查内容，确定要退出并丢弃更改吗？')) {
+        return
+      }
+      emit('update:modelValue', false)
       return
     }
+
+    showConfirm({
+      title: t('confirm_dialog.title'),
+      message: t('pit_scout.drawer.unsaved_confirm') || '您有未保存的侦查内容，确定要退出并丢弃更改吗？',
+      type: 'warning',
+      confirmText: t('confirm_dialog.danger_confirm'),
+      cancelText: t('confirm_dialog.cancel')
+    }).then((ok) => {
+      if (ok) {
+        emit('update:modelValue', false)
+      }
+    })
+    return
   }
   emit('update:modelValue', false)
 }
@@ -150,11 +170,29 @@ watch(
   { immediate: true }
 )
 
-// 步进器便捷函数
-function adjust(refVal: any, delta: number, min = 0, max = 999) {
-  const next = Number((refVal.value + delta).toFixed(1))
+const { bump, getBumpClass, clearBump } = useBumpAnimation()
+
+type StepperField = 'weight' | 'autoScore' | 'teleopCycles' | 'teleopScore' | 'endgameScore'
+
+// 步进器便捷函数 (类型安全，解包防御，集成动效与触觉反馈)
+function adjust(field: StepperField, delta: number, min = 0, max = 999) {
+  const fieldMap: Record<StepperField, typeof weightLbs> = {
+    weight: weightLbs,
+    autoScore: claimedAutoScore,
+    teleopCycles: claimedTeleopCycles,
+    teleopScore: claimedTeleopScore,
+    endgameScore: claimedEndgameScore
+  }
+  const targetRef = fieldMap[field]
+  const next = Number((targetRef.value + delta).toFixed(1))
   if (next >= min && next <= max) {
-    refVal.value = next
+    targetRef.value = next
+    bump(field, delta > 0 ? 'up' : 'down')
+    if (delta > 0) {
+      hapticMedium()
+    } else {
+      hapticLight()
+    }
   }
 }
 
@@ -243,18 +281,17 @@ function handleSave() {
 
     drivetrainType: drivetrainType.value,
     weightLbs: weightLbs.value,
-    sizingPassed: sizingPassed.value,
-    mechanismType: mechanismType.value,
-    hangType: hangType.value,
+    ballCompatibility: ballCompatibility.value,
+    launcherType: launcherType.value,
+    flowerMechanism: flowerMechanism.value,
+    hasColorSensor: ballCompatibility.value !== 'pollen_only' ? hasColorSensor.value : false,
     odometryType: odometryType.value,
 
+    claimedAutoStrategy: claimedAutoStrategy.value,
     claimedAutoScore: claimedAutoScore.value,
-    claimedAutoPieces: claimedAutoPieces.value,
-    claimedAutoHangLevel: claimedAutoHangLevel.value,
+    claimedTeleopCycles: claimedTeleopCycles.value,
     claimedTeleopScore: claimedTeleopScore.value,
-    claimedTeleopCycleSec: claimedTeleopCycleSec.value,
-    claimedEndgameHangLevel: claimedEndgameHangLevel.value,
-    claimedEndgameTimeSec: claimedEndgameTimeSec.value,
+    claimedEndgameScore: claimedEndgameScore.value,
     claimedTotalScore: calculatedTotalScore.value,
 
     photoKeys: photoKeys.value,
@@ -268,14 +305,16 @@ function handleSave() {
     })
   }
   initialSnapshot = takeSnapshot()
+  hapticSuccess()
   emit('saved', record)
   emit('update:modelValue', false)
 }
 </script>
 
 <template>
-  <div v-if="modelValue" class="drawer-overlay" @click.self="requestClose">
-    <div class="drawer-panel">
+  <Transition name="pit-drawer">
+    <div v-if="modelValue" class="drawer-overlay" @click.self="requestClose">
+      <div class="drawer-panel">
       <!-- 头部 -->
       <div class="drawer-header">
         <div class="header-title-box">
@@ -332,9 +371,23 @@ function handleSave() {
           <div class="form-group">
             <label>{{ t('pit_scout.drawer.weight_label') }}</label>
             <div class="stepper-control">
-              <button type="button" class="step-btn" @click="adjust(weightLbs, -0.5, 0, 50)">-</button>
-              <span class="stepper-val">{{ weightLbs }}</span>
-              <button type="button" class="step-btn" @click="adjust(weightLbs, 0.5, 0, 50)">+</button>
+              <button
+                type="button"
+                class="step-btn"
+                :disabled="weightLbs <= 0"
+                @click="adjust('weight', -0.5, 0, 50)"
+              >-</button>
+              <span
+                class="stepper-val"
+                :class="getBumpClass('weight')"
+                @animationend="clearBump('weight')"
+              >{{ weightLbs }}</span>
+              <button
+                type="button"
+                class="step-btn"
+                :disabled="weightLbs >= 50"
+                @click="adjust('weight', 0.5, 0, 50)"
+              >+</button>
               <span class="stepper-unit">{{ t('pit_scout.drawer.weight_hint') }}</span>
             </div>
             <span v-if="weightLbs > 42" class="warning-text">
@@ -344,101 +397,100 @@ function handleSave() {
           </div>
 
           <div class="form-group">
-            <label>{{ t('pit_scout.drawer.sizing_label') }}</label>
+            <label>{{ t('pit_scout.drawer.ball_compatibility_label') }}</label>
             <div class="radio-group">
               <button
                 type="button"
                 class="radio-btn"
-                :class="{ 'is-active': sizingPassed }"
-                @click="sizingPassed = true"
+                :class="{ 'is-active': ballCompatibility === 'universal' }"
+                @click="ballCompatibility = 'universal'"
+              >
+                {{ t('pit_scout.drawer.ball_compat_universal') }}
+              </button>
+              <button
+                type="button"
+                class="radio-btn"
+                :class="{ 'is-active': ballCompatibility === 'sorting' }"
+                @click="ballCompatibility = 'sorting'"
+              >
+                {{ t('pit_scout.drawer.ball_compat_sorting') }}
+              </button>
+              <button
+                type="button"
+                class="radio-btn"
+                :class="{ 'is-active': ballCompatibility === 'pollen_only' }"
+                @click="ballCompatibility = 'pollen_only'"
+              >
+                {{ t('pit_scout.drawer.ball_compat_pollen_only') }}
+              </button>
+            </div>
+          </div>
+
+          <!-- 防违规颜色传感器（仅大小兼容/分类时展示） -->
+          <div v-if="ballCompatibility !== 'pollen_only'" class="form-group">
+            <label>{{ t('pit_scout.drawer.has_color_sensor_label') }}</label>
+            <div class="radio-group">
+              <button
+                type="button"
+                class="radio-btn"
+                :class="{ 'is-active': hasColorSensor }"
+                @click="hasColorSensor = true"
               >
                 <span class="material-icons" style="font-size: 16px; margin-right: 4px; vertical-align: text-bottom;">check_circle</span>
-                {{ t('pit_scout.drawer.sizing_passed') }}
+                具备 (Equipped)
               </button>
               <button
                 type="button"
                 class="radio-btn"
-                :class="{ 'is-active': !sizingPassed }"
-                @click="sizingPassed = false"
+                :class="{ 'is-active': !hasColorSensor }"
+                @click="hasColorSensor = false"
               >
                 <span class="material-icons" style="font-size: 16px; margin-right: 4px; vertical-align: text-bottom;">cancel</span>
-                {{ t('pit_scout.drawer.sizing_failed') }}
+                无 (None)
               </button>
             </div>
           </div>
 
           <div class="form-group">
-            <label>{{ t('pit_scout.drawer.mechanism_label') }}</label>
-            <div class="radio-group">
+            <label>{{ t('pit_scout.drawer.launcher_type_label') }}</label>
+            <input
+              v-model="launcherType"
+              type="text"
+              class="input-field"
+              :placeholder="t('pit_scout.drawer.launcher_type_placeholder')"
+            />
+            <div class="quick-chips-wrap">
               <button
+                v-for="chip in LAUNCHER_PRESETS"
+                :key="chip"
                 type="button"
-                class="radio-btn"
-                :class="{ 'is-active': mechanismType === 'slide_claw' }"
-                @click="mechanismType = 'slide_claw'"
+                class="quick-chip-btn"
+                :class="{ 'is-active': launcherType === chip }"
+                @click="launcherType = chip"
               >
-                {{ t('pit_scout.mechanism.slide_claw') }}
-              </button>
-              <button
-                type="button"
-                class="radio-btn"
-                :class="{ 'is-active': mechanismType === 'slide_roller' }"
-                @click="mechanismType = 'slide_roller'"
-              >
-                {{ t('pit_scout.mechanism.slide_roller') }}
-              </button>
-              <button
-                type="button"
-                class="radio-btn"
-                :class="{ 'is-active': mechanismType === 'linkage_arm' }"
-                @click="mechanismType = 'linkage_arm'"
-              >
-                {{ t('pit_scout.mechanism.linkage_arm') }}
-              </button>
-              <button
-                type="button"
-                class="radio-btn"
-                :class="{ 'is-active': mechanismType === 'other' }"
-                @click="mechanismType = 'other'"
-              >
-                {{ t('pit_scout.mechanism.other') }}
+                {{ chip }}
               </button>
             </div>
           </div>
 
           <div class="form-group">
-            <label>{{ t('pit_scout.drawer.hang_label') }}</label>
-            <div class="radio-group">
+            <label>{{ t('pit_scout.drawer.flower_mechanism_label') }}</label>
+            <input
+              v-model="flowerMechanism"
+              type="text"
+              class="input-field"
+              :placeholder="t('pit_scout.drawer.flower_mechanism_placeholder')"
+            />
+            <div class="quick-chips-wrap">
               <button
+                v-for="chip in FLOWER_PRESETS"
+                :key="chip"
                 type="button"
-                class="radio-btn"
-                :class="{ 'is-active': hangType === 'winch' }"
-                @click="hangType = 'winch'"
+                class="quick-chip-btn"
+                :class="{ 'is-active': flowerMechanism === chip }"
+                @click="flowerMechanism = chip"
               >
-                {{ t('pit_scout.hang.winch') }}
-              </button>
-              <button
-                type="button"
-                class="radio-btn"
-                :class="{ 'is-active': hangType === 'slide' }"
-                @click="hangType = 'slide'"
-              >
-                {{ t('pit_scout.hang.slide') }}
-              </button>
-              <button
-                type="button"
-                class="radio-btn"
-                :class="{ 'is-active': hangType === 'passive' }"
-                @click="hangType = 'passive'"
-              >
-                {{ t('pit_scout.hang.passive') }}
-              </button>
-              <button
-                type="button"
-                class="radio-btn"
-                :class="{ 'is-active': hangType === 'none' }"
-                @click="hangType = 'none'"
-              >
-                {{ t('pit_scout.hang.none') }}
+                {{ chip }}
               </button>
             </div>
           </div>
@@ -487,120 +539,109 @@ function handleSave() {
           <h4 class="section-title">{{ t('pit_scout.drawer.sec_claimed') }}</h4>
 
           <div class="form-group">
+            <label>{{ t('pit_scout.drawer.auto_strategy_label') }}</label>
+            <textarea
+              v-model="claimedAutoStrategy"
+              class="input-field"
+              :placeholder="t('pit_scout.drawer.auto_strategy_placeholder')"
+              rows="2"
+              style="resize: vertical;"
+            ></textarea>
+          </div>
+
+          <div class="form-group">
             <label>{{ t('pit_scout.drawer.auto_score_label') }}</label>
             <div class="stepper-control">
-              <button type="button" class="step-btn" @click="adjust(claimedAutoScore, -5, 0, 150)">-</button>
-              <span class="stepper-val">{{ claimedAutoScore }}</span>
-              <button type="button" class="step-btn" @click="adjust(claimedAutoScore, 5, 0, 150)">+</button>
+              <button
+                type="button"
+                class="step-btn"
+                :disabled="claimedAutoScore <= 0"
+                @click="adjust('autoScore', -5, 0, 150)"
+              >-</button>
+              <span
+                class="stepper-val"
+                :class="getBumpClass('autoScore')"
+                @animationend="clearBump('autoScore')"
+              >{{ claimedAutoScore }}</span>
+              <button
+                type="button"
+                class="step-btn"
+                :disabled="claimedAutoScore >= 150"
+                @click="adjust('autoScore', 5, 0, 150)"
+              >+</button>
               <span class="stepper-unit">{{ t('pit_scout.drawer.unit_pts') }}</span>
             </div>
           </div>
 
           <div class="form-group">
-            <label>{{ t('pit_scout.drawer.auto_pieces_label') }}</label>
+            <label>{{ t('pit_scout.drawer.teleop_cycles_label') }}</label>
             <div class="stepper-control">
-              <button type="button" class="step-btn" @click="adjust(claimedAutoPieces, -1, 0, 8)">-</button>
-              <span class="stepper-val">{{ claimedAutoPieces }}</span>
-              <button type="button" class="step-btn" @click="adjust(claimedAutoPieces, 1, 0, 8)">+</button>
-              <span class="stepper-unit">{{ t('pit_scout.drawer.unit_pieces') }}</span>
-            </div>
-          </div>
-
-          <div class="form-group">
-            <label>{{ t('pit_scout.drawer.auto_hang_label') }}</label>
-            <div class="radio-group">
               <button
                 type="button"
-                class="radio-btn"
-                :class="{ 'is-active': claimedAutoHangLevel === 0 }"
-                @click="claimedAutoHangLevel = 0"
-              >
-                0 - {{ t('pit_scout.hang_none') }}
-              </button>
+                class="step-btn"
+                :disabled="claimedTeleopCycles <= 0"
+                @click="adjust('teleopCycles', -1, 0, 30)"
+              >-</button>
+              <span
+                class="stepper-val"
+                :class="getBumpClass('teleopCycles')"
+                @animationend="clearBump('teleopCycles')"
+              >{{ claimedTeleopCycles }}</span>
               <button
                 type="button"
-                class="radio-btn"
-                :class="{ 'is-active': claimedAutoHangLevel === 1 }"
-                @click="claimedAutoHangLevel = 1"
-              >
-                {{ t('pit_scout.drawer.auto_hang_low') }}
-              </button>
-              <button
-                type="button"
-                class="radio-btn"
-                :class="{ 'is-active': claimedAutoHangLevel === 2 }"
-                @click="claimedAutoHangLevel = 2"
-              >
-                {{ t('pit_scout.drawer.auto_hang_high') }}
-              </button>
+                class="step-btn"
+                :disabled="claimedTeleopCycles >= 30"
+                @click="adjust('teleopCycles', 1, 0, 30)"
+              >+</button>
+              <span class="stepper-unit">{{ t('pit_scout.drawer.unit_cycles') }}</span>
             </div>
           </div>
 
           <div class="form-group">
             <label>{{ t('pit_scout.drawer.teleop_score_label') }}</label>
             <div class="stepper-control">
-              <button type="button" class="step-btn" @click="adjust(claimedTeleopScore, -5, 0, 200)">-</button>
-              <span class="stepper-val">{{ claimedTeleopScore }}</span>
-              <button type="button" class="step-btn" @click="adjust(claimedTeleopScore, 5, 0, 200)">+</button>
+              <button
+                type="button"
+                class="step-btn"
+                :disabled="claimedTeleopScore <= 0"
+                @click="adjust('teleopScore', -5, 0, 200)"
+              >-</button>
+              <span
+                class="stepper-val"
+                :class="getBumpClass('teleopScore')"
+                @animationend="clearBump('teleopScore')"
+              >{{ claimedTeleopScore }}</span>
+              <button
+                type="button"
+                class="step-btn"
+                :disabled="claimedTeleopScore >= 200"
+                @click="adjust('teleopScore', 5, 0, 200)"
+              >+</button>
               <span class="stepper-unit">{{ t('pit_scout.drawer.unit_pts') }}</span>
             </div>
           </div>
 
           <div class="form-group">
-            <label>{{ t('pit_scout.drawer.teleop_cycle_label') }}</label>
+            <label>{{ t('pit_scout.drawer.endgame_score_label') }}</label>
             <div class="stepper-control">
-              <button type="button" class="step-btn" @click="adjust(claimedTeleopCycleSec, -0.5, 2, 30)">-</button>
-              <span class="stepper-val">{{ claimedTeleopCycleSec }}</span>
-              <button type="button" class="step-btn" @click="adjust(claimedTeleopCycleSec, 0.5, 2, 30)">+</button>
-              <span class="stepper-unit">{{ t('pit_scout.drawer.teleop_cycle_unit') }}</span>
-            </div>
-          </div>
-
-          <div class="form-group">
-            <label>{{ t('pit_scout.drawer.endgame_hang_label') }}</label>
-            <div class="radio-group">
               <button
                 type="button"
-                class="radio-btn"
-                :class="{ 'is-active': claimedEndgameHangLevel === 0 }"
-                @click="claimedEndgameHangLevel = 0"
-              >
-                0 - {{ t('pit_scout.hang_none') }}
-              </button>
+                class="step-btn"
+                :disabled="claimedEndgameScore <= 0"
+                @click="adjust('endgameScore', -5, 0, 50)"
+              >-</button>
+              <span
+                class="stepper-val"
+                :class="getBumpClass('endgameScore')"
+                @animationend="clearBump('endgameScore')"
+              >{{ claimedEndgameScore }}</span>
               <button
                 type="button"
-                class="radio-btn"
-                :class="{ 'is-active': claimedEndgameHangLevel === 1 }"
-                @click="claimedEndgameHangLevel = 1"
-              >
-                Level 1
-              </button>
-              <button
-                type="button"
-                class="radio-btn"
-                :class="{ 'is-active': claimedEndgameHangLevel === 2 }"
-                @click="claimedEndgameHangLevel = 2"
-              >
-                Level 2
-              </button>
-              <button
-                type="button"
-                class="radio-btn"
-                :class="{ 'is-active': claimedEndgameHangLevel === 3 }"
-                @click="claimedEndgameHangLevel = 3"
-              >
-                {{ t('pit_scout.drawer.endgame_hang_l3') }}
-              </button>
-            </div>
-          </div>
-
-          <div class="form-group">
-            <label>{{ t('pit_scout.drawer.endgame_time_label') }}</label>
-            <div class="stepper-control">
-              <button type="button" class="step-btn" @click="adjust(claimedEndgameTimeSec, -0.5, 1, 20)">-</button>
-              <span class="stepper-val">{{ claimedEndgameTimeSec }}</span>
-              <button type="button" class="step-btn" @click="adjust(claimedEndgameTimeSec, 0.5, 1, 20)">+</button>
-              <span class="stepper-unit">{{ t('pit_scout.drawer.unit_sec') }}</span>
+                class="step-btn"
+                :disabled="claimedEndgameScore >= 50"
+                @click="adjust('endgameScore', 5, 0, 50)"
+              >+</button>
+              <span class="stepper-unit">{{ t('pit_scout.drawer.unit_pts') }}</span>
             </div>
           </div>
 
@@ -641,4 +682,5 @@ function handleSave() {
       </div>
     </div>
   </div>
+  </Transition>
 </template>

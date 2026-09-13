@@ -2,6 +2,7 @@
 import { ref, computed } from 'vue'
 import { useInboxStore } from '@/stores/inbox'
 import { useUserStore } from '@/stores/user'
+import { useToastStore } from '@/stores/toast'
 import { useRouter, useRoute } from 'vue-router'
 import type { SystemMessage } from '@/types'
 
@@ -38,15 +39,17 @@ function handleClearAll() {
   inboxStore.clearAllMessages()
 }
 
+const toastStore = useToastStore()
+
 function handleMessageClick(msg: SystemMessage) {
   if (msg.type === 'conflict' && msg.conflictMatchNumber && msg.conflictTeamNumber) {
-    const eventId = route.params.eventId
+    const eventId = msg.eventId || (route.params.eventId as string)
     if (eventId) {
       const levelQuery = msg.conflictTournamentLevel ? `&highlightLevel=${msg.conflictTournamentLevel}` : ''
       router.push(`/event/${eventId}?tab=history&highlightMatch=${msg.conflictMatchNumber}&highlightTeam=${msg.conflictTeamNumber}${levelQuery}`)
       inboxStore.setOpen(false)
     } else {
-      alert('Please enter the event first to view the conflict.')
+      toastStore.showToast('请先进入对应赛事以查看冲突记录', 'warning')
     }
   }
 }
@@ -116,6 +119,11 @@ function handleMessageClick(msg: SystemMessage) {
 }
 
 @media (max-width: 768px) {
+  /* Mobile: hide floating FAB when closed; mobile accesses Inbox from the topbar button */
+  .inbox-widget:not(.is-open) {
+    display: none !important;
+  }
+
   .inbox-widget {
     bottom: calc(56px + env(safe-area-inset-bottom, 0px) + 16px);
     right: 16px;
@@ -153,7 +161,8 @@ function handleMessageClick(msg: SystemMessage) {
   transition: width 0.5s cubic-bezier(0.25, 1, 0.5, 1), 
               height 0.5s cubic-bezier(0.25, 1, 0.5, 1), 
               border-radius 0.5s cubic-bezier(0.25, 1, 0.5, 1),
-              box-shadow 0.5s cubic-bezier(0.25, 1, 0.5, 1);
+              box-shadow 0.5s cubic-bezier(0.25, 1, 0.5, 1),
+              background-color 0.4s cubic-bezier(0.25, 1, 0.5, 1);
   cursor: pointer;
   display: flex;
   flex-direction: column;
@@ -167,26 +176,9 @@ function handleMessageClick(msg: SystemMessage) {
   max-width: calc(100vw - 32px);
   max-height: calc(100vh - 120px);
   border-radius: 16px;
-  background: white;
+  background-color: #ffffff;
   box-shadow: 0 12px 32px rgba(0, 0, 0, 0.35);
   cursor: default;
-  animation: bg-morph-open 0.8s cubic-bezier(0.25, 1, 0.5, 1) forwards;
-}
-
-.inbox-widget:not(.is-open) .inbox-morph-container {
-  animation: bg-morph-close 0.8s cubic-bezier(0.25, 1, 0.5, 1) forwards;
-}
-
-@keyframes bg-morph-open {
-  0% { background: var(--primary, #39ff14); }
-  50% { background: #8eff73; }
-  100% { background: white; }
-}
-
-@keyframes bg-morph-close {
-  0% { background: white; }
-  50% { background: #8eff73; }
-  100% { background: var(--primary, #39ff14); }
 }
 
 .inbox-btn-content {

@@ -4,13 +4,22 @@ import { useI18n } from 'vue-i18n'
 import { useRecordStore } from '@/stores/records'
 import { useScheduleStore } from '@/stores/schedule'
 import { usePitScoutStore } from '@/stores/pitScout'
-import { hapticFeedback } from '@/utils/haptics'
+import {
+  hapticFeedback,
+  hapticLight,
+  hapticMedium,
+  hapticSelection,
+  hapticSuccess,
+  hapticWarning
+} from '@/utils/haptics'
 import type { ScoutingRecord, ScoutingFormData } from '@/types'
 import TagPicker from '@/components/common/TagPicker.vue'
 import PitStatusIndicator from '@/components/pit/PitStatusIndicator.vue'
+import PhaseCycleTracker from './PhaseCycleTracker.vue'
 import { isAssignmentCompleted, getRecordTournamentLevel } from '@/utils/tournament'
+import { useBumpAnimation } from '@/composables/useBumpAnimation'
 
-const { t } = useI18n()
+const { t, te } = useI18n()
 
 const props = defineProps<{
   eventId: string
@@ -28,6 +37,18 @@ const emit = defineEmits<{
 const scheduleStore = useScheduleStore()
 const pitStore = usePitScoutStore()
 
+function formatDrivetrain(dt?: string) {
+  if (!dt) return '-'
+  const key = 'pit_scout.drivetrain.' + dt
+  return te(key) ? t(key) : dt
+}
+
+function formatBallCompat(bc?: string) {
+  if (!bc) return '-'
+  const key = 'pit_scout.ball_compatibility.' + bc
+  return te(key) ? t(key) : bc
+}
+
 function getPitSummary(teamNumStr: string) {
   const num = parseInt(teamNumStr)
   if (!num) return null
@@ -36,8 +57,9 @@ function getPitSummary(teamNumStr: string) {
   const r = u.pitRecord
   return {
     drivetrain: r.drivetrainType,
+    ballCompatibility: r.ballCompatibility || 'universal',
     autoScore: r.claimedAutoScore,
-    hangLevel: r.claimedEndgameHangLevel
+    teleopCycles: r.claimedTeleopCycles || 0
   }
 }
 
@@ -49,15 +71,20 @@ const currentTournamentLevel = ref<string>('QUALIFICATION')
 
 interface TeamScoutData {
   teamNumber: string
-  autoClassified: number
-  autoOverflow: number
-  autoPatterns: number
-  autoMovementScore: string
-  teleopClassified: number
-  teleopOverflow: number
-  gatesTriggered: number
-  baseScore: number
-  supportMultiplier: number
+  // Auto
+  autoLeave: boolean
+  autoBalls: number
+  autoCycles: number[]
+  autoPark: boolean
+
+  // TeleOp (Cycle Tracker)
+  teleopCycles: number[]
+
+  // Endgame
+  flowerPlaced: boolean
+  flowerBottomBonus: boolean
+  teleopPark: boolean
+
   isBroken: boolean
   notes: string
 }
@@ -65,15 +92,14 @@ interface TeamScoutData {
 function createEmptyTeam(): TeamScoutData {
   return {
     teamNumber: '',
-    autoClassified: 0,
-    autoOverflow: 0,
-    autoPatterns: 0,
-    autoMovementScore: '',
-    teleopClassified: 0,
-    teleopOverflow: 0,
-    gatesTriggered: 0,
-    baseScore: 5,
-    supportMultiplier: 0,
+    autoLeave: false,
+    autoBalls: 0,
+    autoCycles: [],
+    autoPark: false,
+    teleopCycles: [],
+    flowerPlaced: false,
+    flowerBottomBonus: false,
+    teleopPark: false,
     isBroken: false,
     notes: ''
   }
@@ -81,18 +107,260 @@ function createEmptyTeam(): TeamScoutData {
 
 const teamsData = ref<TeamScoutData[]>([createEmptyTeam()])
 
-function decrement(team: any, field: keyof TeamScoutData) {
-  if (typeof team[field] === 'number' && (team[field] as number) > 0) {
-    (team[field] as number)--
-    hapticFeedback(10)
+const { bump, getBumpClass, clearBump } = useBumpAnimation()
+
+interface CycleTapState {
+  teamIndex: number
+  phase: 'auto' | 'teleop'
+  timestamp: number
+  timer?: any
+}
+
+const activeCycleTap = ref<CycleTapState | null>(null)
+const TAP_WINDOW_MS = 2000
+
+function syncAutoBalls(team: TeamScoutData) {
+  team.autoBalls = team.autoCycles.reduce((sum, b) => sum + b, 0)
+}
+
+function isCycleTapping(teamIndex: number, phase: 'auto' | 'teleop'): boolean {
+  return (
+    !!activeCycleTap.value &&
+    activeCycleTap.value.teamIndex === teamIndex &&
+    activeCycleTap.value.phase === phase
+  )
+}
+
+function getLastCycleBalls(team: TeamScoutData, phase: 'auto' | 'teleop'): number {
+  const cycles = phase === 'auto' ? team.autoCycles : team.teleopCycles
+  return cycles.length > 0 ? (cycles[cycles.length - 1] ?? 0) : 0
+}
+
+function addCycle(
+  team: TeamScoutData,
+  ballsOrPhase: number | 'auto' | 'teleop' = 1,
+  phaseOrIndex: 'auto' | 'teleop' | number = 'teleop',
+  teamIndex: number = 0
+) {
+  let initialBalls = 1
+  let phase: 'auto' | 'teleop' = 'teleop'
+  let idx = teamIndex
+  let isExplicitBalls = false
+
+  if (typeof ballsOrPhase === 'number') {
+    initialBalls = ballsOrPhase
+    isExplicitBalls = true
+    if (typeof phaseOrIndex === 'string') {
+      phase = phaseOrIndex
+    } else if (typeof phaseOrIndex === 'number') {
+      idx = phaseOrIndex
+    }
+  } else {
+    phase = ballsOrPhase
+    if (typeof phaseOrIndex === 'number') {
+      idx = phaseOrIndex
+    }
+  }
+
+  const cycles = phase === 'auto' ? team.autoCycles : team.teleopCycles
+  const now = Date.now()
+
+  // 显式指定球数调用 (如单测 addCycle(team, 2))：直接添加并返回
+  if (isExplicitBalls) {
+    cycles.push(initialBalls)
+    hapticMedium()
+    if (phase === 'auto') {
+      syncAutoBalls(team)
+    }
+    if (activeCycleTap.value?.timer) clearTimeout(activeCycleTap.value.timer)
+    activeCycleTap.value = null
+    return
+  }
+
+  const isRecent =
+    activeCycleTap.value &&
+    activeCycleTap.value.teamIndex === idx &&
+    activeCycleTap.value.phase === phase &&
+    now - activeCycleTap.value.timestamp < TAP_WINDOW_MS &&
+    cycles.length > 0
+
+  if (isRecent) {
+    // 连续点击：在同一轮次累加球数 (0 -> 1 -> 2 -> 3 -> 4)
+    const lastIdx = cycles.length - 1
+    const current = cycles[lastIdx] ?? 0
+    if (current < 4) {
+      cycles[lastIdx] = current + 1
+      hapticMedium()
+      bump(lastIdx, phase === 'auto' ? 'autoCycle' : 'teleopCycle', 'up')
+      if (phase === 'auto') {
+        syncAutoBalls(team)
+      }
+    } else {
+      hapticLight()
+    }
+  } else {
+    // 开启新一轮打球，默认从 0 开始
+    cycles.push(0)
+    hapticMedium()
+    if (phase === 'auto') {
+      syncAutoBalls(team)
+    }
+  }
+
+  if (activeCycleTap.value?.timer) {
+    clearTimeout(activeCycleTap.value.timer)
+  }
+
+  const timer = setTimeout(() => {
+    if (
+      activeCycleTap.value &&
+      activeCycleTap.value.teamIndex === idx &&
+      activeCycleTap.value.phase === phase
+    ) {
+      activeCycleTap.value = null
+    }
+  }, TAP_WINDOW_MS)
+
+  activeCycleTap.value = {
+    teamIndex: idx,
+    phase,
+    timestamp: now,
+    timer
   }
 }
 
-function increment(team: any, field: keyof TeamScoutData, max: number = 99) {
-  if (typeof team[field] === 'number' && (team[field] as number) < max) {
-    (team[field] as number)++
-    hapticFeedback(10)
+function setLastCycleBalls(
+  team: TeamScoutData,
+  balls: number,
+  phase: 'auto' | 'teleop' = 'teleop',
+  teamIndex: number = 0
+) {
+  const cycles = phase === 'auto' ? team.autoCycles : team.teleopCycles
+  if (phase === 'auto' && balls === 0) {
+    team.autoCycles = []
+    syncAutoBalls(team)
+    if (activeCycleTap.value?.timer) clearTimeout(activeCycleTap.value.timer)
+    activeCycleTap.value = null
+    hapticSelection()
+    return
   }
+
+  if (cycles.length === 0) {
+    cycles.push(balls)
+  } else {
+    cycles[cycles.length - 1] = balls
+  }
+
+  bump(cycles.length - 1, phase === 'auto' ? 'autoCycle' : 'teleopCycle', 'up')
+  if (phase === 'auto') {
+    syncAutoBalls(team)
+  }
+  hapticSelection()
+
+  if (activeCycleTap.value?.timer) clearTimeout(activeCycleTap.value.timer)
+  activeCycleTap.value = null
+}
+
+function undoLastCycle(
+  team: TeamScoutData,
+  phase: 'auto' | 'teleop' = 'teleop',
+  teamIndex: number = 0
+) {
+  const cycles = phase === 'auto' ? team.autoCycles : team.teleopCycles
+  if (cycles.length > 0) {
+    cycles.pop()
+    if (phase === 'auto') {
+      syncAutoBalls(team)
+    }
+    hapticLight()
+  }
+  if (activeCycleTap.value?.timer) clearTimeout(activeCycleTap.value.timer)
+  activeCycleTap.value = null
+}
+
+function incrementCycle(
+  team: TeamScoutData,
+  cIndex: number,
+  phase: 'auto' | 'teleop' = 'teleop',
+  teamIndex: number = 0
+) {
+  const cycles = phase === 'auto' ? team.autoCycles : team.teleopCycles
+  const current = cycles[cIndex]
+  if (current !== undefined && current < 4) {
+    cycles[cIndex] = current + 1
+    hapticMedium()
+    bump(cIndex, phase === 'auto' ? 'autoCycle' : 'teleopCycle', 'up')
+    if (phase === 'auto') {
+      syncAutoBalls(team)
+    }
+  }
+}
+
+function decrementCycle(
+  team: TeamScoutData,
+  cIndex: number,
+  phase: 'auto' | 'teleop' = 'teleop',
+  teamIndex: number = 0
+) {
+  const cycles = phase === 'auto' ? team.autoCycles : team.teleopCycles
+  const current = cycles[cIndex]
+  if (current !== undefined && current > 0) {
+    cycles[cIndex] = current - 1
+    hapticLight()
+    bump(cIndex, phase === 'auto' ? 'autoCycle' : 'teleopCycle', 'down')
+    if (phase === 'auto') {
+      syncAutoBalls(team)
+    }
+  }
+}
+
+function getCycleBallsTotal(team: TeamScoutData, phase: 'auto' | 'teleop' = 'teleop'): number {
+  const cycles = phase === 'auto' ? team.autoCycles : team.teleopCycles
+  return cycles.reduce((sum, b) => sum + b, 0)
+}
+
+function getAvgBallsPerCycle(team: TeamScoutData, phase: 'auto' | 'teleop' = 'teleop'): string {
+  const cycles = phase === 'auto' ? team.autoCycles : team.teleopCycles
+  if (cycles.length === 0) return '0.0'
+  return (getCycleBallsTotal(team, phase) / cycles.length).toFixed(1)
+}
+
+function incrementAutoBalls(team: TeamScoutData, index: number = 0) {
+  if (team.autoCycles.length === 0) {
+    team.autoCycles.push(1)
+  } else {
+    const lastIdx = team.autoCycles.length - 1
+    const cur = team.autoCycles[lastIdx]
+    if (cur !== undefined && cur < 4) {
+      team.autoCycles[lastIdx] = cur + 1
+    } else {
+      team.autoCycles.push(1)
+    }
+  }
+  syncAutoBalls(team)
+  hapticMedium()
+  bump(index, 'autoBalls', 'up')
+}
+
+function decrementAutoBalls(team: TeamScoutData, index: number = 0) {
+  if (team.autoBalls > 0) {
+    if (team.autoCycles.length > 0) {
+      const lastIdx = team.autoCycles.length - 1
+      const cur = team.autoCycles[lastIdx]
+      if (cur !== undefined && cur > 1) {
+        team.autoCycles[lastIdx] = cur - 1
+      } else {
+        team.autoCycles.pop()
+      }
+    }
+    syncAutoBalls(team)
+    hapticLight()
+    bump(index, 'autoBalls', 'down')
+  }
+}
+
+function setAutoBalls(team: TeamScoutData, val: number, index: number = 0) {
+  setLastCycleBalls(team, val, 'auto', index)
 }
 
 watch(scoutMode, (mode) => {
@@ -121,17 +389,21 @@ watch(() => props.editRecord, (rec: ScoutingRecord | null | undefined) => {
     matchNumber.value = String(rec.matchNumber)
     allianceColor.value = raw.allianceColor || 'none'
     currentTournamentLevel.value = raw.tournamentLevel || 'QUALIFICATION'
+    const legacyAutoBalls = (raw.autoPreload ? 1 : 0) + (raw.autoSecondary ? 1 : 0)
+    const autoBalls = typeof raw.autoBalls === 'number' ? raw.autoBalls : legacyAutoBalls
+    const autoCycles = Array.isArray(raw.autoCycles)
+      ? [...raw.autoCycles]
+      : (autoBalls > 0 ? [autoBalls] : [])
     teamsData.value = [{
       teamNumber: String(rec.teamNumber),
-      autoClassified: raw.autoClassified ?? 0,
-      autoOverflow: raw.autoOverflow ?? 0,
-      autoPatterns: raw.autoPatterns ?? 0,
-      autoMovementScore: String(raw.autoMovementScore ?? 0),
-      teleopClassified: raw.teleopClassified ?? 0,
-      teleopOverflow: raw.teleopOverflow ?? 0,
-      gatesTriggered: raw.gatesTriggered ?? 0,
-      baseScore: raw.baseScore ?? 5,
-      supportMultiplier: raw.supportMultiplier ?? 0,
+      autoLeave: raw.autoLeave ?? false,
+      autoBalls: autoBalls,
+      autoCycles: autoCycles,
+      autoPark: raw.autoPark ?? false,
+      teleopCycles: Array.isArray(raw.teleopCycles) ? [...raw.teleopCycles] : [],
+      flowerPlaced: raw.flowerPlaced ?? false,
+      flowerBottomBonus: raw.flowerBottomBonus ?? false,
+      teleopPark: raw.teleopPark ?? false,
       isBroken: raw.isBroken ?? false,
       notes: rec.notes || ''
     }]
@@ -186,9 +458,14 @@ const nextPendingAssignment = computed(() => {
 })
 
 function calcTeamTotal(team: TeamScoutData) {
-  const auto = (3 * team.autoClassified) + (1 * team.autoOverflow) + (2 * team.autoPatterns) + (parseInt(team.autoMovementScore) || 0)
-  const teleop = (3 * team.teleopClassified) + (1 * team.teleopOverflow) + Math.floor(1.5 * team.gatesTriggered)
-  const endgame = team.baseScore + (team.supportMultiplier * 18)
+  const auto = (team.autoLeave ? 3 : 0) +
+               ((team.autoBalls || 0) * 3) +
+               (team.autoPark ? 5 : 0)
+  const totalBalls = getCycleBallsTotal(team)
+  const teleop = totalBalls * 2
+  const endgame = (team.flowerPlaced ? 10 : 0) +
+                  (team.flowerBottomBonus ? 5 : 0) +
+                  (team.teleopPark ? 5 : 0)
   return auto + teleop + endgame
 }
 
@@ -196,10 +473,9 @@ const isFormValid = computed(() => {
   const isMatchValid = /^\d{1,8}$/.test(matchNumber.value) && parseInt(matchNumber.value) > 0
   const activeTeams = scoutMode.value === 'single' ? teamsData.value.slice(0, 1) : teamsData.value
   const areTeamsValid = activeTeams.every(t => /^\d{1,8}$/.test(t.teamNumber) && parseInt(t.teamNumber) > 0)
-  const areMovementValid = activeTeams.every(t => t.autoMovementScore === '' || /^\d{1,8}$/.test(t.autoMovementScore))
   const isColorValid = allianceColor.value !== 'none'
   const isUnique = new Set(activeTeams.map(t => t.teamNumber)).size === activeTeams.length
-  return isMatchValid && areTeamsValid && areMovementValid && isColorValid && isUnique
+  return isMatchValid && areTeamsValid && isColorValid && isUnique
 })
 
 function isInvalidFormat(val: string) {
@@ -210,8 +486,9 @@ function isInvalidFormat(val: string) {
 async function handleSubmit() {
   if (submitting.value) return
   if (!isFormValid.value) {
+    hapticWarning()
     submitStatus.value = 'error'
-    submitErrorMsg.value = '包含非法字符或长度超限，请检查标红的输入框'
+    submitErrorMsg.value = t('scouting.invalid_input_hint')
     setTimeout(() => { submitStatus.value = 'none' }, 2000)
     return
   }
@@ -229,6 +506,7 @@ async function handleSubmit() {
       return getRecordTournamentLevel(r) === curLevel
     })
     if (existing) {
+      hapticWarning()
       submitStatus.value = 'error'
       submitErrorMsg.value = t('toast.conflict_error', { match: matchNum, team: teamNum })
       setTimeout(() => { submitStatus.value = 'none' }, 4000)
@@ -241,9 +519,14 @@ async function handleSubmit() {
 
   try {
     const records: ScoutingRecord[] = activeTeams.map(team => {
-      const auto = (3 * team.autoClassified) + (1 * team.autoOverflow) + (2 * team.autoPatterns) + (parseInt(team.autoMovementScore) || 0)
-      const teleop = (3 * team.teleopClassified) + (1 * team.teleopOverflow) + Math.floor(1.5 * team.gatesTriggered)
-      const endgame = team.baseScore + (team.supportMultiplier * 18)
+      const auto = (team.autoLeave ? 3 : 0) +
+                   ((team.autoBalls || 0) * 3) +
+                   (team.autoPark ? 5 : 0)
+      const totalBalls = getCycleBallsTotal(team)
+      const teleop = totalBalls * 2
+      const endgame = (team.flowerPlaced ? 10 : 0) +
+                      (team.flowerBottomBonus ? 5 : 0) +
+                      (team.teleopPark ? 5 : 0)
       const total = auto + teleop + endgame
 
       const formData: ScoutingFormData = {
@@ -251,16 +534,16 @@ async function handleSubmit() {
         tournamentLevel: currentTournamentLevel.value,
         teamNumber: parseInt(team.teamNumber),
         allianceColor: allianceColor.value,
-        autoClassified: team.autoClassified,
-        autoOverflow: team.autoOverflow,
-        autoPatterns: team.autoPatterns,
-        autoMovementScore: parseInt(team.autoMovementScore) || 0,
-        teleopClassified: team.teleopClassified,
-        teleopOverflow: team.teleopOverflow,
-        gatesTriggered: team.gatesTriggered,
-        baseScore: team.baseScore,
-        supportMultiplier: team.supportMultiplier,
-        isBroken: team.isBroken
+        isBroken: team.isBroken,
+        autoLeave: team.autoLeave,
+        autoBalls: team.autoBalls || 0,
+        autoCycles: [...team.autoCycles],
+        autoPreload: (team.autoBalls || 0) > 0,
+        autoPark: team.autoPark,
+        teleopCycles: [...team.teleopCycles],
+        flowerPlaced: team.flowerPlaced,
+        flowerBottomBonus: team.flowerBottomBonus,
+        teleopPark: team.teleopPark
       }
 
       return {
@@ -292,6 +575,7 @@ async function handleSubmit() {
     }
 
     submitStatus.value = 'success'
+    hapticSuccess()
     if (!props.editRecord) {
       matchNumber.value = String(parseInt(matchNumber.value) + 1)
     }
@@ -311,6 +595,7 @@ async function handleSubmit() {
     }
 
   } catch (err) {
+    hapticWarning()
     submitStatus.value = 'error'
   } finally {
     setTimeout(() => {
@@ -355,8 +640,8 @@ const recordStore = useRecordStore()
         <div class="setting-group">
           <span>{{ t('scouting.mode') }}</span>
           <div class="segmented-control">
-            <button type="button" :class="{ active: scoutMode === 'single' }" :disabled="!!editRecord" @click="scoutMode = 'single'">{{ t('scouting.single_team') }}</button>
-            <button type="button" :class="{ active: scoutMode === 'alliance' }" :disabled="!!editRecord" @click="scoutMode = 'alliance'">{{ t('scouting.alliance') }}</button>
+            <button type="button" :class="{ active: scoutMode === 'single' }" :disabled="!!editRecord" @click="scoutMode = 'single'; hapticSelection()">{{ t('scouting.single_team') }}</button>
+            <button type="button" :class="{ active: scoutMode === 'alliance' }" :disabled="!!editRecord" @click="scoutMode = 'alliance'; hapticSelection()">{{ t('scouting.alliance') }}</button>
           </div>
         </div>
         <div class="setting-group">
@@ -364,8 +649,8 @@ const recordStore = useRecordStore()
           <div class="spdt-switch" :class="'pos-' + allianceColor">
             <div class="spdt-thumb" v-show="allianceColor !== 'none'"></div>
             <div class="spdt-labels">
-              <span @click="allianceColor = 'red'" :class="{ active: allianceColor === 'red' }">{{ t('scouting.red') }}</span>
-              <span @click="allianceColor = 'blue'" :class="{ active: allianceColor === 'blue' }">{{ t('scouting.blue') }}</span>
+              <span @click="allianceColor = 'red'; hapticSelection()" :class="{ active: allianceColor === 'red' }">{{ t('scouting.red') }}</span>
+              <span @click="allianceColor = 'blue'; hapticSelection()" :class="{ active: allianceColor === 'blue' }">{{ t('scouting.blue') }}</span>
             </div>
           </div>
         </div>
@@ -398,7 +683,7 @@ const recordStore = useRecordStore()
                 <input v-model="team.teamNumber" type="text" inputmode="numeric" placeholder="e.g. 12345" :class="{ 'invalid-field': isInvalidFormat(team.teamNumber) }" />
                 <span v-if="getPitSummary(team.teamNumber)" class="pit-quick-hint" style="font-size: 11px; color: var(--color-primary, #38bdf8); margin-top: 2px; display: inline-flex; align-items: center; gap: 4px;">
                   <span class="material-icons" style="font-size: 13px;">lightbulb</span>
-                  <span>展位自述：{{ getPitSummary(team.teamNumber)?.drivetrain }} | 自主 {{ getPitSummary(team.teamNumber)?.autoScore }}分 | 悬挂 L{{ getPitSummary(team.teamNumber)?.hangLevel }}</span>
+                  <span>{{ t('pit_scout.quick_summary', { drivetrain: formatDrivetrain(getPitSummary(team.teamNumber)?.drivetrain), ball: formatBallCompat(getPitSummary(team.teamNumber)?.ballCompatibility), auto: getPitSummary(team.teamNumber)?.autoScore ?? 0, teleop: getPitSummary(team.teamNumber)?.teleopCycles ?? 0 }) }}</span>
                 </span>
                 <span v-if="recordStore.bannedTeams.includes(parseInt(team.teamNumber))" class="banned-warning">
                   <span class="material-icons" style="font-size: 14px; vertical-align: middle;">warning</span> 
@@ -422,92 +707,82 @@ const recordStore = useRecordStore()
 
           <!-- Autonomous -->
           <section class="form-section">
-            <h3><span class="material-icons">smart_toy</span> {{ t('scouting.autonomous') }}</h3>
-            <div class="field-row">
-              <label class="field">
-                <span>{{ t('scouting.movement') }}</span>
-                <input v-model="team.autoMovementScore" type="text" inputmode="numeric" placeholder="0" :class="{ 'invalid-field': isInvalidFormat(team.autoMovementScore) }" />
+            <PhaseCycleTracker
+              phase="auto"
+              :title="t('scouting.autonomous')"
+              icon="smart_toy"
+              :rate-text="t('scouting.auto_balls_rate')"
+              v-model="team.autoCycles"
+              @change="syncAutoBalls(team)"
+            />
+
+            <!-- Auto Toggles (Leave & Park) -->
+            <div class="biobuzz-toggles-grid" style="margin-top: 12px;">
+              <label class="toggle-card" :class="{ 'is-active': team.autoLeave }">
+                <input v-model="team.autoLeave" type="checkbox" @change="hapticSelection" />
+                <span class="material-icons check-icon">{{ team.autoLeave ? 'check_box' : 'check_box_outline_blank' }}</span>
+                <div class="toggle-info">
+                  <span class="toggle-title">{{ t('scouting.auto_leave') }}</span>
+                </div>
               </label>
-              <div class="counter-field">
-                <span class="counter-label">{{ t('scouting.patterns') }}</span>
-                <div class="counter-controls">
-                  <button type="button" class="counter-btn" @click="decrement(team, 'autoPatterns')">-</button>
-                  <span class="counter-val">{{ team.autoPatterns }}</span>
-                  <button type="button" class="counter-btn" @click="increment(team, 'autoPatterns')">+</button>
+
+              <label class="toggle-card" :class="{ 'is-active': team.autoPark }">
+                <input v-model="team.autoPark" type="checkbox" @change="hapticSelection" />
+                <span class="material-icons check-icon">{{ team.autoPark ? 'check_box' : 'check_box_outline_blank' }}</span>
+                <div class="toggle-info">
+                  <span class="toggle-title">{{ t('scouting.auto_park') }}</span>
                 </div>
-              </div>
-            </div>
-            <div class="field-row split" style="margin-top: 12px">
-              <div class="counter-field">
-                <span class="counter-label">{{ t('scouting.classified') }}</span>
-                <div class="counter-controls">
-                  <button type="button" class="counter-btn" @click="decrement(team, 'autoClassified')">-</button>
-                  <span class="counter-val">{{ team.autoClassified }}</span>
-                  <button type="button" class="counter-btn" @click="increment(team, 'autoClassified')">+</button>
-                </div>
-              </div>
-              <div class="counter-field">
-                <span class="counter-label">{{ t('scouting.overflow') }}</span>
-                <div class="counter-controls">
-                  <button type="button" class="counter-btn" @click="decrement(team, 'autoOverflow')">-</button>
-                  <span class="counter-val">{{ team.autoOverflow }}</span>
-                  <button type="button" class="counter-btn" @click="increment(team, 'autoOverflow')">+</button>
-                </div>
-              </div>
+              </label>
             </div>
           </section>
 
-          <!-- TeleOp -->
+          <!-- TeleOp (Cycle Tracker) -->
           <section class="form-section">
-            <h3><span class="material-icons">sports_esports</span> {{ t('scouting.teleop') }}</h3>
-            <div class="field-row">
-              <div class="counter-field">
-                <span class="counter-label">{{ t('scouting.gates') }}</span>
-                <div class="counter-controls">
-                  <button type="button" class="counter-btn" @click="decrement(team, 'gatesTriggered')">-</button>
-                  <span class="counter-val">{{ team.gatesTriggered }}</span>
-                  <button type="button" class="counter-btn" @click="increment(team, 'gatesTriggered')">+</button>
-                </div>
-              </div>
-            </div>
-            <div class="field-row split" style="margin-top: 12px">
-              <div class="counter-field">
-                <span class="counter-label">{{ t('scouting.classified') }}</span>
-                <div class="counter-controls">
-                  <button type="button" class="counter-btn" @click="decrement(team, 'teleopClassified')">-</button>
-                  <span class="counter-val">{{ team.teleopClassified }}</span>
-                  <button type="button" class="counter-btn" @click="increment(team, 'teleopClassified')">+</button>
-                </div>
-              </div>
-              <div class="counter-field">
-                <span class="counter-label">{{ t('scouting.overflow') }}</span>
-                <div class="counter-controls">
-                  <button type="button" class="counter-btn" @click="decrement(team, 'teleopOverflow')">-</button>
-                  <span class="counter-val">{{ team.teleopOverflow }}</span>
-                  <button type="button" class="counter-btn" @click="increment(team, 'teleopOverflow')">+</button>
-                </div>
-              </div>
-            </div>
+            <PhaseCycleTracker
+              phase="teleop"
+              :title="t('scouting.teleop')"
+              icon="sports_esports"
+              :rate-text="'+2 ' + t('scouting.unit_balls')"
+              v-model="team.teleopCycles"
+            />
           </section>
 
           <!-- Endgame -->
           <section class="form-section">
             <h3><span class="material-icons">flag</span> {{ t('scouting.endgame') }}</h3>
-            <div class="field">
-              <span>{{ t('scouting.base_score') }}</span>
-              <select v-model.number="team.baseScore">
-                <option :value="5">5 pts</option>
-                <option :value="10">10 pts</option>
-              </select>
+            <div class="biobuzz-toggles-grid">
+              <label class="toggle-card" :class="{ 'is-active': team.flowerPlaced }">
+                <input v-model="team.flowerPlaced" type="checkbox" @change="hapticSelection" />
+                <span class="material-icons check-icon">{{ team.flowerPlaced ? 'check_box' : 'check_box_outline_blank' }}</span>
+                <div class="toggle-info">
+                  <span class="toggle-title">{{ t('scouting.flower_placed') }}</span>
+                </div>
+              </label>
+
+              <label class="toggle-card" :class="{ 'is-active': team.flowerBottomBonus }">
+                <input v-model="team.flowerBottomBonus" type="checkbox" @change="hapticSelection" />
+                <span class="material-icons check-icon">{{ team.flowerBottomBonus ? 'check_box' : 'check_box_outline_blank' }}</span>
+                <div class="toggle-info">
+                  <span class="toggle-title">{{ t('scouting.flower_bottom_bonus') }}</span>
+                </div>
+              </label>
+
+              <label class="toggle-card" :class="{ 'is-active': team.teleopPark }">
+                <input v-model="team.teleopPark" type="checkbox" @change="hapticSelection" />
+                <span class="material-icons check-icon">{{ team.teleopPark ? 'check_box' : 'check_box_outline_blank' }}</span>
+                <div class="toggle-info">
+                  <span class="toggle-title">{{ t('scouting.teleop_park') }}</span>
+                </div>
+              </label>
+
+              <label class="toggle-card is-broken-card" :class="{ 'is-active': team.isBroken }">
+                <input v-model="team.isBroken" type="checkbox" @change="hapticSelection" />
+                <span class="material-icons check-icon" style="color: var(--status-error);">{{ team.isBroken ? 'check_box' : 'check_box_outline_blank' }}</span>
+                <div class="toggle-info">
+                  <span class="toggle-title" style="color: var(--status-error); font-weight: bold;">{{ t('scouting.is_broken') }}</span>
+                </div>
+              </label>
             </div>
-            <label class="toggle" style="margin-top: 10px">
-              <input v-model="team.supportMultiplier" :true-value="1" :false-value="0" type="checkbox" />
-              <span>{{ t('scouting.support') }}</span>
-            </label>
-            <label class="toggle" style="margin-top: 10px; color: var(--status-error);">
-              <input v-model="team.isBroken" type="checkbox" />
-              <span style="color: var(--status-error); font-weight: bold;">{{ t('scouting.is_broken') }}</span>
-            </label>
             
             <div class="field" style="margin-top: 16px;">
               <span>{{ t('scouting.notes') }}</span>

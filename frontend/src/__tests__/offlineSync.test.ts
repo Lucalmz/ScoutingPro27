@@ -278,6 +278,7 @@ describe('offlineSync Utility', () => {
     const syncedRecords: ScoutingRecord[] = []
     let stampedCalled = false
     let dbPersistedCalled = false
+    let externalSyncedEvt: ScoutingEvent | null = null
 
     const importRes = await executeBatchSyncImport({
       scanResult: scanRes,
@@ -294,6 +295,9 @@ describe('offlineSync Utility', () => {
       },
       persistRecordsToDb: async (recs) => {
         dbPersistedCalled = true
+      },
+      syncExternalEvent: async (evt) => {
+        externalSyncedEvt = evt
       }
     })
 
@@ -305,6 +309,7 @@ describe('offlineSync Utility', () => {
     expect(syncedRecords).toHaveLength(1)
     expect(stampedCalled).toBe(true)
     expect(dbPersistedCalled).toBe(true)
+    expect(externalSyncedEvt).toEqual(dummyEvent)
   })
 
   it('executes batch import for Client (marks confirmed records as SYNCED, applies tags)', async () => {

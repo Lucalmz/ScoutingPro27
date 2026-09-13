@@ -10,15 +10,17 @@
   display: flex;
   align-items: center;
   justify-content: space-between;
-  padding: 12px 24px;
+  padding: max(12px, var(--sat)) max(24px, var(--sar)) 12px max(24px, var(--sal));
   background: var(--card);
   border-bottom: 1px solid var(--border);
+  gap: 12px;
 }
 
 .topbar-right {
   display: flex;
   align-items: center;
   gap: 12px;
+  flex-shrink: 0;
 }
 
 .user-tag-btn,
@@ -42,6 +44,13 @@
   border-color: var(--primary, #39ff14);
   color: var(--primary, #39ff14);
   box-shadow: var(--glow-primary, 0 0 10px rgba(57, 255, 20, 0.35));
+}
+
+/* Desktop: hide topbar Inbox button (since bottom-right floating Inbox FAB is present) */
+@media (min-width: 769px) {
+  .inbox-topbar-btn {
+    display: none !important;
+  }
 }
 
 .user-tag-btn .edit-icon {
@@ -68,6 +77,8 @@
   display: flex;
   align-items: center;
   gap: 16px;
+  min-width: 0;
+  flex: 1;
 }
 
 .btn-back {
@@ -78,6 +89,7 @@
   border-radius: 8px;
   cursor: pointer;
   font-size: 14px;
+  flex-shrink: 0;
 }
 
 .btn-back:hover {
@@ -88,24 +100,34 @@
   width: 26px;
   height: 26px;
   object-fit: contain;
-  filter: drop-shadow(0 0 6px rgba(57, 255, 20, 0.45));
+  image-rendering: -webkit-optimize-contrast;
+  filter: drop-shadow(0 0 3px rgba(57, 255, 20, 0.35));
+  flex-shrink: 0;
 }
 
 .event-title {
   display: flex;
   flex-direction: column;
+  min-width: 0;
+  flex: 1;
 }
 
 .event-name {
-  display: inline-block;
+  display: block;
   font-size: 1.2rem;
   font-weight: 700;
-  width: fit-content;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  max-width: 100%;
 }
 
 .event-code {
   font-size: 12px;
   color: var(--muted-foreground);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
 /* Tab Bar */
@@ -382,18 +404,56 @@
   box-shadow: 0 2px 8px rgba(234, 179, 8, 0.35);
 }
 
-@media (max-width: 768px) {
+@media (max-width: 680px) {
   .tab-bar {
     display: none !important;
   }
   .tab-content {
-    padding-bottom: calc(72px + env(safe-area-inset-bottom, 0px));
+    padding: 10px 8px calc(72px + var(--sab));
   }
   .topbar {
-    padding: 10px 14px;
+    padding: max(10px, var(--sat)) max(10px, var(--sar)) 10px max(10px, var(--sal));
+    gap: 8px;
+  }
+  .topbar-left {
+    gap: 8px;
+  }
+  .topbar-right {
+    gap: 6px;
   }
   .topbar-btn .topbar-btn-text {
     display: none;
+  }
+  .btn-back {
+    padding: 6px 10px;
+    font-size: 13px;
+  }
+}
+
+@media (max-width: 480px) {
+  .user-tag-btn {
+    padding: 6px 8px;
+  }
+  .user-tag-btn .username-text {
+    display: none;
+  }
+  .topbar-right {
+    gap: 4px;
+  }
+}
+
+@media (max-width: 360px) {
+  .event-brand-logo {
+    display: none;
+  }
+  .btn-back {
+    padding: 6px 8px;
+  }
+  .event-name {
+    font-size: 1rem;
+  }
+  .topbar-btn {
+    padding: 5px 6px;
   }
 }
 

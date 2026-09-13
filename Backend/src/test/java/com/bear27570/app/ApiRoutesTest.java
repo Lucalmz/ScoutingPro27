@@ -1137,6 +1137,48 @@ class ApiRoutesTest {
     }
 
     @Test
+    void testFtcConfigRejectsNonExistentEventCodeBiobuzz26() {
+        JavalinTest.test(app, (server, client) -> {
+            RoomFixture f = setupRoomFixture(client);
+
+            var res = client.put("/api/events/" + f.eventId + "/ftc-config",
+                    "{\"ftcYear\":2026,\"ftcEventCode\":\"BIOBUZZ26\"}",
+                    b -> b.header("Authorization", "Bearer " + f.hostToken));
+            assertThat(res.code()).isEqualTo(400);
+            assertThat(res.body().string()).contains("FTC 官方赛事代码不存在: BIOBUZZ26 (赛季 2026)");
+
+            // Verify database was NOT updated with fake event code
+            jdbi.useHandle(handle -> {
+                var code = handle.createQuery("SELECT ftc_event_code FROM events WHERE id = ?")
+                        .bind(0, f.eventId)
+                        .mapTo(String.class)
+                        .findOne();
+                assertThat(code).isEmpty();
+            });
+        });
+    }
+
+    @Test
+    void testFtcConfigUnbindClearsEventCode() {
+        JavalinTest.test(app, (server, client) -> {
+            RoomFixture f = setupRoomFixture(client);
+
+            var res = client.put("/api/events/" + f.eventId + "/ftc-config",
+                    "{\"ftcYear\":null,\"ftcEventCode\":null}",
+                    b -> b.header("Authorization", "Bearer " + f.hostToken));
+            assertThat(res.code()).isEqualTo(200);
+
+            jdbi.useHandle(handle -> {
+                var code = handle.createQuery("SELECT ftc_event_code FROM events WHERE id = ?")
+                        .bind(0, f.eventId)
+                        .mapTo(String.class)
+                        .findOne();
+                assertThat(code).isEmpty();
+            });
+        });
+    }
+
+    @Test
     void testScheduleBatchHostOnlyAndValidation() {
         JavalinTest.test(app, (server, client) -> {
             RoomFixture f = setupRoomFixture(client);
@@ -1190,6 +1232,58 @@ class ApiRoutesTest {
             assertThat(fetchRes.code()).isEqualTo(200);
             assertThat(fetchRes.body().string()).contains("11111");
             assertThat(fetchRes.body().string()).contains("Scout Alice");
+        });
+    }
+
+    @Test
+    void testTeamTagCaseInsensitiveLifecycleAndPermissions() {
+        JavalinTest.test(app, (server, client) -> {
+            RoomFixture f = setupRoomFixture(client);
+
+            // 1. ScoutA creates a tag "Fast-Shooter" for team 27570 (normalized to "fast-shooter")
+            var addRes = client.post("/api/events/" + f.eventId + "/teams/27570/tags",
+                    "{\"tag\":\"Fast-Shooter\",\"color\":\"blue\"}",
+                    b -> b.header("Authorization", "Bearer " + f.scoutAToken));
+            assertThat(addRes.code()).isEqualTo(200);
+            assertThat(addRes.body().string()).contains("\"tag\":\"fast-shooter\"");
+
+            // 2. Fetch tags for event
+            var getRes = client.get("/api/events/" + f.eventId + "/tags",
+                    b -> b.header("Authorization", "Bearer " + f.scoutAToken));
+            assertThat(getRes.code()).isEqualTo(200);
+            assertThat(getRes.body().string()).contains("\"tag\":\"fast-shooter\"");
+
+            // 3. ScoutB (not creator, not host) attempts to delete with mixed case -> 403 Forbidden
+            var forbiddenDelRes = client.delete("/api/events/" + f.eventId + "/teams/27570/tags/Fast-Shooter", null,
+                    b -> b.header("Authorization", "Bearer " + f.scoutBToken));
+            assertThat(forbiddenDelRes.code()).isEqualTo(403);
+            assertThat(forbiddenDelRes.body().string()).contains("Only the tag creator or event host can delete this tag");
+
+            // 4. ScoutA (creator) deletes with mixed case "Fast-Shooter" -> 200 OK and actually deletes "fast-shooter"
+            var delRes = client.delete("/api/events/" + f.eventId + "/teams/27570/tags/Fast-Shooter", null,
+                    b -> b.header("Authorization", "Bearer " + f.scoutAToken));
+            assertThat(delRes.code()).isEqualTo(200);
+
+            // 5. Verify tag is gone
+            var getAfterDel = client.get("/api/events/" + f.eventId + "/tags",
+                    b -> b.header("Authorization", "Bearer " + f.scoutAToken));
+            assertThat(getAfterDel.code()).isEqualTo(200);
+            assertThat(getAfterDel.body().string()).isEqualTo("[]");
+
+            // 6. Host can also delete a tag created by ScoutA with mixed case
+            var addRes2 = client.post("/api/events/" + f.eventId + "/teams/27570/tags",
+                    "{\"tag\":\"Mecanum_Drive\",\"color\":\"red\"}",
+                    b -> b.header("Authorization", "Bearer " + f.scoutAToken));
+            assertThat(addRes2.code()).isEqualTo(200);
+
+            var hostDelRes = client.delete("/api/events/" + f.eventId + "/teams/27570/tags/Mecanum_Drive", null,
+                    b -> b.header("Authorization", "Bearer " + f.hostToken));
+            assertThat(hostDelRes.code()).isEqualTo(200);
+
+            var getAfterHostDel = client.get("/api/events/" + f.eventId + "/tags",
+                    b -> b.header("Authorization", "Bearer " + f.hostToken));
+            assertThat(getAfterHostDel.code()).isEqualTo(200);
+            assertThat(getAfterHostDel.body().string()).isEqualTo("[]");
         });
     }
 }

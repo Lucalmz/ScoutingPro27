@@ -10,3 +10,4 @@ Backend/jcef-bundle/
 Backend/src/main/resources/jcef-bundle.zip
 frontend/dist/
 frontend/node_modules/
+.agents/

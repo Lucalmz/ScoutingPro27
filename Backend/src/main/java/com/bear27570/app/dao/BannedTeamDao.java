@@ -11,6 +11,9 @@ public interface BannedTeamDao {
     @SqlUpdate("MERGE INTO banned_teams (event_id, team_number) KEY(event_id, team_number) VALUES (:eventId, :teamNumber)")
     void banTeam(@Bind("eventId") String eventId, @Bind("teamNumber") int teamNumber);
 
+    @SqlUpdate("DELETE FROM banned_teams WHERE event_id = :eventId AND team_number = :teamNumber")
+    int unbanTeam(@Bind("eventId") String eventId, @Bind("teamNumber") int teamNumber);
+
     @SqlQuery("SELECT team_number FROM banned_teams WHERE event_id = :eventId")
     List<Integer> getBannedTeams(@Bind("eventId") String eventId);
 }

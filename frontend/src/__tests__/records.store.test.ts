@@ -20,13 +20,14 @@ const createDummyRecord = (
   scoutId = 's1',
   syncStatus = 'PENDING',
   allianceColor = 'none',
-  tournamentLevel = 'QUALIFICATION'
+  tournamentLevel = 'QUALIFICATION',
+  matchNumber = 1
 ): ScoutingRecord => ({
   id,
   eventId: 'e1',
   scoutId,
   scoutName: 'Scout ' + scoutId,
-  matchNumber: 1,
+  matchNumber,
   teamNumber,
   autoScore,
   teleopScore,
@@ -48,10 +49,10 @@ describe('Records Store', () => {
   it('rankings computation with allianceColor and splitting logic', () => {
     const store = useRecordStore()
     store.records = [
-      createDummyRecord('r1', 118, 10, 20, 10, 's1', 'PENDING', 'red'), // total 40
-      createDummyRecord('r2', 118, 20, 30, 10, 's2', 'PENDING', 'blue'), // total 60 (max)
-      createDummyRecord('r3', 254, 30, 40, 20, 's1', 'PENDING', 'red'),  // total 90
-      createDummyRecord('r4', 254, 10, 10, 10, 's2', 'PENDING', 'blue')  // total 30
+      createDummyRecord('r1', 118, 10, 20, 10, 's1', 'PENDING', 'red', 'QUALIFICATION', 1), // total 40
+      createDummyRecord('r2', 118, 20, 30, 10, 's2', 'PENDING', 'blue', 'QUALIFICATION', 2), // total 60 (max)
+      createDummyRecord('r3', 254, 30, 40, 20, 's1', 'PENDING', 'red', 'QUALIFICATION', 1),  // total 90
+      createDummyRecord('r4', 254, 10, 10, 10, 's2', 'PENDING', 'blue', 'QUALIFICATION', 2)  // total 30
     ]
     
     const rankings = store.rankings
@@ -258,6 +259,13 @@ describe('Records Store', () => {
     store.applyTagUpdate(dummyTag, 'REMOVE')
     expect(store.teamTags).toHaveLength(0)
     expect(store.getTagsForTeam(27570)).toEqual([])
+
+    // Case-insensitive ADD and REMOVE
+    store.applyTagUpdate({ ...dummyTag, tag: 'fast_cycle' }, 'ADD')
+    expect(store.teamTags).toHaveLength(1)
+    // REMOVE with mixed case 'Fast_Cycle' should remove 'fast_cycle'
+    store.applyTagUpdate({ ...dummyTag, tag: 'Fast_Cycle' }, 'REMOVE')
+    expect(store.teamTags).toHaveLength(0)
   })
 
   it('handles applyTagsFullSync for full event sync', () => {

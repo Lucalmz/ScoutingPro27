@@ -441,6 +441,7 @@ export interface BatchImportContext {
   markSynced?: (ids: string[]) => void
   applyTagsFullSync?: (tags: TeamTagItem[]) => void
   applyScheduleFullSync?: (schedules: import('@/types').MatchScheduleItem[], assignments: import('@/types').ScoutAssignment[]) => void
+  syncExternalEvent?: (event: ScoutingEvent) => Promise<ScoutingEvent | null | void>
 }
 
 export interface BatchImportExecutionResult {
@@ -466,6 +467,13 @@ export async function executeBatchSyncImport(ctx: BatchImportContext): Promise<B
         ctx.events.push(evt)
       } else {
         Object.assign(existing, evt)
+      }
+      if (ctx.syncExternalEvent) {
+        try {
+          await ctx.syncExternalEvent(evt)
+        } catch (e) {
+          console.warn('[OfflineSync] Failed to sync external event to backend:', e)
+        }
       }
       importedEventId = evt.id
       if (item.eventPkg.schedule && ctx.applyScheduleFullSync) {

@@ -1,6 +1,6 @@
 import { defineStore } from 'pinia'
 import { ref, computed } from 'vue'
-import { listEvents, createEvent, joinEvent } from '@/services/api'
+import { listEvents, createEvent, joinEvent, syncExternalEvent } from '@/services/api'
 import { useUserStore } from '@/stores/user'
 import type { ScoutingEvent } from '@/types'
 
@@ -77,6 +77,27 @@ export const useEventStore = defineStore('events', () => {
     }
   }
 
+  async function syncExternal(event: ScoutingEvent): Promise<ScoutingEvent | null> {
+    loading.value = true
+    error.value = null
+    try {
+      const synced = await syncExternalEvent(event)
+      const existingIdx = events.value.findIndex(e => e.id === synced.id)
+      if (existingIdx >= 0) {
+        events.value[existingIdx] = synced
+      } else {
+        events.value.push(synced)
+      }
+      currentEvent.value = synced
+      return synced
+    } catch (e: any) {
+      error.value = e.message ?? 'Failed to sync external event'
+      return null
+    } finally {
+      loading.value = false
+    }
+  }
+
   function setCurrentEvent(evt: ScoutingEvent | null) {
     currentEvent.value = evt
   }
@@ -109,6 +130,7 @@ export const useEventStore = defineStore('events', () => {
     fetchEvents,
     create,
     join,
+    syncExternal,
     setCurrentEvent,
     updateFtcConfig,
     clearError,

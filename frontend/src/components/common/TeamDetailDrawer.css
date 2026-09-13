@@ -309,7 +309,7 @@
 
 /* ── Footer ── */
 .drawer-footer {
-  padding: 12px 16px;
+  padding: 12px 16px max(12px, var(--sab, env(safe-area-inset-bottom, 0px)));
   background: var(--popover, #111111);
   border-top: 1px solid var(--border, #262626);
   flex-shrink: 0;

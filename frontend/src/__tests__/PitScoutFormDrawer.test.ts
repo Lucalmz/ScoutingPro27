@@ -51,18 +51,17 @@ describe('PitScoutFormDrawer.vue', () => {
         robotName: 'Apex Predator',
         drivetrainType: 'swerve',
         weightLbs: 38.5,
-        sizingPassed: true,
-        mechanismType: 'intake_claw',
-        hangType: 'telescoping',
+        ballCompatibility: 'universal',
+        launcherType: '差速双飞轮',
+        flowerMechanism: '垂直级联高抬升',
+        hasColorSensor: true,
         odometryType: 'sparkfun_otos',
+        claimedAutoStrategy: '3 balls leave',
         claimedAutoScore: 45,
-        claimedAutoPieces: 3,
-        claimedAutoHangLevel: 'level1',
+        claimedTeleopCycles: 5,
         claimedTeleopScore: 60,
-        claimedTeleopCycleSec: 12,
-        claimedEndgameHangLevel: 'level3',
-        claimedEndgameTimeSec: 8,
-        claimedTotalScore: 105,
+        claimedEndgameScore: 15,
+        claimedTotalScore: 120,
         photoKeys: ['photo_1'],
         version: 1,
         hostSeq: 1,
@@ -155,5 +154,140 @@ describe('PitScoutFormDrawer.vue', () => {
     } finally {
       global.Image = origImage
     }
+  })
+
+  it('correctly increments and decrements all 5 stepper controls via DOM button clicks and updates calculatedTotalScore', async () => {
+    const wrapper = mount(PitScoutFormDrawer, { props: defaultProps })
+    await wrapper.vm.$nextTick()
+    await new Promise((r) => setTimeout(r, 20))
+
+    const steppers = wrapper.findAll('.stepper-control')
+    expect(steppers).toHaveLength(5)
+
+    // Stepper 0: weightLbs (starts at 38.0, step 0.5)
+    const weightMinus = steppers[0].findAll('.step-btn')[0]
+    const weightVal = steppers[0].find('.stepper-val')
+    const weightPlus = steppers[0].findAll('.step-btn')[1]
+
+    expect(weightVal.text()).toBe('38')
+    await weightPlus.trigger('click')
+    expect(weightVal.text()).toBe('38.5')
+    expect(wrapper.vm.weightLbs).toBe(38.5)
+    await weightMinus.trigger('click')
+    expect(weightVal.text()).toBe('38')
+
+    // Stepper 1: claimedAutoScore (starts at 30, step 5)
+    const autoMinus = steppers[1].findAll('.step-btn')[0]
+    const autoVal = steppers[1].find('.stepper-val')
+    const autoPlus = steppers[1].findAll('.step-btn')[1]
+
+    expect(autoVal.text()).toBe('30')
+    await autoPlus.trigger('click')
+    expect(autoVal.text()).toBe('35')
+    expect(wrapper.vm.claimedAutoScore).toBe(35)
+    await autoMinus.trigger('click')
+    expect(autoVal.text()).toBe('30')
+
+    // Stepper 2: claimedTeleopCycles (starts at 5, step 1)
+    const cycleMinus = steppers[2].findAll('.step-btn')[0]
+    const cycleVal = steppers[2].find('.stepper-val')
+    const cyclePlus = steppers[2].findAll('.step-btn')[1]
+
+    expect(cycleVal.text()).toBe('5')
+    await cyclePlus.trigger('click')
+    expect(cycleVal.text()).toBe('6')
+    expect(wrapper.vm.claimedTeleopCycles).toBe(6)
+    await cycleMinus.trigger('click')
+    expect(cycleVal.text()).toBe('5')
+
+    // Stepper 3: claimedTeleopScore (starts at 60, step 5)
+    const teleopScoreMinus = steppers[3].findAll('.step-btn')[0]
+    const teleopScoreVal = steppers[3].find('.stepper-val')
+    const teleopScorePlus = steppers[3].findAll('.step-btn')[1]
+
+    expect(teleopScoreVal.text()).toBe('60')
+    await teleopScorePlus.trigger('click')
+    expect(teleopScoreVal.text()).toBe('65')
+    expect(wrapper.vm.claimedTeleopScore).toBe(65)
+    await teleopScoreMinus.trigger('click')
+    expect(teleopScoreVal.text()).toBe('60')
+
+    // Stepper 4: claimedEndgameScore (starts at 15, step 5)
+    const endgameMinus = steppers[4].findAll('.step-btn')[0]
+    const endgameVal = steppers[4].find('.stepper-val')
+    const endgamePlus = steppers[4].findAll('.step-btn')[1]
+
+    expect(endgameVal.text()).toBe('15')
+    await endgamePlus.trigger('click')
+    expect(endgameVal.text()).toBe('20')
+    expect(wrapper.vm.claimedEndgameScore).toBe(20)
+    await endgameMinus.trigger('click')
+    expect(endgameVal.text()).toBe('15')
+
+    // Total: auto(30) + teleop(60) + endgame(15) = 105
+    expect(wrapper.vm.calculatedTotalScore).toBe(105)
+    await autoPlus.trigger('click') // +5
+    expect(wrapper.vm.calculatedTotalScore).toBe(110)
+  })
+
+  it('triggers alternating bump animations on consecutive clicks and clears on animationend', async () => {
+    const wrapper = mount(PitScoutFormDrawer, { props: defaultProps })
+    await wrapper.vm.$nextTick()
+    await new Promise((r) => setTimeout(r, 20))
+
+    const weightStepper = wrapper.findAll('.stepper-control')[0]
+    const plusBtn = weightStepper.findAll('.step-btn')[1]
+    const valSpan = weightStepper.find('.stepper-val')
+
+    // 1st click -> bump-up-a
+    await plusBtn.trigger('click')
+    expect(valSpan.classes()).toContain('bump-up-a')
+
+    // 2nd consecutive click -> bump-up-b
+    await plusBtn.trigger('click')
+    expect(valSpan.classes()).toContain('bump-up-b')
+    expect(valSpan.classes()).not.toContain('bump-up-a')
+
+    // animationend -> clears
+    await valSpan.trigger('animationend')
+    expect(valSpan.classes()).not.toContain('bump-up-a')
+    expect(valSpan.classes()).not.toContain('bump-up-b')
+
+    // Decrement click -> bump-down-a or b
+    const minusBtn = weightStepper.findAll('.step-btn')[0]
+    await minusBtn.trigger('click')
+    expect(valSpan.classes().some(c => c.startsWith('bump-down-'))).toBe(true)
+  })
+
+  it('disables minus button at min and plus button at max', async () => {
+    const wrapper = mount(PitScoutFormDrawer, { props: defaultProps })
+    await wrapper.vm.$nextTick()
+    await new Promise((r) => setTimeout(r, 20))
+
+    // Set weight to min = 0
+    wrapper.vm.weightLbs = 0
+    await wrapper.vm.$nextTick()
+
+    const weightStepper = wrapper.findAll('.stepper-control')[0]
+    const minusBtn = weightStepper.findAll('.step-btn')[0] as any
+    const plusBtn = weightStepper.findAll('.step-btn')[1] as any
+
+    expect(minusBtn.attributes('disabled')).toBeDefined()
+    expect(plusBtn.attributes('disabled')).toBeUndefined()
+
+    // Clicking disabled minus does not decrease past 0
+    await minusBtn.trigger('click')
+    expect(wrapper.vm.weightLbs).toBe(0)
+
+    // Set weight to max = 50
+    wrapper.vm.weightLbs = 50
+    await wrapper.vm.$nextTick()
+
+    expect(plusBtn.attributes('disabled')).toBeDefined()
+    expect(minusBtn.attributes('disabled')).toBeUndefined()
+
+    // Clicking disabled plus does not increase past 50
+    await plusBtn.trigger('click')
+    expect(wrapper.vm.weightLbs).toBe(50)
   })
 })

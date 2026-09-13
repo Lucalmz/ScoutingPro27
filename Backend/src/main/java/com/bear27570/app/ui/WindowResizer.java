@@ -1,5 +1,7 @@
 package com.bear27570.app.ui;
 
+import com.bear27570.app.Main;
+
 import javax.swing.*;
 import java.awt.*;
 import java.awt.event.MouseAdapter;
@@ -133,5 +135,6 @@ public class WindowResizer extends MouseAdapter {
 
         frame.setBounds(newX, newY, newW, newH);
         frame.validate();
+        Main.updateWindowShape(frame);
     }
 }

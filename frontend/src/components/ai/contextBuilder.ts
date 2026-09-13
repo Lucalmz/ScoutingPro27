@@ -48,10 +48,19 @@ export function buildEventDataContext(options: ContextOptions): string {
   // 1. Rankings & Aggregated Performance Summary
   if (rankings.length > 0) {
     lines.push('\n[Teams Overall Rankings & Aggregated Performance Summary]')
-    lines.push('Team | Matches | Avg Auto | Avg TeleOp | Avg Endgame | Overall Avg | Max Score | Broken Matches | Trend')
-    lines.push('---|---|---|---|---|---|---|---|---')
-    for (const r of rankings) {
-      lines.push(`${r.teamNumber} | ${r.matchCount} | ${r.avgAutoScore} | ${r.avgTeleopScore} | ${r.avgEndgameScore} | ${r.avgRating} | ${r.maxScore} | ${r.brokenCount} | ${r.trend}`)
+    const hasTips = rankings.some(r => r.avgTipsPerMatch !== undefined && r.avgTipsPerMatch > 0)
+    if (hasTips) {
+      lines.push('Team | Matches | Avg Auto | Avg TeleOp | Avg Endgame | Avg Tips | Overall Avg | Max Score | Broken Matches | Trend')
+      lines.push('---|---|---|---|---|---|---|---|---|---')
+      for (const r of rankings) {
+        lines.push(`${r.teamNumber} | ${r.matchCount} | ${r.avgAutoScore} | ${r.avgTeleopScore} | ${r.avgEndgameScore} | ${r.avgTipsPerMatch ?? 0} | ${r.avgRating} | ${r.maxScore} | ${r.brokenCount} | ${r.trend}`)
+      }
+    } else {
+      lines.push('Team | Matches | Avg Auto | Avg TeleOp | Avg Endgame | Overall Avg | Max Score | Broken Matches | Trend')
+      lines.push('---|---|---|---|---|---|---|---|---')
+      for (const r of rankings) {
+        lines.push(`${r.teamNumber} | ${r.matchCount} | ${r.avgAutoScore} | ${r.avgTeleopScore} | ${r.avgEndgameScore} | ${r.avgRating} | ${r.maxScore} | ${r.brokenCount} | ${r.trend}`)
+      }
     }
   }
 
@@ -100,21 +109,14 @@ export function buildEventDataContext(options: ContextOptions): string {
   // 3. Pit Scouting & Robot Hardware Profiles (Self-Reported Specs & Brag Audit)
   if (activePitRecords.length > 0) {
     lines.push('\n[Pit Scouting & Robot Hardware Profiles (Self-Reported Specs & Brag Audit)]')
-    lines.push('Team # | Drivetrain | Mechanism | Hang Type | Odom | Claimed Auto | Claimed TeleOp | Claimed Hang | Claimed Total | Brag Index (Audit)')
-    lines.push('---|---|---|---|---|---|---|---|---|---')
+    lines.push('Team # | Drivetrain | Ball Compat | Launcher | Flower Mech | Sensor | Odom | Claimed Auto | Claimed TeleOp | Claimed Endgame | Claimed Total | Brag Index (Audit)')
+    lines.push('---|---|---|---|---|---|---|---|---|---|---|---')
     const sortedPits = [...activePitRecords].sort((a, b) => a.teamNumber - b.teamNumber)
     for (const pit of sortedPits) {
       const teamMatches = activeRecords.filter(r => r.teamNumber === pit.teamNumber)
       const brag = calculateBragIndex(pit, teamMatches)
       const drivetrain = pit.drivetrainType || 'N/A'
-      const mechanism = pit.mechanismType || 'N/A'
-      const hangType = pit.hangType || 'N/A'
       const odom = pit.odometryType || 'N/A'
-      const autoStr = `${pit.claimedAutoScore} pts (${pit.claimedAutoPieces} pcs, Hang L${pit.claimedAutoHangLevel})`
-      const teleopStr = `${pit.claimedTeleopScore} pts (${pit.claimedTeleopCycleSec}s/cycle)`
-      const hangStr = pit.claimedEndgameHangLevel > 0
-        ? `L${pit.claimedEndgameHangLevel} (${pit.claimedEndgameTimeSec}s)`
-        : 'None'
       const totalStr = `${pit.claimedTotalScore} pts`
 
       let bragStr = 'Pending'
@@ -122,16 +124,28 @@ export function buildEventDataContext(options: ContextOptions): string {
         if (brag.tier === 'pending') {
           bragStr = 'Pending (No Matches)'
         } else {
-          let hangNotice = ''
-          if (brag.hangVerified) {
-            hangNotice = ', High Hang Verified'
-          } else if (brag.hangPardoned) {
-            hangNotice = ', High Hang Pending Verification'
+          let endgameNotice = ''
+          if (brag.endgameVerified || brag.hangVerified) {
+            endgameNotice = ', Flower Verified'
+          } else if (brag.endgamePardoned || brag.hangPardoned) {
+            endgameNotice = ', Flower Pending Verification'
           }
-          bragStr = `${brag.overallRatio}x (${brag.tier}${hangNotice})`
+          bragStr = `${brag.overallRatio}x (${brag.tier}${endgameNotice})`
         }
       }
-      lines.push(`${pit.teamNumber} | ${drivetrain} | ${mechanism} | ${hangType} | ${odom} | ${autoStr} | ${teleopStr} | ${hangStr} | ${totalStr} | ${bragStr}`)
+
+      const ballCompat = pit.ballCompatibility || 'N/A'
+      const launcher = pit.launcherType || 'N/A'
+      const flower = pit.flowerMechanism || 'N/A'
+      const sensor = pit.hasColorSensor ? 'Yes' : 'No'
+      const autoStr = pit.claimedAutoStrategy
+        ? `${pit.claimedAutoScore} pts (${pit.claimedAutoStrategy})`
+        : `${pit.claimedAutoScore} pts`
+      const teleopStr = pit.claimedTeleopCycles != null
+        ? `${pit.claimedTeleopScore} pts (${pit.claimedTeleopCycles} cycles)`
+        : `${pit.claimedTeleopScore} pts`
+      const endgameStr = `${pit.claimedEndgameScore ?? 0} pts`
+      lines.push(`${pit.teamNumber} | ${drivetrain} | ${ballCompat} | ${launcher} | ${flower} | ${sensor} | ${odom} | ${autoStr} | ${teleopStr} | ${endgameStr} | ${totalStr} | ${bragStr}`)
     }
   }
 

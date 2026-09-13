@@ -251,7 +251,8 @@ async function applyImport() {
       },
       markSynced: recordStore.markSynced,
       applyTagsFullSync: recordStore.applyTagsFullSync,
-      applyScheduleFullSync: scheduleStore.applyScheduleFullSync
+      applyScheduleFullSync: scheduleStore.applyScheduleFullSync,
+      syncExternalEvent: eventStore.syncExternal
     })
 
     if (res.totalDropped > 0) {

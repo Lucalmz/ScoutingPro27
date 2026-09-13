@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref, onMounted } from 'vue'
+import { ref, onMounted, nextTick } from 'vue'
 import { useRouter } from 'vue-router'
 import { useI18n } from 'vue-i18n'
 import { useUserStore } from '@/stores/user'
@@ -8,8 +8,9 @@ import { parseEventPackage } from '@/utils/offlineSync'
 import { useToastStore } from '@/stores/toast'
 import { useInboxStore } from '@/stores/inbox'
 import { isDesktopHost } from '@/services/photoStorage'
+import { hapticLight } from '@/utils/haptics'
+import { transitionState } from '@/utils/transitionState'
 import RenameModal from '@/components/common/RenameModal.vue'
-import AccountMergeModal from '@/components/common/AccountMergeModal.vue'
 
 const { t } = useI18n()
 const toastStore = useToastStore()
@@ -21,7 +22,6 @@ const inboxStore = useInboxStore()
 const showCreateModal = ref(false)
 const showJoinModal = ref(false)
 const showRenameModal = ref(false)
-const showMergeModal = ref(false)
 const eventFileInputRef = ref<HTMLInputElement | null>(null)
 const newEventName = ref('')
 const inviteCode = ref('')
@@ -29,23 +29,28 @@ const creating = ref(false)
 const joining = ref(false)
 const enteringEventId = ref<string | null>(null)
 
-async function onAccountMerged(newUsername: string) {
-  toastStore.showToast(`账号已成功合并至 ${newUsername}，正在刷新赛事...`, 'success')
-  if (userStore.userId) {
-    await eventStore.fetchEvents(userStore.userId)
-  }
-}
-
 async function onEventFileSelected(e: Event) {
   const file = (e.target as HTMLInputElement).files?.[0]
   if (!file) return
   try {
     const pkg = parseEventPackage(await file.text())
-    const existing = eventStore.events.find((ev) => ev.id === pkg.event.id)
-    if (!existing) eventStore.events.push(pkg.event)
-    else Object.assign(existing, pkg.event)
+    let targetEvent = pkg.event
+    try {
+      const synced = await eventStore.syncExternal(pkg.event)
+      if (synced) {
+        targetEvent = synced
+      } else {
+        const existing = eventStore.events.find((ev) => ev.id === pkg.event.id)
+        if (!existing) eventStore.events.push(pkg.event)
+        else Object.assign(existing, pkg.event)
+      }
+    } catch {
+      const existing = eventStore.events.find((ev) => ev.id === pkg.event.id)
+      if (!existing) eventStore.events.push(pkg.event)
+      else Object.assign(existing, pkg.event)
+    }
     toastStore.showToast(t('offline_sync.import_success_event'), 'info')
-    enterEvent(pkg.event)
+    enterEvent(targetEvent)
   } catch (err: any) {
     toastStore.showToast(t('offline_sync.import_failed') + (err.message || ''), 'error')
   } finally {
@@ -88,9 +93,6 @@ async function handleJoin() {
   }
 }
 
-import { transitionState } from '@/utils/transitionState'
-import { nextTick } from 'vue'
-
 function beforeEnter(el: Element) {
   if (transitionState.sharedElementId) return
   const htmlEl = el as HTMLElement
@@ -104,31 +106,30 @@ function enter(el: Element, done: () => void) {
     return
   }
   const htmlEl = el as HTMLElement
-  
-  // Force browser to paint the initial opacity: 0 state before animating
-  // eslint-disable-next-line no-unused-expressions
-  htmlEl.offsetHeight
-  
   const index = parseInt(htmlEl.dataset.index || '0', 10)
   const delay = Math.min(index, 15) * 40
-  
-  setTimeout(() => {
-    htmlEl.style.setProperty('transition', 'all var(--motion-duration-normal) var(--motion-ease-out)', 'important')
-    htmlEl.style.opacity = '1'
-    htmlEl.style.transform = 'translateY(0)'
-    
-    // Clean up inline !important transition after animation so :active feedback is restored
+
+  requestAnimationFrame(() => {
     setTimeout(() => {
-      htmlEl.style.removeProperty('transition')
-      done()
-    }, 360)
-  }, delay)
+      htmlEl.style.setProperty('transition', 'all var(--motion-duration-normal) var(--motion-ease-out)', 'important')
+      htmlEl.style.opacity = '1'
+      htmlEl.style.transform = 'translateY(0)'
+
+      setTimeout(() => {
+        htmlEl.style.removeProperty('transition')
+        htmlEl.style.removeProperty('opacity')
+        htmlEl.style.removeProperty('transform')
+        done()
+      }, 360)
+    }, delay)
+  })
 }
 
 function enterEvent(evt: { id: string }) {
+  hapticLight()
   enteringEventId.value = evt.id
   transitionState.startSharedTransition(`event-card-${evt.id}`)
-  
+
   nextTick(() => {
     // Navigate immediately after the DOM has the inline style
     router.push(`/event/${evt.id}`)
@@ -140,14 +141,19 @@ function handleLogout() {
   router.replace('/')
 }
 
+let mouseMoveRaf: number | null = null
 function onCardMouseMove(e: MouseEvent) {
   const card = e.currentTarget as HTMLElement
-  const rect = card.getBoundingClientRect()
-  const x = e.clientX - rect.left
-  const y = e.clientY - rect.top
-  
-  card.style.setProperty('--mouse-x', `${x}px`)
-  card.style.setProperty('--mouse-y', `${y}px`)
+  const clientX = e.clientX
+  const clientY = e.clientY
+
+  if (mouseMoveRaf !== null) return
+  mouseMoveRaf = requestAnimationFrame(() => {
+    mouseMoveRaf = null
+    const rect = card.getBoundingClientRect()
+    card.style.setProperty('--mouse-x', `${clientX - rect.left}px`)
+    card.style.setProperty('--mouse-y', `${clientY - rect.top}px`)
+  })
 }
 function handleOpenRenameModal() {
   if (typeof document !== 'undefined' && 'startViewTransition' in document) {
@@ -170,7 +176,7 @@ function handleOpenRenameModal() {
     <header class="topbar">
       <div class="topbar-left">
         <span class="brand" style="display: flex; align-items: center; gap: 10px;">
-          <img src="/logo_transparent.png" alt="SP27" class="brand-logo" />
+          <img src="/logo_60.png" srcset="/logo_30.png 1x, /logo_60.png 2x" alt="SP27" class="brand-logo" />
           <span>ScoutingPro 27</span>
         </span>
       </div>
@@ -196,14 +202,6 @@ function handleOpenRenameModal() {
             :style="{ viewTransitionName: !showRenameModal ? 'user-profile-text' : 'none' }"
           >{{ userStore.username }}</span>
           <span class="material-icons edit-icon" style="font-size: 14px; margin-left: 4px;">edit</span>
-        </button>
-        <button
-          class="topbar-btn account-merge-btn"
-          @click="showMergeModal = true"
-          :title="t('user.merge_account')"
-        >
-          <span class="material-icons" style="font-size: 18px; margin-right: 4px;">merge_type</span>
-          <span class="topbar-btn-text">{{ t('user.merge_account') }}</span>
         </button>
         <button class="btn-logout" @click="handleLogout">{{ t('dashboard.logout') }}</button>
       </div>
@@ -321,10 +319,7 @@ function handleOpenRenameModal() {
     </Transition>
 
     <!-- Rename User Modal -->
-    <RenameModal v-model:visible="showRenameModal" @open-merge="showMergeModal = true" />
-
-    <!-- Merge Account Modal -->
-    <AccountMergeModal v-model:visible="showMergeModal" @merged="onAccountMerged" />
+    <RenameModal v-model:visible="showRenameModal" />
   </div>
 </template>
 

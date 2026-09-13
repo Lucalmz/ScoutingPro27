@@ -13,6 +13,29 @@ vi.mock('../services/api', () => ({
   fetchFtcTeams: vi.fn().mockResolvedValue([])
 }))
 
+const createMockPitRecord = (overrides: Partial<PitScoutingRecord> = {}): PitScoutingRecord => ({
+  id: 'p1',
+  eventId: 'e1',
+  teamNumber: 27570,
+  scoutId: 's1',
+  scoutName: 'Alice',
+  drivetrainType: 'mecanum',
+  weightLbs: 38,
+  ballCompatibility: 'universal',
+  launcherType: '差速双飞轮',
+  flowerMechanism: '垂直级联高抬升',
+  hasColorSensor: true,
+  odometryType: 'two_wheel',
+  claimedAutoStrategy: '',
+  claimedAutoScore: 60,
+  claimedTeleopCycles: 6,
+  claimedTeleopScore: 80,
+  claimedEndgameScore: 15,
+  claimedTotalScore: 155,
+  version: 1,
+  ...overrides
+})
+
 describe('PitScout Store & Unified Team Roster', () => {
   beforeEach(() => {
     setActivePinia(createPinia())
@@ -64,28 +87,18 @@ describe('PitScout Store & Unified Team Roster', () => {
 
     // 4. Pit record has team 27570
     pitStore.records = [
-      {
+      createMockPitRecord({
         id: 'p1',
         eventId: 'e1',
         teamNumber: 27570,
         scoutId: 'sc1',
         scoutName: 'Scout 1',
         drivetrainType: 'mecanum',
-        weightLbs: 38,
-        sizingPassed: true,
-        mechanismType: 'slide_claw',
-        hangType: 'winch',
-        odometryType: 'two_wheel',
         claimedAutoScore: 80,
-        claimedAutoPieces: 3,
-        claimedAutoHangLevel: 1,
         claimedTeleopScore: 100,
-        claimedTeleopCycleSec: 8.0,
-        claimedEndgameHangLevel: 2,
-        claimedEndgameTimeSec: 4.0,
         claimedTotalScore: 180,
         version: 1
-      } as PitScoutingRecord
+      })
     ]
 
     const list = pitStore.unifiedTeamList
@@ -136,28 +149,19 @@ describe('PitScout Store & Unified Team Roster', () => {
     const pitStore = usePitScoutStore()
     pitStore.currentEventId = 'e1'
 
-    const rec1: PitScoutingRecord = {
+    const rec1 = createMockPitRecord({
       id: 'p1',
       eventId: 'e1',
       teamNumber: 27570,
       scoutId: 's1',
       scoutName: 'Alice',
       drivetrainType: 'mecanum',
-      weightLbs: 35,
-      sizingPassed: true,
-      mechanismType: 'slide_claw',
-      hangType: 'winch',
-      odometryType: 'none',
       claimedAutoScore: 50,
-      claimedAutoPieces: 2,
-      claimedAutoHangLevel: 0,
       claimedTeleopScore: 70,
-      claimedTeleopCycleSec: 10,
-      claimedEndgameHangLevel: 1,
-      claimedEndgameTimeSec: 5,
-      claimedTotalScore: 120,
+      claimedEndgameScore: 10,
+      claimedTotalScore: 130,
       version: 1
-    }
+    })
 
     pitStore.applyRemoteUpdate(rec1)
     expect(pitStore.records).toHaveLength(1)
@@ -182,28 +186,19 @@ describe('PitScout Store & Unified Team Roster', () => {
       { teamNumber: 2, nameFull: 'Team 2' }
     ]
     pitStore.records = [
-      {
+      createMockPitRecord({
         id: 'p1',
         eventId: 'e1',
         teamNumber: 1,
         scoutId: 's1',
         scoutName: 'Alice',
         drivetrainType: 'mecanum',
-        weightLbs: 35,
-        sizingPassed: true,
-        mechanismType: '',
-        hangType: '',
-        odometryType: '',
         claimedAutoScore: 50,
-        claimedAutoPieces: 2,
-        claimedAutoHangLevel: 0,
         claimedTeleopScore: 70,
-        claimedTeleopCycleSec: 10,
-        claimedEndgameHangLevel: 1,
-        claimedEndgameTimeSec: 5,
-        claimedTotalScore: 120,
+        claimedEndgameScore: 10,
+        claimedTotalScore: 130,
         version: 1
-      } as PitScoutingRecord
+      })
     ]
 
     // Total: 2 teams (Team 1 has pit record, Team 2 does not)
@@ -231,28 +226,19 @@ describe('PitScout Store & Unified Team Roster', () => {
     const pitStore = usePitScoutStore()
     pitStore.currentEventId = 'test-event-1'
 
-    const rec: PitScoutingRecord = {
+    const rec = createMockPitRecord({
       id: 'p-online',
       eventId: 'test-event-1',
       teamNumber: 100,
       scoutId: 's1',
       scoutName: 'Alice',
       drivetrainType: 'mecanum',
-      weightLbs: 30,
-      sizingPassed: true,
-      mechanismType: 'other',
-      hangType: 'none',
-      odometryType: 'none',
       claimedAutoScore: 0,
-      claimedAutoPieces: 0,
-      claimedAutoHangLevel: 0,
       claimedTeleopScore: 0,
-      claimedTeleopCycleSec: 0,
-      claimedEndgameHangLevel: 0,
-      claimedEndgameTimeSec: 0,
+      claimedEndgameScore: 0,
       claimedTotalScore: 0,
       version: 0
-    }
+    })
 
     // 1. Success case
     await pitStore.saveRecord({ ...rec })
@@ -280,29 +266,16 @@ describe('PitScout Store & Unified Team Roster', () => {
     pitStore.currentEventId = 'test-event-1'
 
     pitStore.records = [
-      {
+      createMockPitRecord({
         id: 'p-pending-1',
         eventId: 'test-event-1',
         teamNumber: 300,
         scoutId: 's1',
         scoutName: 'Alice',
         drivetrainType: 'tank',
-        weightLbs: 35,
-        sizingPassed: true,
-        mechanismType: 'other',
-        hangType: 'none',
-        odometryType: 'none',
-        claimedAutoScore: 0,
-        claimedAutoPieces: 0,
-        claimedAutoHangLevel: 0,
-        claimedTeleopScore: 0,
-        claimedTeleopCycleSec: 0,
-        claimedEndgameHangLevel: 0,
-        claimedEndgameTimeSec: 0,
-        claimedTotalScore: 0,
         version: 1,
         syncStatus: 'PENDING'
-      } as PitScoutingRecord
+      })
     ]
 
     expect(pitStore.pendingPitRecords).toHaveLength(1)
@@ -322,58 +295,36 @@ describe('PitScout Store & Unified Team Roster', () => {
 
     // Local has pending changes for team 400 at version 2, with photo 'photo-local'
     pitStore.records = [
-      {
+      createMockPitRecord({
         id: 'p-local',
         eventId: 'test-event-1',
         teamNumber: 400,
         scoutId: 's1',
         scoutName: 'Alice',
         drivetrainType: 'swerve',
-        weightLbs: 40,
-        sizingPassed: true,
-        mechanismType: 'other',
-        hangType: 'none',
-        odometryType: 'none',
         claimedAutoScore: 100,
-        claimedAutoPieces: 0,
-        claimedAutoHangLevel: 0,
-        claimedTeleopScore: 0,
-        claimedTeleopCycleSec: 0,
-        claimedEndgameHangLevel: 0,
-        claimedEndgameTimeSec: 0,
         claimedTotalScore: 100,
         version: 2,
         photoKeys: ['photo-local'],
         syncStatus: 'PENDING'
-      } as PitScoutingRecord
+      })
     ]
 
     // Incoming from Host is older (version 1) with photo 'photo-host'
     const incomingOlder: PitScoutingRecord[] = [
-      {
+      createMockPitRecord({
         id: 'p-remote-old',
         eventId: 'test-event-1',
         teamNumber: 400,
         scoutId: 's2',
         scoutName: 'Bob',
         drivetrainType: 'mecanum',
-        weightLbs: 30,
-        sizingPassed: true,
-        mechanismType: 'other',
-        hangType: 'none',
-        odometryType: 'none',
         claimedAutoScore: 50,
-        claimedAutoPieces: 0,
-        claimedAutoHangLevel: 0,
-        claimedTeleopScore: 0,
-        claimedTeleopCycleSec: 0,
-        claimedEndgameHangLevel: 0,
-        claimedEndgameTimeSec: 0,
         claimedTotalScore: 50,
         version: 1,
         photoKeys: ['photo-host'],
         syncStatus: 'SYNCED'
-      }
+      })
     ]
 
     pitStore.applyFullSync(incomingOlder)
@@ -389,30 +340,19 @@ describe('PitScout Store & Unified Team Roster', () => {
 
     // Now Host provides version 3 (strictly newer)
     const incomingNewer: PitScoutingRecord[] = [
-      {
+      createMockPitRecord({
         id: 'p-remote-newer',
         eventId: 'test-event-1',
         teamNumber: 400,
         scoutId: 's2',
         scoutName: 'Bob',
         drivetrainType: 'tank',
-        weightLbs: 32,
-        sizingPassed: true,
-        mechanismType: 'other',
-        hangType: 'none',
-        odometryType: 'none',
         claimedAutoScore: 120,
-        claimedAutoPieces: 0,
-        claimedAutoHangLevel: 0,
-        claimedTeleopScore: 0,
-        claimedTeleopCycleSec: 0,
-        claimedEndgameHangLevel: 0,
-        claimedEndgameTimeSec: 0,
         claimedTotalScore: 120,
         version: 3,
         photoKeys: ['photo-host-v3'],
         syncStatus: 'SYNCED'
-      }
+      })
     ]
 
     pitStore.applyFullSync(incomingNewer)
@@ -432,58 +372,38 @@ describe('PitScout Store & Unified Team Roster', () => {
     pitStore.currentEventId = 'test-event-1'
 
     pitStore.records = [
-      {
+      createMockPitRecord({
         id: 'p-local-pending',
         eventId: 'test-event-1',
         teamNumber: 500,
         scoutId: 's1',
         scoutName: 'Alice',
         drivetrainType: 'swerve',
-        weightLbs: 42,
-        sizingPassed: true,
-        mechanismType: 'intake',
-        hangType: 'winch',
-        odometryType: 'pinpoint',
         claimedAutoScore: 90,
-        claimedAutoPieces: 3,
-        claimedAutoHangLevel: 1,
         claimedTeleopScore: 100,
-        claimedTeleopCycleSec: 6,
-        claimedEndgameHangLevel: 2,
-        claimedEndgameTimeSec: 3,
         claimedTotalScore: 190,
         version: 2,
         photoKeys: ['photo-local-offline'],
         syncStatus: 'PENDING'
-      } as PitScoutingRecord
+      })
     ]
 
     vi.mocked(fetchPitRecords).mockResolvedValueOnce({
       records: [
-        {
+        createMockPitRecord({
           id: 'p-remote-server',
           eventId: 'test-event-1',
           teamNumber: 500,
           scoutId: 's2',
           scoutName: 'Bob',
           drivetrainType: 'mecanum',
-          weightLbs: 30,
-          sizingPassed: true,
-          mechanismType: 'other',
-          hangType: 'none',
-          odometryType: 'none',
           claimedAutoScore: 40,
-          claimedAutoPieces: 1,
-          claimedAutoHangLevel: 0,
           claimedTeleopScore: 50,
-          claimedTeleopCycleSec: 10,
-          claimedEndgameHangLevel: 0,
-          claimedEndgameTimeSec: 0,
           claimedTotalScore: 90,
           version: 1,
           photoKeys: ['photo-remote-server'],
           syncStatus: 'SYNCED'
-        } as PitScoutingRecord
+        })
       ],
       officialTeams: []
     })
@@ -504,57 +424,37 @@ describe('PitScout Store & Unified Team Roster', () => {
     pitStore.currentEventId = 'test-event-1'
 
     pitStore.records = [
-      {
+      createMockPitRecord({
         id: 'p-local-current',
         eventId: 'test-event-1',
         teamNumber: 600,
         scoutId: 's1',
         scoutName: 'Alice',
         drivetrainType: 'swerve',
-        weightLbs: 40,
-        sizingPassed: true,
-        mechanismType: 'intake',
-        hangType: 'none',
-        odometryType: 'none',
         claimedAutoScore: 80,
-        claimedAutoPieces: 2,
-        claimedAutoHangLevel: 0,
         claimedTeleopScore: 80,
-        claimedTeleopCycleSec: 8,
-        claimedEndgameHangLevel: 1,
-        claimedEndgameTimeSec: 5,
         claimedTotalScore: 160,
         version: 5,
         syncStatus: 'SYNCED'
-      } as PitScoutingRecord
+      })
     ]
 
     vi.mocked(savePitRecord).mockClear()
 
     // Incoming stale update (version 3 < local version 5)
-    const staleUpdate: PitScoutingRecord = {
+    const staleUpdate: PitScoutingRecord = createMockPitRecord({
       id: 'p-stale',
       eventId: 'test-event-1',
       teamNumber: 600,
       scoutId: 's3',
       scoutName: 'Charlie',
       drivetrainType: 'tank',
-      weightLbs: 30,
-      sizingPassed: true,
-      mechanismType: 'other',
-      hangType: 'none',
-      odometryType: 'none',
       claimedAutoScore: 10,
-      claimedAutoPieces: 0,
-      claimedAutoHangLevel: 0,
       claimedTeleopScore: 10,
-      claimedTeleopCycleSec: 15,
-      claimedEndgameHangLevel: 0,
-      claimedEndgameTimeSec: 0,
       claimedTotalScore: 20,
       version: 3,
       syncStatus: 'SYNCED'
-    }
+    })
 
     pitStore.applyRemoteUpdate(staleUpdate)
 
@@ -572,52 +472,32 @@ describe('PitScout Store & Unified Team Roster', () => {
     pitStore.currentEventId = 'test-event-1'
 
     pitStore.records = [
-      {
+      createMockPitRecord({
         id: 'p1',
         eventId: 'test-event-1',
         teamNumber: 100,
         scoutId: 'old_uuid_1',
         scoutName: 'OldScout',
         drivetrainType: 'mecanum',
-        weightLbs: 30,
-        sizingPassed: true,
-        mechanismType: 'intake',
-        hangType: 'none',
-        odometryType: 'none',
         claimedAutoScore: 50,
-        claimedAutoPieces: 2,
-        claimedAutoHangLevel: 0,
         claimedTeleopScore: 50,
-        claimedTeleopCycleSec: 8,
-        claimedEndgameHangLevel: 0,
-        claimedEndgameTimeSec: 0,
         claimedTotalScore: 100,
         version: 1,
         syncStatus: 'SYNCED'
-      } as PitScoutingRecord,
-      {
+      }),
+      createMockPitRecord({
         id: 'p2',
         eventId: 'test-event-1',
         teamNumber: 200,
         scoutId: 'other_scout',
         scoutName: 'OtherScout',
         drivetrainType: 'tank',
-        weightLbs: 28,
-        sizingPassed: true,
-        mechanismType: 'claw',
-        hangType: 'none',
-        odometryType: 'none',
         claimedAutoScore: 30,
-        claimedAutoPieces: 1,
-        claimedAutoHangLevel: 0,
         claimedTeleopScore: 40,
-        claimedTeleopCycleSec: 10,
-        claimedEndgameHangLevel: 0,
-        claimedEndgameTimeSec: 0,
         claimedTotalScore: 70,
         version: 1,
         syncStatus: 'SYNCED'
-      } as PitScoutingRecord
+      })
     ]
 
     pitStore.migrateScoutId('old_uuid_1', 'master_uuid_2', 'MasterScout')

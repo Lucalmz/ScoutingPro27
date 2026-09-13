@@ -64,18 +64,17 @@ describe('End-to-End Scouting Workflow Integration', () => {
       robotName: 'Titanium Bear',
       drivetrainType: 'swerve',
       weightLbs: 41.2,
-      sizingPassed: true,
-      mechanismType: 'linkage_arm',
-      hangType: 'telescoping',
+      ballCompatibility: 'universal',
+      launcherType: 'dual_flywheel',
+      flowerMechanism: 'cascade_lift',
+      hasColorSensor: true,
       odometryType: 'sparkfun_otos',
+      claimedAutoStrategy: '3 balls leave park',
       claimedAutoScore: 60,
-      claimedAutoPieces: 3,
-      claimedAutoHangLevel: 1,
+      claimedTeleopCycles: 9,
       claimedTeleopScore: 90,
-      claimedTeleopCycleSec: 10.5,
-      claimedEndgameHangLevel: 3, // Claims Level 3 high hang
-      claimedEndgameTimeSec: 6.0,
-      claimedTotalScore: 180, // Total claimed: 60 + 90 + 30 = 180
+      claimedEndgameScore: 30,
+      claimedTotalScore: 180,
       photoKeys: ['photo_titanium_front'],
       version: 1,
       hostSeq: 1,
@@ -204,8 +203,8 @@ describe('End-to-End Scouting Workflow Integration', () => {
     const updatedBrag = calculateBragIndex(claimedRecord, updatedMatches)
 
     expect(updatedBrag).toBeDefined()
-    // Max endgame score is now 28, confirming the claimed Level 3 high hang!
-    expect(updatedBrag?.label).toContain('高杠已证实')
+    // Max endgame score is now 28, confirming the claimed flower endgame score!
+    expect(updatedBrag?.label).toContain('花朵已证实')
   })
 
   it('verifies that teammate covering an assignment clears pending task for the assigned scout', async () => {

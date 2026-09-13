@@ -115,17 +115,13 @@ describe('ScoutingForm', () => {
         matchNumber: 2,
         teamNumber: 123,
         allianceColor: 'blue',
-        autoClassified: 0,
-        autoOverflow: 0,
-        autoPatterns: 0,
-        autoMovementScore: 0,
-        teleopClassified: 0,
-        teleopOverflow: 0,
-        gatesTriggered: 0,
-        baseScore: 5,
-        supportMultiplier: 0,
-        minorFouls: 0,
-        majorFouls: 0
+        autoLeave: true,
+        autoBalls: 1,
+        autoPark: true,
+        teleopCycles: [2, 3],
+        flowerPlaced: false,
+        flowerBottomBonus: false,
+        teleopPark: true
       }),
       syncStatus: 'PENDING',
       createdAt: '2023-01-01T00:00:00Z',
@@ -173,23 +169,98 @@ describe('ScoutingForm', () => {
     })
   })
 
-  describe('Counter Controls', () => {
-    it('increments and decrements patterns score using unbreakable counter controls', async () => {
+  describe('Cycle Tracker Controls', () => {
+    it('records, modifies and undoes teleop cycles correctly', async () => {
       const wrapper = mount(ScoutingForm, { props: defaultProps })
+      const team = wrapper.vm.teamsData[0]
       
-      expect(wrapper.vm.teamsData[0].autoPatterns).toBe(0)
+      expect(team.teleopCycles.length).toBe(0)
       
-      // Trigger increment
-      wrapper.vm.increment(wrapper.vm.teamsData[0], 'autoPatterns')
-      expect(wrapper.vm.teamsData[0].autoPatterns).toBe(1)
+      // Add first cycle with default 1 ball
+      wrapper.vm.addCycle(team, 1)
+      expect(team.teleopCycles).toEqual([1])
 
-      // Trigger decrement
-      wrapper.vm.decrement(wrapper.vm.teamsData[0], 'autoPatterns')
-      expect(wrapper.vm.teamsData[0].autoPatterns).toBe(0)
+      // Quick change to 3 balls
+      wrapper.vm.setLastCycleBalls(team, 3)
+      expect(team.teleopCycles).toEqual([3])
 
-      // Decrement below 0 is prevented
-      wrapper.vm.decrement(wrapper.vm.teamsData[0], 'autoPatterns')
-      expect(wrapper.vm.teamsData[0].autoPatterns).toBe(0)
+      // Increment balls up to max 4
+      wrapper.vm.incrementCycle(team, 0)
+      expect(team.teleopCycles).toEqual([4])
+      wrapper.vm.incrementCycle(team, 0) // capped at 4
+      expect(team.teleopCycles).toEqual([4])
+
+      // Decrement down to 0
+      wrapper.vm.decrementCycle(team, 0)
+      expect(team.teleopCycles).toEqual([3])
+
+      // Add second cycle with 2 balls
+      wrapper.vm.addCycle(team, 2)
+      expect(team.teleopCycles).toEqual([3, 2])
+      expect(wrapper.vm.getCycleBallsTotal(team)).toBe(5)
+      expect(wrapper.vm.getAvgBallsPerCycle(team)).toBe('2.5')
+
+      // Undo last cycle
+      wrapper.vm.undoLastCycle(team)
+      expect(team.teleopCycles).toEqual([3])
+    })
+
+    it('handles rapid consecutive addCycle clicks by incrementing balls on the current cycle', async () => {
+      const wrapper = mount(ScoutingForm, { props: defaultProps })
+      const team = wrapper.vm.teamsData[0]
+
+      // Tap 1: creates cycle 1 with 0 balls (defaults to 0)
+      wrapper.vm.addCycle(team, 'teleop', 0)
+      expect(team.teleopCycles).toEqual([0])
+      expect(wrapper.vm.isCycleTapping(0, 'teleop')).toBe(true)
+
+      // Tap 2 (rapid within 2s): increments cycle 1 to 1 ball
+      wrapper.vm.addCycle(team, 'teleop', 0)
+      expect(team.teleopCycles).toEqual([1])
+
+      // Tap 3: increments to 2 balls
+      wrapper.vm.addCycle(team, 'teleop', 0)
+      expect(team.teleopCycles).toEqual([2])
+
+      // Tap 4: increments to 3 balls
+      wrapper.vm.addCycle(team, 'teleop', 0)
+      expect(team.teleopCycles).toEqual([3])
+
+      // Tap 5: increments to 4 balls
+      wrapper.vm.addCycle(team, 'teleop', 0)
+      expect(team.teleopCycles).toEqual([4])
+
+      // Tap 6: capped at 4 balls
+      wrapper.vm.addCycle(team, 'teleop', 0)
+      expect(team.teleopCycles).toEqual([4])
+    })
+
+    it('unifies auto balls with cycle recording and direct chip selection', async () => {
+      const wrapper = mount(ScoutingForm, { props: defaultProps })
+      const team = wrapper.vm.teamsData[0]
+
+      expect(team.autoBalls).toBe(0)
+      expect(team.autoCycles).toEqual([])
+
+      // Tap 1 on auto: adds cycle with 0 balls
+      wrapper.vm.addCycle(team, 'auto', 0)
+      expect(team.autoCycles).toEqual([0])
+      expect(team.autoBalls).toBe(0)
+
+      // Rapid tap: increments to 1 ball
+      wrapper.vm.addCycle(team, 'auto', 0)
+      expect(team.autoCycles).toEqual([1])
+      expect(team.autoBalls).toBe(1)
+
+      // Direct chip selection: set to 3 balls
+      wrapper.vm.setAutoBalls(team, 3, 0)
+      expect(team.autoCycles).toEqual([3])
+      expect(team.autoBalls).toBe(3)
+
+      // Direct chip selection: set to 0 (clears cycles)
+      wrapper.vm.setAutoBalls(team, 0, 0)
+      expect(team.autoCycles).toEqual([])
+      expect(team.autoBalls).toBe(0)
     })
   })
 })

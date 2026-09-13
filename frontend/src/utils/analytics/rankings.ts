@@ -75,16 +75,49 @@ export function calculateScoutReliability(
 }
 
 /**
- * Aggregates scouting records by team, applies reliability weighting and penalty deductions,
+ * Helper to extract total scored balls from a scouting record's rawData (2026 BIOBUZZ autoBalls + teleopCycles or legacy fields).
+ */
+export function getScoutedBalls(r: ScoutingRecord): number {
+  try {
+    if (!r.rawData) return 0
+    const parsed = typeof r.rawData === 'string' ? JSON.parse(r.rawData) : r.rawData
+    const autoBalls = typeof parsed.autoBalls === 'number'
+      ? parsed.autoBalls
+      : ((parsed.autoPreload ? 1 : 0) + (parsed.autoSecondary ? 1 : 0))
+    if (Array.isArray(parsed.teleopCycles)) {
+      const teleopBalls = parsed.teleopCycles.reduce((sum: number, c: number) => sum + (Number(c) || 0), 0)
+      return autoBalls + teleopBalls
+    }
+    return autoBalls
+  } catch {
+    return 0
+  }
+}
+
+/**
+ * Aggregates scouting records by team, applies reliability weighting,
+ * allocates official match tips based on ball count ratios,
  * calculates trend arrows ('up' | 'down' | 'stable' | 'new'), and returns sorted rankings.
+ * Note: Official penalties are currently ignored per 2026-2027 BIOBUZZ rules.
  */
 export function calculateRankings(
   records: ScoutingRecord[],
   officialMatches: OfficialMatch[],
   scoutReliability: Record<string, 'low' | 'high'>
 ): RankingRow[] {
+  const uniqueRecords = new Map<string, ScoutingRecord>()
+  for (const record of records) {
+    if (record.isDeleted) continue
+    const level = getRecordTournamentLevel(record)
+    const key = `${level}-${record.matchNumber}-${record.teamNumber}`
+    const existing = uniqueRecords.get(key)
+    if (!existing || new Date(record.updatedAt) > new Date(existing.updatedAt)) {
+      uniqueRecords.set(key, record)
+    }
+  }
+
   const map = new Map<number, ScoutingRecord[]>()
-  for (const r of records) {
+  for (const r of uniqueRecords.values()) {
     if (r.isDeleted) continue
     let teamRecs = map.get(r.teamNumber)
     if (!teamRecs) {
@@ -109,6 +142,7 @@ export function calculateRankings(
     let totalWeightedTeleop = 0
     let totalWeightedEndgame = 0
     let totalWeightedScore = 0
+    let totalAllocatedTips = 0
     let realMaxScore = 0
     const totalRealScoreForTrend: number[] = []
     let brokenCount = 0
@@ -122,24 +156,51 @@ export function calculateRankings(
       const weight = scoutReliability[r.scoutId] === 'low' ? 0.5 : 1.0
       weightSum += weight
 
-      let realTotalScore = r.totalScore
+      // 官方判罚分目前忽略，纯粹聚焦战队自身得分能力
+      const realTotalScore = r.totalScore
       const rLevel = getRecordTournamentLevel(r)
       const match = officialMatches.find((m) => {
         if (m.matchNum !== r.matchNumber) return false
         const mLevel = (m.tournamentLevel || 'QUALIFICATION').toUpperCase()
         return mLevel === rLevel
       })
-      if (match && match.scores) {
+
+      // Tips 比例分配计算：依据出球比例进行场均贡献分配
+      let allocatedTips = 0
+      if (match && match.scores && match.teams) {
         const teamInfo = match.teams.find((t) => t.teamNumber === r.teamNumber)
         if (teamInfo) {
           const alliance = teamInfo.alliance.toLowerCase() as 'red' | 'blue'
           const allianceScores = match.scores[alliance]
-          if (allianceScores) {
-            realTotalScore = r.totalScore - allianceScores.penaltyPointsCommitted / 2
+          const totalTips = allianceScores?.totalTips ?? 0
+          if (totalTips > 0) {
+            const myBalls = getScoutedBalls(r)
+            const partnerTeams = match.teams.filter(
+              (t) => t.alliance.toLowerCase() === alliance && t.teamNumber !== r.teamNumber
+            )
+            if (partnerTeams.length > 0) {
+              let partnerBalls = 0
+              let foundPartner = false
+              for (const pt of partnerTeams) {
+                const partnerRec = uniqueRecords.get(`${rLevel}-${r.matchNumber}-${pt.teamNumber}`)
+                if (partnerRec && !partnerRec.isBroken) {
+                  partnerBalls += getScoutedBalls(partnerRec)
+                  foundPartner = true
+                }
+              }
+              if (foundPartner && (myBalls + partnerBalls) > 0) {
+                allocatedTips = totalTips * (myBalls / (myBalls + partnerBalls))
+              } else {
+                allocatedTips = totalTips * 0.5
+              }
+            } else {
+              allocatedTips = totalTips * 0.5
+            }
           }
         }
       }
 
+      totalAllocatedTips += allocatedTips
       totalWeightedAuto += r.autoScore * weight
       totalWeightedTeleop += r.teleopScore * weight
       totalWeightedEndgame += r.endgameScore * weight
@@ -157,11 +218,15 @@ export function calculateRankings(
     const avgEndgameScore = totalWeightedEndgame / effectiveWeight
     const avgRating = totalWeightedScore / effectiveWeight
 
+    const validMatchesCount = totalRealScoreForTrend.length
+    const avgTipsPerMatch = validMatchesCount > 0
+      ? Math.round((totalAllocatedTips / validMatchesCount) * 10) / 10
+      : 0
+
     let trend: 'up' | 'down' | 'stable' | 'new' = 'new'
-    const validCount = totalRealScoreForTrend.length
-    if (validCount > 1) {
-      const lastMatchScore = totalRealScoreForTrend[validCount - 1]!
-      const previousMatches = totalRealScoreForTrend.slice(0, validCount - 1)
+    if (validMatchesCount > 1) {
+      const lastMatchScore = totalRealScoreForTrend[validMatchesCount - 1]!
+      const previousMatches = totalRealScoreForTrend.slice(0, validMatchesCount - 1)
       const previousAvg = previousMatches.reduce((s, r) => s + r, 0) / previousMatches.length
 
       if (lastMatchScore > previousAvg * 1.15) {
@@ -171,7 +236,7 @@ export function calculateRankings(
       } else {
         trend = 'stable'
       }
-    } else if (validCount === 1) {
+    } else if (validMatchesCount === 1) {
       trend = 'new'
     }
 
@@ -181,6 +246,7 @@ export function calculateRankings(
       avgAutoScore: Math.round(avgAutoScore * 10) / 10,
       avgTeleopScore: Math.round(avgTeleopScore * 10) / 10,
       avgEndgameScore: Math.round(avgEndgameScore * 10) / 10,
+      avgTipsPerMatch,
       maxScore: realMaxScore,
       avgRating: Math.round(avgRating * 10) / 10,
       brokenCount,

@@ -1,4 +1,4 @@
--- V4__Expand_Id_Columns.sql — Expand ID columns and add performance indexes for super-event scale
+-- V4__Move_To_Biobuzz.sql — Expand ID columns, add performance indexes, and transition schema to 2026-2027 BIOBUZZ
 
 -- 1. Expand Primary Key ID columns to VARCHAR(2048)
 ALTER TABLE match_schedules ALTER COLUMN id VARCHAR(2048);
@@ -39,3 +39,22 @@ CREATE INDEX IF NOT EXISTS idx_records_scout ON scouting_records(scout_id);
 CREATE INDEX IF NOT EXISTS idx_records_event_team ON scouting_records(event_id, team_number);
 CREATE INDEX IF NOT EXISTS idx_records_tombstone ON scouting_records(is_deleted, updated_at);
 CREATE INDEX IF NOT EXISTS idx_pit_records_active ON pit_scouting_records(event_id, is_deleted, team_number);
+
+-- 5. Add 2026-2027 BIOBUZZ Pit Scouting Columns
+ALTER TABLE pit_scouting_records ADD COLUMN IF NOT EXISTS ball_compatibility VARCHAR(30) DEFAULT 'universal';
+ALTER TABLE pit_scouting_records ADD COLUMN IF NOT EXISTS launcher_type VARCHAR(100) DEFAULT '';
+ALTER TABLE pit_scouting_records ADD COLUMN IF NOT EXISTS flower_mechanism VARCHAR(100) DEFAULT '';
+ALTER TABLE pit_scouting_records ADD COLUMN IF NOT EXISTS has_color_sensor BOOLEAN DEFAULT FALSE;
+ALTER TABLE pit_scouting_records ADD COLUMN IF NOT EXISTS claimed_auto_strategy TEXT;
+ALTER TABLE pit_scouting_records ADD COLUMN IF NOT EXISTS claimed_teleop_cycles INT DEFAULT 0;
+ALTER TABLE pit_scouting_records ADD COLUMN IF NOT EXISTS claimed_endgame_score INT DEFAULT 0;
+
+-- 6. Drop Obsolete Legacy Non-BIOBUZZ Columns
+ALTER TABLE pit_scouting_records DROP COLUMN IF EXISTS sizing_passed;
+ALTER TABLE pit_scouting_records DROP COLUMN IF EXISTS mechanism_type;
+ALTER TABLE pit_scouting_records DROP COLUMN IF EXISTS hang_type;
+ALTER TABLE pit_scouting_records DROP COLUMN IF EXISTS claimed_auto_pieces;
+ALTER TABLE pit_scouting_records DROP COLUMN IF EXISTS claimed_auto_hang_level;
+ALTER TABLE pit_scouting_records DROP COLUMN IF EXISTS claimed_teleop_cycle_sec;
+ALTER TABLE pit_scouting_records DROP COLUMN IF EXISTS claimed_endgame_hang_level;
+ALTER TABLE pit_scouting_records DROP COLUMN IF EXISTS claimed_endgame_time_sec;

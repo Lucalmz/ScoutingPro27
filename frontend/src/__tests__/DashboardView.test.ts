@@ -31,9 +31,13 @@ vi.mock('@/services/photoStorage', () => ({
   isDesktopHost: vi.fn(() => true)
 }))
 
+import { transitionState } from '@/utils/transitionState'
+
 describe('DashboardView.vue', () => {
   beforeEach(() => {
     setActivePinia(createPinia())
+    transitionState.sharedElementId = null
+    transitionState.activeToken = null
     mockPush.mockClear()
     mockReplace.mockClear()
     vi.clearAllMocks()
@@ -83,6 +87,7 @@ describe('DashboardView.vue', () => {
     const card = wrapper.find('.event-card')
     expect(card.exists()).toBe(true)
     await card.trigger('click')
+    expect(card.classes()).toContain('slide-out-right')
     await wrapper.vm.$nextTick()
     await new Promise((r) => setTimeout(r, 10))
 
@@ -170,6 +175,10 @@ describe('DashboardView.vue', () => {
     const eventStore = useEventStore()
     eventStore.events = []
     vi.spyOn(eventStore, 'fetchEvents').mockResolvedValue(undefined)
+    const syncExternalSpy = vi.spyOn(eventStore, 'syncExternal').mockImplementation(async (evt) => {
+      eventStore.events.push(evt)
+      return evt
+    })
 
     const toastStore = useToastStore()
     const toastSpy = vi.spyOn(toastStore, 'showToast')
@@ -203,8 +212,70 @@ describe('DashboardView.vue', () => {
     await fileInput.trigger('change')
     await new Promise((r) => setTimeout(r, 50))
 
+    expect(syncExternalSpy).toHaveBeenCalledWith(expect.objectContaining({ id: 'pkg-evt-789' }))
     expect(eventStore.events.some((e) => e.id === 'pkg-evt-789')).toBe(true)
     expect(toastSpy).toHaveBeenCalledWith('offline_sync.import_success_event', 'info')
     expect(mockPush).toHaveBeenCalledWith('/event/pkg-evt-789')
+  })
+
+  it('cleans up inline transition, opacity, and transform in enter hook so card styles are not permanently locked', async () => {
+    const userStore = useUserStore()
+    userStore.user = { id: 'u1', username: 'Tester', token: 'token' }
+    const eventStore = useEventStore()
+    eventStore.events = []
+    vi.spyOn(eventStore, 'fetchEvents').mockResolvedValue(undefined)
+
+    const wrapper = mount(DashboardView)
+    await new Promise((r) => setTimeout(r, 10))
+
+    vi.useFakeTimers()
+
+    const dummyEl = document.createElement('div')
+    dummyEl.dataset.index = '0'
+    document.body.appendChild(dummyEl)
+
+    const vm = wrapper.vm as any
+
+    const rafSpy = vi.spyOn(window, 'requestAnimationFrame').mockImplementation((cb) => {
+      cb(0)
+      return 0
+    })
+
+    // Test beforeEnter
+    vm.beforeEnter(dummyEl)
+    expect(dummyEl.style.opacity).toBe('0')
+    expect(dummyEl.style.transform).toBe('translateY(20px)')
+
+    // Test enter
+    let doneCalled = false
+    vm.enter(dummyEl, () => {
+      doneCalled = true
+    })
+
+    // Advance timers for delay (0ms) + transition duration (360ms)
+    vi.advanceTimersByTime(500)
+
+    expect(doneCalled).toBe(true)
+    // Inline styles must be removed so that .slide-out-right and other transitions work seamlessly
+    expect(dummyEl.style.opacity).toBe('')
+    expect(dummyEl.style.transform).toBe('')
+    expect(dummyEl.style.transition).toBe('')
+
+    rafSpy.mockRestore()
+    document.body.removeChild(dummyEl)
+    vi.useRealTimers()
+  })
+
+  it('does NOT render persistent account-merge-btn in topbar', async () => {
+    const userStore = useUserStore()
+    userStore.user = { id: 'u1', username: 'Tester', token: 'token' }
+    const eventStore = useEventStore()
+    eventStore.events = []
+    vi.spyOn(eventStore, 'fetchEvents').mockResolvedValue(undefined)
+
+    const wrapper = mount(DashboardView)
+    await new Promise((r) => setTimeout(r, 10))
+
+    expect(wrapper.find('.account-merge-btn').exists()).toBe(false)
   })
 })

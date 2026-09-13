@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { watch } from 'vue'
 import ToastProvider from '@/components/ToastProvider.vue'
+import ConfirmModal from '@/components/common/ConfirmModal.vue'
 import InboxWidget from '@/components/common/InboxWidget.vue'
 import { useInboxStore } from '@/stores/inbox'
 import { useToastStore } from '@/stores/toast'
@@ -8,7 +9,7 @@ import { useToastStore } from '@/stores/toast'
 const inboxStore = useInboxStore()
 const toastStore = useToastStore()
 
-const isViewTransitionSupported = 'startViewTransition' in document
+const isViewTransitionSupported = typeof document !== 'undefined' && 'startViewTransition' in document
 
 watch(() => inboxStore.messages.length, (newLen, oldLen) => {
   if (newLen > oldLen) {
@@ -22,6 +23,7 @@ watch(() => inboxStore.messages.length, (newLen, oldLen) => {
 
 <template>
   <ToastProvider />
+  <ConfirmModal />
   <div class="router-view-container">
     <router-view v-slot="{ Component }">
       <transition 
@@ -119,7 +121,6 @@ watch(() => inboxStore.messages.length, (newLen, oldLen) => {
 @keyframes slide-from-right {
   from {
     transform: translateX(48px) scale(0.98);
-    filter: blur(2px);
     opacity: 0;
   }
 }
@@ -127,7 +128,6 @@ watch(() => inboxStore.messages.length, (newLen, oldLen) => {
 @keyframes slide-to-left {
   to {
     transform: translateX(-48px) scale(0.98);
-    filter: blur(2px);
     opacity: 0;
   }
 }
@@ -135,7 +135,6 @@ watch(() => inboxStore.messages.length, (newLen, oldLen) => {
 @keyframes slide-from-left {
   from {
     transform: translateX(-48px) scale(0.98);
-    filter: blur(2px);
     opacity: 0;
   }
 }
@@ -143,7 +142,6 @@ watch(() => inboxStore.messages.length, (newLen, oldLen) => {
 @keyframes slide-to-right {
   to {
     transform: translateX(48px) scale(0.98);
-    filter: blur(2px);
     opacity: 0;
   }
 }
@@ -406,12 +404,12 @@ watch(() => inboxStore.messages.length, (newLen, oldLen) => {
 }
 
 @keyframes modal-push-back {
-  from { transform: scale(1); filter: brightness(1); border-radius: 0; }
-  to { transform: scale(0.94); filter: brightness(0.65); border-radius: 16px; }
+  from { transform: scale(1); opacity: 1; border-radius: 0; }
+  to { transform: scale(0.94); opacity: 0.65; border-radius: 16px; }
 }
 
 @keyframes modal-pull-forward {
-  from { transform: scale(0.94); filter: brightness(0.65); border-radius: 16px; }
-  to { transform: scale(1); filter: brightness(1); border-radius: 0; }
+  from { transform: scale(0.94); opacity: 0.65; border-radius: 16px; }
+  to { transform: scale(1); opacity: 1; border-radius: 0; }
 }
 </style>

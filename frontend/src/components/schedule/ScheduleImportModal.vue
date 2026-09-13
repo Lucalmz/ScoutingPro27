@@ -43,7 +43,7 @@ function handleClose() {
 // 1. 一键同步 FTC 官方赛程与比分
 async function handleSyncOfficial() {
   if (!props.event) return
-  const year = props.event.ftcYear || 2025
+  const year = props.event.ftcYear || 2026
   const code = (props.event.ftcEventCode || '').trim()
 
   if (!code) {
@@ -191,7 +191,7 @@ async function handleConfirmCsvImport() {
                 </span>
                 <div class="ftc-meta">
                   <div class="meta-title">
-                    {{ event?.ftcEventCode ? `FTC 赛事: ${event.ftcEventCode} (${event.ftcYear || 2025})` : t('schedule.ftc_unbound_notice') }}
+                    {{ event?.ftcEventCode ? `FTC 赛事: ${event.ftcEventCode} (${event.ftcYear || 2026})` : t('schedule.ftc_unbound_notice') }}
                   </div>
                   <div class="meta-desc">
                     {{ event?.ftcEventCode ? t('schedule.ftc_bound_desc') : t('schedule.ftc_unbound_desc') }}

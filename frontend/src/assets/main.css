@@ -79,6 +79,12 @@
   --glow-primary: 0 0 10px rgba(57, 255, 20, 0.4), 0 0 20px rgba(57, 255, 20, 0.2);
   --glow-primary-hover: 0 0 15px rgba(57, 255, 20, 0.6), 0 0 30px rgba(57, 255, 20, 0.3);
 
+  /* Safe Area Tokens */
+  --sat: env(safe-area-inset-top, 0px);
+  --sab: env(safe-area-inset-bottom, 0px);
+  --sal: env(safe-area-inset-left, 0px);
+  --sar: env(safe-area-inset-right, 0px);
+
   /* Unified Motion Design Tokens */
   --motion-ease-out: cubic-bezier(0.16, 1, 0.3, 1);
   --motion-ease-in: cubic-bezier(0.7, 0, 0.84, 0);
@@ -109,7 +115,9 @@ html {
     sans-serif;
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
-  scrollbar-gutter: stable;
+  scrollbar-gutter: auto;
+  -webkit-text-size-adjust: 100%;
+  text-size-adjust: 100%;
 }
 
 h1, h2, h3, h4, h5, h6, .font-heading {
@@ -121,7 +129,10 @@ body {
   background: var(--background);
   color: var(--foreground);
   min-height: 100vh;
+  min-height: 100dvh;
   overflow-x: hidden;
+  touch-action: manipulation;
+  -webkit-overflow-scrolling: touch;
 }
 
 /* Scrollbar styling */
@@ -205,7 +216,7 @@ button,
   transition: transform var(--motion-duration-fast) var(--motion-ease-out),
               box-shadow var(--motion-duration-fast) var(--motion-ease-out),
               background-color var(--motion-duration-fast) ease,
-              opacity var(--motion-duration-fast) ease !important;
+              opacity var(--motion-duration-fast) ease;
 }
 
 button:active:not(:disabled), 
@@ -310,6 +321,12 @@ button:active:not(:disabled),
 .tag-badge-enter-active,
 .tag-badge-leave-active {
   transition: all var(--motion-duration-moderate) var(--motion-ease-out);
+}
+.tag-badge-leave-active {
+  position: absolute;
+}
+.tag-badge-move {
+  transition: transform var(--motion-duration-moderate) var(--motion-ease-out);
 }
 .tag-badge-enter-from {
   opacity: 0;

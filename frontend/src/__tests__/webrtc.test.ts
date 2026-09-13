@@ -736,8 +736,58 @@ describe('webrtc service', () => {
       expect.stringContaining('"conflictType":"DUPLICATE_NAME"')
     )
     expect(dc2.send).toHaveBeenCalledWith(
-      expect.stringContaining('"suggestedName":"Alice-')
+      expect.stringContaining('"conflictingUserId":"scout_alice_user1"')
     )
+  })
+
+  it('Host detects DUPLICATE_NAME conflict when client has same username as Host itself', async () => {
+    localStorage.setItem(
+      'scoutingpro-user',
+      JSON.stringify({ id: 'host_alice_uuid', username: 'HostAlice' })
+    )
+
+    const callbacks = {
+      onStatusChange: vi.fn(),
+      onRecordsReceived: vi.fn().mockImplementation((recs) => Promise.resolve(recs)),
+      onAckReceived: vi.fn(),
+      onRequestSync: vi.fn(),
+      onClientConnected: vi.fn()
+    }
+    const service = createWebRtcService(callbacks)
+    await service.host('test-code')
+
+    const onMessage = mockMqttClient.on.mock.calls.find((c: any) => c[0] === 'message')?.[1]
+
+    // Client connects with same username as Host but different userId
+    onMessage('topic', new TextEncoder().encode(JSON.stringify({
+      sender: 'peer_client_alice',
+      offer: { type: 'offer', sdp: '...' }
+    })))
+    await new Promise(r => setTimeout(r, 10))
+    const pc = vi.mocked(global.RTCPeerConnection).mock.results[0].value
+    const dc = { send: vi.fn(), readyState: 'open', close: vi.fn(), onmessage: null as any }
+    pc.ondatachannel({ channel: dc })
+
+    await dc.onmessage({
+      data: JSON.stringify({
+        type: 'REQUEST_SYNC',
+        senderUserId: 'client_alice_uuid',
+        senderUserName: 'HostAlice',
+        authCode: 'test-code'
+      })
+    })
+
+    expect(dc.send).toHaveBeenCalledWith(
+      expect.stringContaining('"conflictType":"DUPLICATE_NAME"')
+    )
+    expect(dc.send).toHaveBeenCalledWith(
+      expect.stringContaining('"conflictingUserId":"host_alice_uuid"')
+    )
+    expect(dc.send).toHaveBeenCalledWith(
+      expect.stringContaining('"conflictingUsername":"HostAlice"')
+    )
+
+    localStorage.removeItem('scoutingpro-user')
   })
 
   it('Host handles takeover request with permit decision', async () => {
@@ -2205,18 +2255,16 @@ describe('WebRTC Pit Scouting & Batch Sync Protocol', () => {
       scoutName: 'Alice',
       drivetrainType: 'mecanum',
       weightLbs: 38,
-      sizingPassed: true,
-      mechanismType: '',
-      hangType: '',
-      odometryType: '',
+      ballCompatibility: 'universal',
+      launcherType: '差速双飞轮',
+      flowerMechanism: '垂直级联高抬升',
+      hasColorSensor: true,
+      odometryType: 'two_wheel',
       claimedAutoScore: 60,
-      claimedAutoPieces: 3,
-      claimedAutoHangLevel: 1,
+      claimedTeleopCycles: 8,
       claimedTeleopScore: 80,
-      claimedTeleopCycleSec: 8,
-      claimedEndgameHangLevel: 2,
-      claimedEndgameTimeSec: 5,
-      claimedTotalScore: 140,
+      claimedEndgameScore: 15,
+      claimedTotalScore: 155,
       version: 1
     }
 

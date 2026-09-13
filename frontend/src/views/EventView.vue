@@ -22,7 +22,6 @@ import ScheduleManager from '@/components/schedule/ScheduleManager.vue'
 import SessionConflictModal from '@/components/common/SessionConflictModal.vue'
 import TakeoverPromptModal from '@/components/common/TakeoverPromptModal.vue'
 import RenameModal from '@/components/common/RenameModal.vue'
-import AccountMergeModal from '@/components/common/AccountMergeModal.vue'
 import OfflineSyncModal from '@/components/common/OfflineSyncModal.vue'
 import MobileQrModal from '@/components/common/MobileQrModal.vue'
 import MobileBottomNav from '@/components/common/MobileBottomNav.vue'
@@ -52,29 +51,18 @@ const pitStore = usePitScoutStore()
 const { t } = useI18n()
 
 const showRenameModal = ref(false)
-const showMergeModal = ref(false)
 const showOfflineSyncModal = ref(false)
 const showMobileQrModal = ref(false)
-
-async function onAccountMerged(newUsername: string, meta?: { oldId?: string, newId?: string }) {
-  toastStore.showToast(t('user.merge_success_toast', { username: newUsername }) || `账号已成功合并至 ${newUsername}，正在刷新...`, 'success')
-  const activeEventId = (route.params.eventId as string) || event.value?.id
-  if (activeEventId && meta?.oldId && meta?.newId) {
-    connStore.rtcService?.sendIdentityMigration(activeEventId, meta.oldId, meta.newId, newUsername)
-    connStore.requestSync(0, undefined, meta.newId, newUsername)
-  }
-  if (userStore.userId) {
-    await eventStore.fetchEvents(userStore.userId)
-  }
-}
 function handleOpenRenameModal() {
   if (typeof document !== 'undefined' && 'startViewTransition' in document) {
     document.documentElement.dataset.transitionType = 'user-profile'
-    const vt = document.startViewTransition(async () => {
+    const vt = (document as any).startViewTransition(async () => {
       showRenameModal.value = true
       await nextTick()
     })
-    vt.finished.finally(() => {
+    vt.ready?.catch(() => {})
+    vt.updateCallbackDone?.catch(() => {})
+    vt.finished.catch(() => {}).finally(() => {
       document.documentElement.removeAttribute('data-transition-type')
     })
   } else {
@@ -187,17 +175,13 @@ onMounted(async () => {
     flushOfflinePhotos(evt.id)
   }
 
-  if (eventStore.isHost) {
-    window.addEventListener('beforeunload', handleBeforeUnload)
-  }
+  window.addEventListener('beforeunload', handleBeforeUnload)
 })
 
 let navigatingToTeamDetail = false
 
 onUnmounted(() => {
-  if (eventStore.isHost) {
-    window.removeEventListener('beforeunload', handleBeforeUnload)
-  }
+  window.removeEventListener('beforeunload', handleBeforeUnload)
   if (!navigatingToTeamDetail) {
     cleanupWebRTC()
   }
@@ -279,7 +263,7 @@ async function handleTakeoverHost() {
     await connStore.takeoverHost()
   } catch (e: any) {
     console.error('[EventView] Failed to takeover host:', e)
-    toastStore.showError(e?.message || '接管主机失败')
+    toastStore.showError(e?.message || t('event.takeover_failed'))
   }
 }
 </script>
@@ -292,7 +276,7 @@ async function handleTakeoverHost() {
         <button class="btn-back" @click="goBack" style="display: flex; align-items: center; gap: 4px;">
           <span class="material-icons" style="font-size: 18px;">arrow_back</span>{{ t('event.back') }}
         </button>
-        <img src="/logo_transparent.png" alt="SP27" class="event-brand-logo" />
+        <img src="/logo_60.png" srcset="/logo_30.png 1x, /logo_60.png 2x" alt="SP27" class="event-brand-logo" />
         <div class="event-title">
           <span class="event-name" :style="{ viewTransitionName: 'event-card-title' }">{{ event?.name ?? t('event.event') }}</span>
           <div class="event-meta-row" v-if="event">
@@ -302,7 +286,7 @@ async function handleTakeoverHost() {
             </span>
             <span v-if="event.ftcEventCode" class="badge-ftc-bound" :title="t('event.ftc_bound_desc', { count: recordStore.officialMatches.length })">
               <span class="material-icons ftc-badge-icon">verified</span>
-              FTC: <strong>{{ event.ftcEventCode }}</strong> ({{ event.ftcYear || 2025 }})
+              FTC: <strong>{{ event.ftcEventCode }}</strong> ({{ event.ftcYear || 2026 }})
             </span>
             <span v-else-if="eventStore.isHost" class="badge-ftc-unbound" :title="t('event.ftc_unbound')">
               <span class="material-icons ftc-badge-icon">link_off</span>
@@ -366,12 +350,12 @@ async function handleTakeoverHost() {
       <div class="standby-banner-left">
         <span class="material-icons standby-icon">sensors</span>
         <span class="standby-text">
-          本机为<strong>【备用监控端】</strong>（当前赛事已由主控设备主持中，本机保持实时数据镜像）。
+          {{ t('event.standby_banner_desc') }}
         </span>
       </div>
       <button class="btn-takeover-host" @click="handleTakeoverHost">
         <span class="material-icons" style="font-size: 16px; margin-right: 4px;">offline_bolt</span>
-        一键接管为主控机
+        {{ t('event.takeover_as_host') }}
       </button>
     </div>
 
@@ -436,8 +420,7 @@ async function handleTakeoverHost() {
 
     <SessionConflictModal />
     <TakeoverPromptModal />
-    <RenameModal v-model:visible="showRenameModal" :event-id="event?.id" @open-merge="showMergeModal = true" />
-    <AccountMergeModal v-model:visible="showMergeModal" @merged="onAccountMerged" />
+    <RenameModal v-model:visible="showRenameModal" :event-id="event?.id" />
     <OfflineSyncModal v-model:visible="showOfflineSyncModal" :event-id="event?.id" />
     <MobileQrModal
       v-if="isHost && event"

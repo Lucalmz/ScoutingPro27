@@ -7,7 +7,8 @@ import * as api from '../services/api'
 vi.mock('../services/api', () => ({
   listEvents: vi.fn(),
   createEvent: vi.fn(),
-  joinEvent: vi.fn()
+  joinEvent: vi.fn(),
+  syncExternalEvent: vi.fn()
 }))
 
 describe('Events Store', () => {
@@ -70,5 +71,24 @@ describe('Events Store', () => {
     await store.join('ABCDEF', 'Updated Event')
     expect(store.events).toHaveLength(1)
     expect(store.events[0].name).toBe('Updated Event')
+  })
+
+  it('syncExternal synchronizes external event into events list and currentEvent', async () => {
+    const store = useEventStore()
+    const externalEvt = { id: 'evt-ext-1', name: 'External Imported Event', inviteCode: 'EXT123', hostId: 'u-remote' }
+    vi.mocked(api.syncExternalEvent).mockResolvedValue(externalEvt)
+
+    const synced = await store.syncExternal(externalEvt)
+    expect(synced?.id).toBe('evt-ext-1')
+    expect(store.events).toHaveLength(1)
+    expect(store.currentEvent?.id).toBe('evt-ext-1')
+    expect(store.events[0].name).toBe('External Imported Event')
+
+    // Calling again updates existing
+    const updated = { ...externalEvt, name: 'External Imported Event Renamed' }
+    vi.mocked(api.syncExternalEvent).mockResolvedValue(updated)
+    await store.syncExternal(updated)
+    expect(store.events).toHaveLength(1)
+    expect(store.events[0].name).toBe('External Imported Event Renamed')
   })
 })

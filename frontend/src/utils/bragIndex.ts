@@ -21,6 +21,7 @@ export function calculateBragIndex(
       overallRatio: 1.0,
       autoRatio: 1.0,
       teleopRatio: 1.0,
+      endgameUnfulfilled: false,
       hangUnfulfilled: false,
       label: '⏳ 待实测'
     }
@@ -33,6 +34,7 @@ export function calculateBragIndex(
       overallRatio: 1.0,
       autoRatio: 1.0,
       teleopRatio: 1.0,
+      endgameUnfulfilled: false,
       hangUnfulfilled: false,
       label: '⏳ 自述待补充'
     }
@@ -62,26 +64,24 @@ export function calculateBragIndex(
     ? Number((claimed.claimedTeleopScore / Math.max(maxTeleopScore, 1)).toFixed(2))
     : 1.0
 
-  // 4. 悬挂与高难机构履约核验
-  // FTC 实战打分中: Level 2 = 15 分, Level 3 = 28 分
-  const hangLevel = claimed.claimedEndgameHangLevel || 0
-  const claimsHighHang = hangLevel >= 2
-  const targetHangScore = hangLevel === 3 ? 28 : 15
-  const hangVerified = claimsHighHang && maxEndgameScore >= targetHangScore
-  const hangUnfulfilled = claimsHighHang && validMatches.length >= 2 && maxEndgameScore < targetHangScore
-  const hangPardoned = hangUnfulfilled // 针对高悬挂难复位或排位赛策略性留力特赦免责
+  // 4. 残局与高难花朵机构履约核验 (BIOBUZZ 2026-2027: 花朵放置 10-15 分, 停靠 5 分)
+  const claimedEndgame = claimed.claimedEndgameScore || 0
+  const claimsFlower = claimedEndgame >= 10
+  const endgameVerified = claimsFlower && maxEndgameScore >= 10
+  const endgameUnfulfilled = claimsFlower && validMatches.length >= 2 && maxEndgameScore < 10
+  const endgamePardoned = endgameUnfulfilled // 针对花朵机构策略性留力特赦免责
 
-  // 5. 判定档位（以赛场实际展现的峰值上限与产出比率为准）
+  // 5. 判定档位（以赛场实际展现的峰值上限与产出比率为准，放宽阈值以包容赛场正常波动与最佳成绩自报）
   let tier: BragTier = 'realistic'
   let label = `${overallRatio}x 真实守信`
 
-  if (overallRatio > 2.0) {
+  if (overallRatio > 2.2) {
     tier = 'mythical'
     label = `${overallRatio}x 吹破牛皮`
-  } else if (overallRatio > 1.45) {
+  } else if (overallRatio > 1.65) {
     tier = 'overclaimed'
     label = `${overallRatio}x 夸大其词`
-  } else if (overallRatio > 1.15) {
+  } else if (overallRatio > 1.25) {
     tier = 'optimistic'
     label = `${overallRatio}x 略偏乐观`
   } else {
@@ -90,10 +90,10 @@ export function calculateBragIndex(
   }
 
   // 标注状态修饰
-  if (hangVerified) {
-    label += ' (高杠已证实)'
-  } else if (hangPardoned) {
-    label += ' (高挂待验证)'
+  if (endgameVerified) {
+    label += ' (花朵已证实)'
+  } else if (endgamePardoned) {
+    label += ' (花朵待验证)'
   }
 
   return {
@@ -101,9 +101,12 @@ export function calculateBragIndex(
     overallRatio,
     autoRatio,
     teleopRatio,
-    hangUnfulfilled,
-    hangPardoned,
-    hangVerified,
+    endgameUnfulfilled,
+    endgamePardoned,
+    endgameVerified,
+    hangUnfulfilled: endgameUnfulfilled,
+    hangPardoned: endgamePardoned,
+    hangVerified: endgameVerified,
     label
   }
 }

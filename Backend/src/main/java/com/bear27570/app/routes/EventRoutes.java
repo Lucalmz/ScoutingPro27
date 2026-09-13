@@ -13,6 +13,8 @@ import com.bear27570.app.db.AppConfig;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
+import com.bear27570.app.util.FtcApiClient;
+
 import java.io.File;
 import java.io.IOException;
 import java.nio.file.Files;
@@ -29,10 +31,16 @@ public class EventRoutes {
     private static final Logger logger = LoggerFactory.getLogger(EventRoutes.class);
     private final Jdbi jdbi;
     private final Gson gson;
+    private final FtcApiClient ftcApiClient;
 
     public EventRoutes(Jdbi jdbi, Gson gson) {
+        this(jdbi, gson, new FtcApiClient());
+    }
+
+    public EventRoutes(Jdbi jdbi, Gson gson, FtcApiClient ftcApiClient) {
         this.jdbi = jdbi;
         this.gson = gson;
+        this.ftcApiClient = ftcApiClient != null ? ftcApiClient : new FtcApiClient();
     }
 
     public void register(RoutesConfig routes) {
@@ -180,7 +188,7 @@ public class EventRoutes {
                 return;
             }
             Integer parsedYear = null;
-            if (body.get("ftcYear") != null) {
+            if (body.get("ftcYear") != null && !String.valueOf(body.get("ftcYear")).isBlank()) {
                 try {
                     parsedYear = Double.valueOf(String.valueOf(body.get("ftcYear"))).intValue();
                 } catch (NumberFormatException e) {
@@ -189,8 +197,9 @@ public class EventRoutes {
                 }
             }
             final Integer year = parsedYear;
-            String code = asString(body.get("ftcEventCode"));
-            
+            String rawCode = asString(body.get("ftcEventCode"));
+            final String code = (rawCode != null && !rawCode.isBlank()) ? rawCode.trim().toUpperCase() : null;
+
             String userId = ctx.attribute("userId");
             jdbi.useExtension(EventDao.class, dao -> {
                 ScoutingEvent e = dao.findById(eventId);
@@ -200,7 +209,32 @@ public class EventRoutes {
                 if (!userId.equals(e.getHostId())) {
                     throw new io.javalin.http.ForbiddenResponse("Only the host can configure the event");
                 }
-                dao.updateFtcConfig(eventId, year, code);
+            });
+
+            if (code != null) {
+                if (year == null || year < 2000 || year > 2100) {
+                    ctx.status(400).result("Invalid ftcYear");
+                    return;
+                }
+                if (!code.matches("^[A-Za-z0-9_-]{1,32}$")) {
+                    ctx.status(400).result("Invalid ftcEventCode format");
+                    return;
+                }
+                try {
+                    boolean exists = ftcApiClient.eventExists(year, code);
+                    if (!exists) {
+                        ctx.status(400).result("FTC 官方赛事代码不存在: " + code + " (赛季 " + year + ")");
+                        return;
+                    }
+                } catch (Exception e) {
+                    logger.error("Failed to verify FTC event code '{}' for season {}: {}", code, year, e.getMessage(), e);
+                    ctx.status(502).result("FTC 官方 API 校验失败: " + e.getMessage());
+                    return;
+                }
+            }
+
+            jdbi.useExtension(EventDao.class, dao -> {
+                dao.updateFtcConfig(eventId, code != null ? year : null, code);
             });
             ctx.status(200).result("OK");
         });
@@ -238,6 +272,31 @@ public class EventRoutes {
                 }
                 BannedTeamDao bannedDao = handle.attach(BannedTeamDao.class);
                 bannedDao.banTeam(eventId, teamNumber);
+            });
+            ctx.status(200).result("OK");
+        });
+
+        routes.delete("/api/events/{id}/banned-teams/{teamNumber}", ctx -> {
+            String eventId = ctx.pathParam("id");
+            int teamNumber;
+            try {
+                teamNumber = Integer.parseInt(ctx.pathParam("teamNumber"));
+            } catch (NumberFormatException e) {
+                ctx.status(400).result("Invalid teamNumber format");
+                return;
+            }
+            String userId = ctx.attribute("userId");
+            jdbi.useTransaction(handle -> {
+                EventDao eventDao = handle.attach(EventDao.class);
+                ScoutingEvent e = eventDao.findById(eventId);
+                if (e == null) {
+                    throw new io.javalin.http.NotFoundResponse("Event not found");
+                }
+                if (!userId.equals(e.getHostId())) {
+                    throw new io.javalin.http.ForbiddenResponse("Only the host can unban teams");
+                }
+                BannedTeamDao bannedDao = handle.attach(BannedTeamDao.class);
+                bannedDao.unbanTeam(eventId, teamNumber);
             });
             ctx.status(200).result("OK");
         });

@@ -117,9 +117,9 @@ public class AiRoutes {
 
                 ctx.status(200).result(gson.toJson(Map.of("success", true))).contentType("application/json");
             } catch (IllegalArgumentException e) {
-                ctx.status(400).result(gson.toJson(Map.of("error", e.getMessage()))).contentType("application/json");
+                ctx.status(400).result(gson.toJson(Map.of("error", e.getMessage() != null ? e.getMessage() : "Invalid argument"))).contentType("application/json");
             } catch (Exception e) {
-                ctx.status(500).result(gson.toJson(Map.of("error", "Failed to save settings: " + e.getMessage()))).contentType("application/json");
+                ctx.status(500).result(gson.toJson(Map.of("error", "Failed to save settings: " + (e.getMessage() != null ? e.getMessage() : e.toString())))).contentType("application/json");
             }
         });
 
@@ -311,7 +311,7 @@ public class AiRoutes {
                 String reply = AiClient.chat(settings, sysPrompt, msgList);
                 ctx.result(gson.toJson(Map.of("reply", reply))).contentType("application/json");
             } catch (Exception e) {
-                ctx.status(500).result(gson.toJson(Map.of("error", e.getMessage()))).contentType("application/json");
+                ctx.status(500).result(gson.toJson(Map.of("error", e.getMessage() != null ? e.getMessage() : "AI chat failed"))).contentType("application/json");
             }
         });
 

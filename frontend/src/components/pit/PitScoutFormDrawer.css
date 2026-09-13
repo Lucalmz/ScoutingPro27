@@ -3,10 +3,10 @@
   inset: 0;
   background: rgba(0, 0, 0, 0.75);
   backdrop-filter: blur(4px);
+  -webkit-backdrop-filter: blur(4px);
   z-index: 1000;
   display: flex;
   justify-content: flex-end;
-  animation: fadeIn 0.34s ease;
 }
 
 .drawer-panel {
@@ -18,7 +18,6 @@
   display: flex;
   flex-direction: column;
   box-shadow: -8px 0 24px rgba(0, 0, 0, 0.6);
-  animation: slideIn 0.425s cubic-bezier(0.16, 1, 0.3, 1);
 }
 
 .drawer-header {
@@ -149,12 +148,26 @@
   display: flex;
   align-items: center;
   justify-content: center;
-  transition: all 0.2s ease;
+  transition: all 0.15s ease;
+  user-select: none;
+  touch-action: manipulation;
+  -webkit-tap-highlight-color: transparent;
 }
 
-.step-btn:hover {
+.step-btn:hover:not(:disabled) {
   border-color: var(--primary, #39ff14);
   color: var(--primary, #39ff14);
+}
+
+.step-btn:active:not(:disabled) {
+  transform: scale(0.92);
+}
+
+.step-btn:disabled {
+  opacity: 0.35;
+  cursor: not-allowed;
+  border-color: var(--border, #262626);
+  color: var(--muted-foreground, #888888);
 }
 
 .stepper-val {
@@ -163,6 +176,52 @@
   font-size: 16px;
   font-weight: 700;
   color: var(--foreground, #ededed);
+  font-variant-numeric: tabular-nums;
+  user-select: none;
+  display: inline-block;
+  transition: transform 0.15s cubic-bezier(0.34, 1.56, 0.64, 1), color 0.15s ease;
+}
+
+.stepper-val.bump-up,
+.stepper-val.bump-up-a {
+  animation: val-bump-up-a 0.22s cubic-bezier(0.34, 1.56, 0.64, 1);
+}
+
+.stepper-val.bump-up-b {
+  animation: val-bump-up-b 0.22s cubic-bezier(0.34, 1.56, 0.64, 1);
+}
+
+.stepper-val.bump-down,
+.stepper-val.bump-down-a {
+  animation: val-bump-down-a 0.22s cubic-bezier(0.34, 1.56, 0.64, 1);
+}
+
+.stepper-val.bump-down-b {
+  animation: val-bump-down-b 0.22s cubic-bezier(0.34, 1.56, 0.64, 1);
+}
+
+@keyframes val-bump-up-a {
+  0% { transform: translateY(0) scale(1); }
+  50% { transform: translateY(-3px) scale(1.15); color: var(--primary, #39ff14); }
+  100% { transform: translateY(0) scale(1); }
+}
+
+@keyframes val-bump-up-b {
+  0% { transform: translateY(0) scale(1); }
+  50% { transform: translateY(-3px) scale(1.15); color: var(--primary, #39ff14); }
+  100% { transform: translateY(0) scale(1); }
+}
+
+@keyframes val-bump-down-a {
+  0% { transform: translateY(0) scale(1); }
+  50% { transform: translateY(2px) scale(0.92); color: var(--status-error, #ef4444); }
+  100% { transform: translateY(0) scale(1); }
+}
+
+@keyframes val-bump-down-b {
+  0% { transform: translateY(0) scale(1); }
+  50% { transform: translateY(2px) scale(0.92); color: var(--status-error, #ef4444); }
+  100% { transform: translateY(0) scale(1); }
 }
 
 .stepper-unit {
@@ -188,6 +247,35 @@
   font-size: 12px;
   color: #ef4444;
   font-weight: 500;
+}
+
+.quick-chips-wrap {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-top: 4px;
+}
+
+.quick-chip-btn {
+  padding: 4px 10px;
+  border-radius: 6px;
+  background: rgba(255, 255, 255, 0.04);
+  border: 1px solid var(--border, #262626);
+  font-size: 11px;
+  color: var(--muted-foreground, #888888);
+  cursor: pointer;
+  transition: all 0.15s ease;
+}
+
+.quick-chip-btn:hover {
+  border-color: var(--primary, #39ff14);
+  color: var(--foreground, #ededed);
+}
+
+.quick-chip-btn.is-active {
+  background: rgba(57, 255, 20, 0.12);
+  border-color: var(--primary, #39ff14);
+  color: var(--primary, #39ff14);
 }
 
 .photos-grid {
@@ -294,8 +382,53 @@
   to { opacity: 1; }
 }
 
-@keyframes slideIn {
-  from { transform: translateX(100%); }
-  to { transform: translateX(0); }
+/* Pit Drawer Universal Transition */
+.pit-drawer-enter-active,
+.pit-drawer-leave-active {
+  transition: opacity 0.3s cubic-bezier(0.16, 1, 0.3, 1);
+}
+.pit-drawer-enter-active .drawer-panel,
+.pit-drawer-leave-active .drawer-panel {
+  transition: transform 0.34s cubic-bezier(0.16, 1, 0.3, 1);
+}
+.pit-drawer-enter-from,
+.pit-drawer-leave-to {
+  opacity: 0;
+}
+.pit-drawer-enter-from .drawer-panel,
+.pit-drawer-leave-to .drawer-panel {
+  transform: translateX(100%);
+}
+
+@media (max-width: 680px) {
+  .drawer-overlay {
+    align-items: flex-end;
+    justify-content: center;
+  }
+  .drawer-panel {
+    max-width: 100%;
+    height: auto;
+    max-height: 88vh;
+    border-left: none;
+    border-top: 1px solid var(--border, #262626);
+    border-top-left-radius: 20px;
+    border-top-right-radius: 20px;
+  }
+  .pit-drawer-enter-from .drawer-panel,
+  .pit-drawer-leave-to .drawer-panel {
+    transform: translateY(100%);
+  }
+  .drawer-body {
+    padding: 16px 14px;
+    gap: 18px;
+  }
+  .step-btn {
+    width: 44px;
+    height: 44px;
+    font-size: 20px;
+  }
+  .drawer-footer {
+    padding: 12px 16px max(16px, var(--sab));
+  }
 }
 

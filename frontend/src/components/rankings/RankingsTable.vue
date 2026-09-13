@@ -9,6 +9,8 @@ import { useRouter } from 'vue-router'
 import { transitionState } from '@/utils/transitionState'
 import { useTween } from '@/composables/useTween'
 import { useNavigationStore } from '@/stores/navigation'
+import { hapticLight, hapticSelection } from '@/utils/haptics'
+import { useConfirm } from '@/composables/useConfirm'
 
 // Inline component for animated numbers
 const AnimatedNumber = defineComponent({
@@ -49,6 +51,7 @@ function formatTagLabel(tagKey?: string | null): string {
 }
 
 function setSort(key: SortKey) {
+  hapticLight()
   if (sortKey.value === key) {
     sortDir.value = sortDir.value === 'asc' ? 'desc' : 'asc'
   } else {
@@ -88,34 +91,17 @@ function sortIndicator(key: SortKey): string {
   return sortDir.value === 'asc' ? 'arrow_drop_up' : 'arrow_drop_down'
 }
 
-const highlightTop = ref(0)
-const highlightHeight = ref(0)
-const highlightVisible = ref(false)
 
-function onRowEnter(e: MouseEvent) {
-  const target = e.currentTarget as HTMLElement
-  const wrapper = target.closest('.table-wrapper') as HTMLElement
-  if (wrapper && target) {
-    const wrapperRect = wrapper.getBoundingClientRect()
-    const targetRect = target.getBoundingClientRect()
-    highlightTop.value = targetRect.top - wrapperRect.top + wrapper.scrollTop
-    highlightHeight.value = targetRect.height
-    highlightVisible.value = true
-  }
-}
 
-function onTableLeave() {
-  highlightVisible.value = false
-}
-
-const highlightStyle = computed(() => ({
-  top: `${highlightTop.value}px`,
-  height: `${highlightHeight.value}px`,
-  opacity: highlightVisible.value ? 1 : 0
-}))
+const { showConfirm } = useConfirm()
 
 async function banTeam(teamNumber: number) {
-  if (!confirm(`Are you sure you want to ban team ${teamNumber}? Scouters will be warned not to record them.`)) {
+  const ok = await showConfirm({
+    title: t('confirm_dialog.title'),
+    message: `Are you sure you want to ban team ${teamNumber}? Scouters will be warned not to record them.`,
+    type: 'warning'
+  })
+  if (!ok) {
     return
   }
   try {
@@ -128,7 +114,27 @@ async function banTeam(teamNumber: number) {
   }
 }
 
+async function unbanTeam(teamNumber: number) {
+  const ok = await showConfirm({
+    title: t('confirm_dialog.title'),
+    message: `Are you sure you want to unban team ${teamNumber}?`,
+    type: 'info'
+  })
+  if (!ok) {
+    return
+  }
+  try {
+    if (eventStore.currentEvent?.id) {
+      await recordStore.unbanTeam(eventStore.currentEvent.id, teamNumber)
+      toastStore.showToast(`Team ${teamNumber} has been unbanned`, 'success')
+    }
+  } catch (e: any) {
+    toastStore.showToast(e.message || 'Failed to unban team', 'error')
+  }
+}
+
 function viewTeamDetails(teamNumber: number) {
+  hapticLight()
   if (eventStore.currentEvent?.id) {
     const tabContent = document.querySelector('.tab-content') as HTMLElement | null
     const tableWrapper = document.querySelector('.table-wrapper') as HTMLElement | null
@@ -161,7 +167,7 @@ function viewTeamDetails(teamNumber: number) {
         <button
           class="filter-chip"
           :class="{ active: selectedTagFilter === null }"
-          @click="selectedTagFilter = null"
+          @click="selectedTagFilter = null; hapticSelection()"
         >
           {{ t('tags.all') }}
         </button>
@@ -170,7 +176,7 @@ function viewTeamDetails(teamNumber: number) {
           :key="tagKey"
           class="filter-chip"
           :class="{ active: selectedTagFilter === tagKey }"
-          @click="selectedTagFilter = (selectedTagFilter === tagKey ? null : tagKey)"
+          @click="selectedTagFilter = (selectedTagFilter === tagKey ? null : tagKey); hapticSelection()"
         >
           {{ formatTagLabel(tagKey) }}
         </button>
@@ -180,28 +186,31 @@ function viewTeamDetails(teamNumber: number) {
         <thead>
           <tr>
             <th @click="setSort('teamNumber')" class="sortable">
-              {{ t('rankings.team') }}<span class="material-icons" style="font-size: 18px; vertical-align: middle;">{{ sortIndicator('teamNumber') }}</span>
+              {{ t('rankings.team') }}<span class="material-icons sort-icon" :class="{ 'is-active': sortKey === 'teamNumber', 'is-asc': sortKey === 'teamNumber' && sortDir === 'asc' }">arrow_drop_down</span>
             </th>
             <th @click="setSort('matchCount')" class="sortable">
-              {{ t('rankings.matches') }}<span class="material-icons" style="font-size: 18px; vertical-align: middle;">{{ sortIndicator('matchCount') }}</span>
+              {{ t('rankings.matches') }}<span class="material-icons sort-icon" :class="{ 'is-active': sortKey === 'matchCount', 'is-asc': sortKey === 'matchCount' && sortDir === 'asc' }">arrow_drop_down</span>
             </th>
             <th @click="setSort('brokenCount')" class="sortable">
-              {{ t('rankings.breakdown') }}<span class="material-icons" style="font-size: 18px; vertical-align: middle;">{{ sortIndicator('brokenCount') }}</span>
+              {{ t('rankings.breakdown') }}<span class="material-icons sort-icon" :class="{ 'is-active': sortKey === 'brokenCount', 'is-asc': sortKey === 'brokenCount' && sortDir === 'asc' }">arrow_drop_down</span>
             </th>
             <th @click="setSort('avgAutoScore')" class="sortable">
-              {{ t('rankings.avg_auto') }}<span class="material-icons" style="font-size: 18px; vertical-align: middle;">{{ sortIndicator('avgAutoScore') }}</span>
+              {{ t('rankings.avg_auto') }}<span class="material-icons sort-icon" :class="{ 'is-active': sortKey === 'avgAutoScore', 'is-asc': sortKey === 'avgAutoScore' && sortDir === 'asc' }">arrow_drop_down</span>
             </th>
             <th @click="setSort('avgTeleopScore')" class="sortable">
-              {{ t('rankings.avg_tele') }}<span class="material-icons" style="font-size: 18px; vertical-align: middle;">{{ sortIndicator('avgTeleopScore') }}</span>
+              {{ t('rankings.avg_tele') }}<span class="material-icons sort-icon" :class="{ 'is-active': sortKey === 'avgTeleopScore', 'is-asc': sortKey === 'avgTeleopScore' && sortDir === 'asc' }">arrow_drop_down</span>
             </th>
             <th @click="setSort('avgEndgameScore')" class="sortable">
-              {{ t('rankings.avg_endgame') }}<span class="material-icons" style="font-size: 18px; vertical-align: middle;">{{ sortIndicator('avgEndgameScore') }}</span>
+              {{ t('rankings.avg_endgame') }}<span class="material-icons sort-icon" :class="{ 'is-active': sortKey === 'avgEndgameScore', 'is-asc': sortKey === 'avgEndgameScore' && sortDir === 'asc' }">arrow_drop_down</span>
+            </th>
+            <th @click="setSort('avgTipsPerMatch')" class="sortable" :title="t('rankings.avg_tips_desc')">
+              {{ t('rankings.avg_tips') }}<span class="material-icons sort-icon" :class="{ 'is-active': sortKey === 'avgTipsPerMatch', 'is-asc': sortKey === 'avgTipsPerMatch' && sortDir === 'asc' }">arrow_drop_down</span>
             </th>
             <th @click="setSort('maxScore')" class="sortable">
-              {{ t('rankings.max') }}<span class="material-icons" style="font-size: 18px; vertical-align: middle;">{{ sortIndicator('maxScore') }}</span>
+              {{ t('rankings.max') }}<span class="material-icons sort-icon" :class="{ 'is-active': sortKey === 'maxScore', 'is-asc': sortKey === 'maxScore' && sortDir === 'asc' }">arrow_drop_down</span>
             </th>
             <th @click="setSort('avgRating')" class="sortable">
-              {{ t('rankings.rating') }}<span class="material-icons" style="font-size: 18px; vertical-align: middle;">{{ sortIndicator('avgRating') }}</span>
+              {{ t('rankings.rating') }}<span class="material-icons sort-icon" :class="{ 'is-active': sortKey === 'avgRating', 'is-asc': sortKey === 'avgRating' && sortDir === 'asc' }">arrow_drop_down</span>
             </th>
             <th>{{ t('rankings.trend') }}</th>
             <th>{{ t('rankings.details') }}</th>
@@ -214,7 +223,6 @@ function viewTeamDetails(teamNumber: number) {
             :key="row.teamNumber" 
             :data-index="index"
             :data-team-row="row.teamNumber"
-            @mouseenter="onRowEnter"
           >
             <td class="team-cell">
               <div 
@@ -250,6 +258,7 @@ function viewTeamDetails(teamNumber: number) {
             <td><AnimatedNumber :value="row.avgAutoScore" /></td>
             <td><AnimatedNumber :value="row.avgTeleopScore" /></td>
             <td><AnimatedNumber :value="row.avgEndgameScore" /></td>
+            <td><AnimatedNumber :value="row.avgTipsPerMatch ?? 0" /></td>
             <td><AnimatedNumber :value="row.maxScore" /></td>
             <td class="total-cell"><AnimatedNumber :value="row.avgRating" /></td>
             <td class="trend-cell">
@@ -265,7 +274,15 @@ function viewTeamDetails(teamNumber: number) {
             </td>
             <td v-if="eventStore.isHost">
               <button 
-                v-if="row.matchCount >= 3 && !recordStore.bannedTeams.includes(row.teamNumber)" 
+                v-if="recordStore.bannedTeams.includes(row.teamNumber)" 
+                class="unban-btn" 
+                @click="unbanTeam(row.teamNumber)"
+                :title="t('rankings.unban_team')"
+              >
+                {{ t('rankings.unban_team') }}
+              </button>
+              <button 
+                v-else-if="row.matchCount >= 3" 
                 class="ban-btn" 
                 @click="banTeam(row.teamNumber)"
                 :title="t('rankings.ban_team')"
@@ -313,13 +330,15 @@ function viewTeamDetails(teamNumber: number) {
 
 .table-wrapper {
   overflow-x: auto;
+  -webkit-overflow-scrolling: touch;
   width: 100%;
   box-sizing: border-box;
 }
 
 table {
   width: 100%;
-  border-collapse: collapse;
+  border-collapse: separate;
+  border-spacing: 0;
   font-size: 14px;
   min-width: 760px;
 }
@@ -334,6 +353,14 @@ thead th {
   white-space: nowrap;
 }
 
+thead th:first-child {
+  position: sticky;
+  left: 0;
+  z-index: 3;
+  background: var(--card);
+  box-shadow: 2px 0 6px -2px rgba(0, 0, 0, 0.4);
+}
+
 th.sortable {
   cursor: pointer;
   user-select: none;
@@ -343,27 +370,51 @@ th.sortable:hover {
   color: var(--foreground);
 }
 
-tbody td {
-  padding: 12px 16px;
-  border-bottom: 1px solid var(--card);
-  color: var(--muted-foreground);
+.sort-icon {
+  font-size: 18px;
+  vertical-align: middle;
+  display: inline-block;
+  opacity: 0.25;
+  transition: transform 0.22s cubic-bezier(0.16, 1, 0.3, 1), opacity 0.2s ease, color 0.2s ease;
 }
 
-.hover-highlight {
-  position: absolute;
+.sort-icon.is-active {
+  opacity: 1;
+  color: var(--primary);
+}
+
+.sort-icon.is-asc {
+  transform: rotate(180deg);
+}
+
+tbody td {
+  padding: 12px 16px;
+  border-bottom: 1px solid var(--border);
+  color: var(--muted-foreground);
+  background: var(--card);
+  transition: background-color 0.15s ease;
+}
+
+tbody td:first-child {
+  position: sticky;
   left: 0;
-  right: 0;
-  background: rgba(128, 128, 128, 0.1);
-  backdrop-filter: brightness(1.1);
-  pointer-events: none;
-  transition: top 0.25s cubic-bezier(0.25, 1, 0.5, 1), height 0.25s cubic-bezier(0.25, 1, 0.5, 1), opacity 0.2s ease;
-  z-index: 10;
-  border-radius: 6px;
+  z-index: 2;
+  background: var(--card);
+  box-shadow: 2px 0 6px -2px rgba(0, 0, 0, 0.4);
+}
+
+tbody tr:hover td {
+  background: rgba(255, 255, 255, 0.04);
+}
+
+tbody tr:hover td:first-child {
+  background: #111111;
 }
 
 .team-cell {
   font-weight: 700;
   color: var(--foreground);
+  min-width: 130px;
 }
 
 .total-cell {
@@ -501,6 +552,57 @@ tbody td {
   border-radius: 4px;
   margin-left: 8px;
   vertical-align: middle;
+}
+
+.ban-btn {
+  background: rgba(239, 68, 68, 0.12);
+  color: var(--status-error);
+  border: 1px solid var(--status-error);
+  border-radius: 4px;
+  padding: 3px 8px;
+  font-size: 11px;
+  font-weight: 500;
+  cursor: pointer;
+  transition: all 0.2s;
+}
+
+.ban-btn:hover {
+  background: var(--status-error);
+  color: white;
+}
+
+.unban-btn {
+  background: rgba(57, 255, 20, 0.12);
+  color: var(--primary);
+  border: 1px solid var(--primary);
+  border-radius: 4px;
+  padding: 3px 8px;
+  font-size: 11px;
+  font-weight: 500;
+  cursor: pointer;
+  transition: all 0.2s;
+}
+
+.unban-btn:hover {
+  background: var(--primary);
+  color: var(--primary-foreground);
+}
+
+@media (max-width: 680px) {
+  table {
+    font-size: 13px;
+  }
+  thead th, tbody td {
+    padding: 10px 12px;
+  }
+  .tag-filter-bar {
+    padding: 8px 10px;
+    gap: 4px;
+  }
+  .filter-chip {
+    padding: 4px 8px;
+    font-size: 0.7rem;
+  }
 }
 </style>
 

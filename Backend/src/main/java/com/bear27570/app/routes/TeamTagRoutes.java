@@ -121,6 +121,12 @@ public class TeamTagRoutes {
                 return;
             }
             String tagValue = URLDecoder.decode(ctx.pathParam("tag"), StandardCharsets.UTF_8).trim();
+            String normalizedTag = tagValue;
+            if (normalizedTag.matches("^[A-Za-z0-9 _#-]+$")) {
+                normalizedTag = normalizedTag.toLowerCase();
+            }
+            final String lookupTag = normalizedTag;
+            final String rawTag = tagValue;
             String userId = ctx.attribute("userId");
 
             jdbi.useTransaction(handle -> {
@@ -131,7 +137,14 @@ public class TeamTagRoutes {
                 }
 
                 TeamTagDao tagDao = handle.attach(TeamTagDao.class);
-                TeamTag existing = tagDao.findSpecific(eventId, teamNumber, tagValue);
+                TeamTag existing = tagDao.findSpecific(eventId, teamNumber, lookupTag);
+                String tagToDelete = lookupTag;
+                if (existing == null && !lookupTag.equals(rawTag)) {
+                    existing = tagDao.findSpecific(eventId, teamNumber, rawTag);
+                    if (existing != null) {
+                        tagToDelete = rawTag;
+                    }
+                }
 
                 if (existing != null) {
                     // Permission check: only tag creator or event host can delete (V30)
@@ -140,8 +153,8 @@ public class TeamTagRoutes {
                     if (!isCreator && !isHost) {
                         throw new io.javalin.http.ForbiddenResponse("Only the tag creator or event host can delete this tag");
                     }
-                    logger.info("[AUDIT] Tag deleted: eventId={}, teamNumber={}, tag={}, deletedBy={}", eventId, teamNumber, tagValue, userId);
-                    tagDao.delete(eventId, teamNumber, tagValue);
+                    logger.info("[AUDIT] Tag deleted: eventId={}, teamNumber={}, tag={}, deletedBy={}", eventId, teamNumber, tagToDelete, userId);
+                    tagDao.delete(eventId, teamNumber, tagToDelete);
                 }
                 // If tag not found, idempotent success (V23)
             });

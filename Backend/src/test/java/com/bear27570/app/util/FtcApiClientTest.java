@@ -148,4 +148,47 @@ class FtcApiClientTest {
         assertThat(matches2).hasSize(1);
         assertThat(serverCallCount.get()).isEqualTo(1);
     }
+
+    @Test
+    void testEventExistsReturnsTrueWhenEventFound() throws Exception {
+        String responseBody = "{\"events\":[{\"code\":\"CNCMPLB\",\"name\":\"China Championship\"}],\"eventCount\":1}";
+        mockServer.createContext("/v2.0/2025/events", exchange -> {
+            byte[] bytes = responseBody.getBytes(StandardCharsets.UTF_8);
+            exchange.getResponseHeaders().set("Content-Type", "application/json");
+            exchange.sendResponseHeaders(200, bytes.length);
+            try (OutputStream os = exchange.getResponseBody()) {
+                os.write(bytes);
+            }
+        });
+
+        FtcApiClient client = new FtcApiClient("http://127.0.0.1:" + mockPort, "testuser", "testtoken");
+        assertThat(client.eventExists(2025, "CNCMPLB")).isTrue();
+        assertThat(client.eventExists(2025, "cncmplb")).isTrue();
+    }
+
+    @Test
+    void testEventExistsReturnsFalseWhen404OrNotFound() throws Exception {
+        mockServer.createContext("/v2.0/2026/events", exchange -> {
+            exchange.sendResponseHeaders(404, -1);
+        });
+
+        FtcApiClient client = new FtcApiClient("http://127.0.0.1:" + mockPort, "testuser", "testtoken");
+        assertThat(client.eventExists(2026, "BIOBUZZ26")).isFalse();
+    }
+
+    @Test
+    void testEventExistsReturnsFalseWhenEmptyList() throws Exception {
+        String responseBody = "{\"events\":[],\"eventCount\":0}";
+        mockServer.createContext("/v2.0/2025/events", exchange -> {
+            byte[] bytes = responseBody.getBytes(StandardCharsets.UTF_8);
+            exchange.getResponseHeaders().set("Content-Type", "application/json");
+            exchange.sendResponseHeaders(200, bytes.length);
+            try (OutputStream os = exchange.getResponseBody()) {
+                os.write(bytes);
+            }
+        });
+
+        FtcApiClient client = new FtcApiClient("http://127.0.0.1:" + mockPort, "testuser", "testtoken");
+        assertThat(client.eventExists(2025, "NO_SUCH_EVENT")).isFalse();
+    }
 }

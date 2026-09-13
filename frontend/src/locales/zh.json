@@ -74,13 +74,28 @@
     "status_online": "在线",
     "status_offline": "离线",
     "role_host": "房主",
-    "role_scout": "侦察员"
+    "role_scout": "侦察员",
+    "host_activated": "本机已成功激活/接管为主机 (Active Host)",
+    "demoted_to_standby": "收到其他设备接管通知，本机已平滑退位为【备用监控端】",
+    "host_exited_takeover_available": "主控设备已退出，本机作为备用端可立即一键接管为主机",
+    "host_left": "赛事主控设备已退出房间",
+    "takeover_failed": "接管主机失败",
+    "takeover_as_host": "一键接管为主控机",
+    "standby_host_online": "【备用监控端 (Standby Host)】主控已在线",
+    "standby_host_disconnected": "【备用监控端】主控机连接中断，可随时接管",
+    "standby_banner_desc": "本机为【备用监控端】（当前赛事已由主控设备主持中，本机保持实时数据镜像）。"
+  },
+  "confirm_dialog": {
+    "title": "操作确认",
+    "confirm": "确定",
+    "cancel": "取消",
+    "danger_confirm": "确认丢弃/清空"
   },
   "scouting": {
     "match_info": "基础信息",
     "match_number": "场次编号",
     "team_number": "队伍编号",
-    "alliance": "联盟阵营",
+    "alliance": "联盟双队",
     "red": "红方",
     "blue": "蓝方",
     "autonomous": "自动阶段",
@@ -104,10 +119,7 @@
     "submit_failed": "提交失败！",
     "mode": "计分模式",
     "single_team": "单队",
-    "alliance": "联盟双队",
     "alliance_color": "联盟颜色",
-    "red": "红方",
-    "blue": "蓝方",
     "none": "白板",
     "team_1": "队伍 1",
     "team_2": "队伍 2",
@@ -115,7 +127,32 @@
     "is_broken": "车坏了 (Is Broken)",
     "notes": "比赛评价/备注",
     "notes_placeholder": "请记录对该队这场的表现评价...",
-    "team_tags": "队伍标签"
+    "team_tags": "队伍标签",
+    "invalid_input_hint": "包含非法字符或长度超限，请检查标红的输入框",
+    "auto_balls": "自动进球",
+    "auto_balls_rate": "+3 分/球",
+    "auto_leave": "完全离墙 (LEAVE +3 分)",
+    "auto_park": "装载区停泊 (PARK +5 分)",
+    "cycle_tracker_title": "打球轮次追踪器 (Cycle Tracker)",
+    "total_cycles": "总轮次",
+    "unit_cycles": "轮",
+    "total_balls": "总发射球数",
+    "unit_balls": "球",
+    "avg_balls_per_cycle": "场均出球",
+    "btn_new_cycle": "+ 记录新轮次",
+    "btn_cycle_tapping": "第 {num} 轮: {count} 球 (再点+1)",
+    "btn_add_ball": "+1 球",
+    "btn_undo_cycle": "撤销上一轮",
+    "cycle_num": "第 {num} 轮",
+    "balls_unit": "{count} 球",
+    "collapse_cycles": "收起轮次",
+    "expand_cycles": "展开全部 ({count})",
+    "pts_per_ball": "+{pts} 分/球",
+    "cap_reached_hint": "已达 4 球上限",
+    "empty_cycles_hint": "点击「记录新轮次」开始记录",
+    "flower_placed": "塞入花朵大球 (NECTAR Placed)",
+    "flower_bottom_bonus": "底部花蜜奖 (Bottom NECTAR Bonus +5 分)",
+    "teleop_park": "终局装载区停泊 (PARK +5 分)"
   },
   "history": {
     "loading": "正在加载历史记录...",
@@ -146,7 +183,10 @@
     "breakdown": "损坏率",
     "actions": "操作",
     "details": "详情",
-    "ban_team": "Ban 队"
+    "ban_team": "Ban 队",
+    "avg_tips": "出球率",
+    "avg_tips_desc": "依据赛场实际进球数按比例分摊的队伍净贡献率",
+    "unban_team": "解除标记"
   },
   "team_detail": {
     "title": "队伍 {team} 详情",
@@ -155,7 +195,10 @@
     "performance": "表现数据",
     "comments": "评价记录",
     "no_records": "该队伍暂无记录。",
-    "is_broken": "车坏了"
+    "is_broken": "车坏了",
+    "eval_placeholder": "输入对该队伍本场表现的补充评价...",
+    "no_evaluation": "暂无本场评价。",
+    "save_failed": "保存评价失败: "
   },
   "connection": {
     "offline": "离线",
@@ -320,7 +363,14 @@
     "duplicate_tag": "该队伍已存在同名标签",
     "max_limit_reached": "每支队伍最多添加 15 个标签",
     "add_failed": "添加标签失败",
-    "remove_failed": "删除标签失败"
+    "remove_failed": "删除标签失败",
+    "preset": {
+      "over_possession": "#易超持",
+      "control_opponent_nectar": "#控制对方大球",
+      "early_flower": "#提前塞大球进花",
+      "aggressive_defense": "#暴力冲撞别车",
+      "human_player_foul": "#人玩易违规"
+    }
   },
   "conflict": {
     "title": "考察员身份冲突",
@@ -338,7 +388,16 @@
     "takeover_requested": "已发送接管请求，等待原设备确认（15s）...",
     "cooldown_hint": "请求过于频繁，请等待 {seconds} 秒后重试",
     "rejected_hint": "接管请求已被原设备拒绝，请修改昵称后进入房间。",
-    "or": "或"
+    "or": "或",
+    "merge_invalid_password": "目标主账号密码错误，验证失败",
+    "option_duplicate_rename_title": "方案一：修改昵称加入房间",
+    "option_duplicate_rename_hint": "如果您是不同成员恰好重名，请修改昵称以区分比赛打分数据：",
+    "btn_confirm_rename": "确认改名并进入",
+    "option_duplicate_merge_title": "方案二：合并至已有主账号",
+    "option_duplicate_merge_hint": "如果这是您在其他设备上的已有主账号，请输入该账号密码验证所有权并合并本机数据：",
+    "target_password_placeholder": "请输入主账号密码验证所有权",
+    "btn_merging": "验证并合并中...",
+    "btn_confirm_merge": "验证密码并合并账号"
   },
   "takeover": {
     "title": "新设备请求接管身份",
@@ -346,7 +405,9 @@
     "warning": "若这是您本人刚更换的新设备，请点击「允许接管」；若非本人操作，请点击「拒绝」以保护数据安全。",
     "timeout_desc": "{seconds} 秒内未操作将自动放行接管",
     "btn_permit": "允许接管",
-    "btn_deny": "拒绝"
+    "btn_deny": "拒绝",
+    "description": "检测到新设备正在尝试以「{name}」身份接入当前房间。",
+    "btn_reject": "拒绝"
   },
   "kicked": {
     "title": "设备已离线",
@@ -358,7 +419,8 @@
     "cancel": "取消",
     "confirm": "确定",
     "save": "保存",
-    "close": "关闭"
+    "close": "关闭",
+    "saving": "保存中..."
   },
   "user": {
     "edit_nickname": "修改资料与密码",
@@ -567,7 +629,9 @@
     "schedule": "赛程",
     "rankings": "排位",
     "scouts": "协同",
-    "history": "历史"
+    "history": "历史",
+    "ai": "AI 对话",
+    "more": "更多"
   },
   "pit_scout": {
     "title": "展位侦察",
@@ -676,7 +740,22 @@
       "sec_photos": "3. 机器人定妆特写照片",
       "btn_upload_photo": "+ 拍照 / 选图",
       "btn_cancel": "取消",
-      "btn_save": "保存展位记录"
+      "btn_save": "保存展位记录",
+      "unsaved_confirm": "您有未保存的侦查内容，确定要退出并丢弃更改吗？",
+      "ball_compatibility_label": "进球/分选兼容性",
+      "ball_compat_universal": "大小球通用吞吐 (Universal)",
+      "ball_compat_sorting": "具备颜色/大小球分选机制 (Sorting)",
+      "ball_compat_pollen_only": "仅吸取/发射花粉小球 (Pollen Only)",
+      "has_color_sensor_label": "搭载颜色传感器 (自动分选/防误吸)",
+      "launcher_type_label": "发射机构构型",
+      "launcher_type_placeholder": "如：双飞轮双轴发射 / 弹射机构",
+      "flower_mechanism_label": "花朵机构设计",
+      "flower_mechanism_placeholder": "如：垂直电梯顶出 / 机械臂卡扣",
+      "auto_strategy_label": "自主阶段打法路线规划",
+      "auto_strategy_placeholder": "如：先打预载球，后退扫大球并放置花朵",
+      "teleop_cycles_label": "自述手动轮次预估 (轮)",
+      "unit_cycles": "轮",
+      "endgame_score_label": "自述终局得分预估 (分)"
     },
     "detail_card": {
       "title": "展位技术档案与自述对账",
@@ -692,8 +771,21 @@
       "actual_max_total": "实战最高总分",
       "actual_avg": "均分 {avg}",
       "brag_rating": "吹牛指数评级",
-      "no_pit_data": "暂无该队伍的展位自述数据，点击右上角即可补录。"
+      "no_pit_data": "暂无该队伍的展位自述数据，点击右上角即可补录。",
+      "spec_ball_compat": "球型: {val}",
+      "spec_launcher": "发射: {val}",
+      "spec_flower": "放花: {val}",
+      "spec_color_sensor": "颜色传感: {val}",
+      "equipped": "配备"
+    },
+    "quick_summary": "底盘: {drivetrain} | 球型: {ball} | 自述理论: 自主 {auto} / 手动 {teleop} 轮",
+    "photo_save_failed": "照片保存失败，请重试",
+    "claimed_teleop_cycles": "自述手动轮次",
+    "claimed_cycles_unit": "轮",
+    "ball_compatibility": {
+      "universal": "通用吞吐 (Universal)",
+      "sorting": "分选识别 (Sorting)",
+      "pollen_only": "仅小球 (Pollen Only)"
     }
   }
 }
-

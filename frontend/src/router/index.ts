@@ -97,7 +97,7 @@ router.beforeResolve((to, from, next) => {
   // Capture the transaction token assigned by the click
   const token = transitionState.activeToken
 
-  currentTransition = document.startViewTransition(() => {
+  currentTransition = (document as any).startViewTransition(() => {
     return new Promise<void>(resolve => {
       const unregister = router.afterEach(() => {
         unregister()
@@ -109,21 +109,20 @@ router.beforeResolve((to, from, next) => {
     })
   })
 
+  // Prevent unhandled promise rejections on aborted or skipped transitions
+  currentTransition.ready?.catch(() => {})
+  currentTransition.updateCallbackDone?.catch(() => {})
+
   // Cleanup reliably after transition finishes or is interrupted
-  currentTransition.finished.finally(() => {
+  currentTransition.finished.catch(() => {}).finally(() => {
     currentTransition = null
     if (token !== null) {
       transitionState.clear(token)
     }
-    
-    // Only remove dataset attributes if a new transition hasn't started
-    // (If a new one started, it would have overwritten them, and we shouldn't wipe its work)
-    if (transitionState.activeToken === null || transitionState.activeToken === token) {
-      document.documentElement.removeAttribute('data-direction')
-      document.documentElement.removeAttribute('data-transition-type')
-      document.documentElement.removeAttribute('data-to-type')
-      document.documentElement.removeAttribute('data-from-type')
-    }
+    document.documentElement.removeAttribute('data-direction')
+    document.documentElement.removeAttribute('data-transition-type')
+    document.documentElement.removeAttribute('data-to-type')
+    document.documentElement.removeAttribute('data-from-type')
   })
 })
 

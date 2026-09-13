@@ -63,18 +63,17 @@ class PitScoutDaoTest {
         record.setRobotName("Polaris");
         record.setDrivetrainType("mecanum");
         record.setWeightLbs(38.5);
-        record.setSizingPassed(true);
-        record.setMechanismType("slide_claw");
-        record.setHangType("winch");
         record.setOdometryType("two_wheel");
+        record.setBallCompatibility("universal");
+        record.setLauncherType("差速双飞轮");
+        record.setFlowerMechanism("垂直级联高抬升");
+        record.setHasColorSensor(true);
+        record.setClaimedAutoStrategy("预载进球+花园两球+快速停泊");
         record.setClaimedAutoScore(85);
-        record.setClaimedAutoPieces(3);
-        record.setClaimedAutoHangLevel(1);
+        record.setClaimedTeleopCycles(6);
         record.setClaimedTeleopScore(110);
-        record.setClaimedTeleopCycleSec(8.5);
-        record.setClaimedEndgameHangLevel(3);
-        record.setClaimedEndgameTimeSec(4.0);
-        record.setClaimedTotalScore(195);
+        record.setClaimedEndgameScore(15);
+        record.setClaimedTotalScore(210);
         record.setVersion(1);
 
         jdbi.useExtension(PitScoutDao.class, dao -> dao.upsertPitRecord(record));
@@ -85,9 +84,15 @@ class PitScoutDaoTest {
         assertThat(fetched.getTeamNumber()).isEqualTo(27570);
         assertThat(fetched.getRobotName()).isEqualTo("Polaris");
         assertThat(fetched.getWeightLbs()).isEqualTo(38.5);
+        assertThat(fetched.getBallCompatibility()).isEqualTo("universal");
+        assertThat(fetched.getLauncherType()).isEqualTo("差速双飞轮");
+        assertThat(fetched.getFlowerMechanism()).isEqualTo("垂直级联高抬升");
+        assertThat(fetched.isHasColorSensor()).isTrue();
+        assertThat(fetched.getClaimedAutoStrategy()).isEqualTo("预载进球+花园两球+快速停泊");
         assertThat(fetched.getClaimedAutoScore()).isEqualTo(85);
-        assertThat(fetched.getClaimedEndgameHangLevel()).isEqualTo(3);
-        assertThat(fetched.getClaimedTotalScore()).isEqualTo(195);
+        assertThat(fetched.getClaimedTeleopCycles()).isEqualTo(6);
+        assertThat(fetched.getClaimedEndgameScore()).isEqualTo(15);
+        assertThat(fetched.getClaimedTotalScore()).isEqualTo(210);
 
         // Update record (LWW / edit)
         record.setClaimedAutoScore(95);
@@ -136,6 +141,7 @@ class PitScoutDaoTest {
         List<PitScoutingRecord> allAfter = jdbi.withExtension(PitScoutDao.class, dao -> dao.findAllPitRecordsByEvent("evt_pit"));
         assertThat(allAfter).hasSize(1);
         assertThat(allAfter.get(0).isDeleted()).isTrue();
+        assertThat(allAfter.get(0).getVersion()).isEqualTo(2);
     }
 
     @Test

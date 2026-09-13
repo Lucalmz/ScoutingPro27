@@ -157,7 +157,7 @@ public class ApiRoutes {
         // ==================== Domain Sub-Routes ====================
         new SystemRoutes(gson).register(routes);
         new WebRtcRoutes(jdbi, gson).register(routes);
-        new EventRoutes(jdbi, gson).register(routes);
+        new EventRoutes(jdbi, gson, ftcApiClient).register(routes);
         new TeamTagRoutes(jdbi, gson).register(routes);
         new ScheduleRoutes(jdbi, gson).register(routes);
         new FtcProxyRoutes(ftcApiClient, gson).register(routes);

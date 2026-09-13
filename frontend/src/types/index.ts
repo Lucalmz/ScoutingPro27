@@ -42,6 +42,7 @@ export interface SystemMessage {
   conflictMatchNumber?: number
   conflictTeamNumber?: number
   conflictTournamentLevel?: string
+  eventId?: string
 }
 
 // --- Event ---
@@ -93,21 +94,22 @@ export interface ScoutingFormData {
   allianceColor: 'none' | 'red' | 'blue'
   isBroken: boolean
   
-  // 2026 DECODE Fields
+  // 2026-2027 BIOBUZZ Fields
   // Auto
-  autoClassified: number
-  autoOverflow: number
-  autoPatterns: number
-  autoMovementScore: number
+  autoLeave: boolean
+  autoBalls: number
+  autoCycles?: number[]
+  autoPark: boolean
+  autoPreload?: boolean
+  autoSecondary?: boolean
 
-  // Teleop
-  teleopClassified: number
-  teleopOverflow: number
-  gatesTriggered: number
+  // Teleop (Cycle Tracker)
+  teleopCycles: number[]
 
   // Endgame
-  baseScore: number
-  supportMultiplier: number
+  flowerPlaced: boolean
+  flowerBottomBonus: boolean
+  teleopPark: boolean
 }
 
 // --- Official Match ---
@@ -115,8 +117,8 @@ export interface OfficialMatch {
   matchNum: number
   tournamentLevel?: string
   scores: {
-    red: { penaltyPointsCommitted: number; totalPointsNp: number }
-    blue: { penaltyPointsCommitted: number; totalPointsNp: number }
+    red: { penaltyPointsCommitted: number; totalPointsNp: number; totalTips?: number }
+    blue: { penaltyPointsCommitted: number; totalPointsNp: number; totalTips?: number }
   } | null
   teams: { teamNumber: number; alliance: string }[]
 }
@@ -425,6 +427,7 @@ export interface RankingRow {
   avgAutoScore: number
   avgTeleopScore: number
   avgEndgameScore: number
+  avgTipsPerMatch?: number     // 场均蜂巢翻转贡献次数 (tips/场)
   maxScore: number
   avgRating: number
   brokenCount: number
@@ -443,6 +446,8 @@ export interface AiSettings {
 }
 
 // --- Pit Scouting & Unified Team Pool ---
+export type BallCompatibility = 'universal' | 'sorting' | 'pollen_only'
+
 export interface PitScoutingRecord {
   id: string
   eventId: string
@@ -451,22 +456,21 @@ export interface PitScoutingRecord {
   scoutName: string
   robotName?: string
 
-  // 核心硬件构型
+  // 核心硬件构型 (BIOBUZZ 2026-2027)
   drivetrainType: 'mecanum' | 'tank' | 'swerve' | 'other'
   weightLbs: number
-  sizingPassed: boolean
-  mechanismType: string // 'slide_claw' | 'slide_roller' | 'linkage_arm' | 'other'
-  hangType: string      // 'winch' | 'slide' | 'passive' | 'none'
+  ballCompatibility: BallCompatibility
+  launcherType: string
+  flowerMechanism: string
+  hasColorSensor: boolean
   odometryType: string  // 'none' | 'two_wheel' | 'three_wheel' | 'pinpoint_otos'
 
   // 核心量化自述指标
+  claimedAutoStrategy?: string
   claimedAutoScore: number
-  claimedAutoPieces: number
-  claimedAutoHangLevel: number
+  claimedTeleopCycles: number
   claimedTeleopScore: number
-  claimedTeleopCycleSec: number
-  claimedEndgameHangLevel: number
-  claimedEndgameTimeSec: number
+  claimedEndgameScore: number
   claimedTotalScore: number
 
   // 图片与版本
@@ -495,9 +499,12 @@ export interface BragInfo {
   overallRatio: number       // claimedTotal / actualMaxTotal
   autoRatio: number          // claimedAuto / actualMaxAuto
   teleopRatio: number        // claimedTeleop / actualMaxTeleop
-  hangUnfulfilled: boolean   // claimed high hang (>=2) but actual <= 1
-  hangPardoned?: boolean     // 高悬挂未履约特赦标志（机构难复位或常规赛留力）
-  hangVerified?: boolean     // 高悬挂实测已证实（只要有一次成功即证明没说谎）
+  endgameUnfulfilled: boolean   // claimed flower/endgame (>=10) but actual < 10
+  endgamePardoned?: boolean     // 残局花朵未履约特赦标志
+  endgameVerified?: boolean     // 残局花朵实测已证实
+  hangUnfulfilled?: boolean     // 兼容别名
+  hangPardoned?: boolean
+  hangVerified?: boolean
   label: string              // e.g. "1.05x 真实守信"
 }
 

@@ -3,6 +3,7 @@ import { ref, computed } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { useRecordStore } from '@/stores/records'
 import { useToastStore } from '@/stores/toast'
+import { hapticLight, hapticWarning } from '@/utils/haptics'
 import type { TeamTagItem } from '@/types'
 
 const props = defineProps<{
@@ -29,6 +30,30 @@ const COLOR_OPTIONS = [
   'yellow',
   'gray'
 ] as const
+
+// 常用预设（BIOBUZZ 违规风控预设）
+const PRESET_TAGS = [
+  { tag: '#易超持', i18nKey: 'tags.preset.over_possession', color: 'orange' },
+  { tag: '#控制对方大球', i18nKey: 'tags.preset.control_opponent_nectar', color: 'red' },
+  { tag: '#提前塞大球进花', i18nKey: 'tags.preset.early_flower', color: 'red' },
+  { tag: '#暴力冲撞别车', i18nKey: 'tags.preset.aggressive_defense', color: 'red' },
+  { tag: '#人玩易违规', i18nKey: 'tags.preset.human_player_foul', color: 'orange' }
+] as const
+
+function getPresetLabel(preset: typeof PRESET_TAGS[number]): string {
+  if (preset.i18nKey && te(preset.i18nKey)) {
+    const val = t(preset.i18nKey)
+    if (val && val !== preset.i18nKey) return val
+  }
+  return preset.tag
+}
+
+function isPresetActive(preset: typeof PRESET_TAGS[number]): boolean {
+  const label = getPresetLabel(preset)
+  return activeTagKeys.value.has(preset.tag) ||
+         activeTagKeys.value.has(label) ||
+         (preset.i18nKey ? activeTagKeys.value.has(preset.i18nKey) : false)
+}
 
 const isAdding = ref(false)
 const inputTag = ref('')
@@ -59,8 +84,28 @@ const tagSuggestions = computed<string[]>(() => {
 function formatTagLabel(tag?: TeamTagItem | null): string {
   if (!tag || !tag.tag) return ''
   if (tag.isPreset || tag.tag.startsWith('preset.')) {
-    const i18nKey = `tags.${tag.tag}`
-    return te(i18nKey) ? t(i18nKey) : tag.tag.replace(/^preset\./, '')
+    const i18nKey = tag.tag.startsWith('preset.') ? `tags.${tag.tag}` : `tags.preset.${tag.tag}`
+    if (te(i18nKey)) {
+      const val = t(i18nKey)
+      if (val !== i18nKey) return val
+    }
+  }
+  const legacyMap: Record<string, string> = {
+    '#易超持': 'tags.preset.over_possession',
+    '#控制对方大球': 'tags.preset.control_opponent_nectar',
+    '#提前塞大球进花': 'tags.preset.early_flower',
+    '#暴力冲撞别车': 'tags.preset.aggressive_defense',
+    '#人玩易违规': 'tags.preset.human_player_foul',
+    '#OverPossession': 'tags.preset.over_possession',
+    '#ControlOpponentNectar': 'tags.preset.control_opponent_nectar',
+    '#EarlyFlower': 'tags.preset.early_flower',
+    '#AggressiveDefense': 'tags.preset.aggressive_defense',
+    '#HumanPlayerFoul': 'tags.preset.human_player_foul'
+  }
+  const mappedKey = legacyMap[tag.tag]
+  if (mappedKey && te(mappedKey)) {
+    const val = t(mappedKey)
+    if (val !== mappedKey) return val
   }
   return tag.tag
 }
@@ -110,10 +155,12 @@ async function handleAddCustomTag() {
   try {
     const res = await recordStore.addTag(props.eventId, props.teamNumber, raw, selectedColor.value, false)
     if (res.success && res.tag) {
+      hapticLight()
       emit('tagAdded', res.tag)
       inputTag.value = ''
       isAdding.value = false
     } else {
+      hapticWarning()
       toastStore.showToast(res.error || t('tags.add_failed'), 'error')
     }
   } finally {
@@ -127,8 +174,10 @@ async function handleRemoveTag(tagKey: string) {
   try {
     const res = await recordStore.removeTag(props.eventId, props.teamNumber, tagKey)
     if (res.success) {
+      hapticLight()
       emit('tagRemoved', tagKey)
     } else {
+      hapticWarning()
       toastStore.showToast(res.error || t('tags.remove_failed'), 'error')
     }
   } finally {
@@ -138,6 +187,31 @@ async function handleRemoveTag(tagKey: string) {
 
 function selectSuggestion(suggestion: string) {
   inputTag.value = suggestion
+}
+
+async function handleAddPresetTag(preset: typeof PRESET_TAGS[number]) {
+  if (props.readonly || isSubmitting.value) return
+  if (isPresetActive(preset)) return
+
+  // 上限检查（V14）
+  if (currentTags.value.length >= 15) {
+    toastStore.showToast(t('tags.max_limit_reached'), 'error')
+    return
+  }
+
+  isSubmitting.value = true
+  try {
+    const res = await recordStore.addTag(props.eventId, props.teamNumber, preset.tag, preset.color, false)
+    if (res.success && res.tag) {
+      hapticLight()
+      emit('tagAdded', res.tag)
+    } else {
+      hapticWarning()
+      toastStore.showToast(res.error || t('tags.add_failed'), 'error')
+    }
+  } finally {
+    isSubmitting.value = false
+  }
 }
 </script>
 
@@ -180,6 +254,24 @@ function selectSuggestion(suggestion: string) {
     <!-- 添加标签交互面板 -->
     <Transition name="tab-fade">
       <div v-if="!readonly && isAdding" class="tag-edit-panel">
+        <!-- 常用预设（BIOBUZZ 赛季违规与风控预设） -->
+        <div class="presets-section">
+          <span class="edit-label">{{ t('tags.presets') }}:</span>
+          <div class="preset-chips-row">
+            <button
+              v-for="preset in PRESET_TAGS"
+              :key="preset.tag"
+              type="button"
+              class="preset-chip"
+              :class="[`tag-${preset.color}`, { 'is-active': isPresetActive(preset) }]"
+              :disabled="isPresetActive(preset) || isSubmitting"
+              @click="handleAddPresetTag(preset)"
+            >
+              {{ getPresetLabel(preset) }}
+            </button>
+          </div>
+        </div>
+
         <div class="custom-input-section">
           <span class="edit-label">{{ t('tags.custom_tag') }}:</span>
           <div class="input-row">
@@ -337,6 +429,49 @@ function selectSuggestion(suggestion: string) {
   text-transform: uppercase;
   color: var(--muted-foreground);
   letter-spacing: 0.04em;
+}
+
+.presets-section {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding-bottom: 8px;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.06);
+}
+
+.preset-chips-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+}
+
+.preset-chip {
+  display: inline-flex;
+  align-items: center;
+  padding: 3px 9px;
+  border-radius: 12px;
+  font-size: 0.76rem;
+  font-weight: 600;
+  cursor: pointer;
+  border: 1px solid transparent;
+  transition: all 0.15s ease;
+}
+
+.preset-chip:hover:not(:disabled) {
+  transform: translateY(-1px);
+  filter: brightness(1.2);
+}
+
+.preset-chip:disabled {
+  opacity: 0.35;
+  cursor: not-allowed;
+}
+
+.preset-chip.is-active {
+  opacity: 0.4;
+  cursor: default;
+  text-decoration: line-through;
 }
 
 .custom-input-section {

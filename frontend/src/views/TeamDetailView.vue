@@ -4,6 +4,7 @@ import { useRouter, onBeforeRouteLeave } from 'vue-router'
 import { useI18n } from 'vue-i18n'
 import { useRecordStore } from '@/stores/records'
 import { useConnectionStore } from '@/stores/connection'
+import { useToastStore } from '@/stores/toast'
 import TagPicker from '@/components/common/TagPicker.vue'
 import ConnectionStatus from '@/components/common/ConnectionStatus.vue'
 import { usePitScoutStore } from '@/stores/pitScout'
@@ -17,10 +18,29 @@ const props = defineProps<{
 }>()
 
 const router = useRouter()
-const { t } = useI18n()
+const { t, te } = useI18n()
 const recordStore = useRecordStore()
 const pitStore = usePitScoutStore()
+const toastStore = useToastStore()
 const isPitDrawerOpen = ref(false)
+
+function formatDrivetrain(dt?: string) {
+  if (!dt) return '-'
+  const key = 'pit_scout.drivetrain.' + dt
+  return te(key) ? t(key) : dt
+}
+
+function formatBallCompat(bc?: string) {
+  if (!bc) return '-'
+  const key = 'pit_scout.ball_compatibility.' + bc
+  return te(key) ? t(key) : bc
+}
+
+function formatOdometry(odo?: string) {
+  if (!odo) return '-'
+  const key = 'pit_scout.odometry.' + odo
+  return te(key) ? t(key) : odo
+}
 
 const teamNumVal = computed(() => parseInt(props.teamNumber))
 const unifiedTeam = computed(() => isNaN(teamNumVal.value) ? undefined : pitStore.getUnifiedTeam(teamNumVal.value))
@@ -30,8 +50,6 @@ const detailBragLabel = computed(() => {
   if (!b) return '-'
   const tierText = t(`pit_scout.brag_tiers.${b.tier}`) || b.label
   let str = `${b.overallRatio}x ${tierText}`
-  if (b.hangVerified) str += ` (${t('pit_scout.hang_verified')})`
-  else if (b.hangPardoned) str += ` (${t('pit_scout.hang_pardoned')})`
   return str
 })
 
@@ -120,7 +138,7 @@ async function saveComment(match: ScoutingRecord) {
       editingMatchId.value = null
     }
   } catch (e: any) {
-    alert('Failed to save comment: ' + e.message)
+    toastStore.showError(t('team_detail.save_failed') + (e.message || ''))
   } finally {
     isSaving.value = false
   }
@@ -177,18 +195,20 @@ async function saveComment(match: ScoutingRecord) {
 
         <div v-if="unifiedTeam?.pitRecord" style="display: flex; flex-direction: column; gap: 12px;">
           <div style="display: flex; flex-wrap: wrap; gap: 6px;">
-            <span class="spec-badge">{{ t('pit_scout.detail_card.spec_drivetrain', { val: t('pit_scout.drivetrain.' + unifiedTeam.pitRecord.drivetrainType) || unifiedTeam.pitRecord.drivetrainType }) }}</span>
+            <span class="spec-badge">{{ t('pit_scout.detail_card.spec_drivetrain', { val: formatDrivetrain(unifiedTeam.pitRecord.drivetrainType) }) }}</span>
             <span v-if="unifiedTeam.pitRecord.weightLbs" class="spec-badge">{{ t('pit_scout.detail_card.spec_weight', { val: unifiedTeam.pitRecord.weightLbs }) }}</span>
-            <span class="spec-badge">{{ t('pit_scout.detail_card.spec_mechanism', { val: t('pit_scout.mechanism.' + unifiedTeam.pitRecord.mechanismType) || unifiedTeam.pitRecord.mechanismType }) }}</span>
-            <span class="spec-badge">{{ t('pit_scout.detail_card.spec_hang', { val: t('pit_scout.hang.' + unifiedTeam.pitRecord.hangType) || unifiedTeam.pitRecord.hangType }) }}</span>
-            <span class="spec-badge">{{ t('pit_scout.detail_card.spec_odometry', { val: t('pit_scout.odometry.' + unifiedTeam.pitRecord.odometryType) || unifiedTeam.pitRecord.odometryType }) }}</span>
+            <span v-if="unifiedTeam.pitRecord.ballCompatibility" class="spec-badge">{{ t('pit_scout.detail_card.spec_ball_compat', { val: formatBallCompat(unifiedTeam.pitRecord.ballCompatibility) }) }}</span>
+            <span v-if="unifiedTeam.pitRecord.launcherType" class="spec-badge">{{ t('pit_scout.detail_card.spec_launcher', { val: unifiedTeam.pitRecord.launcherType }) }}</span>
+            <span v-if="unifiedTeam.pitRecord.flowerMechanism" class="spec-badge">{{ t('pit_scout.detail_card.spec_flower', { val: unifiedTeam.pitRecord.flowerMechanism }) }}</span>
+            <span v-if="unifiedTeam.pitRecord.hasColorSensor" class="spec-badge">{{ t('pit_scout.detail_card.spec_color_sensor', { val: t('pit_scout.detail_card.equipped') }) }}</span>
+            <span class="spec-badge">{{ t('pit_scout.detail_card.spec_odometry', { val: formatOdometry(unifiedTeam.pitRecord.odometryType) }) }}</span>
           </div>
 
           <div style="display: grid; grid-template-columns: repeat(3, 1fr); gap: 10px; background: rgba(255, 255, 255, 0.02); border: 1px solid var(--border); border-radius: 8px; padding: 10px;">
             <div style="display: flex; flex-direction: column; gap: 2px;">
               <span style="font-size: 11px; color: var(--muted-foreground);">{{ t('pit_scout.detail_card.claimed_calc_total') }}</span>
               <span style="font-size: 16px; font-weight: 700; color: var(--primary);">{{ unifiedTeam.pitRecord.claimedTotalScore }}</span>
-              <span style="font-size: 10px; color: var(--muted-foreground);">{{ t('pit_scout.detail_card.claimed_auto_teleop', { auto: unifiedTeam.pitRecord.claimedAutoScore, teleop: unifiedTeam.pitRecord.claimedTeleopScore }) }}</span>
+              <span style="font-size: 10px; color: var(--muted-foreground);">{{ t('pit_scout.detail_card.claimed_auto_teleop', { auto: unifiedTeam.pitRecord.claimedAutoScore, teleop: unifiedTeam.pitRecord.claimedTeleopScore, cycles: unifiedTeam.pitRecord.claimedTeleopCycles || 0 }) }}</span>
             </div>
             <div style="display: flex; flex-direction: column; gap: 2px;">
               <span style="font-size: 11px; color: var(--muted-foreground);">{{ t('pit_scout.detail_card.actual_max_total') }}</span>
@@ -263,15 +283,15 @@ async function saveComment(match: ScoutingRecord) {
                 v-model="editCommentText" 
                 class="edit-textarea" 
                 rows="3" 
-                placeholder="Evaluate this team's performance..."
+                :placeholder="t('team_detail.eval_placeholder')"
               ></textarea>
               <div class="edit-actions">
-                <button @click="cancelEditComment" class="btn-cancel" :disabled="isSaving">Cancel</button>
-                <button @click="saveComment(match)" class="btn-save" :disabled="isSaving">{{ isSaving ? 'Saving...' : 'Save' }}</button>
+                <button @click="cancelEditComment" class="btn-cancel" :disabled="isSaving">{{ t('common.cancel') }}</button>
+                <button @click="saveComment(match)" class="btn-save" :disabled="isSaving">{{ isSaving ? t('common.saving') : t('common.save') }}</button>
               </div>
             </div>
             <p v-else-if="match.notes" class="comments-text">{{ match.notes }}</p>
-            <p v-else class="comments-text empty">No evaluation recorded yet.</p>
+            <p v-else class="comments-text empty">{{ t('team_detail.no_evaluation') }}</p>
           </div>
         </div>
       </div>

@@ -132,4 +132,48 @@ describe('TagPicker.vue', () => {
     const addBtn = wrapper.find('.btn-add-tag')
     expect(addBtn.attributes('disabled')).toBeDefined()
   })
+
+  it('renders the 5 BIOBUZZ preset tags and allows 1-click addition', async () => {
+    const recordStore = useRecordStore()
+    const addTagSpy = vi.spyOn(recordStore, 'addTag').mockResolvedValue({
+      success: true,
+      tag: { id: 'p1', eventId: 'e1', teamNumber: 27570, tag: '#易超持', color: 'orange', isPreset: false }
+    })
+
+    const wrapper = mount(TagPicker, {
+      props: { eventId: 'e1', teamNumber: 27570 }
+    })
+
+    await wrapper.find('.btn-add-tag').trigger('click')
+    const presetChips = wrapper.findAll('.preset-chip')
+    expect(presetChips).toHaveLength(5)
+    expect(presetChips.map(c => c.text())).toEqual([
+      '#易超持',
+      '#控制对方大球',
+      '#提前塞大球进花',
+      '#暴力冲撞别车',
+      '#人玩易违规'
+    ])
+
+    // Click on '#易超持'
+    await presetChips[0].trigger('click')
+    expect(addTagSpy).toHaveBeenCalledWith('e1', 27570, '#易超持', 'orange', false)
+  })
+
+  it('disables preset chips that are already active on the team', async () => {
+    const recordStore = useRecordStore()
+    recordStore.teamTags = [
+      { id: 't-exist', eventId: 'e1', teamNumber: 27570, tag: '#控制对方大球', color: 'red', isPreset: false }
+    ]
+
+    const wrapper = mount(TagPicker, {
+      props: { eventId: 'e1', teamNumber: 27570 }
+    })
+
+    await wrapper.find('.btn-add-tag').trigger('click')
+    const opponentTagChip = wrapper.findAll('.preset-chip').find(c => c.text() === '#控制对方大球')
+    expect(opponentTagChip).toBeDefined()
+    expect(opponentTagChip?.attributes('disabled')).toBeDefined()
+  })
 })
+

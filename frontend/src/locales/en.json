@@ -74,7 +74,22 @@
     "status_online": "Online",
     "status_offline": "Offline",
     "role_host": "Host",
-    "role_scout": "Scout"
+    "role_scout": "Scout",
+    "host_activated": "This device has been activated / taken over as Active Host",
+    "demoted_to_standby": "Takeover notice received; this device demoted to Standby Host",
+    "host_exited_takeover_available": "Primary host disconnected; click Take Over to become host",
+    "host_left": "Primary host device has left the room",
+    "takeover_failed": "Failed to take over host",
+    "takeover_as_host": "Take Over as Host",
+    "standby_host_online": "[Standby Host] Primary host is online",
+    "standby_host_disconnected": "[Standby Host] Primary host offline, ready to take over",
+    "standby_banner_desc": "This device is [Standby Host] (Mirroring live event data from primary host)."
+  },
+  "confirm_dialog": {
+    "title": "Confirmation",
+    "confirm": "Confirm",
+    "cancel": "Cancel",
+    "danger_confirm": "Confirm & Discard"
   },
   "scouting": {
     "match_info": "Match Info",
@@ -104,10 +119,7 @@
     "submit_failed": "Failed to submit!",
     "mode": "Mode",
     "single_team": "Single",
-    "alliance": "Alliance",
     "alliance_color": "Alliance Color",
-    "red": "Red",
-    "blue": "Blue",
     "none": "White",
     "team_1": "Team 1",
     "team_2": "Team 2",
@@ -115,7 +127,32 @@
     "is_broken": "Robot is Broken",
     "notes": "Comments / Evaluation",
     "notes_placeholder": "Write your evaluation of the team's performance...",
-    "team_tags": "Team Tags"
+    "team_tags": "Team Tags",
+    "invalid_input_hint": "Contains invalid characters or exceeds length limit. Please check highlighted fields.",
+    "auto_balls": "Auto Balls",
+    "auto_balls_rate": "+3 pts/ball",
+    "auto_leave": "Full Leave Wall (LEAVE +3 pts)",
+    "auto_park": "Loading Zone Park (PARK +5 pts)",
+    "cycle_tracker_title": "Cycle Tracker",
+    "total_cycles": "Total Cycles",
+    "unit_cycles": "cycles",
+    "total_balls": "Total Balls",
+    "unit_balls": "balls",
+    "avg_balls_per_cycle": "Avg Balls/Cycle",
+    "btn_new_cycle": "+ Record New Cycle",
+    "btn_cycle_tapping": "Cycle #{num}: {count} Balls (Tap +1)",
+    "btn_add_ball": "+1 Ball",
+    "btn_undo_cycle": "Undo Last Cycle",
+    "cycle_num": "Cycle #{num}",
+    "balls_unit": "{count} balls",
+    "collapse_cycles": "Collapse",
+    "expand_cycles": "Expand All ({count})",
+    "pts_per_ball": "+{pts} pts/ball",
+    "cap_reached_hint": "Max 4 balls reached",
+    "empty_cycles_hint": "Click 'Record New Cycle' to begin",
+    "flower_placed": "Flower Nectar Placed",
+    "flower_bottom_bonus": "Bottom NECTAR Bonus (+5 pts)",
+    "teleop_park": "Endgame Park (+5 pts)"
   },
   "history": {
     "loading": "Loading history...",
@@ -146,7 +183,10 @@
     "breakdown": "Breakdown",
     "actions": "Actions",
     "details": "Details",
-    "ban_team": "Ban Team"
+    "ban_team": "Ban Team",
+    "avg_tips": "Balls Share",
+    "avg_tips_desc": "Estimated net contribution rate allocated by ball scoring ratio",
+    "unban_team": "Unban Team"
   },
   "team_detail": {
     "title": "Team {team} Details",
@@ -155,7 +195,10 @@
     "performance": "Performance",
     "comments": "Comments",
     "no_records": "No records for this team yet.",
-    "is_broken": "Broken"
+    "is_broken": "Broken",
+    "eval_placeholder": "Evaluate this team's performance...",
+    "no_evaluation": "No evaluation recorded yet.",
+    "save_failed": "Failed to save comment: "
   },
   "connection": {
     "offline": "Offline",
@@ -320,7 +363,14 @@
     "duplicate_tag": "This tag already exists for this team",
     "max_limit_reached": "Maximum 15 tags allowed per team",
     "add_failed": "Failed to add tag",
-    "remove_failed": "Failed to remove tag"
+    "remove_failed": "Failed to remove tag",
+    "preset": {
+      "over_possession": "#over_possession",
+      "control_opponent_nectar": "#control_opponent_nectar",
+      "early_flower": "#early_flower",
+      "aggressive_defense": "#aggressive_defense",
+      "human_player_foul": "#human_player_foul"
+    }
   },
   "conflict": {
     "title": "Scout Session Conflict",
@@ -338,7 +388,16 @@
     "takeover_requested": "Takeover request sent, awaiting original device confirmation (15s)...",
     "cooldown_hint": "Request limit reached, please wait {seconds}s before retrying",
     "rejected_hint": "Takeover request was rejected by the original device. Please rename to join.",
-    "or": "OR"
+    "or": "OR",
+    "merge_invalid_password": "Incorrect password for target account. Verification failed.",
+    "option_duplicate_rename_title": "Option 1: Rename to Join",
+    "option_duplicate_rename_hint": "If you are a different member with the same name, please rename to isolate scouting data:",
+    "btn_confirm_rename": "Confirm Rename & Enter",
+    "option_duplicate_merge_title": "Option 2: Merge into Existing Account",
+    "option_duplicate_merge_hint": "If this is your existing account from another device, enter its password to verify ownership and merge data:",
+    "target_password_placeholder": "Enter target account password to verify ownership",
+    "btn_merging": "Merging...",
+    "btn_confirm_merge": "Verify & Merge Account"
   },
   "takeover": {
     "title": "Device Takeover Request",
@@ -346,7 +405,9 @@
     "warning": "If you just switched to a new device, click \"Allow Takeover\". Otherwise, click \"Deny\" to protect your session.",
     "timeout_desc": "Takeover automatically allowed in {seconds}s if no action taken",
     "btn_permit": "Allow Takeover",
-    "btn_deny": "Deny"
+    "btn_deny": "Deny",
+    "description": "A new device is requesting to connect to this room as \"{name}\".",
+    "btn_reject": "Deny"
   },
   "kicked": {
     "title": "Session Disconnected",
@@ -358,7 +419,8 @@
     "cancel": "Cancel",
     "confirm": "Confirm",
     "save": "Save",
-    "close": "Close"
+    "close": "Close",
+    "saving": "Saving..."
   },
   "user": {
     "edit_nickname": "Edit Profile & Password",
@@ -567,7 +629,9 @@
     "schedule": "Schedule",
     "rankings": "Rankings",
     "scouts": "Scouts",
-    "history": "History"
+    "history": "History",
+    "ai": "AI Chat",
+    "more": "More"
   },
   "pit_scout": {
     "title": "Pit Scouting",
@@ -676,7 +740,22 @@
       "sec_photos": "3. Robot Photos",
       "btn_upload_photo": "+ Take / Choose Photo",
       "btn_cancel": "Cancel",
-      "btn_save": "Save Pit Record"
+      "btn_save": "Save Pit Record",
+      "unsaved_confirm": "You have unsaved pit scouting changes. Are you sure you want to exit and discard them?",
+      "ball_compatibility_label": "Ball Compatibility",
+      "ball_compat_universal": "Universal (Large & Small)",
+      "ball_compat_sorting": "Sorting Mechanism",
+      "ball_compat_pollen_only": "Pollen Only",
+      "has_color_sensor_label": "Equipped with Color Sensor",
+      "launcher_type_label": "Launcher Mechanism Type",
+      "launcher_type_placeholder": "e.g. Dual-flywheel / Catapult",
+      "flower_mechanism_label": "Flower Mechanism Design",
+      "flower_mechanism_placeholder": "e.g. Vertical Elevator / Arm Claw",
+      "auto_strategy_label": "Auto Strategy & Routing",
+      "auto_strategy_placeholder": "e.g. Preload shot, sweep balls, score flower",
+      "teleop_cycles_label": "Claimed TeleOp Cycles",
+      "unit_cycles": "cycles",
+      "endgame_score_label": "Claimed Endgame Score (pts)"
     },
     "detail_card": {
       "title": "Pit Technical Specs & Reconciliation",
@@ -692,8 +771,21 @@
       "actual_max_total": "Actual Max Score",
       "actual_avg": "Avg {avg}",
       "brag_rating": "Brag Index Rating",
-      "no_pit_data": "No pit scouting data for this team yet. Click top-right button to add."
+      "no_pit_data": "No pit scouting data for this team yet. Click top-right button to add.",
+      "spec_ball_compat": "Ball Compat: {val}",
+      "spec_launcher": "Launcher: {val}",
+      "spec_flower": "Flower: {val}",
+      "spec_color_sensor": "Color Sensor: {val}",
+      "equipped": "Equipped"
+    },
+    "quick_summary": "Drivetrain: {drivetrain} | Ball: {ball} | Claimed: Auto {auto} / TeleOp {teleop} cycles",
+    "photo_save_failed": "Failed to save photo, please try again",
+    "claimed_teleop_cycles": "Claimed TeleOp Cycles",
+    "claimed_cycles_unit": "cycles",
+    "ball_compatibility": {
+      "universal": "Universal Intake",
+      "sorting": "Sorting & Filtering",
+      "pollen_only": "Pollen Only"
     }
   }
 }
-

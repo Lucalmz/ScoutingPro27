@@ -14,6 +14,7 @@ import { renderMarkdown } from '@/utils/markdown'
 import { buildTeamRegex, applyTeamChipsToHtml } from './teamMatcher'
 import TeamDetailDrawer from '@/components/common/TeamDetailDrawer.vue'
 import { useAiChatStream, type ChatMessage } from './useAiChatStream'
+import { useConfirm } from '@/composables/useConfirm'
 
 const props = defineProps<{
   eventId: string
@@ -252,8 +253,17 @@ function copyMessage(content: string) {
   })
 }
 
-function clearChat() {
-  if (confirm(t('ai.clear_confirm'))) {
+const { showConfirm } = useConfirm()
+
+async function clearChat() {
+  const ok = await showConfirm({
+    title: t('confirm_dialog.title'),
+    message: t('ai.clear_confirm'),
+    type: 'danger',
+    confirmText: t('confirm_dialog.danger_confirm'),
+    cancelText: t('confirm_dialog.cancel')
+  })
+  if (ok) {
     cancelEditMessage()
     chatHistory.value = []
     debouncedSaveHistory()
