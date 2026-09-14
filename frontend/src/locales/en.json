@@ -139,7 +139,7 @@
     "total_balls": "Total Balls",
     "unit_balls": "balls",
     "avg_balls_per_cycle": "Avg Balls/Cycle",
-    "btn_new_cycle": "+ Record New Cycle",
+    "btn_new_cycle": "Record New Cycle",
     "btn_cycle_tapping": "Cycle #{num}: {count} Balls (Tap +1)",
     "btn_add_ball": "+1 Ball",
     "btn_undo_cycle": "Undo Last Cycle",

@@ -139,7 +139,7 @@
     "total_balls": "总发射球数",
     "unit_balls": "球",
     "avg_balls_per_cycle": "场均出球",
-    "btn_new_cycle": "+ 记录新轮次",
+    "btn_new_cycle": "记录新轮次",
     "btn_cycle_tapping": "第 {num} 轮: {count} 球 (再点+1)",
     "btn_add_ball": "+1 球",
     "btn_undo_cycle": "撤销上一轮",

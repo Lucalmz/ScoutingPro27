@@ -32,6 +32,7 @@ const i18n = createI18n({
         btn_cycle_tapping: 'Cycle #{num}: {count} balls (Tap +1)',
         btn_add_ball: '+1 Ball',
         btn_undo_cycle: 'Undo',
+        empty_cycles_hint: 'Click Record New Cycle to begin',
         cycle_num: 'Cycle #{num}',
         balls_unit: '{count} balls',
         total_cycles: 'Total Cycles',

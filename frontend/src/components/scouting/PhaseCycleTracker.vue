@@ -78,12 +78,15 @@ function handleNewCycle() {
   userScrolledUp.value = false
   scrollToBottom(true)
 
-  // 简短干脆的微动效反馈
-  isTappingNewCycle.value = true
-  if (tapTimeout) clearTimeout(tapTimeout)
-  tapTimeout = setTimeout(() => {
-    isTappingNewCycle.value = false
-  }, 220)
+  // 流畅的荧光绿光影变亮回弹动效
+  isTappingNewCycle.value = false
+  nextTick(() => {
+    isTappingNewCycle.value = true
+    if (tapTimeout) clearTimeout(tapTimeout)
+    tapTimeout = setTimeout(() => {
+      isTappingNewCycle.value = false
+    }, 450)
+  })
 
   hapticMedium()
 }
@@ -492,33 +495,57 @@ defineExpose({
   gap: 10px;
 }
 
-/* 新建轮次按钮 (精简微动效) */
+/* 新建轮次按钮 (荧光绿加微光影，点击流畅变亮回弹) */
 .btn-new-cycle {
   display: inline-flex;
   align-items: center;
   gap: 6px;
-  background: #22c55e;
-  color: #000;
+  background: linear-gradient(180deg, #4efd2d 0%, #39ff14 100%);
+  color: #000000;
   font-weight: 800;
   font-size: 14px;
   min-height: 44px;
-  padding: 8px 16px;
+  padding: 8px 18px;
   border-radius: 10px;
-  border: none;
+  border: 1px solid rgba(255, 255, 255, 0.25);
   cursor: pointer;
   user-select: none;
-  transition: transform 0.12s ease, background-color 0.18s ease;
-  box-shadow: 0 2px 8px rgba(34, 197, 94, 0.25);
+  box-shadow: 0 0 14px rgba(57, 255, 20, 0.4), inset 0 1px 1px rgba(255, 255, 255, 0.35);
+  transition: transform 0.15s cubic-bezier(0.34, 1.56, 0.64, 1), box-shadow 0.18s ease, filter 0.18s ease;
+  touch-action: manipulation;
+  -webkit-tap-highlight-color: transparent;
+}
+
+.btn-new-cycle:hover {
+  filter: brightness(1.08);
+  box-shadow: 0 0 18px rgba(57, 255, 20, 0.55), inset 0 1px 1px rgba(255, 255, 255, 0.45);
+  transform: translateY(-1px);
 }
 
 .btn-new-cycle:active {
-  transform: scale(0.96);
+  transform: scale(0.95);
 }
 
 .btn-new-cycle.btn-tapping {
-  background: #16a34a;
-  color: #fff;
-  transform: scale(0.98);
+  animation: cycle-btn-bloom 0.45s cubic-bezier(0.2, 0.9, 0.3, 1) forwards;
+}
+
+@keyframes cycle-btn-bloom {
+  0% {
+    transform: scale(0.96);
+    filter: brightness(1);
+    box-shadow: 0 0 14px rgba(57, 255, 20, 0.4);
+  }
+  30% {
+    transform: scale(1.03);
+    filter: brightness(1.35) saturate(1.2);
+    box-shadow: 0 0 26px rgba(57, 255, 20, 0.85), 0 0 45px rgba(57, 255, 20, 0.45);
+  }
+  100% {
+    transform: scale(1);
+    filter: brightness(1);
+    box-shadow: 0 0 14px rgba(57, 255, 20, 0.4);
+  }
 }
 
 .active-counter-group {
@@ -531,6 +558,108 @@ defineExpose({
   font-size: 13px;
   font-weight: 700;
   color: var(--foreground, #f8fafc);
+}
+
+/* 当前轮次球数步进加减按钮及数值 */
+.counter-controls {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-shrink: 0;
+  white-space: nowrap;
+}
+
+.counter-btn {
+  width: 44px;
+  height: 44px;
+  border-radius: 10px;
+  border: 1px solid var(--input, rgba(255, 255, 255, 0.15));
+  background: var(--border, rgba(255, 255, 255, 0.08));
+  color: var(--foreground, #f8fafc);
+  font-size: 20px;
+  font-weight: 700;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: all 0.15s ease;
+  user-select: none;
+  touch-action: manipulation;
+  -webkit-tap-highlight-color: transparent;
+}
+
+.counter-btn:hover:not(:disabled) {
+  background: var(--input, rgba(255, 255, 255, 0.15));
+  border-color: var(--primary, #39ff14);
+}
+
+.counter-btn:active:not(:disabled) {
+  transform: scale(0.92);
+}
+
+.counter-btn:disabled {
+  opacity: 0.3;
+  cursor: not-allowed;
+}
+
+.counter-val {
+  font-size: 20px;
+  font-weight: 700;
+  min-width: 36px;
+  text-align: center;
+  user-select: none;
+  font-variant-numeric: tabular-nums;
+  display: inline-block;
+  color: var(--foreground, #f8fafc);
+  transition: transform 0.15s cubic-bezier(0.34, 1.56, 0.64, 1), color 0.15s ease;
+}
+
+.counter-val.bump-up,
+.counter-val.bump-up-a,
+.mini-counter-val.bump-up,
+.mini-counter-val.bump-up-a {
+  animation: val-bump-up-a 0.22s cubic-bezier(0.34, 1.56, 0.64, 1);
+}
+
+.counter-val.bump-up-b,
+.mini-counter-val.bump-up-b {
+  animation: val-bump-up-b 0.22s cubic-bezier(0.34, 1.56, 0.64, 1);
+}
+
+.counter-val.bump-down,
+.counter-val.bump-down-a,
+.mini-counter-val.bump-down,
+.mini-counter-val.bump-down-a {
+  animation: val-bump-down-a 0.22s cubic-bezier(0.34, 1.56, 0.64, 1);
+}
+
+.counter-val.bump-down-b,
+.mini-counter-val.bump-down-b {
+  animation: val-bump-down-b 0.22s cubic-bezier(0.34, 1.56, 0.64, 1);
+}
+
+@keyframes val-bump-up-a {
+  0% { transform: translateY(0) scale(1); }
+  50% { transform: translateY(-3px) scale(1.15); color: var(--primary, #39ff14); }
+  100% { transform: translateY(0) scale(1); }
+}
+
+@keyframes val-bump-up-b {
+  0% { transform: translateY(0) scale(1); }
+  50% { transform: translateY(-3px) scale(1.15); color: var(--primary, #39ff14); }
+  100% { transform: translateY(0) scale(1); }
+}
+
+@keyframes val-bump-down-a {
+  0% { transform: translateY(0) scale(1); }
+  50% { transform: translateY(2px) scale(0.92); color: var(--status-error, #ef4444); }
+  100% { transform: translateY(0) scale(1); }
+}
+
+@keyframes val-bump-down-b {
+  0% { transform: translateY(0) scale(1); }
+  50% { transform: translateY(2px) scale(0.92); color: var(--status-error, #ef4444); }
+  100% { transform: translateY(0) scale(1); }
 }
 
 .balls-unit-tag {
