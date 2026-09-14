@@ -76,10 +76,12 @@ interface TeamScoutData {
   autoLeave: boolean
   autoBalls: number
   autoCycles: number[]
+  autoMissedCycles: number[]
   autoPark: boolean
 
   // TeleOp (Cycle Tracker)
   teleopCycles: number[]
+  teleopMissedCycles: number[]
 
   // Endgame
   flowerPlaced: boolean
@@ -96,8 +98,10 @@ function createEmptyTeam(): TeamScoutData {
     autoLeave: false,
     autoBalls: 0,
     autoCycles: [],
+    autoMissedCycles: [],
     autoPark: false,
     teleopCycles: [],
+    teleopMissedCycles: [],
     flowerPlaced: false,
     flowerBottomBonus: false,
     teleopPark: false,
@@ -395,13 +399,17 @@ watch(() => props.editRecord, (rec: ScoutingRecord | null | undefined) => {
     const autoCycles = Array.isArray(raw.autoCycles)
       ? [...raw.autoCycles]
       : (autoBalls > 0 ? [autoBalls] : [])
+    const autoMissedCycles = Array.isArray(raw.autoMissedCycles) ? [...raw.autoMissedCycles] : []
+    const teleopMissedCycles = Array.isArray(raw.teleopMissedCycles) ? [...raw.teleopMissedCycles] : []
     teamsData.value = [{
       teamNumber: String(rec.teamNumber),
       autoLeave: raw.autoLeave ?? false,
       autoBalls: autoBalls,
       autoCycles: autoCycles,
+      autoMissedCycles: autoMissedCycles,
       autoPark: raw.autoPark ?? false,
       teleopCycles: Array.isArray(raw.teleopCycles) ? [...raw.teleopCycles] : [],
+      teleopMissedCycles: teleopMissedCycles,
       flowerPlaced: raw.flowerPlaced ?? false,
       flowerBottomBonus: raw.flowerBottomBonus ?? false,
       teleopPark: raw.teleopPark ?? false,
@@ -539,9 +547,11 @@ async function handleSubmit() {
         autoLeave: team.autoLeave,
         autoBalls: team.autoBalls || 0,
         autoCycles: [...team.autoCycles],
+        autoMissedCycles: [...team.autoMissedCycles],
         autoPreload: (team.autoBalls || 0) > 0,
         autoPark: team.autoPark,
         teleopCycles: [...team.teleopCycles],
+        teleopMissedCycles: [...team.teleopMissedCycles],
         flowerPlaced: team.flowerPlaced,
         flowerBottomBonus: team.flowerBottomBonus,
         teleopPark: team.teleopPark
@@ -716,6 +726,7 @@ const recordStore = useRecordStore()
               icon="smart_toy"
               :rate-text="t('scouting.auto_balls_rate')"
               v-model="team.autoCycles"
+              v-model:missed-value="team.autoMissedCycles"
               @change="syncAutoBalls(team)"
             />
 
@@ -747,6 +758,7 @@ const recordStore = useRecordStore()
               icon="sports_esports"
               :rate-text="'+2 ' + t('scouting.unit_balls')"
               v-model="team.teleopCycles"
+              v-model:missed-value="team.teleopMissedCycles"
             />
           </section>
 

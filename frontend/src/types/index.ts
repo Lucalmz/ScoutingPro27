@@ -99,12 +99,14 @@ export interface ScoutingFormData {
   autoLeave: boolean
   autoBalls: number
   autoCycles?: number[]
+  autoMissedCycles?: number[]
   autoPark: boolean
   autoPreload?: boolean
   autoSecondary?: boolean
 
   // Teleop (Cycle Tracker)
   teleopCycles: number[]
+  teleopMissedCycles?: number[]
 
   // Endgame
   flowerPlaced: boolean

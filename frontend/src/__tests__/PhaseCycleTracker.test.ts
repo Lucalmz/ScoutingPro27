@@ -1,4 +1,4 @@
-import { describe, it, expect, vi } from 'vitest'
+import { describe, it, expect } from 'vitest'
 import { mount } from '@vue/test-utils'
 import { createI18n } from 'vue-i18n'
 import PhaseCycleTracker from '@/components/scouting/PhaseCycleTracker.vue'
@@ -19,6 +19,7 @@ describe('PhaseCycleTracker.vue', () => {
         icon: 'smart_toy',
         rateText: '+3 分/球',
         modelValue: [],
+        missedValue: [],
         ...props
       },
       global: {
@@ -35,17 +36,96 @@ describe('PhaseCycleTracker.vue', () => {
     expect(wrapper.find('.cycle-empty-hint').exists()).toBe(true)
   })
 
-  it('clicking "Record New Cycle" defaults to 0 balls', async () => {
+  it('clicking "Record New Cycle" defaults to 0 balls when empty', async () => {
     const wrapper = createWrapper()
     const newCycleBtn = wrapper.find('.btn-action-new-cycle')
+    expect(newCycleBtn.attributes('disabled')).toBeUndefined()
     await newCycleBtn.trigger('click')
 
-    // Emits update:modelValue with [0]
+    // Emits update:modelValue with [0] and update:missedValue with [0]
     expect(wrapper.emitted('update:modelValue')).toBeTruthy()
     expect(wrapper.emitted('update:modelValue')![0]).toEqual([[0]])
+    expect(wrapper.emitted('update:missedValue')![0]).toEqual([[0]])
   })
 
-  it('increments balls one by one up to 4, and caps at 4', async () => {
+  it('disallows starting a new cycle when current cycle has 0 balls', async () => {
+    const wrapper = createWrapper({ modelValue: [0], missedValue: [0] })
+    const newCycleBtn = wrapper.find('.btn-action-new-cycle')
+
+    // Disabled when current attempts is 0
+    expect(newCycleBtn.attributes('disabled')).toBeDefined()
+    expect(wrapper.find('.empty-block-hint').exists()).toBe(true)
+
+    // Triggering click should not emit new cycle
+    await newCycleBtn.trigger('click')
+    expect(wrapper.emitted('update:modelValue')).toBeFalsy()
+
+    // When current cycle has at least 1 shot (hit or miss), new cycle button becomes enabled
+    await wrapper.setProps({ modelValue: [1], missedValue: [0] })
+    expect(wrapper.find('.btn-action-new-cycle').attributes('disabled')).toBeUndefined()
+    expect(wrapper.find('.empty-block-hint').exists()).toBe(false)
+
+    await wrapper.find('.btn-action-new-cycle').trigger('click')
+    expect(wrapper.emitted('update:modelValue')![0]).toEqual([[1, 0]])
+  })
+
+  it('blind touchpad: HIT button adds scored ball, MISS button adds missed ball', async () => {
+    const wrapper = createWrapper({ modelValue: [0], missedValue: [0] })
+    const hitBtn = wrapper.find('.pad-hit-btn')
+    const missBtn = wrapper.find('.pad-miss-btn')
+
+    // HIT: 0 -> 1
+    await hitBtn.trigger('click')
+    expect(wrapper.emitted('update:modelValue')![0]).toEqual([[1]])
+
+    // MISS: 0 -> 1
+    await missBtn.trigger('click')
+    expect(wrapper.emitted('update:missedValue')![0]).toEqual([[1]])
+  })
+
+  it('blind touchpad: initial touch when cycles is empty creates first cycle', async () => {
+    const wrapperHit = createWrapper({ modelValue: [], missedValue: [] })
+    await wrapperHit.find('.pad-hit-btn').trigger('click')
+    expect(wrapperHit.emitted('update:modelValue')![0]).toEqual([[1]])
+    expect(wrapperHit.emitted('update:missedValue')![0]).toEqual([[0]])
+
+    const wrapperMiss = createWrapper({ modelValue: [], missedValue: [] })
+    await wrapperMiss.find('.pad-miss-btn').trigger('click')
+    expect(wrapperMiss.emitted('update:modelValue')![0]).toEqual([[0]])
+    expect(wrapperMiss.emitted('update:missedValue')![0]).toEqual([[1]])
+  })
+
+  it('blind touchpad: caps at 4 attempts total in current cycle', async () => {
+    // 3 hits, 1 miss = 4 attempts total
+    const wrapper = createWrapper({ modelValue: [3], missedValue: [1] })
+    const hitBtn = wrapper.find('.pad-hit-btn')
+    const missBtn = wrapper.find('.pad-miss-btn')
+
+    expect(hitBtn.attributes('disabled')).toBeDefined()
+    expect(missBtn.attributes('disabled')).toBeDefined()
+    expect(wrapper.find('.cap-badge').exists()).toBe(true)
+
+    // New cycle button is suggested when capped at 4
+    expect(wrapper.find('.btn-action-new-cycle').classes()).toContain('is-suggested')
+  })
+
+  it('calculates KPI statistics and accuracy correctly', () => {
+    // Cycle 1: 3 hits, 1 miss; Cycle 2: 1 hit, 1 miss -> Total: 4 hits, 2 misses (6 attempts) -> 67%
+    const wrapper = createWrapper({
+      modelValue: [3, 1],
+      missedValue: [1, 1]
+    })
+
+    const kpiCards = wrapper.findAll('.kpi-card')
+    expect(kpiCards.length).toBe(4)
+    expect(kpiCards[0]!.find('.kpi-num').text()).toBe('2') // total cycles
+    expect(kpiCards[1]!.find('.kpi-num').text()).toBe('4') // total scored
+    expect(kpiCards[2]!.find('.kpi-num').text()).toBe('2') // total missed
+    expect(kpiCards[3]!.find('.kpi-num').text()).toBe('67%') // accuracy
+    expect(kpiCards[3]!.classes()).toContain('accuracy-medium')
+  })
+
+  it('increments balls with stepper and direct chip selection', async () => {
     const wrapper = createWrapper({ modelValue: [0] })
     const plusBtn = wrapper.findAll('.active-cycle-card .counter-btn')[1]!
 
@@ -53,37 +133,24 @@ describe('PhaseCycleTracker.vue', () => {
     await plusBtn.trigger('click')
     expect(wrapper.emitted('update:modelValue')![0]).toEqual([[1]])
 
-    await wrapper.setProps({ modelValue: [3] })
-    // 3 -> 4
-    await plusBtn.trigger('click')
-    expect(wrapper.emitted('update:modelValue')![1]).toEqual([[4]])
-
-    await wrapper.setProps({ modelValue: [4] })
-    // Capped at 4: plus button disabled
-    expect(plusBtn.attributes('disabled')).toBeDefined()
-    expect(wrapper.find('.cap-badge').exists()).toBe(true)
-  })
-
-  it('direct chip selection sets balls directly', async () => {
-    const wrapper = createWrapper({ modelValue: [1] })
+    // Chips
     const chips = wrapper.findAll('.chip-ball-btn')
     expect(chips.length).toBe(5) // 0, 1, 2, 3, 4
-
-    // Click chip 3
     await chips[3]!.trigger('click')
-    expect(wrapper.emitted('update:modelValue')![0]).toEqual([[3]])
-
-    // Click chip 0
-    await chips[0]!.trigger('click')
-    expect(wrapper.emitted('update:modelValue')![1]).toEqual([[0]])
+    expect(wrapper.emitted('update:modelValue')![1]).toEqual([[3]])
   })
 
-  it('undo button removes the last cycle', async () => {
-    const wrapper = createWrapper({ modelValue: [3, 2] })
+  it('undo action: steps back single shot first, removes cycle when empty', async () => {
+    // Current cycle has 2 balls: clicking undo decrements 2 -> 1
+    const wrapper = createWrapper({ modelValue: [3, 2], missedValue: [0, 0] })
     const undoBtn = wrapper.find('.btn-undo-cycle')
     await undoBtn.trigger('click')
+    expect(wrapper.emitted('update:modelValue')![0]).toEqual([[3, 1]])
 
-    expect(wrapper.emitted('update:modelValue')![0]).toEqual([[3]])
+    // Empty cycle: clicking undo removes the cycle
+    const emptyWrapper = createWrapper({ modelValue: [3, 0], missedValue: [0, 0] })
+    await emptyWrapper.find('.btn-undo-cycle').trigger('click')
+    expect(emptyWrapper.emitted('update:modelValue')![0]).toEqual([[3]])
   })
 
   it('toggles expand/collapse when cycle count exceeds 3', async () => {
@@ -102,7 +169,7 @@ describe('PhaseCycleTracker.vue', () => {
   })
 
   it('supports inline editing of past cycles', async () => {
-    const wrapper = createWrapper({ modelValue: [2, 4] })
+    const wrapper = createWrapper({ modelValue: [2, 4], missedValue: [0, 0] })
     const rows = wrapper.findAll('.cycle-row-item')
     expect(rows.length).toBe(2)
 
