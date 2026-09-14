@@ -621,7 +621,27 @@
     "troubleshoot_title": "Troubleshooting:",
     "troubleshoot_desc": "If your phone cannot open the page, verify: 1) Phone is connected to the same Wi-Fi or PC hotspot; 2) Windows Defender Firewall allows port 8080 inbound connections; 3) Windows Mobile Hotspot is enabled.",
     "refresh_network": "Refresh Network",
-    "refreshing": "Detecting..."
+    "refreshing": "Detecting...",
+    "mode_lan": "LAN Mode (Wi-Fi / Hotspot)",
+    "mode_ipv6": "Direct IPv6 (Cellular 4G/5G & Remote PCs)",
+    "select_ipv6": "Select Public IPv6 Address:",
+    "ipv6_ready_badge": "Public Direct Connection Ready (Cellular & Remote PCs)",
+    "ipv6_not_found_title": "No Public IPv6 Address Detected",
+    "ipv6_not_found_desc": "The current network has not assigned a Global Unicast IPv6 address. Please switch to LAN Mode or enable IPv6 on your router.",
+    "copy_pc_link": "Copy PC Web Link",
+    "copy_pc_link_tooltip": "Send to grandstand laptops or remote scouts to open directly in desktop browsers",
+    "troubleshoot_ipv6_title": "Public IPv6 Troubleshooting:",
+    "troubleshoot_ipv6_desc": "1) Mobile devices should use cellular data (4G/5G); 2) Remote computers can open the bracketed IPv6 URL directly; 3) If inaccessible, click 'Allow Inbound Port' below to troubleshoot.",
+    "firewall_card_title": "Windows Firewall Port Troubleshooting",
+    "firewall_card_desc": "Not needed on LAN Wi-Fi. If mobile devices using 4G/5G cellular data fail to load the webpage, allow the host TCP inbound port:",
+    "firewall_allowed": "Allowed (Ready)",
+    "firewall_optional": "Only if cellular fails",
+    "run_cmd_btn": "Allow Inbound Port",
+    "run_cmd_running": "Configuring...",
+    "run_cmd_success": "Inbound port allowed! Mobile phone can now reload.",
+    "run_cmd_failed": "Admin permission not granted. You can copy the command to run manually in Administrator prompt.",
+    "copy_cmd_btn": "Copy Command",
+    "copy_cmd_success": "Firewall command copied to clipboard"
   },
   "bottom_nav": {
     "scout": "Scout",
@@ -697,6 +717,9 @@
       "none": "None (Encoder Only)",
       "two_wheel": "2-Wheel + IMU",
       "three_wheel": "3-Wheel Omni",
+      "pinpoint": "GoBILDA Pinpoint",
+      "sparkfun_otos": "SparkFun OTOS Optical",
+      "otos": "SparkFun OTOS Optical",
       "pinpoint_otos": "Pinpoint / OTOS Optical"
     },
     "brag_tiers": {

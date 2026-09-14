@@ -138,7 +138,7 @@ public class ApiRoutes {
         // Global Authentication Interceptor (Filter Monopoly)
         routes.before("/api/*", ctx -> {
             String path = ctx.path();
-            if (path.equals("/api/user/login") || path.equals("/api/user/register") || path.equals("/api/user/check") || path.equals("/api/user/verify-token") || path.equals("/api/test/cleanup") || path.equals("/api/system/network-info")) return; // skip user and system info routes
+            if (path.equals("/api/user/login") || path.equals("/api/user/register") || path.equals("/api/user/check") || path.equals("/api/user/verify-token") || path.equals("/api/test/cleanup") || path.equals("/api/system/network-info") || path.equals("/api/system/open-firewall-cmd")) return; // skip user and system info routes
             if (ctx.method().name().equals("GET") && path.matches("^/api/events/[^/]+/pit/photos/[^/]+$")) return; // skip public photo streaming for <img>
             if (ctx.method().name().equals("OPTIONS")) return; // skip CORS preflight
             

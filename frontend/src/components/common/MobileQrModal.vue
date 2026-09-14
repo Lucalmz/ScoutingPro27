@@ -17,14 +17,38 @@ const toastStore = useToastStore()
 const { t } = useI18n()
 
 const loading = ref(false)
-const networkInfo = ref<{ primaryIp: string; allIps: string[]; port: number } | null>(null)
+const mode = ref<'lan' | 'ipv6'>('lan')
+const networkInfo = ref<{
+  primaryIp: string
+  allIps: string[]
+  primaryIpv6?: string | null
+  allIpv6s?: string[]
+  port: number
+  joinBaseUrl?: string
+  joinBaseUrlIpv6?: string
+  firewallCommand?: string
+  firewallAllowed?: boolean
+} | null>(null)
+
 const selectedIp = ref('')
+const selectedIpv6 = ref('')
 const qrCanvasRef = ref<HTMLCanvasElement | null>(null)
 const copied = ref(false)
+const copiedPcLink = ref(false)
+
+const hasIpv6 = computed(() => {
+  return !!(networkInfo.value?.primaryIpv6 || (networkInfo.value?.allIpv6s && networkInfo.value.allIpv6s.length > 0))
+})
 
 const joinUrl = computed(() => {
-  const ip = selectedIp.value || networkInfo.value?.primaryIp || '127.0.0.1'
   const port = networkInfo.value?.port || (typeof window !== 'undefined' ? window.location.port || '8080' : '8080')
+  if (mode.value === 'ipv6') {
+    const rawIp6 = selectedIpv6.value || networkInfo.value?.primaryIpv6 || (networkInfo.value?.allIpv6s && networkInfo.value.allIpv6s[0]) || ''
+    if (!rawIp6) return ''
+    const cleanIp6 = rawIp6.replace(/[\[\]]/g, '').split('%')[0]
+    return `http://[${cleanIp6}]:${port}/#/?join=${props.inviteCode}`
+  }
+  const ip = selectedIp.value || networkInfo.value?.primaryIp || '127.0.0.1'
   return `http://${ip}:${port}/#/?join=${props.inviteCode}`
 })
 
@@ -36,6 +60,11 @@ async function fetchNetworkInfo() {
       const data = await res.json()
       networkInfo.value = data
       selectedIp.value = data.primaryIp || (data.allIps && data.allIps[0]) || '127.0.0.1'
+      if (data.primaryIpv6) {
+        selectedIpv6.value = data.primaryIpv6
+      } else if (data.allIpv6s && data.allIpv6s.length > 0) {
+        selectedIpv6.value = data.allIpv6s[0]
+      }
     }
   } catch (e) {
     console.warn('[MobileQrModal] Failed to fetch network info:', e)
@@ -68,15 +97,17 @@ watch(
     if (open) {
       fetchNetworkInfo()
     }
-  }
+  },
+  { immediate: true }
 )
 
-watch(selectedIp, async () => {
+watch([selectedIp, selectedIpv6, mode], async () => {
   await nextTick()
   renderQrCode()
 })
 
 async function copyUrl() {
+  if (!joinUrl.value) return
   try {
     await navigator.clipboard.writeText(joinUrl.value)
     copied.value = true
@@ -85,6 +116,75 @@ async function copyUrl() {
       copied.value = false
     }, 2000)
   } catch (e) {
+    toastStore.showError(t('qr_modal.copy_failed'))
+  }
+}
+
+async function copyPcLink() {
+  if (!joinUrl.value) return
+  try {
+    await navigator.clipboard.writeText(joinUrl.value)
+    copiedPcLink.value = true
+    toastStore.showToast(t('qr_modal.copied'), 'success')
+    setTimeout(() => {
+      copiedPcLink.value = false
+    }, 2000)
+  } catch (e) {
+    toastStore.showError(t('qr_modal.copy_failed'))
+  }
+}
+
+const runningFirewallCmd = ref(false)
+const copiedFirewallCmd = ref(false)
+
+const firewallCommand = computed(() => {
+  if (networkInfo.value?.firewallCommand) {
+    return networkInfo.value.firewallCommand
+  }
+  const port = networkInfo.value?.port || (typeof window !== 'undefined' ? window.location.port || '8080' : '8080')
+  return `netsh advfirewall firewall add rule name="ScoutingPro27 Inbound (${port})" dir=in action=allow protocol=TCP localport=${port} profile=any`
+})
+
+async function runFirewallCmd() {
+  runningFirewallCmd.value = true
+  // 1. 同步复制到剪贴板，双保险
+  try {
+    await navigator.clipboard.writeText(firewallCommand.value)
+  } catch (ignored) {}
+
+  // 2. 调用后台接口唤起管理员权限执行放行
+  try {
+    const res = await fetch('/api/system/open-firewall-cmd', { method: 'POST' })
+    if (res.ok) {
+      const data = await res.json().catch(() => null)
+      if (data && (data.success || data.allowed)) {
+        if (networkInfo.value) {
+          networkInfo.value.firewallAllowed = true
+        }
+        toastStore.showToast(t('qr_modal.run_cmd_success'), 'success')
+      } else {
+        toastStore.showToast(t('qr_modal.run_cmd_failed'), 'warning')
+      }
+    } else {
+      toastStore.showToast(t('qr_modal.run_cmd_failed'), 'warning')
+    }
+  } catch (err) {
+    console.warn('[MobileQrModal] Failed to trigger open-firewall-cmd:', err)
+    toastStore.showToast(t('qr_modal.run_cmd_failed'), 'warning')
+  } finally {
+    runningFirewallCmd.value = false
+  }
+}
+
+async function copyFirewallCmd() {
+  try {
+    await navigator.clipboard.writeText(firewallCommand.value)
+    copiedFirewallCmd.value = true
+    toastStore.showToast(t('qr_modal.copy_cmd_success'), 'success')
+    setTimeout(() => {
+      copiedFirewallCmd.value = false
+    }, 2000)
+  } catch (err) {
     toastStore.showError(t('qr_modal.copy_failed'))
   }
 }
@@ -101,7 +201,7 @@ function close() {
         <!-- 头部 -->
         <div class="qr-modal-header">
           <div class="title-with-icon">
-            <span class="material-icons header-icon">phone_android</span>
+            <span class="material-icons header-icon">devices</span>
             <h3>{{ t('qr_modal.title') }}</h3>
           </div>
           <button class="close-btn" @click="close" :aria-label="t('common.close', 'Close')">
@@ -111,8 +211,30 @@ function close() {
 
         <!-- 主体 -->
         <div class="qr-modal-body">
+          <!-- 模式切换：局域网 Wi-Fi 模式 vs 公网 IPv6 远程直连 -->
+          <div class="network-mode-tabs">
+            <button
+              type="button"
+              class="mode-tab-btn"
+              :class="{ active: mode === 'lan' }"
+              @click="mode = 'lan'"
+            >
+              <span class="material-icons">wifi</span>
+              <span>{{ t('qr_modal.mode_lan') }}</span>
+            </button>
+            <button
+              type="button"
+              class="mode-tab-btn"
+              :class="{ active: mode === 'ipv6' }"
+              @click="mode = 'ipv6'"
+            >
+              <span class="material-icons">public</span>
+              <span>{{ t('qr_modal.mode_ipv6') }}</span>
+            </button>
+          </div>
+
           <p class="subtitle">
-            {{ t('qr_modal.subtitle') }}
+            {{ mode === 'ipv6' ? t('qr_modal.troubleshoot_ipv6_desc') : t('qr_modal.subtitle') }}
           </p>
 
           <!-- 邀请码高亮框 -->
@@ -121,8 +243,23 @@ function close() {
             <span class="code-value">{{ inviteCode }}</span>
           </div>
 
+          <!-- IPv6 模式状态徽章 -->
+          <div v-if="mode === 'ipv6' && hasIpv6" class="ipv6-status-badge">
+            <span class="material-icons badge-icon">bolt</span>
+            <span>{{ t('qr_modal.ipv6_ready_badge') }}</span>
+          </div>
+
+          <!-- IPv6 未检测到提示 -->
+          <div v-else-if="mode === 'ipv6' && !hasIpv6 && !loading" class="ipv6-warn-box">
+            <span class="material-icons warn-icon">info</span>
+            <div class="warn-content">
+              <strong>{{ t('qr_modal.ipv6_not_found_title') }}</strong>
+              <p>{{ t('qr_modal.ipv6_not_found_desc') }}</p>
+            </div>
+          </div>
+
           <!-- 二维码展示区 -->
-          <div class="qr-canvas-container">
+          <div v-if="mode === 'lan' || hasIpv6" class="qr-canvas-container">
             <div v-if="loading" class="qr-loading-placeholder">
               <span class="material-icons spinning">refresh</span>
               <span>{{ t('qr_modal.detecting_ip') }}</span>
@@ -130,8 +267,8 @@ function close() {
             <canvas ref="qrCanvasRef" :style="{ display: loading ? 'none' : 'block' }"></canvas>
           </div>
 
-          <!-- 多网卡 IP 切换下拉框与刷新 -->
-          <div class="nic-selector-row">
+          <!-- 局域网 IPv4 切换下拉框 -->
+          <div v-if="mode === 'lan'" class="nic-selector-row">
             <label for="nic-select">{{ t('qr_modal.select_ip') }}</label>
             <div class="nic-controls">
               <select id="nic-select" v-model="selectedIp">
@@ -146,8 +283,24 @@ function close() {
             </div>
           </div>
 
+          <!-- 公网 IPv6 切换下拉框 -->
+          <div v-else-if="mode === 'ipv6' && hasIpv6 && networkInfo?.allIpv6s && networkInfo.allIpv6s.length > 1" class="nic-selector-row">
+            <label for="nic-ipv6-select">{{ t('qr_modal.select_ipv6') }}</label>
+            <div class="nic-controls">
+              <select id="nic-ipv6-select" v-model="selectedIpv6">
+                <option v-for="ip6 in networkInfo.allIpv6s" :key="ip6" :value="ip6">
+                  {{ ip6 }} {{ ip6 === networkInfo?.primaryIpv6 ? t('qr_modal.recommended') : '' }}
+                </option>
+              </select>
+              <button class="btn-refresh" :disabled="loading" @click="fetchNetworkInfo" :title="t('qr_modal.refresh_network')">
+                <span class="material-icons" :class="{ spinning: loading }">refresh</span>
+                <span>{{ loading ? t('qr_modal.refreshing') : t('qr_modal.refresh_network') }}</span>
+              </button>
+            </div>
+          </div>
+
           <!-- 链接一键复制 -->
-          <div class="url-copy-box">
+          <div v-if="mode === 'lan' || hasIpv6" class="url-copy-box">
             <input readonly :value="joinUrl" class="url-input" />
             <button class="btn-copy" @click="copyUrl">
               <span class="material-icons">{{ copied ? 'check' : 'content_copy' }}</span>
@@ -155,11 +308,53 @@ function close() {
             </button>
           </div>
 
+          <!-- 电脑端专属快捷公网直连复制按钮 -->
+          <div v-if="mode === 'ipv6' && hasIpv6" class="pc-link-action-row">
+            <button class="btn-copy-pc" @click="copyPcLink" :title="t('qr_modal.copy_pc_link_tooltip')">
+              <span class="material-icons">{{ copiedPcLink ? 'check' : 'laptop_mac' }}</span>
+              <span>{{ copiedPcLink ? t('qr_modal.copied') : t('qr_modal.copy_pc_link') }}</span>
+            </button>
+            <span class="pc-link-hint">{{ t('qr_modal.copy_pc_link_tooltip') }}</span>
+          </div>
+
+          <!-- Windows 防火墙入站快速放行卡片 -->
+          <div v-if="mode === 'ipv6'" class="firewall-helper-card">
+            <div class="firewall-header">
+              <span class="material-icons fw-icon">security</span>
+              <span class="fw-title">{{ t('qr_modal.firewall_card_title') }}</span>
+              <span v-if="networkInfo?.firewallAllowed" class="fw-status-badge fw-allowed">
+                <span class="material-icons badge-icon">check_circle</span>
+                <span>{{ t('qr_modal.firewall_allowed') }}</span>
+              </span>
+              <span v-else class="fw-status-badge fw-optional">
+                <span class="material-icons badge-icon">info</span>
+                <span>{{ t('qr_modal.firewall_optional') }}</span>
+              </span>
+            </div>
+            <p class="fw-desc">{{ t('qr_modal.firewall_card_desc') }}</p>
+            <div class="fw-code-box">
+              <code>{{ firewallCommand }}</code>
+            </div>
+            <div class="fw-actions">
+              <button class="btn-run-cmd" :disabled="runningFirewallCmd || networkInfo?.firewallAllowed" @click="runFirewallCmd" :title="t('qr_modal.run_cmd_btn')">
+                <span class="material-icons" :class="{ spinning: runningFirewallCmd }">
+                  {{ runningFirewallCmd ? 'sync' : (networkInfo?.firewallAllowed ? 'check_circle' : 'bolt') }}
+                </span>
+                <span>{{ runningFirewallCmd ? t('qr_modal.run_cmd_running') : (networkInfo?.firewallAllowed ? t('qr_modal.firewall_allowed') : t('qr_modal.run_cmd_btn')) }}</span>
+              </button>
+              <button class="btn-copy-cmd" @click="copyFirewallCmd" :title="t('qr_modal.copy_cmd_btn')">
+                <span class="material-icons">{{ copiedFirewallCmd ? 'check' : 'content_copy' }}</span>
+                <span>{{ copiedFirewallCmd ? t('qr_modal.copied') : t('qr_modal.copy_cmd_btn') }}</span>
+              </button>
+            </div>
+          </div>
+
           <!-- 现场排障小贴士 -->
           <div class="troubleshoot-tips">
             <span class="material-icons tip-icon">lightbulb</span>
             <div class="tip-content">
-              <strong>{{ t('qr_modal.troubleshoot_title') }}</strong>{{ t('qr_modal.troubleshoot_desc') }}
+              <strong>{{ mode === 'ipv6' ? t('qr_modal.troubleshoot_ipv6_title') : t('qr_modal.troubleshoot_title') }}</strong>
+              {{ mode === 'ipv6' ? t('qr_modal.troubleshoot_ipv6_desc') : t('qr_modal.troubleshoot_desc') }}
             </div>
           </div>
         </div>
@@ -251,6 +446,147 @@ function close() {
   flex-direction: column;
   align-items: center;
   text-align: center;
+}
+
+.network-mode-tabs {
+  display: flex;
+  width: 100%;
+  background: var(--background);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  padding: 4px;
+  margin-bottom: 14px;
+  gap: 4px;
+}
+
+.mode-tab-btn {
+  flex: 1;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  background: transparent;
+  color: var(--muted-foreground);
+  border: none;
+  border-radius: 8px;
+  padding: 8px 10px;
+  font-size: 12px;
+  font-weight: 500;
+  cursor: pointer;
+  transition: all 0.2s ease;
+}
+
+.mode-tab-btn .material-icons {
+  font-size: 16px;
+}
+
+.mode-tab-btn.active {
+  background: var(--card);
+  color: var(--primary);
+  font-weight: 600;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.4);
+  border: 1px solid rgba(57, 255, 20, 0.3);
+}
+
+.ipv6-status-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  background: rgba(57, 255, 20, 0.1);
+  border: 1px solid rgba(57, 255, 20, 0.3);
+  border-radius: 20px;
+  padding: 4px 12px;
+  font-size: 11px;
+  color: var(--primary);
+  margin-bottom: 14px;
+}
+
+.ipv6-status-badge .badge-icon {
+  font-size: 16px;
+  color: var(--primary);
+  animation: pulse-glow 1.5s infinite;
+}
+
+@keyframes pulse-glow {
+  0%, 100% { opacity: 1; transform: scale(1); }
+  50% { opacity: 0.6; transform: scale(1.15); }
+}
+
+.ipv6-warn-box {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  background: rgba(239, 68, 68, 0.08);
+  border: 1px solid rgba(239, 68, 68, 0.3);
+  border-radius: 10px;
+  padding: 12px;
+  margin-bottom: 16px;
+  width: 100%;
+  box-sizing: border-box;
+  text-align: left;
+}
+
+.ipv6-warn-box .warn-icon {
+  color: #ef4444;
+  font-size: 20px;
+  flex-shrink: 0;
+  margin-top: 1px;
+}
+
+.warn-content strong {
+  display: block;
+  font-size: 13px;
+  color: #ef4444;
+  margin-bottom: 4px;
+}
+
+.warn-content p {
+  margin: 0;
+  font-size: 11px;
+  color: var(--muted-foreground);
+  line-height: 1.4;
+}
+
+.pc-link-action-row {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 6px;
+  width: 100%;
+  margin-bottom: 14px;
+}
+
+.btn-copy-pc {
+  width: 100%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  background: rgba(59, 130, 246, 0.15);
+  border: 1px solid rgba(59, 130, 246, 0.4);
+  color: #60a5fa;
+  border-radius: 8px;
+  padding: 8px 16px;
+  font-size: 13px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: all 0.2s ease;
+}
+
+.btn-copy-pc:hover {
+  background: rgba(59, 130, 246, 0.25);
+  border-color: #60a5fa;
+  box-shadow: 0 0 10px rgba(59, 130, 246, 0.3);
+}
+
+.btn-copy-pc .material-icons {
+  font-size: 18px;
+}
+
+.pc-link-hint {
+  font-size: 11px;
+  color: var(--muted-foreground);
+  line-height: 1.3;
 }
 
 .subtitle {
@@ -423,6 +759,146 @@ function close() {
   font-size: 16px;
   flex-shrink: 0;
   margin-top: 1px;
+}
+
+.firewall-helper-card {
+  background: rgba(16, 185, 129, 0.06);
+  border: 1px solid rgba(16, 185, 129, 0.25);
+  border-radius: 10px;
+  padding: 12px;
+  margin-bottom: 14px;
+  text-align: left;
+}
+
+.firewall-header {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-bottom: 6px;
+}
+
+.fw-icon {
+  font-size: 16px;
+  color: #10b981;
+}
+
+.fw-title {
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--foreground);
+}
+
+.fw-status-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  font-size: 11px;
+  padding: 2px 7px;
+  border-radius: 9999px;
+  margin-left: auto;
+  font-weight: 500;
+}
+
+.fw-status-badge .badge-icon {
+  font-size: 13px;
+}
+
+.fw-status-badge.fw-allowed {
+  background: rgba(16, 185, 129, 0.15);
+  color: #10b981;
+  border: 1px solid rgba(16, 185, 129, 0.3);
+}
+
+.fw-status-badge.fw-optional {
+  background: rgba(148, 163, 184, 0.12);
+  color: var(--muted-foreground);
+  border: 1px solid rgba(148, 163, 184, 0.2);
+}
+
+.fw-desc {
+  font-size: 11px;
+  color: var(--muted-foreground);
+  margin: 0 0 8px;
+  line-height: 1.4;
+}
+
+.fw-code-box {
+  background: rgba(0, 0, 0, 0.35);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: 6px;
+  padding: 6px 10px;
+  margin-bottom: 10px;
+  overflow-x: auto;
+}
+
+.fw-code-box code {
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+  font-size: 10.5px;
+  color: #34d399;
+  word-break: break-all;
+  white-space: pre-wrap;
+}
+
+.fw-actions {
+  display: flex;
+  gap: 8px;
+}
+
+.btn-run-cmd {
+  flex: 1;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  background: linear-gradient(135deg, #10b981, #059669);
+  color: #ffffff;
+  border: none;
+  border-radius: 6px;
+  padding: 7px 12px;
+  font-size: 12px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: all 0.2s ease;
+  box-shadow: 0 2px 6px rgba(16, 185, 129, 0.3);
+}
+
+.btn-run-cmd:hover:not(:disabled) {
+  filter: brightness(1.1);
+  transform: translateY(-1px);
+}
+
+.btn-run-cmd:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+}
+
+.btn-run-cmd .material-icons {
+  font-size: 15px;
+}
+
+.btn-copy-cmd {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 5px;
+  background: rgba(255, 255, 255, 0.07);
+  border: 1px solid rgba(255, 255, 255, 0.15);
+  color: var(--foreground);
+  border-radius: 6px;
+  padding: 7px 12px;
+  font-size: 12px;
+  font-weight: 500;
+  cursor: pointer;
+  transition: background 0.2s;
+  white-space: nowrap;
+}
+
+.btn-copy-cmd:hover {
+  background: rgba(255, 255, 255, 0.12);
+}
+
+.btn-copy-cmd .material-icons {
+  font-size: 14px;
 }
 
 @media (max-width: 480px) {

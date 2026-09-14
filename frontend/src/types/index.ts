@@ -463,7 +463,7 @@ export interface PitScoutingRecord {
   launcherType: string
   flowerMechanism: string
   hasColorSensor: boolean
-  odometryType: string  // 'none' | 'two_wheel' | 'three_wheel' | 'pinpoint_otos'
+  odometryType: string  // 'none' | 'two_wheel' | 'three_wheel' | 'pinpoint' | 'sparkfun_otos'
 
   // 核心量化自述指标
   claimedAutoStrategy?: string

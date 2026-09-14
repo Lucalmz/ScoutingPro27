@@ -160,7 +160,7 @@ public class SimulateScouting {
                 String[] launcherTypes = {"差速双飞轮", "单大飞轮", "弹簧凸轮抛射", "气动弹射"};
                 String[] flowerMechanisms = {"垂直级联高升降", "地槽推球", "仰角抛射", "无"};
                 String[] drivetrains = {"swerve", "mecanum", "tank"};
-                String[] odometries = {"pinpoint_otos", "three_wheel", "two_wheel", "none"};
+                String[] odometries = {"pinpoint", "sparkfun_otos", "three_wheel", "two_wheel", "none"};
 
                 for (JsonElement tElem : teams) {
                     JsonObject t = tElem.getAsJsonObject();

@@ -234,7 +234,7 @@ public class Main {
             }, "app-shutdown-hook"));
 
             String localUrl = "http://localhost:" + app.port() + "/index.html";
-            System.out.println("Javalin 运行在: " + localUrl + " (监听 0.0.0.0:" + app.port() + ")");
+            System.out.println("Javalin 运行在: " + localUrl + " (监听 IPv4/IPv6 双栈端口 :" + app.port() + ")");
             
             boolean headless = false;
             for (String arg : args) {
@@ -389,14 +389,24 @@ public class Main {
     }
 
     private static Javalin startServerWithFallback(ApiRoutes apiRoutes, int targetPort) {
+        // 优先使用 IPv4/IPv6 双栈通配地址 "::" 绑定，使局域网、电脑热点、手机 4G/5G 蜂窝网络及电脑间公网 IPv6 均可直接连通
         try {
-            return createJavalinApp(apiRoutes).start("0.0.0.0", targetPort);
+            return createJavalinApp(apiRoutes).start("::", targetPort);
         } catch (Exception e) {
-            System.err.println("目标端口 " + targetPort + " 启动失败，尝试备用端口: " + e.getMessage());
+            System.err.println("IPv6/IPv4 双栈绑定目标端口 " + targetPort + " 异常，尝试 IPv4 (0.0.0.0): " + e.getMessage());
             try {
-                return createJavalinApp(apiRoutes).start("0.0.0.0", targetPort == 8080 ? 8081 : 0);
+                return createJavalinApp(apiRoutes).start("0.0.0.0", targetPort);
             } catch (Exception e2) {
-                return createJavalinApp(apiRoutes).start("0.0.0.0", 0);
+                System.err.println("目标端口 " + targetPort + " 启动失败，尝试备用端口: " + e2.getMessage());
+                try {
+                    return createJavalinApp(apiRoutes).start("::", targetPort == 8080 ? 8081 : 0);
+                } catch (Exception e3) {
+                    try {
+                        return createJavalinApp(apiRoutes).start("0.0.0.0", targetPort == 8080 ? 8081 : 0);
+                    } catch (Exception e4) {
+                        return createJavalinApp(apiRoutes).start(0);
+                    }
+                }
             }
         }
     }

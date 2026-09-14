@@ -13,6 +13,7 @@ export interface PeerConnectionFactoryOptions {
   onClientRebuildRelay?: () => void
   getLocalEcdhPubHex: () => string
   getCurrentHostSessionId: () => string
+  getClientSessionId?: () => string
   getClientSharedAesKey: () => CryptoKey | null
   getClientSharedKey: (senderId: string) => CryptoKey | null
   getClientFingerprint: (senderId?: string) => string | undefined
@@ -297,7 +298,7 @@ export class PeerConnectionManager {
                       this.options.getSignaling()?.send({
                         offer: payload,
                         ecdhPublicKey: this.options.getLocalEcdhPubHex(),
-                        clientSessionId: `client-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
+                        clientSessionId: this.options.getClientSessionId?.() || `client-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
                         hostSessionId: this.options.getCurrentHostSessionId()
                       })
                     }

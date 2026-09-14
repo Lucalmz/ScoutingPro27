@@ -525,10 +525,18 @@ function handleSave() {
               <button
                 type="button"
                 class="radio-btn"
-                :class="{ 'is-active': odometryType === 'pinpoint_otos' }"
-                @click="odometryType = 'pinpoint_otos'"
+                :class="{ 'is-active': odometryType === 'pinpoint' }"
+                @click="odometryType = 'pinpoint'"
               >
-                {{ t('pit_scout.odometry.pinpoint_otos') }}
+                {{ t('pit_scout.odometry.pinpoint') }}
+              </button>
+              <button
+                type="button"
+                class="radio-btn"
+                :class="{ 'is-active': odometryType === 'sparkfun_otos' || odometryType === 'otos' }"
+                @click="odometryType = 'sparkfun_otos'"
+              >
+                {{ t('pit_scout.odometry.sparkfun_otos') }}
               </button>
             </div>
           </div>

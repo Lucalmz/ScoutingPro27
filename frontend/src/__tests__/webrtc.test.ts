@@ -2409,6 +2409,38 @@ describe('WebRTC Pit Scouting & Batch Sync Protocol', () => {
     vi.useRealTimers()
     clientService.disconnect()
   })
+
+  it('enters standby mode upon discovering an existing host during probe and propagates hostSessionId', async () => {
+    const callbacks = {
+      onStatusChange: vi.fn(),
+      onRecordsReceived: vi.fn(),
+      onAckReceived: vi.fn(),
+      onRequestSync: vi.fn(),
+      onHostStandby: vi.fn()
+    }
+
+    const hostService = createWebRtcService(callbacks)
+    await hostService.host('room-standby-test')
+
+    const onMessage = mockMqttClient.on.mock.calls.find((c: any) => c[0] === 'message')?.[1]
+
+    // Simulate another active host announcing heartbeat during probe phase
+    onMessage('topic', new TextEncoder().encode(JSON.stringify({
+      type: 'host_heartbeat',
+      hostSessionId: 'active-host-session-12345',
+      deviceId: 'dev_host_1',
+      timestamp: Date.now()
+    })))
+
+    await new Promise(r => setTimeout(r, 20))
+
+    expect(callbacks.onHostStandby).toHaveBeenCalledWith({
+      hostSessionId: 'active-host-session-12345',
+      hostDeviceId: 'dev_host_1'
+    })
+
+    hostService.disconnect()
+  })
 })
 
 

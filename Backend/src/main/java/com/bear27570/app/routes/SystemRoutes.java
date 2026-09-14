@@ -4,6 +4,7 @@ import com.bear27570.app.util.NetworkUtil;
 import com.google.gson.Gson;
 import io.javalin.config.RoutesConfig;
 
+import java.util.HashMap;
 import java.util.Map;
 
 public class SystemRoutes {
@@ -15,14 +16,36 @@ public class SystemRoutes {
 
     public void register(RoutesConfig routes) {
         routes.get("/api/system/network-info", ctx -> {
-            NetworkUtil.NetworkInfo info = NetworkUtil.getLanIpv4Info();
+            NetworkUtil.NetworkInfo info = NetworkUtil.getCompleteNetworkInfo();
             int currentPort = ctx.port();
-            ctx.result(gson.toJson(Map.of(
-                    "primaryIp", info.primaryIp(),
-                    "allIps", info.allIps(),
-                    "port", currentPort,
-                    "joinBaseUrl", "http://" + info.primaryIp() + ":" + currentPort
-            ))).contentType("application/json");
+            boolean firewallAllowed = NetworkUtil.isWindowsFirewallPortAllowed(currentPort);
+            Map<String, Object> data = new HashMap<>();
+            data.put("primaryIp", info.primaryIp());
+            data.put("allIps", info.allIps());
+            data.put("primaryIpv6", info.primaryIpv6());
+            data.put("allIpv6s", info.allIpv6s());
+            data.put("port", currentPort);
+            data.put("firewallAllowed", firewallAllowed);
+            data.put("firewallCommand", NetworkUtil.getFirewallCommand(currentPort));
+            data.put("joinBaseUrl", "http://" + info.primaryIp() + ":" + currentPort);
+            if (info.primaryIpv6() != null && !info.primaryIpv6().isBlank()) {
+                data.put("joinBaseUrlIpv6", "http://[" + info.primaryIpv6() + "]:" + currentPort);
+            }
+            ctx.result(gson.toJson(data)).contentType("application/json");
+        });
+
+        routes.post("/api/system/open-firewall-cmd", ctx -> {
+            int currentPort = ctx.port();
+            boolean success = NetworkUtil.openWindowsFirewallPrompt(currentPort);
+            boolean allowed = NetworkUtil.isWindowsFirewallPortAllowed(currentPort);
+            String cmd = NetworkUtil.getFirewallCommand(currentPort);
+            Map<String, Object> resp = new HashMap<>();
+            resp.put("success", success && allowed);
+            resp.put("allowed", allowed);
+            resp.put("command", cmd);
+            resp.put("port", currentPort);
+            resp.put("os", System.getProperty("os.name", "").toLowerCase());
+            ctx.result(gson.toJson(resp)).contentType("application/json");
         });
     }
 }

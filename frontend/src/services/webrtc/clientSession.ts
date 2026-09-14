@@ -31,6 +31,8 @@ export interface ClientSessionContext {
   getCurrentInviteCode: () => string
   getCurrentHostSessionId: () => string
   setCurrentHostSessionId: (id: string) => void
+  getClientSessionId: () => string
+  setClientSessionId: (id: string) => void
   getClientHostSenderId: () => string | undefined
   setClientHostSenderId: (id: string) => void
   getClientPc: () => RTCPeerConnection | null
@@ -95,6 +97,7 @@ export function createClientSession(ctx: ClientSessionContext) {
       ctx.setClientForceRelay(true)
     }
     ctx.setClientPendingCandidates([])
+    ctx.setClientSessionId(`client-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`)
 
     isRebuilding = true
     try {
@@ -182,11 +185,17 @@ export function createClientSession(ctx: ClientSessionContext) {
         }
       }
 
+      let clientSessionId = ctx.getClientSessionId()
+      if (!clientSessionId) {
+        clientSessionId = `client-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`
+        ctx.setClientSessionId(clientSessionId)
+      }
+
       signaling?.send({
         offer: offerPayload,
         ecdhPublicKey: localEcdhPubHex,
         deviceId: localDeviceId,
-        clientSessionId: `client-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
+        clientSessionId,
         hostSessionId: ctx.getCurrentHostSessionId()
       })
     } catch (err) {

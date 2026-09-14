@@ -165,7 +165,7 @@ ScoutingPro27 在整个 FIRST 社区最大的创新与突破，在于**将先进
    - **发射与投掷机构 (Launcher & Delivery)**：滚刷倾倒 (Roller Drop)、弹射器 (Catapult)、双飞轮发射 (Dual Flywheel)、旋转炮塔 (Turret)；
    - **球种兼容与智能分选 (Ball Compatibility)**：全球种通吃 (Universal)、智能分选进球 (Sorting)、专攻花粉球 (Pollen-only)；
    - **花朵/蜂巢对接与悬挂 (Flower & Beehive Docking / Hang)**：卷扬绳索攀爬 (Winch)、级联滑轨抬升 (Slide)、连杆机械锁定 (Linkage)、被动卡扣勾挂 (Passive)；
-   - **里程计定位方案 (Odometry)**：纯电机编码器、双轮 + 陀螺仪、三轮全向、GoBILDA Pinpoint / SparkFun OTOS 光流传感器；
+   - **里程计定位方案 (Odometry)**：纯电机编码器、双轮 + 陀螺仪、三轮全向、GoBILDA Pinpoint、SparkFun OTOS 光流传感器；
    - **赛检合规性**：18 英寸立方体初检合规 (18" Sizing Check)、整机重量 (上限 42 lbs 限重，超重自动黄色预警)。
 3. **特写拍照与离线队列**：点击拍照按钮，拍下对方机器人关键部位的高清特写照片。手机自动进行 WebP 高保真优化压缩，暂存本地 IndexedDB 发件箱；一旦连接主机，后台自动渐进式断点续传。
 4. 点击保存后，数据瞬间同步到领队电脑，领队在电脑上点开队伍档案，高清特写大图立刻呈现！

@@ -39,6 +39,7 @@ export function createWebRtcService(callbacks: WebRtcCallbacks): WebRtcService {
   let currentInviteCode = ''
   let hostSessionId = ''
   let currentHostSessionId = ''
+  let currentClientSessionId = ''
   let currentEventMetadata: ScoutingEvent | null = null
 
   // Host Mutex & Standby State
@@ -130,6 +131,7 @@ export function createWebRtcService(callbacks: WebRtcCallbacks): WebRtcService {
     },
     getLocalEcdhPubHex: () => localEcdhPubHex,
     getCurrentHostSessionId: () => currentHostSessionId,
+    getClientSessionId: () => currentClientSessionId,
     getClientSharedAesKey: () => sas.clientSharedAesKey,
     getClientSharedKey: (senderId: string) => sas.clientSharedKeys.get(senderId) || null,
     getClientFingerprint: (senderId?: string) =>
@@ -357,6 +359,10 @@ export function createWebRtcService(callbacks: WebRtcCallbacks): WebRtcService {
     setCurrentHostSessionId: (id: string) => {
       currentHostSessionId = id
     },
+    getClientSessionId: () => currentClientSessionId,
+    setClientSessionId: (id: string) => {
+      currentClientSessionId = id
+    },
     getClientHostSenderId: () => clientHostSenderId,
     setClientHostSenderId: (id: string) => {
       clientHostSenderId = id
@@ -429,6 +435,7 @@ export function createWebRtcService(callbacks: WebRtcCallbacks): WebRtcService {
     isHostMode = false
     isStandbyHostMode = true
     activeHostSessionId = existingHostSessionId
+    currentHostSessionId = existingHostSessionId
     activeHostDeviceId = existingDeviceId || ''
     callbacks.onHostStandby?.({ hostSessionId: existingHostSessionId, hostDeviceId: existingDeviceId })
 
@@ -447,6 +454,7 @@ export function createWebRtcService(callbacks: WebRtcCallbacks): WebRtcService {
     isHostMode = false
     isStandbyHostMode = true
     activeHostSessionId = newHostSessionId
+    currentHostSessionId = newHostSessionId
     activeHostDeviceId = newDeviceId || ''
 
     clients.forEach((c) => {

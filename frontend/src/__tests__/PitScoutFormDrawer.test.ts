@@ -290,4 +290,32 @@ describe('PitScoutFormDrawer.vue', () => {
     await plusBtn.trigger('click')
     expect(wrapper.vm.weightLbs).toBe(50)
   })
+
+  it('separates pinpoint and sparkfun_otos into independent selectable buttons', async () => {
+    const wrapper = mount(PitScoutFormDrawer, { props: defaultProps })
+    await wrapper.vm.$nextTick()
+    await new Promise((r) => setTimeout(r, 20))
+
+    const radioGroups = wrapper.findAll('.radio-group')
+    // Find the odometry group which has 5 buttons
+    const odomGroup = radioGroups.find(g => g.findAll('.radio-btn').length === 5)
+    expect(odomGroup).toBeDefined()
+    const odomButtons = odomGroup!.findAll('.radio-btn')
+
+    // Button 3 is pinpoint, Button 4 is sparkfun_otos
+    const pinpointBtn = odomButtons[3]
+    const otosBtn = odomButtons[4]
+
+    // Click pinpoint
+    await pinpointBtn.trigger('click')
+    expect(wrapper.vm.odometryType).toBe('pinpoint')
+    expect(pinpointBtn.classes()).toContain('is-active')
+    expect(otosBtn.classes()).not.toContain('is-active')
+
+    // Click sparkfun_otos
+    await otosBtn.trigger('click')
+    expect(wrapper.vm.odometryType).toBe('sparkfun_otos')
+    expect(otosBtn.classes()).toContain('is-active')
+    expect(pinpointBtn.classes()).not.toContain('is-active')
+  })
 })

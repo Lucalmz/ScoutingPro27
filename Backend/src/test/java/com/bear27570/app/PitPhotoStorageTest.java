@@ -132,7 +132,22 @@ class PitPhotoStorageTest {
             String body = res.body().string();
             assertThat(body).contains("primaryIp");
             assertThat(body).contains("allIps");
+            assertThat(body).contains("primaryIpv6");
+            assertThat(body).contains("allIpv6s");
+            assertThat(body).contains("firewallCommand");
             assertThat(body).contains("port");
+        });
+    }
+
+    @Test
+    void testOpenFirewallCmdEndpoint() {
+        JavalinTest.test(app, (server, client) -> {
+            var res = client.post("/api/system/open-firewall-cmd");
+            assertThat(res.code()).isEqualTo(200);
+            String body = res.body().string();
+            assertThat(body).contains("command");
+            assertThat(body).contains("netsh advfirewall firewall add rule");
+            assertThat(body).contains("os");
         });
     }
 

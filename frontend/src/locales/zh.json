@@ -621,7 +621,27 @@
     "troubleshoot_title": "排障提示：",
     "troubleshoot_desc": "若手机扫码打不开，请检查：① 手机是否已连接电脑热点或同名 Wi-Fi；② Windows 防火墙是否放行 8080 端口入站通信；③ 电脑若开热点请确认已在 Windows 设置中开启“移动热点”。",
     "refresh_network": "刷新网络",
-    "refreshing": "检测中..."
+    "refreshing": "检测中...",
+    "mode_lan": "局域网模式 (Wi-Fi / 热点)",
+    "mode_ipv6": "公网直连 (IPv6 手机流量 / 异地电脑)",
+    "select_ipv6": "选择公网 IPv6 地址：",
+    "ipv6_ready_badge": "公网直连已就绪 (手机流量 / 异地电脑均可直通)",
+    "ipv6_not_found_title": "未检测到公网 IPv6 地址",
+    "ipv6_not_found_desc": "当前网络或路由器未分配全球单播 IPv6 地址。请切换回“局域网模式”，或检查路由器是否已开启 IPv6。",
+    "copy_pc_link": "复制电脑端公网链接",
+    "copy_pc_link_tooltip": "发给看台笔记本或异地队员，直接在电脑浏览器中粘贴打开即可连入赛场",
+    "troubleshoot_ipv6_title": "公网 IPv6 排障：",
+    "troubleshoot_ipv6_desc": "① 手机端使用移动蜂窝流量（4G/5G）扫码直连；② 异地电脑在浏览器直接打开带有中括号的 IPv6 网址；③ 如连不上请点击下方“一键放行端口”排障。",
+    "firewall_card_title": "Windows 防火墙排障与端口放行",
+    "firewall_card_desc": "局域网 Wi-Fi 下无需配置。若手机使用 4G/5G 移动流量扫码打不开网页，可点击放行电脑本机的 TCP 入站端口：",
+    "firewall_allowed": "已放行 (无需再次配置)",
+    "firewall_optional": "仅移动蜂窝打不开网页时需要",
+    "run_cmd_btn": "一键放行端口",
+    "run_cmd_running": "正在配置...",
+    "run_cmd_success": "已成功放行端口，手机现可刷新重试",
+    "run_cmd_failed": "未获得管理员权限或已取消，您可复制命令手动在管理员终端运行",
+    "copy_cmd_btn": "复制命令",
+    "copy_cmd_success": "防火墙配置命令已复制到剪贴板"
   },
   "bottom_nav": {
     "scout": "打分",
@@ -697,6 +717,9 @@
       "none": "无 (纯电机编码器)",
       "two_wheel": "双轮 + 陀螺仪",
       "three_wheel": "三轮全向",
+      "pinpoint": "GoBILDA Pinpoint",
+      "sparkfun_otos": "SparkFun OTOS 光流",
+      "otos": "SparkFun OTOS 光流",
       "pinpoint_otos": "Pinpoint / OTOS 光流"
     },
     "brag_tiers": {
