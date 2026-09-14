@@ -138,7 +138,7 @@ async function saveComment(match: ScoutingRecord) {
       editingMatchId.value = null
     }
   } catch (e: any) {
-    toastStore.showError(t('team_detail.save_failed') + (e.message || ''))
+    toastStore.showError(e, t('team_detail.save_failed'))
   } finally {
     isSaving.value = false
   }

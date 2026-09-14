@@ -41,7 +41,7 @@ export const useUserStore = defineStore('user', () => {
     } catch (e: any) {
       const msg = e.message ?? 'Login failed'
       error.value = msg
-      useToastStore().showError(msg)
+      useToastStore().showError(e, '登录失败，请重试')
       return false
     } finally {
       loading.value = false
@@ -60,7 +60,7 @@ export const useUserStore = defineStore('user', () => {
     } catch (e: any) {
       const msg = e.message ?? 'Registration failed'
       error.value = msg
-      useToastStore().showError(msg)
+      useToastStore().showError(e, '注册失败，请重试')
       return false
     } finally {
       loading.value = false
@@ -224,7 +224,7 @@ export const useUserStore = defineStore('user', () => {
     } catch (e: any) {
       const errMsg = e?.message || '账号合并失败'
       error.value = errMsg
-      useToastStore().showError(errMsg)
+      useToastStore().showError(e, '账号合并失败，请重试')
       return { success: false, oldId, newId: oldId, newUsername: currentUsername, error: errMsg }
     } finally {
       loading.value = false

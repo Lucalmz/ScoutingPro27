@@ -77,7 +77,7 @@ async function handleSyncOfficial() {
     emit('imported', res.count)
     handleClose()
   } catch (err: any) {
-    toastStore.showToast((t('schedule.sync_official_failed') || '官方赛程同步失败: ') + (err.message || ''), 'error')
+    toastStore.showError(err, t('schedule.sync_official_failed') || '官方赛程同步失败')
   } finally {
     isSyncingOfficial.value = false
   }
@@ -124,7 +124,7 @@ async function handleConfirmCsvImport() {
     emit('imported', res.count)
     handleClose()
   } catch (err: any) {
-    toastStore.showToast((t('schedule.csv_import_failed') || '赛程导入失败: ') + (err.message || ''), 'error')
+    toastStore.showError(err, t('schedule.csv_import_failed') || '赛程导入失败')
   } finally {
     isParsing.value = false
   }

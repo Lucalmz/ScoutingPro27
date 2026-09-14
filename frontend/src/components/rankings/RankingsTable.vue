@@ -110,7 +110,7 @@ async function banTeam(teamNumber: number) {
       toastStore.showToast(`Team ${teamNumber} has been banned`, 'success')
     }
   } catch (e: any) {
-    toastStore.showToast(e.message || 'Failed to ban team', 'error')
+    toastStore.showError(e, 'Failed to ban team')
   }
 }
 
@@ -129,7 +129,7 @@ async function unbanTeam(teamNumber: number) {
       toastStore.showToast(`Team ${teamNumber} has been unbanned`, 'success')
     }
   } catch (e: any) {
-    toastStore.showToast(e.message || 'Failed to unban team', 'error')
+    toastStore.showError(e, 'Failed to unban team')
   }
 }
 

@@ -79,13 +79,13 @@ async function saveEventSettings() {
   if (!props.event) return
   const code = settingsCode.value.trim()
   if (!code) {
-    toastStore.showToast('请输入有效的 FTC 比赛代码 (例如: CNCMPLB, AUCMP)', 'error')
+    toastStore.showToast(t('event.ftc_code_required') || '请输入有效的 FTC 比赛代码 (例如: USUTSAS1)', 'error')
     return
   }
 
   isSavingSettings.value = true
   try {
-    const year = Number(settingsYear.value) || 2025
+    const year = Number(settingsYear.value) || 2026
     await updateEventFtcConfig(props.event.id, year, code)
     
     // Update store state
@@ -96,7 +96,7 @@ async function saveEventSettings() {
     
     toastStore.showToast(t('event.bind_success') || 'FTC 官方赛事代码绑定成功！', 'info')
   } catch (e: any) {
-    toastStore.showToast((t('event.bind_failed') || '绑定设置失败: ') + (e.message || String(e)), 'error')
+    toastStore.showError(e, t('event.bind_failed') || '绑定设置失败')
   } finally {
     isSavingSettings.value = false
   }
@@ -233,7 +233,7 @@ async function sendDirectMessage(scoutId: string, scoutName?: string) {
         </div>
         <div class="form-group">
           <label>Event Code (FTC 比赛代码)</label>
-          <input type="text" v-model="settingsCode" placeholder="例如: CNCMPLB, AUCMP" :disabled="isSavingSettings" />
+          <input type="text" v-model="settingsCode" placeholder="例如: USUTSAS1" :disabled="isSavingSettings" />
           <small class="form-hint">{{ t('event.ftc_binding_hint') }}</small>
         </div>
         <button class="btn-primary" @click="saveEventSettings" :disabled="isSavingSettings" style="display: flex; align-items: center; justify-content: center; gap: 6px;">

@@ -52,7 +52,7 @@ async function onEventFileSelected(e: Event) {
     toastStore.showToast(t('offline_sync.import_success_event'), 'info')
     enterEvent(targetEvent)
   } catch (err: any) {
-    toastStore.showToast(t('offline_sync.import_failed') + (err.message || ''), 'error')
+    toastStore.showError(err, t('offline_sync.import_failed'))
   } finally {
     if (eventFileInputRef.value) eventFileInputRef.value.value = ''
   }

@@ -13,6 +13,9 @@ import type {
   MatchScheduleItem,
   ScoutAssignment,
 } from '@/types'
+import { ApiError } from '@/utils/errorHelper'
+
+export { ApiError }
 
 const BASE = '/api'
 
@@ -81,7 +84,7 @@ async function request<T>(
       window.dispatchEvent(new Event('auth-unauthorized'))
     }
     const text = await res.text().catch(() => '')
-    throw new Error(`API ${method} ${path} failed (${res.status}): ${text}`)
+    throw new ApiError(res.status, path, method, text)
   }
   if (res.status === 204) return undefined as T
   const text = await res.text()

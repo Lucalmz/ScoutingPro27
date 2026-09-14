@@ -18,6 +18,7 @@ import PitStatusIndicator from '@/components/pit/PitStatusIndicator.vue'
 import PhaseCycleTracker from './PhaseCycleTracker.vue'
 import { isAssignmentCompleted, getRecordTournamentLevel } from '@/utils/tournament'
 import { useBumpAnimation } from '@/composables/useBumpAnimation'
+import { formatUserFriendlyError } from '@/utils/errorHelper'
 
 const { t, te } = useI18n()
 
@@ -597,6 +598,8 @@ async function handleSubmit() {
   } catch (err) {
     hapticWarning()
     submitStatus.value = 'error'
+    const { message } = formatUserFriendlyError(err, t('scouting.submit_failed') || '提交失败，请重试')
+    submitErrorMsg.value = message
   } finally {
     setTimeout(() => {
       submitting.value = false

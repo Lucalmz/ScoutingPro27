@@ -283,7 +283,7 @@ async function applyImport() {
     handleClose()
   } catch (err: any) {
     importError.value = err.message || '应用同步数据包失败'
-    toastStore.showToast(t('offline_sync.import_failed') + (err.message || ''), 'error')
+    toastStore.showError(err, t('offline_sync.import_failed'))
   } finally {
     isApplying.value = false
   }
