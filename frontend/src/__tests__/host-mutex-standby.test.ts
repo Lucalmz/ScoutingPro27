@@ -345,4 +345,58 @@ describe('Host Mutex, Standby Mode & Takeover (双主机互斥与接管)', () =>
 
     service.disconnect()
   })
+
+  it('re-entering host from same device ignores stale heartbeats from prior session and remains active host', async () => {
+    const onHostPromoted = vi.fn()
+    const onHostStandby = vi.fn()
+    const onHostDemoted = vi.fn()
+
+    const service = createWebRtcService({
+      onStatusChange: vi.fn(),
+      onRecordsReceived: vi.fn().mockResolvedValue([]),
+      onAckReceived: vi.fn(),
+      onRequestSync: vi.fn(),
+      onHostPromoted,
+      onHostStandby,
+      onHostDemoted
+    })
+
+    await service.host('room-ftc-123')
+    await new Promise(r => setTimeout(r, 15))
+
+    const onMessage = mockMqttClient.on.mock.calls.find((c: any) => c[0] === 'message')?.[1]
+    expect(onMessage).toBeDefined()
+
+    // Find localDeviceId from published probe
+    const calls = mockMqttClient.publish.mock.calls
+    const probeCall = calls.find((c: any) => {
+      const payloadStr = c[1]?.toString() || ''
+      return payloadStr.includes('"type":"host_probe"')
+    })
+    expect(probeCall).toBeDefined()
+    const probePayload = JSON.parse(probeCall[1].toString())
+    const myDeviceId = probePayload.deviceId
+    expect(myDeviceId).toBeTruthy()
+
+    // Simulate stale heartbeat from an old session on THIS SAME DEVICE arriving during probe
+    onMessage('topic', new TextEncoder().encode(JSON.stringify({
+      type: 'host_heartbeat',
+      sender: 'peer_old_session',
+      hostSessionId: 'host-old-session-id',
+      deviceId: myDeviceId, // SAME device ID!
+      timestamp: Date.now() - 1000
+    })))
+
+    // Wait for probe to complete
+    await new Promise(r => setTimeout(r, 70))
+
+    // MUST remain active host! Not standby!
+    expect(service.isStandbyHost()).toBe(false)
+    expect(onHostPromoted).toHaveBeenCalled()
+    expect(onHostStandby).not.toHaveBeenCalled()
+    expect(onHostDemoted).not.toHaveBeenCalled()
+
+    service.disconnect()
+  })
 })
+

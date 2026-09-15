@@ -570,6 +570,9 @@ export function createWebRtcService(callbacks: WebRtcCallbacks): WebRtcService {
 
       // When another device is actively probing, if this device is the Active Host, reply immediately!
       if (data.type === 'host_probe') {
+        if (data.deviceId && data.deviceId === localDeviceId) {
+          return
+        }
         if (isHostMode && !isStandbyHostMode && data.hostSessionId !== hostSessionId) {
           await signaling?.send({
             type: 'host_heartbeat',
@@ -586,6 +589,11 @@ export function createWebRtcService(callbacks: WebRtcCallbacks): WebRtcService {
           (data.type === 'host_heartbeat' || data.type === 'host_hello') &&
           data.hostSessionId !== hostSessionId
         ) {
+          // Stale messages from own device's prior session must NOT trigger standby demotion
+          if (data.deviceId && data.deviceId === localDeviceId) {
+            console.log(`[WebRTC Host] Ignoring stale host message from same device during probe: ${data.hostSessionId}`)
+            return
+          }
           console.log(`[WebRTC Host] Discovered existing host during probe: ${data.hostSessionId} (${data.sender})`)
           if (probeTimer) {
             clearTimeout(probeTimer)
@@ -599,6 +607,9 @@ export function createWebRtcService(callbacks: WebRtcCallbacks): WebRtcService {
 
       if (data.type === 'host_heartbeat' || data.type === 'host_hello') {
         if (data.hostSessionId && data.hostSessionId !== hostSessionId) {
+          if (data.deviceId && data.deviceId === localDeviceId) {
+            return
+          }
           if (isStandbyHostMode) {
             activeHostSessionId = data.hostSessionId
             activeHostDeviceId = data.deviceId || ''
@@ -629,10 +640,23 @@ export function createWebRtcService(callbacks: WebRtcCallbacks): WebRtcService {
       }
 
       if (data.type === 'host_takeover') {
+        if (data.deviceId && data.deviceId === localDeviceId) {
+          return
+        }
         if (isHostMode && data.sender !== signaling?.clientId) {
           await demoteToStandby(data.newHostSessionId, data.deviceId)
           return
         }
+      }
+
+      if (data.type === 'HOST_LEAVING') {
+        if (data.deviceId && data.deviceId === localDeviceId) {
+          return
+        }
+        if (isStandbyHostMode && data.hostSessionId === activeHostSessionId) {
+          callbacks.onActiveHostLeft?.()
+        }
+        return
       }
 
       if (isHostMode) {
@@ -784,7 +808,11 @@ export function createWebRtcService(callbacks: WebRtcCallbacks): WebRtcService {
 
     if (isHostMode) {
       if (signaling) {
-        signaling.send({ type: 'HOST_LEAVING' })
+        signaling.send({
+          type: 'HOST_LEAVING',
+          hostSessionId,
+          deviceId: localDeviceId
+        })
       }
       clients.forEach((c) => {
         if (c.dc) c.dc.onclose = null
