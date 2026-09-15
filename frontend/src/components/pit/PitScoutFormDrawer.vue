@@ -4,6 +4,8 @@ import { useI18n } from 'vue-i18n'
 import { usePitScoutStore } from '@/stores/pitScout'
 import { useUserStore } from '@/stores/user'
 import { useToastStore } from '@/stores/toast'
+import { useCustomFieldsStore } from '@/stores/customFields'
+import DynamicFieldsRenderer from '@/components/customFields/DynamicFieldsRenderer.vue'
 import { savePhoto, getPhotoUrl, deletePhoto, flushOfflinePhotos } from '@/services/photoStorage'
 import { hapticLight, hapticMedium, hapticSuccess } from '@/utils/haptics'
 import { useBumpAnimation } from '@/composables/useBumpAnimation'
@@ -25,6 +27,9 @@ const { t } = useI18n()
 const pitStore = usePitScoutStore()
 const userStore = useUserStore()
 const toastStore = useToastStore()
+const customFieldsStore = useCustomFieldsStore()
+
+const customFields = ref<Record<string, any>>({})
 
 const team = computed(() => {
   return props.teamNumber ? pitStore.getUnifiedTeam(props.teamNumber) : null
@@ -79,6 +84,17 @@ async function reloadFormData(num: number | null) {
     claimedEndgameScore.value = existing.claimedEndgameScore || 0
 
     photoKeys.value = existing.photoKeys ? [...existing.photoKeys] : []
+
+    if (existing.rawData) {
+      try {
+        const parsed = JSON.parse(existing.rawData)
+        customFields.value = parsed.customFields ? { ...parsed.customFields } : {}
+      } catch {
+        customFields.value = {}
+      }
+    } else {
+      customFields.value = {}
+    }
   } else {
     // 默认初始值
     drivetrainType.value = 'mecanum'
@@ -95,6 +111,7 @@ async function reloadFormData(num: number | null) {
     claimedTeleopScore.value = 60
     claimedEndgameScore.value = 15
     photoKeys.value = []
+    customFields.value = {}
   }
 
   // 同步记录初始快照（防止异步加载图片时序导致 isDirty 误判）
@@ -123,7 +140,8 @@ function takeSnapshot(): string {
     claimedTeleopCycles: claimedTeleopCycles.value,
     claimedTeleopScore: claimedTeleopScore.value,
     claimedEndgameScore: claimedEndgameScore.value,
-    photoKeys: photoKeys.value
+    photoKeys: photoKeys.value,
+    customFields: customFields.value
   })
 }
 
@@ -295,6 +313,7 @@ function handleSave() {
     claimedTotalScore: calculatedTotalScore.value,
 
     photoKeys: photoKeys.value,
+    rawData: JSON.stringify({ customFields: customFields.value }),
     version: existing?.version || 1
   }
 
@@ -540,6 +559,12 @@ function handleSave() {
               </button>
             </div>
           </div>
+
+          <!-- Pit Hardware Custom Fields -->
+          <DynamicFieldsRenderer
+            :definitions="customFieldsStore.getActiveFields(pitStore.currentEventId || '', 'PIT', 'hardware')"
+            v-model="customFields"
+          />
         </div>
 
         <!-- 模块 2: 关键量化自述能力 (比对吹牛指数核心) -->
@@ -657,6 +682,12 @@ function handleSave() {
             <label>{{ t('pit_scout.drawer.calculated_total_label') }}</label>
             <input type="number" class="input-field" :value="calculatedTotalScore" readonly />
           </div>
+
+          <!-- Pit Strategy Custom Fields -->
+          <DynamicFieldsRenderer
+            :definitions="customFieldsStore.getActiveFields(pitStore.currentEventId || '', 'PIT', 'strategy')"
+            v-model="customFields"
+          />
         </div>
 
         <!-- 模块 3: 机器人定妆特写图 (IndexedDB) -->
@@ -680,6 +711,15 @@ function handleSave() {
               />
             </label>
           </div>
+        </div>
+
+        <!-- Pit Overall Custom Fields -->
+        <div v-if="customFieldsStore.getActiveFields(pitStore.currentEventId || '', 'PIT', 'overall').length > 0" class="form-section">
+          <h4 class="section-title">综合自定义指标 (Overall)</h4>
+          <DynamicFieldsRenderer
+            :definitions="customFieldsStore.getActiveFields(pitStore.currentEventId || '', 'PIT', 'overall')"
+            v-model="customFields"
+          />
         </div>
       </div>
 

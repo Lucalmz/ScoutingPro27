@@ -8,8 +8,9 @@ import { useToastStore } from '@/stores/toast'
 import TagPicker from '@/components/common/TagPicker.vue'
 import ConnectionStatus from '@/components/common/ConnectionStatus.vue'
 import { usePitScoutStore } from '@/stores/pitScout'
+import { useCustomFieldsStore } from '@/stores/customFields'
 import PitScoutFormDrawer from '@/components/pit/PitScoutFormDrawer.vue'
-import type { ScoutingRecord } from '@/types'
+import type { ScoutingRecord, CustomFieldDefinition } from '@/types'
 import { sortRecordsChronologically, getMatchLevelPrefix } from '@/utils/tournament'
 
 const props = defineProps<{
@@ -21,6 +22,7 @@ const router = useRouter()
 const { t, te } = useI18n()
 const recordStore = useRecordStore()
 const pitStore = usePitScoutStore()
+const customFieldsStore = useCustomFieldsStore()
 const toastStore = useToastStore()
 const isPitDrawerOpen = ref(false)
 
@@ -83,6 +85,246 @@ function onGlobalKeyDown(e: KeyboardEvent) {
   }
 }
 
+function parseCustomFields(record: { customFields?: Record<string, any>; rawData?: string } | null | undefined): Record<string, any> {
+  if (!record) return {}
+  if (record.customFields && Object.keys(record.customFields).length > 0) {
+    return record.customFields
+  }
+  if (record.rawData) {
+    try {
+      const parsed = typeof record.rawData === 'string' ? JSON.parse(record.rawData) : record.rawData
+      return parsed.customFields || {}
+    } catch {
+      return {}
+    }
+  }
+  return {}
+}
+
+interface CustomMetricSummary {
+  definition: CustomFieldDefinition
+  fieldType: string
+  avg?: number | null
+  max?: number | null
+  rate?: number | null
+  trueCount?: number
+  totalCount?: number
+  distribution?: { label: string; count: number; percentage: number; color?: string }[]
+  textEntries?: { matchNumber: number; text: string }[]
+}
+
+const activeMatchFields = computed(() => {
+  return props.eventId ? customFieldsStore.getActiveFields(props.eventId, 'MATCH') : []
+})
+
+const activePitFields = computed(() => {
+  return props.eventId ? customFieldsStore.getActiveFields(props.eventId, 'PIT') : []
+})
+
+const teamMatchCustomMetrics = computed<CustomMetricSummary[]>(() => {
+  const fields = activeMatchFields.value
+  if (!fields || fields.length === 0) return []
+
+  const matches = teamMatches.value
+  const result: CustomMetricSummary[] = []
+
+  for (const field of fields) {
+    if (field.fieldType === 'number' || field.fieldType === 'level') {
+      const values: number[] = []
+      for (const m of matches) {
+        const cf = parseCustomFields(m)
+        const val = cf[field.fieldKey]
+        if (val !== undefined && val !== null && val !== '') {
+          const num = Number(val)
+          if (!isNaN(num)) {
+            values.push(num)
+          }
+        }
+      }
+      if (values.length > 0) {
+        const sum = values.reduce((a, b) => a + b, 0)
+        result.push({
+          definition: field,
+          fieldType: field.fieldType,
+          avg: sum / values.length,
+          max: Math.max(...values),
+          totalCount: values.length
+        })
+      }
+    } else if (field.fieldType === 'boolean') {
+      let trueCount = 0
+      let totalCount = 0
+      for (const m of matches) {
+        const cf = parseCustomFields(m)
+        const val = cf[field.fieldKey]
+        if (val !== undefined && val !== null) {
+          totalCount++
+          if (val === true || val === 'true' || val === 1) {
+            trueCount++
+          }
+        }
+      }
+      if (totalCount > 0) {
+        result.push({
+          definition: field,
+          fieldType: 'boolean',
+          rate: (trueCount / totalCount) * 100,
+          trueCount,
+          totalCount
+        })
+      }
+    } else if (field.fieldType === 'select' || field.fieldType === 'multi_select') {
+      const optionMap: Record<string, number> = {}
+      let totalEvals = 0
+      for (const m of matches) {
+        const cf = parseCustomFields(m)
+        const val = cf[field.fieldKey]
+        if (val !== undefined && val !== null && val !== '') {
+          if (Array.isArray(val)) {
+            for (const item of val) {
+              if (item) {
+                optionMap[item] = (optionMap[item] || 0) + 1
+                totalEvals++
+              }
+            }
+          } else {
+            optionMap[val] = (optionMap[val] || 0) + 1
+            totalEvals++
+          }
+        }
+      }
+      if (totalEvals > 0) {
+        const dist = (field.options || []).map(opt => {
+          const count = optionMap[opt.value] || optionMap[opt.label] || 0
+          return {
+            label: opt.label,
+            count,
+            percentage: totalEvals > 0 ? (count / totalEvals) * 100 : 0,
+            color: opt.color || 'blue'
+          }
+        }).filter(d => d.count > 0)
+
+        for (const [k, count] of Object.entries(optionMap)) {
+          if (!dist.some(d => d.label === k)) {
+            dist.push({
+              label: k,
+              count,
+              percentage: (count / totalEvals) * 100,
+              color: 'gray'
+            })
+          }
+        }
+
+        result.push({
+          definition: field,
+          fieldType: field.fieldType,
+          distribution: dist,
+          totalCount: totalEvals
+        })
+      }
+    } else if (field.fieldType === 'text') {
+      const textEntries: { matchNumber: number; text: string }[] = []
+      for (const m of matches) {
+        const cf = parseCustomFields(m)
+        const val = cf[field.fieldKey]
+        if (typeof val === 'string' && val.trim().length > 0) {
+          textEntries.push({ matchNumber: m.matchNumber, text: val.trim() })
+        }
+      }
+      if (textEntries.length > 0) {
+        result.push({
+          definition: field,
+          fieldType: 'text',
+          textEntries,
+          totalCount: textEntries.length
+        })
+      }
+    }
+  }
+
+  return result
+})
+
+const teamPitCustomSpecs = computed(() => {
+  const fields = activePitFields.value
+  if (!fields || fields.length === 0 || !unifiedTeam.value?.pitRecord) return []
+  const cf = parseCustomFields(unifiedTeam.value.pitRecord)
+  const list: { field: CustomFieldDefinition; displayValue: string }[] = []
+
+  for (const f of fields) {
+    const val = cf[f.fieldKey]
+    if (val !== undefined && val !== null && val !== '') {
+      let displayValue = String(val)
+      if (f.fieldType === 'boolean') {
+        displayValue = (val === true || val === 'true') ? '是' : '否'
+      } else if (f.fieldType === 'level') {
+        displayValue = `${val} 档`
+      } else if (f.fieldType === 'select') {
+        const opt = f.options?.find(o => o.value === val || o.label === val)
+        displayValue = opt ? opt.label : String(val)
+      } else if (f.fieldType === 'multi_select' && Array.isArray(val)) {
+        displayValue = val.map(v => {
+          const opt = f.options?.find(o => o.value === v || o.label === v)
+          return opt ? opt.label : v
+        }).join(', ')
+      }
+      if (f.unit && f.fieldType === 'number') {
+        displayValue += ` ${f.unit}`
+      }
+      list.push({ field: f, displayValue })
+    }
+  }
+  return list
+})
+
+function getMatchCustomBadges(match: ScoutingRecord) {
+  const fields = activeMatchFields.value
+  if (!fields || fields.length === 0) return []
+  const cf = parseCustomFields(match)
+  const badges: { key: string; name: string; value: string; type: string; color?: string }[] = []
+
+  for (const f of fields) {
+    const val = cf[f.fieldKey]
+    if (val !== undefined && val !== null && val !== '') {
+      let displayValue = String(val)
+      let color = 'gray'
+      if (f.fieldType === 'boolean') {
+        const isTrue = val === true || val === 'true' || val === 1
+        displayValue = isTrue ? '✓' : '✕'
+        color = isTrue ? 'green' : 'gray'
+      } else if (f.fieldType === 'level') {
+        displayValue = `${val} 档`
+        color = val >= 4 ? 'green' : val >= 2 ? 'blue' : 'orange'
+      } else if (f.fieldType === 'number') {
+        displayValue = `${val}${f.unit ? ' ' + f.unit : ''}`
+        color = 'blue'
+      } else if (f.fieldType === 'select') {
+        const opt = f.options?.find(o => o.value === val || o.label === val)
+        displayValue = opt ? opt.label : String(val)
+        color = opt?.color || 'blue'
+      } else if (f.fieldType === 'multi_select' && Array.isArray(val)) {
+        const labels = val.map(v => {
+          const opt = f.options?.find(o => o.value === v || o.label === v)
+          return opt ? opt.label : v
+        })
+        displayValue = labels.join(', ')
+        color = 'purple'
+      } else if (f.fieldType === 'text') {
+        displayValue = String(val)
+        color = 'gray'
+      }
+      badges.push({
+        key: f.fieldKey,
+        name: f.name,
+        value: displayValue,
+        type: f.fieldType,
+        color
+      })
+    }
+  }
+  return badges
+}
+
 function loadEventData(eventId: string) {
   if (!eventId) return
   recordStore.currentEventId = eventId
@@ -93,6 +335,7 @@ function loadEventData(eventId: string) {
   if (pitStore.records.length === 0 || !pitStore.records.some(r => r.eventId === eventId)) {
     pitStore.fetchPitData(eventId)
   }
+  customFieldsStore.fetchFields(eventId)
 }
 
 onMounted(() => {
@@ -202,6 +445,13 @@ async function saveComment(match: ScoutingRecord) {
             <span v-if="unifiedTeam.pitRecord.flowerMechanism" class="spec-badge">{{ t('pit_scout.detail_card.spec_flower', { val: unifiedTeam.pitRecord.flowerMechanism }) }}</span>
             <span v-if="unifiedTeam.pitRecord.hasColorSensor" class="spec-badge">{{ t('pit_scout.detail_card.spec_color_sensor', { val: t('pit_scout.detail_card.equipped') }) }}</span>
             <span class="spec-badge">{{ t('pit_scout.detail_card.spec_odometry', { val: formatOdometry(unifiedTeam.pitRecord.odometryType) }) }}</span>
+            <span
+              v-for="item in teamPitCustomSpecs"
+              :key="item.field.fieldKey"
+              class="spec-badge custom-spec-badge"
+            >
+              {{ item.field.name }}: {{ item.displayValue }}
+            </span>
           </div>
 
           <div style="display: grid; grid-template-columns: repeat(3, 1fr); gap: 10px; background: rgba(255, 255, 255, 0.02); border: 1px solid var(--border); border-radius: 8px; padding: 10px;">
@@ -226,6 +476,91 @@ async function saveComment(match: ScoutingRecord) {
         </div>
         <div v-else style="font-size: 13px; color: var(--muted-foreground); padding: 8px 0;">
           {{ t('pit_scout.detail_card.no_pit_data') }}
+        </div>
+      </div>
+
+      <!-- 自定义指标表现卡片 -->
+      <div v-if="teamMatchCustomMetrics.length > 0" class="team-tags-card custom-metrics-card">
+        <div style="display: flex; align-items: center; justify-content: space-between; margin-bottom: 12px;">
+          <h3 style="margin: 0; display: flex; align-items: center; gap: 6px;">
+            <span class="material-icons" style="font-size: 18px; color: var(--primary, #39ff14);">tune</span>
+            {{ t('custom_fields.team_metrics_title') }}
+          </h3>
+          <span class="metrics-count-badge">{{ teamMatchCustomMetrics.length }} 项指标</span>
+        </div>
+
+        <div class="custom-metrics-grid">
+          <div
+            v-for="metric in teamMatchCustomMetrics"
+            :key="metric.definition.fieldKey"
+            class="metric-box"
+          >
+            <div class="metric-header">
+              <span class="metric-name">{{ metric.definition.name }}</span>
+              <span class="metric-phase-tag">{{ metric.definition.phase }}</span>
+            </div>
+
+            <!-- Number / Level metric display -->
+            <div v-if="metric.fieldType === 'number' || metric.fieldType === 'level'" class="metric-stat-row">
+              <div class="stat-col">
+                <span class="stat-label">{{ t('custom_fields.avg_metric') }}</span>
+                <span class="stat-value highlight">{{ metric.avg !== null && metric.avg !== undefined ? metric.avg.toFixed(1) : '-' }}</span>
+                <span v-if="metric.definition.unit" class="stat-unit">{{ metric.definition.unit }}</span>
+              </div>
+              <div class="stat-col">
+                <span class="stat-label">{{ t('custom_fields.max_metric') }}</span>
+                <span class="stat-value">{{ metric.max !== null && metric.max !== undefined ? metric.max : '-' }}</span>
+                <span v-if="metric.definition.unit" class="stat-unit">{{ metric.definition.unit }}</span>
+              </div>
+              <div class="stat-col">
+                <span class="stat-label">场次</span>
+                <span class="stat-value count">{{ metric.totalCount }}</span>
+              </div>
+            </div>
+
+            <!-- Boolean metric display -->
+            <div v-else-if="metric.fieldType === 'boolean'" class="metric-stat-row">
+              <div class="stat-col full">
+                <div class="bool-rate-bar-wrapper">
+                  <div class="bool-rate-label">
+                    <span>{{ t('custom_fields.rate_occurrence') }}</span>
+                    <span class="rate-num">{{ metric.rate?.toFixed(0) }}%</span>
+                  </div>
+                  <div class="rate-progress-track">
+                    <div class="rate-progress-fill" :style="{ width: `${metric.rate || 0}%` }"></div>
+                  </div>
+                  <span class="stat-detail">已记录 {{ metric.trueCount }} / {{ metric.totalCount }} 场</span>
+                </div>
+              </div>
+            </div>
+
+            <!-- Select / Multi Select metric display -->
+            <div v-else-if="metric.fieldType === 'select' || metric.fieldType === 'multi_select'" class="metric-distribution">
+              <div
+                v-for="opt in metric.distribution"
+                :key="opt.label"
+                class="dist-item"
+              >
+                <span class="dist-label-badge" :class="`color-${opt.color || 'blue'}`">{{ opt.label }}</span>
+                <span class="dist-count">{{ opt.count }}次 ({{ opt.percentage.toFixed(0) }}%)</span>
+              </div>
+            </div>
+
+            <!-- Text metric display -->
+            <div v-else-if="metric.fieldType === 'text'" class="metric-text-list">
+              <div
+                v-for="(entry, eIdx) in metric.textEntries?.slice(0, 3)"
+                :key="eIdx"
+                class="metric-text-bubble"
+              >
+                <span class="match-badge">#{{ entry.matchNumber }}</span>
+                <span class="text-content">{{ entry.text }}</span>
+              </div>
+              <span v-if="(metric.textEntries?.length || 0) > 3" class="more-text-hint">
+                +{{ (metric.textEntries?.length || 0) - 3 }} 条更多记录
+              </span>
+            </div>
+          </div>
         </div>
       </div>
 
@@ -260,6 +595,19 @@ async function saveComment(match: ScoutingRecord) {
               <span class="label">{{ t('scouting.total_score') }}</span>
               <span class="value">{{ match.totalScore }}</span>
             </div>
+          </div>
+
+          <!-- 单场自定义字段徽章 -->
+          <div v-if="getMatchCustomBadges(match).length > 0" class="match-custom-badges-row">
+            <span
+              v-for="badge in getMatchCustomBadges(match)"
+              :key="badge.key"
+              class="match-cf-badge"
+              :class="`cf-color-${badge.color}`"
+            >
+              <span class="cf-name">{{ badge.name }}:</span>
+              <span class="cf-val">{{ badge.value }}</span>
+            </span>
           </div>
 
           <div class="comments-section">
@@ -662,4 +1010,267 @@ async function saveComment(match: ScoutingRecord) {
   color: var(--color-text-secondary, #d1d5db);
   border: 1px solid var(--color-border, #374151);
 }
+
+.pit-custom-specs-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-top: 4px;
+}
+
+.custom-spec-badge {
+  border-color: rgba(57, 255, 20, 0.25);
+  background: rgba(57, 255, 20, 0.05);
+  color: var(--primary, #39ff14);
+}
+
+.custom-metrics-card {
+  border-color: rgba(57, 255, 20, 0.2);
+  background: linear-gradient(180deg, rgba(57, 255, 20, 0.02) 0%, var(--card) 100%);
+}
+
+.metrics-count-badge {
+  font-size: 11px;
+  padding: 2px 8px;
+  border-radius: 10px;
+  background: rgba(255, 255, 255, 0.06);
+  color: var(--muted-foreground);
+  border: 1px solid var(--border);
+}
+
+.custom-metrics-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
+  gap: 12px;
+}
+
+.metric-box {
+  background: rgba(255, 255, 255, 0.02);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 10px 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.metric-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 6px;
+}
+
+.metric-name {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--foreground);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.metric-phase-tag {
+  font-size: 10px;
+  text-transform: uppercase;
+  padding: 1px 6px;
+  border-radius: 4px;
+  background: rgba(255, 255, 255, 0.06);
+  color: var(--muted-foreground);
+}
+
+.metric-stat-row {
+  display: flex;
+  gap: 8px;
+}
+
+.stat-col {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  background: rgba(0, 0, 0, 0.2);
+  padding: 6px 8px;
+  border-radius: 6px;
+  border: 1px solid rgba(255, 255, 255, 0.04);
+}
+
+.stat-col.full {
+  flex: 1 1 100%;
+}
+
+.stat-label {
+  font-size: 10px;
+  color: var(--muted-foreground);
+}
+
+.stat-value {
+  font-size: 15px;
+  font-weight: 700;
+  color: var(--foreground);
+}
+
+.stat-value.highlight {
+  color: var(--primary, #39ff14);
+}
+
+.stat-value.count {
+  font-size: 13px;
+  color: var(--muted-foreground);
+}
+
+.stat-unit {
+  font-size: 10px;
+  color: var(--muted-foreground);
+}
+
+.bool-rate-bar-wrapper {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.bool-rate-label {
+  display: flex;
+  justify-content: space-between;
+  font-size: 11px;
+  color: var(--muted-foreground);
+}
+
+.bool-rate-label .rate-num {
+  font-weight: 700;
+  color: var(--primary, #39ff14);
+}
+
+.rate-progress-track {
+  height: 6px;
+  background: rgba(255, 255, 255, 0.08);
+  border-radius: 3px;
+  overflow: hidden;
+}
+
+.rate-progress-fill {
+  height: 100%;
+  background: linear-gradient(90deg, #38bdf8, #39ff14);
+  border-radius: 3px;
+  transition: width 0.3s ease;
+}
+
+.stat-detail {
+  font-size: 10px;
+  color: var(--muted-foreground);
+  margin-top: 2px;
+}
+
+.metric-distribution {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.dist-item {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  font-size: 11px;
+}
+
+.dist-label-badge {
+  padding: 2px 6px;
+  border-radius: 4px;
+  font-size: 11px;
+  font-weight: 600;
+  border: 1px solid transparent;
+}
+
+.dist-label-badge.color-blue { background: rgba(56, 189, 248, 0.15); color: #38bdf8; border-color: rgba(56, 189, 248, 0.3); }
+.dist-label-badge.color-green { background: rgba(57, 255, 20, 0.15); color: #39ff14; border-color: rgba(57, 255, 20, 0.3); }
+.dist-label-badge.color-orange { background: rgba(251, 146, 60, 0.15); color: #fb923c; border-color: rgba(251, 146, 60, 0.3); }
+.dist-label-badge.color-red { background: rgba(248, 113, 113, 0.15); color: #f87171; border-color: rgba(248, 113, 113, 0.3); }
+.dist-label-badge.color-purple { background: rgba(192, 132, 252, 0.15); color: #c084fc; border-color: rgba(192, 132, 252, 0.3); }
+.dist-label-badge.color-gray { background: rgba(148, 163, 184, 0.15); color: #94a3b8; border-color: rgba(148, 163, 184, 0.3); }
+
+.dist-count {
+  color: var(--muted-foreground);
+  font-size: 11px;
+}
+
+.metric-text-list {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.metric-text-bubble {
+  display: flex;
+  align-items: flex-start;
+  gap: 6px;
+  background: rgba(255, 255, 255, 0.02);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 4px 8px;
+  font-size: 11px;
+}
+
+.metric-text-bubble .match-badge {
+  font-weight: 700;
+  color: var(--primary, #39ff14);
+  font-size: 10px;
+}
+
+.metric-text-bubble .text-content {
+  color: var(--foreground);
+  word-break: break-word;
+}
+
+.more-text-hint {
+  font-size: 10px;
+  color: var(--muted-foreground);
+  font-style: italic;
+}
+
+/* Match history custom badges */
+.match-custom-badges-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-bottom: 12px;
+  padding-bottom: 8px;
+  border-bottom: 1px dashed var(--border);
+}
+
+.match-cf-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 11px;
+  padding: 2px 8px;
+  border-radius: 6px;
+  background: rgba(255, 255, 255, 0.03);
+  border: 1px solid var(--border);
+}
+
+.match-cf-badge .cf-name {
+  color: var(--muted-foreground);
+  font-size: 11px;
+}
+
+.match-cf-badge .cf-val {
+  font-weight: 600;
+  color: var(--foreground);
+}
+
+.match-cf-badge.cf-color-green { border-color: rgba(57, 255, 20, 0.3); background: rgba(57, 255, 20, 0.08); }
+.match-cf-badge.cf-color-green .cf-val { color: #39ff14; }
+
+.match-cf-badge.cf-color-blue { border-color: rgba(56, 189, 248, 0.3); background: rgba(56, 189, 248, 0.08); }
+.match-cf-badge.cf-color-blue .cf-val { color: #38bdf8; }
+
+.match-cf-badge.cf-color-purple { border-color: rgba(192, 132, 252, 0.3); background: rgba(192, 132, 252, 0.08); }
+.match-cf-badge.cf-color-purple .cf-val { color: #c084fc; }
+
+.match-cf-badge.cf-color-orange { border-color: rgba(251, 146, 60, 0.3); background: rgba(251, 146, 60, 0.08); }
+.match-cf-badge.cf-color-orange .cf-val { color: #fb923c; }
+
+.match-cf-badge.cf-color-red { border-color: rgba(248, 113, 113, 0.3); background: rgba(248, 113, 113, 0.08); }
+.match-cf-badge.cf-color-red .cf-val { color: #f87171; }
 </style>

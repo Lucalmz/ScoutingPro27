@@ -440,6 +440,33 @@ export function createChannelMessageHandler(ctx: ChannelMessageHandlerContext) {
         }
         break
 
+      case 'REQUEST_CUSTOM_FIELDS_SYNC':
+        if (isHostMode) {
+          callbacks.onRequestCustomFieldsSync?.(senderId)
+        }
+        break
+
+      case 'CUSTOM_FIELDS_FULL_SYNC':
+        if (!isHostMode && Array.isArray(msg.fields)) {
+          callbacks.onCustomFieldsFullSyncReceived?.(msg.fields, msg.eventId)
+        }
+        break
+
+      case 'CUSTOM_FIELD_UPDATE':
+        if (msg.field) {
+          callbacks.onCustomFieldUpdateReceived?.(msg.field, msg.action, msg.eventId)
+          if (isHostMode) {
+            // Forward to other clients
+            ctx.clients.forEach((c, cid) => {
+              if (cid !== senderId && c.dc && c.dc.readyState === 'open') {
+                if (!c.sender) c.sender = new DataChannelSender(c.dc)
+                c.sender.enqueueSend(JSON.stringify(msg))
+              }
+            })
+          }
+        }
+        break
+
       case 'REQUEST_SCHEDULE_SYNC':
         if (isHostMode) {
           callbacks.onRequestScheduleSync?.(senderId)

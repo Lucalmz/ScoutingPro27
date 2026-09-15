@@ -16,6 +16,8 @@ import type { ScoutingRecord, ScoutingFormData } from '@/types'
 import TagPicker from '@/components/common/TagPicker.vue'
 import PitStatusIndicator from '@/components/pit/PitStatusIndicator.vue'
 import PhaseCycleTracker from './PhaseCycleTracker.vue'
+import DynamicFieldsRenderer from '@/components/customFields/DynamicFieldsRenderer.vue'
+import { useCustomFieldsStore } from '@/stores/customFields'
 import { isAssignmentCompleted, getRecordTournamentLevel } from '@/utils/tournament'
 import { useBumpAnimation } from '@/composables/useBumpAnimation'
 import { formatUserFriendlyError } from '@/utils/errorHelper'
@@ -37,6 +39,7 @@ const emit = defineEmits<{
 
 const scheduleStore = useScheduleStore()
 const pitStore = usePitScoutStore()
+const customFieldsStore = useCustomFieldsStore()
 
 function formatDrivetrain(dt?: string) {
   if (!dt) return '-'
@@ -90,6 +93,7 @@ interface TeamScoutData {
 
   isBroken: boolean
   notes: string
+  customFields: Record<string, any>
 }
 
 function createEmptyTeam(): TeamScoutData {
@@ -106,7 +110,8 @@ function createEmptyTeam(): TeamScoutData {
     flowerBottomBonus: false,
     teleopPark: false,
     isBroken: false,
-    notes: ''
+    notes: '',
+    customFields: {}
   }
 }
 
@@ -414,7 +419,8 @@ watch(() => props.editRecord, (rec: ScoutingRecord | null | undefined) => {
       flowerBottomBonus: raw.flowerBottomBonus ?? false,
       teleopPark: raw.teleopPark ?? false,
       isBroken: raw.isBroken ?? false,
-      notes: rec.notes || ''
+      notes: rec.notes || '',
+      customFields: raw.customFields ? { ...raw.customFields } : {}
     }]
   }
 }, { immediate: true })
@@ -554,7 +560,8 @@ async function handleSubmit() {
         teleopMissedCycles: [...team.teleopMissedCycles],
         flowerPlaced: team.flowerPlaced,
         flowerBottomBonus: team.flowerBottomBonus,
-        teleopPark: team.teleopPark
+        teleopPark: team.teleopPark,
+        customFields: { ...team.customFields }
       }
 
       return {
@@ -748,6 +755,12 @@ const recordStore = useRecordStore()
                 </div>
               </label>
             </div>
+
+            <!-- Custom Fields (Auto) -->
+            <DynamicFieldsRenderer
+              :definitions="customFieldsStore.getActiveFields(props.eventId, 'MATCH', 'auto')"
+              v-model="team.customFields"
+            />
           </section>
 
           <!-- TeleOp (Cycle Tracker) -->
@@ -759,6 +772,12 @@ const recordStore = useRecordStore()
               :rate-text="'+2 ' + t('scouting.unit_balls')"
               v-model="team.teleopCycles"
               v-model:missed-value="team.teleopMissedCycles"
+            />
+
+            <!-- Custom Fields (TeleOp) -->
+            <DynamicFieldsRenderer
+              :definitions="customFieldsStore.getActiveFields(props.eventId, 'MATCH', 'teleop')"
+              v-model="team.customFields"
             />
           </section>
 
@@ -798,6 +817,12 @@ const recordStore = useRecordStore()
                 </div>
               </label>
             </div>
+
+            <!-- Custom Fields (Endgame) -->
+            <DynamicFieldsRenderer
+              :definitions="customFieldsStore.getActiveFields(props.eventId, 'MATCH', 'endgame')"
+              v-model="team.customFields"
+            />
             
             <div class="field" style="margin-top: 16px;">
               <span>{{ t('scouting.notes') }}</span>
@@ -808,6 +833,12 @@ const recordStore = useRecordStore()
                 rows="2"
               ></textarea>
             </div>
+
+            <!-- Custom Fields (Overall) -->
+            <DynamicFieldsRenderer
+              :definitions="customFieldsStore.getActiveFields(props.eventId, 'MATCH', 'overall')"
+              v-model="team.customFields"
+            />
           </section>
           
           <div class="total-score-inline">

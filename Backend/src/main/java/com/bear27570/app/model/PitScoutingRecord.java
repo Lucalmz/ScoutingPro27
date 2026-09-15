@@ -31,6 +31,7 @@ public class PitScoutingRecord {
     private int version = 1;
     private Integer hostSeq;
     private boolean isDeleted = false;
+    private String rawData;
     private String createdAt;
     private String updatedAt;
 
@@ -111,6 +112,9 @@ public class PitScoutingRecord {
     public boolean isDeleted() { return isDeleted; }
     public void setIsDeleted(boolean isDeleted) { this.isDeleted = isDeleted; }
     public void setDeleted(boolean deleted) { this.isDeleted = deleted; }
+
+    public String getRawData() { return rawData; }
+    public void setRawData(String rawData) { this.rawData = rawData; }
 
     public String getCreatedAt() { return createdAt; }
     public void setCreatedAt(String createdAt) { this.createdAt = createdAt; }

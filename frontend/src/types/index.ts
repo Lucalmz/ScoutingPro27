@@ -112,6 +112,9 @@ export interface ScoutingFormData {
   flowerPlaced: boolean
   flowerBottomBonus: boolean
   teleopPark: boolean
+
+  // Custom Fields
+  customFields?: Record<string, any>
 }
 
 // --- Official Match ---
@@ -187,6 +190,9 @@ export type WebRtcMessage =
   | WebRtcTeamTagUpdate
   | WebRtcRequestTagsSync
   | WebRtcTagsFullSync
+  | WebRtcCustomFieldsFullSync
+  | WebRtcCustomFieldUpdate
+  | WebRtcRequestCustomFieldsSync
   | WebRtcSessionConflict
   | WebRtcTakeoverRequest
   | WebRtcTakeoverPrompt
@@ -358,6 +364,36 @@ export interface WebRtcTagsFullSync {
   hostSessionId?: string
 }
 
+export interface WebRtcCustomFieldsFullSync {
+  type: 'CUSTOM_FIELDS_FULL_SYNC'
+  eventId: string
+  fields: CustomFieldDefinition[]
+  authCode?: string
+  senderUserId?: string
+  token?: string
+  hostSessionId?: string
+}
+
+export interface WebRtcCustomFieldUpdate {
+  type: 'CUSTOM_FIELD_UPDATE'
+  eventId: string
+  field: CustomFieldDefinition
+  action: 'CREATE' | 'UPDATE' | 'DELETE'
+  authCode?: string
+  senderUserId?: string
+  token?: string
+  hostSessionId?: string
+}
+
+export interface WebRtcRequestCustomFieldsSync {
+  type: 'REQUEST_CUSTOM_FIELDS_SYNC'
+  eventId: string
+  authCode?: string
+  senderUserId?: string
+  token?: string
+  hostSessionId?: string
+}
+
 export interface WebRtcDirectMessage {
   type: 'DIRECT_MESSAGE'
   id?: string
@@ -477,6 +513,8 @@ export interface PitScoutingRecord {
 
   // 图片与版本
   photoKeys?: string[]
+  rawData?: string
+  customFields?: Record<string, any>
   version: number
   hostSeq?: number
   isDeleted?: boolean
@@ -525,3 +563,35 @@ export interface UnifiedTeamItem {
   tags: TeamTagItem[]
 }
 
+// --- Custom Field System ---
+export type CustomFieldTarget = 'MATCH' | 'PIT'
+export type CustomFieldType = 'boolean' | 'number' | 'level' | 'select' | 'multi_select' | 'text'
+export type CustomFieldPhase = 'auto' | 'teleop' | 'endgame' | 'overall' | 'hardware' | 'strategy'
+
+export interface CustomFieldOption {
+  label: string
+  value: string
+  color?: string // 'green' | 'blue' | 'red' | 'orange' | 'purple' | 'gray'
+}
+
+export interface CustomFieldDefinition {
+  id: string
+  eventId: string
+  target: CustomFieldTarget
+  phase: CustomFieldPhase
+  name: string
+  fieldKey: string
+  fieldType: CustomFieldType
+  required: boolean
+  defaultVal?: string | null
+  optionsJson?: string | null
+  options?: CustomFieldOption[]
+  minVal?: number | null
+  maxVal?: number | null
+  stepVal?: number | null
+  unit?: string | null
+  orderSeq: number
+  isActive: boolean
+  createdAt?: string
+  updatedAt?: string
+}

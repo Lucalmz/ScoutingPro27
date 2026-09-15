@@ -30,6 +30,9 @@ export type WebRtcCallbacks = {
   onPitScoutBatchSyncReceived?: (records: import('@/types').PitScoutingRecord[], senderId?: string) => void
   onRequestPitSync?: (senderId?: string) => void
   onOfficialRosterSyncReceived?: (teams: import('@/types').OfficialTeamInfo[]) => void
+  onRequestCustomFieldsSync?: (senderId?: string) => void
+  onCustomFieldsFullSyncReceived?: (fields: import('@/types').CustomFieldDefinition[], eventId?: string) => void
+  onCustomFieldUpdateReceived?: (field: import('@/types').CustomFieldDefinition, action: 'CREATE' | 'UPDATE' | 'DELETE', eventId?: string) => void
   onSessionConflict?: (
     conflictingUsername: string,
     conflictingUserId: string,

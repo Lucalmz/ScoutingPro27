@@ -1,9 +1,10 @@
 <script setup lang="ts">
 import { ref, computed, defineComponent, toRef, h, nextTick } from 'vue'
 import { useI18n } from 'vue-i18n'
-import type { RankingRow } from '@/types'
+import type { RankingRow, CustomFieldDefinition } from '@/types'
 import { useEventStore } from '@/stores/events'
 import { useRecordStore } from '@/stores/records'
+import { useCustomFieldsStore } from '@/stores/customFields'
 import { useToastStore } from '@/stores/toast'
 import { useRouter } from 'vue-router'
 import { transitionState } from '@/utils/transitionState'
@@ -25,6 +26,7 @@ const AnimatedNumber = defineComponent({
 const { t, te } = useI18n()
 const eventStore = useEventStore()
 const recordStore = useRecordStore()
+const customFieldsStore = useCustomFieldsStore()
 const toastStore = useToastStore()
 const router = useRouter()
 const navStore = useNavigationStore()
@@ -34,7 +36,7 @@ const props = defineProps<{
   loading: boolean
 }>()
 
-type SortKey = keyof RankingRow
+type SortKey = keyof RankingRow | string
 const sortKey = ref<SortKey>('avgRating')
 const sortDir = ref<'asc' | 'desc'>('desc')
 
@@ -49,6 +51,150 @@ const availableFilterTags = computed<string[]>(() => {
 function formatTagLabel(tagKey?: string | null): string {
   return tagKey || ''
 }
+
+// 自定义列配置与聚合
+const availableCustomFields = computed<CustomFieldDefinition[]>(() => {
+  const eventId = eventStore.currentEvent?.id
+  if (!eventId) return []
+  return customFieldsStore.getActiveFields(eventId, 'MATCH').filter(
+    f => f.fieldType === 'number' || f.fieldType === 'level' || f.fieldType === 'boolean'
+  )
+})
+
+const showCustomColsDropdown = ref(false)
+const selectedCustomKeys = ref<string[]>(loadCustomColKeys())
+
+function loadCustomColKeys(): string[] {
+  try {
+    const raw = localStorage.getItem('scoutingpro_rankings_custom_cols')
+    if (raw) return JSON.parse(raw)
+  } catch {}
+  return []
+}
+
+function saveCustomColKeys(keys: string[]) {
+  try {
+    localStorage.setItem('scoutingpro_rankings_custom_cols', JSON.stringify(keys))
+  } catch {}
+}
+
+function toggleCustomCol(key: string) {
+  hapticLight()
+  const idx = selectedCustomKeys.value.indexOf(key)
+  if (idx !== -1) {
+    selectedCustomKeys.value.splice(idx, 1)
+  } else {
+    selectedCustomKeys.value.push(key)
+  }
+  saveCustomColKeys(selectedCustomKeys.value)
+}
+
+function selectAllCustomCols() {
+  hapticLight()
+  selectedCustomKeys.value = availableCustomFields.value.map(f => f.fieldKey)
+  saveCustomColKeys(selectedCustomKeys.value)
+}
+
+function clearAllCustomCols() {
+  hapticLight()
+  selectedCustomKeys.value = []
+  saveCustomColKeys([])
+}
+
+const visibleCustomFields = computed(() => {
+  return availableCustomFields.value.filter(f => selectedCustomKeys.value.includes(f.fieldKey))
+})
+
+function parseCustomFields(record: { customFields?: Record<string, any>; rawData?: string } | null | undefined): Record<string, any> {
+  if (!record) return {}
+  if (record.customFields && Object.keys(record.customFields).length > 0) {
+    return record.customFields
+  }
+  if (record.rawData) {
+    try {
+      const parsed = typeof record.rawData === 'string' ? JSON.parse(record.rawData) : record.rawData
+      return parsed.customFields || {}
+    } catch {
+      return {}
+    }
+  }
+  return {}
+}
+
+interface TeamCustomStat {
+  value: number
+  display: string
+  count: number
+}
+
+const teamCustomStats = computed(() => {
+  const map = new Map<number, Record<string, TeamCustomStat>>()
+  const eventId = eventStore.currentEvent?.id
+  const records = recordStore.activeRecords.filter(r => !eventId || r.eventId === eventId)
+  const fields = availableCustomFields.value
+  if (fields.length === 0) return map
+
+  const teamRecords = new Map<number, typeof records>()
+  for (const r of records) {
+    if (!teamRecords.has(r.teamNumber)) {
+      teamRecords.set(r.teamNumber, [])
+    }
+    teamRecords.get(r.teamNumber)!.push(r)
+  }
+
+  for (const [teamNum, recs] of teamRecords.entries()) {
+    const stats: Record<string, TeamCustomStat> = {}
+
+    for (const f of fields) {
+      if (f.fieldType === 'number' || f.fieldType === 'level') {
+        let sum = 0
+        let count = 0
+        for (const r of recs) {
+          const cf = parseCustomFields(r)
+          const val = cf[f.fieldKey]
+          if (val !== undefined && val !== null && val !== '') {
+            const num = Number(val)
+            if (!isNaN(num)) {
+              sum += num
+              count++
+            }
+          }
+        }
+        if (count > 0) {
+          const avg = sum / count
+          stats[f.fieldKey] = {
+            value: avg,
+            display: avg.toFixed(1),
+            count
+          }
+        }
+      } else if (f.fieldType === 'boolean') {
+        let trueCount = 0
+        let count = 0
+        for (const r of recs) {
+          const cf = parseCustomFields(r)
+          const val = cf[f.fieldKey]
+          if (val !== undefined && val !== null) {
+            count++
+            if (val === true || val === 'true' || val === 1) {
+              trueCount++
+            }
+          }
+        }
+        if (count > 0) {
+          const rate = (trueCount / count) * 100
+          stats[f.fieldKey] = {
+            value: rate,
+            display: `${rate.toFixed(0)}%`,
+            count
+          }
+        }
+      }
+    }
+    map.set(teamNum, stats)
+  }
+  return map
+})
 
 function setSort(key: SortKey) {
   hapticLight()
@@ -76,8 +222,19 @@ const filteredRankings = computed<RankingRow[]>(() => {
 const sorted = computed<RankingRow[]>(() => {
   const arr = [...filteredRankings.value]
   arr.sort((a, b) => {
-    const av = a[sortKey.value]
-    const bv = b[sortKey.value]
+    if (String(sortKey.value).startsWith('cf_')) {
+      const fieldKey = String(sortKey.value).substring(3)
+      const aStat = teamCustomStats.value.get(a.teamNumber)?.[fieldKey]
+      const bStat = teamCustomStats.value.get(b.teamNumber)?.[fieldKey]
+      const aHas = aStat !== undefined
+      const bHas = bStat !== undefined
+      if (!aHas && !bHas) return 0
+      if (!aHas) return 1
+      if (!bHas) return -1
+      return sortDir.value === 'asc' ? aStat.value - bStat.value : bStat.value - aStat.value
+    }
+    const av = a[sortKey.value as keyof RankingRow]
+    const bv = b[sortKey.value as keyof RankingRow]
     if (typeof av === 'number' && typeof bv === 'number') {
       return sortDir.value === 'asc' ? av - bv : bv - av
     }
@@ -161,25 +318,68 @@ function viewTeamDetails(teamNumber: number) {
       <p>{{ t('rankings.no_data') }}</p>
     </div>
     <div v-else class="table-wrapper">
-      <!-- 战术标签筛选栏 -->
-      <div v-if="availableFilterTags.length > 0" class="tag-filter-bar">
-        <span class="filter-title">{{ t('tags.filter_by_tag') }}:</span>
-        <button
-          class="filter-chip"
-          :class="{ active: selectedTagFilter === null }"
-          @click="selectedTagFilter = null; hapticSelection()"
-        >
-          {{ t('tags.all') }}
-        </button>
-        <button
-          v-for="tagKey in availableFilterTags"
-          :key="tagKey"
-          class="filter-chip"
-          :class="{ active: selectedTagFilter === tagKey }"
-          @click="selectedTagFilter = (selectedTagFilter === tagKey ? null : tagKey); hapticSelection()"
-        >
-          {{ formatTagLabel(tagKey) }}
-        </button>
+      <div class="table-toolbar">
+        <!-- 战术标签筛选栏 -->
+        <div v-if="availableFilterTags.length > 0" class="tag-filter-bar">
+          <span class="filter-title">{{ t('tags.filter_by_tag') }}:</span>
+          <button
+            class="filter-chip"
+            :class="{ active: selectedTagFilter === null }"
+            @click="selectedTagFilter = null; hapticSelection()"
+          >
+            {{ t('tags.all') }}
+          </button>
+          <button
+            v-for="tagKey in availableFilterTags"
+            :key="tagKey"
+            class="filter-chip"
+            :class="{ active: selectedTagFilter === tagKey }"
+            @click="selectedTagFilter = (selectedTagFilter === tagKey ? null : tagKey); hapticSelection()"
+          >
+            {{ formatTagLabel(tagKey) }}
+          </button>
+        </div>
+
+        <!-- 自定义列下拉选择器 -->
+        <div v-if="availableCustomFields.length > 0" class="custom-cols-picker-wrapper">
+          <button
+            type="button"
+            class="btn-custom-cols"
+            :class="{ 'has-selected': visibleCustomFields.length > 0 }"
+            @click="showCustomColsDropdown = !showCustomColsDropdown; hapticLight()"
+          >
+            <span class="material-icons" style="font-size: 16px;">view_column</span>
+            <span>{{ t('custom_fields.rankings_custom_cols_btn') }}</span>
+            <span v-if="visibleCustomFields.length > 0" class="badge-col-count">({{ visibleCustomFields.length }})</span>
+            <span class="material-icons" style="font-size: 16px;">{{ showCustomColsDropdown ? 'expand_less' : 'expand_more' }}</span>
+          </button>
+
+          <div v-if="showCustomColsDropdown" class="cols-dropdown-card">
+            <div class="dropdown-header">
+              <span class="dropdown-title">{{ t('custom_fields.rankings_custom_cols_title') }}</span>
+              <div class="header-links">
+                <button type="button" class="btn-link" @click="selectAllCustomCols">{{ t('custom_fields.select_all') }}</button>
+                <span class="sep">/</span>
+                <button type="button" class="btn-link" @click="clearAllCustomCols">{{ t('custom_fields.clear_all') }}</button>
+              </div>
+            </div>
+            <div class="dropdown-options">
+              <label
+                v-for="f in availableCustomFields"
+                :key="f.fieldKey"
+                class="col-option-row"
+              >
+                <input
+                  type="checkbox"
+                  :checked="selectedCustomKeys.includes(f.fieldKey)"
+                  @change="toggleCustomCol(f.fieldKey)"
+                />
+                <span class="opt-name">{{ f.name }}</span>
+                <span class="opt-tag">{{ f.fieldType === 'boolean' ? '%' : (f.unit || '数值') }}</span>
+              </label>
+            </div>
+          </div>
+        </div>
       </div>
 
       <table>
@@ -211,6 +411,15 @@ function viewTeamDetails(teamNumber: number) {
             </th>
             <th @click="setSort('avgRating')" class="sortable">
               {{ t('rankings.rating') }}<span class="material-icons sort-icon" :class="{ 'is-active': sortKey === 'avgRating', 'is-asc': sortKey === 'avgRating' && sortDir === 'asc' }">arrow_drop_down</span>
+            </th>
+            <th
+              v-for="f in visibleCustomFields"
+              :key="f.fieldKey"
+              class="sortable custom-col-th"
+              @click="setSort('cf_' + f.fieldKey)"
+              :title="f.unit ? `${f.name} (${f.unit})` : f.name"
+            >
+              {{ f.name }}<span class="material-icons sort-icon" :class="{ 'is-active': sortKey === 'cf_' + f.fieldKey, 'is-asc': sortKey === 'cf_' + f.fieldKey && sortDir === 'asc' }">arrow_drop_down</span>
             </th>
             <th>{{ t('rankings.trend') }}</th>
             <th>{{ t('rankings.details') }}</th>
@@ -261,6 +470,17 @@ function viewTeamDetails(teamNumber: number) {
             <td><AnimatedNumber :value="row.avgTipsPerMatch ?? 0" /></td>
             <td><AnimatedNumber :value="row.maxScore" /></td>
             <td class="total-cell"><AnimatedNumber :value="row.avgRating" /></td>
+            <td
+              v-for="f in visibleCustomFields"
+              :key="f.fieldKey"
+              class="custom-col-td"
+            >
+              <span v-if="teamCustomStats.get(row.teamNumber)?.[f.fieldKey]" class="custom-col-val">
+                {{ teamCustomStats.get(row.teamNumber)?.[f.fieldKey]?.display }}
+                <span v-if="f.unit && f.fieldType !== 'boolean'" class="unit-text">{{ f.unit }}</span>
+              </span>
+              <span v-else class="empty-cell">-</span>
+            </td>
             <td class="trend-cell">
               <span v-if="row.trend === 'up'" class="material-icons" style="color: var(--status-success); font-size: 18px;" title="Trending Up">trending_up</span>
               <span v-else-if="row.trend === 'down'" class="material-icons" style="color: var(--status-error); font-size: 18px;" title="Trending Down">trending_down</span>
@@ -440,6 +660,179 @@ tbody tr:hover td:first-child {
 
 .ban-btn:hover {
   opacity: 0.8;
+}
+
+/* ── 表格工具栏与自定义列选择器 ── */
+.table-toolbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 12px;
+  flex-wrap: wrap;
+}
+
+.table-toolbar .tag-filter-bar {
+  margin-bottom: 0;
+  flex: 1;
+}
+
+.custom-cols-picker-wrapper {
+  position: relative;
+  display: inline-block;
+}
+
+.btn-custom-cols {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  background: var(--card);
+  border: 1px solid var(--border);
+  color: var(--muted-foreground);
+  padding: 6px 12px;
+  border-radius: 8px;
+  font-size: 12px;
+  font-weight: 500;
+  cursor: pointer;
+  transition: all 0.2s ease;
+}
+
+.btn-custom-cols:hover {
+  border-color: var(--primary);
+  color: var(--foreground);
+}
+
+.btn-custom-cols.has-selected {
+  border-color: rgba(57, 255, 20, 0.4);
+  color: var(--primary, #39ff14);
+}
+
+.badge-col-count {
+  font-weight: 700;
+  color: var(--primary, #39ff14);
+}
+
+.cols-dropdown-card {
+  position: absolute;
+  top: calc(100% + 6px);
+  right: 0;
+  z-index: 100;
+  width: 260px;
+  background: var(--card, #121212);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 10px;
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.6);
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.dropdown-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding-bottom: 6px;
+  border-bottom: 1px solid var(--border);
+}
+
+.dropdown-title {
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--muted-foreground);
+  text-transform: uppercase;
+}
+
+.header-links {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 11px;
+}
+
+.header-links .sep {
+  color: var(--muted-foreground);
+}
+
+.btn-link {
+  background: none;
+  border: none;
+  color: var(--primary, #39ff14);
+  padding: 0;
+  font-size: 11px;
+  cursor: pointer;
+}
+
+.btn-link:hover {
+  text-decoration: underline;
+}
+
+.dropdown-options {
+  max-height: 200px;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.col-option-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 4px 6px;
+  border-radius: 4px;
+  cursor: pointer;
+  font-size: 12px;
+  transition: background 0.15s ease;
+}
+
+.col-option-row:hover {
+  background: rgba(255, 255, 255, 0.05);
+}
+
+.col-option-row input[type="checkbox"] {
+  accent-color: var(--primary, #39ff14);
+}
+
+.col-option-row .opt-name {
+  flex: 1;
+  color: var(--foreground);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.col-option-row .opt-tag {
+  font-size: 10px;
+  color: var(--muted-foreground);
+  background: rgba(255, 255, 255, 0.06);
+  padding: 1px 4px;
+  border-radius: 3px;
+}
+
+/* Custom column header & cell */
+th.custom-col-th {
+  color: var(--foreground);
+}
+
+td.custom-col-td {
+  font-variant-numeric: tabular-nums;
+}
+
+.custom-col-val {
+  font-weight: 600;
+  color: var(--foreground);
+}
+
+.custom-col-val .unit-text {
+  font-size: 10px;
+  font-weight: 400;
+  color: var(--muted-foreground);
+  margin-left: 2px;
+}
+
+.empty-cell {
+  color: var(--muted-foreground);
 }
 
 /* ── 战术标签筛选栏 ── */

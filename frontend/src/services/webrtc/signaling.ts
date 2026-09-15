@@ -82,7 +82,10 @@ export class SignalingChannel {
         'PIT_SCOUT_UPDATE',
         'PIT_SCOUT_FULL_SYNC',
         'REQUEST_PIT_SYNC',
-        'OFFICIAL_ROSTER_SYNC'
+        'OFFICIAL_ROSTER_SYNC',
+        'CUSTOM_FIELDS_FULL_SYNC',
+        'CUSTOM_FIELD_UPDATE',
+        'REQUEST_CUSTOM_FIELDS_SYNC'
       ]
       if (BUSINESS_TYPES.includes(msg.type)) {
         console.warn(`[Security] Dropped illegal business payload '${msg.type}' over public MQTT signaling channel.`)

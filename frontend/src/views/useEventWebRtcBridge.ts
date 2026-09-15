@@ -8,6 +8,7 @@ import { useInboxStore } from '@/stores/inbox'
 import { useToastStore } from '@/stores/toast'
 import { useScheduleStore } from '@/stores/schedule'
 import { usePitScoutStore } from '@/stores/pitScout'
+import { useCustomFieldsStore } from '@/stores/customFields'
 import { createWebRtcService, type WebRtcCallbacks } from '@/services/webrtc'
 import { syncRecords, syncPitRecordsBatch, savePitRecord } from '@/services/api'
 import { flushOfflinePhotos } from '@/services/photoStorage'
@@ -33,6 +34,7 @@ export function useEventWebRtcBridge({
   const inboxStore = useInboxStore()
   const scheduleStore = useScheduleStore()
   const pitStore = usePitScoutStore()
+  const customFieldsStore = useCustomFieldsStore()
   const toastStore = useToastStore()
 
   // Client 端：持久化最后一次从 Host 收到的最大 hostSeq，用于重连后增量请求
@@ -192,6 +194,33 @@ export function useEventWebRtcBridge({
 
       onOfficialRosterSyncReceived: (incomingTeams) => {
         pitStore.applyOfficialRosterSync(incomingTeams)
+      },
+
+      onRequestCustomFieldsSync: (senderId) => {
+        if (eventStore.isHost && connStore.rtcService && eventStore.currentEvent?.id) {
+          connStore.rtcService.sendMessage(
+            {
+              type: 'CUSTOM_FIELDS_FULL_SYNC',
+              eventId: eventStore.currentEvent.id,
+              fields: customFieldsStore.getFields(eventStore.currentEvent.id)
+            },
+            senderId
+          )
+        }
+      },
+
+      onCustomFieldsFullSyncReceived: (incomingFields, eventIdVal) => {
+        const targetId = eventIdVal || eventStore.currentEvent?.id
+        if (targetId) {
+          customFieldsStore.applyFullSync(targetId, incomingFields)
+        }
+      },
+
+      onCustomFieldUpdateReceived: (field, action, eventIdVal) => {
+        const targetId = eventIdVal || eventStore.currentEvent?.id
+        if (targetId) {
+          customFieldsStore.applyRemoteUpdate(targetId, field, action)
+        }
       },
 
       onClientConnected: (userId: string, userName: string) => {
@@ -390,6 +419,13 @@ export function useEventWebRtcBridge({
             })
             connStore.rtcService.sendMessage({
               type: 'REQUEST_PIT_SYNC'
+            })
+            connStore.rtcService.sendMessage({
+              type: 'REQUEST_CUSTOM_FIELDS_SYNC',
+              eventId: evt.id
+            })
+            customFieldsStore.fetchFields(evt.id).catch((e) => {
+              console.warn('[EventView] Failed to fetch custom fields:', e)
             })
             connStore.rtcService.requestTagsSync(evt.id).catch((e) => {
               console.warn('[EventView] Failed to request tags sync:', e)

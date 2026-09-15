@@ -11,6 +11,8 @@ import { updateEventFtcConfig, fetchEventMembers, type EventMemberItem } from '@
 import { downloadCSV } from '@/utils/csvExport'
 import { sortRecordsChronologically, getRecordTournamentLevel } from '@/utils/tournament'
 import OfflineSyncModal from '@/components/common/OfflineSyncModal.vue'
+import CustomFieldsManagerModal from '@/components/customFields/CustomFieldsManagerModal.vue'
+import { useCustomFieldsStore } from '@/stores/customFields'
 
 const props = defineProps<{
   event: ScoutingEvent | null
@@ -22,8 +24,10 @@ const recordStore = useRecordStore()
 const connStore = useConnectionStore()
 const inboxStore = useInboxStore()
 const toastStore = useToastStore()
+const customFieldsStore = useCustomFieldsStore()
 
 const showOfflineSyncModal = ref(false)
+const showCustomFieldsModal = ref(false)
 
 // --- Database Event Members & Real-time Auto-Refresh ---
 const dbMembers = ref<EventMemberItem[]>([])
@@ -104,39 +108,98 @@ async function saveEventSettings() {
 
 // --- Data Export ---
 function exportRankingsCSV() {
-  const headers = ['Team', 'Matches', 'Breakdown Count', 'Avg Auto', 'Avg Teleop', 'Avg Endgame', 'Max Score', 'Avg Rating', 'Trend']
-  const rows = recordStore.rankings.map(r => [
-    r.teamNumber,
-    r.matchCount,
-    r.brokenCount,
-    r.avgAutoScore,
-    r.avgTeleopScore,
-    r.avgEndgameScore,
-    r.maxScore,
-    r.avgRating,
-    r.trend
-  ])
+  const activeCustomFields = props.event?.id
+    ? customFieldsStore.getActiveFields(props.event.id, 'MATCH').filter(f => f.fieldType === 'number' || f.fieldType === 'level' || f.fieldType === 'boolean')
+    : []
+  const customHeaders = activeCustomFields.map(f => f.fieldType === 'boolean' ? `自定义: ${f.name} 发生率(%)` : `自定义: 场均${f.name}`)
+  const headers = ['Team', 'Matches', 'Breakdown Count', 'Avg Auto', 'Avg Teleop', 'Avg Endgame', 'Max Score', 'Avg Rating', 'Trend', ...customHeaders]
+  const rows = recordStore.rankings.map(r => {
+    const teamRecs = recordStore.activeRecords.filter(rec => rec.teamNumber === r.teamNumber && !rec.isBroken)
+    const customCells = activeCustomFields.map(f => {
+      if (teamRecs.length === 0) return '-'
+      if (f.fieldType === 'boolean') {
+        let count = 0
+        let total = 0
+        for (const rec of teamRecs) {
+          try {
+            const raw = JSON.parse(rec.rawData)
+            if (raw.customFields && raw.customFields[f.fieldKey] !== undefined) {
+              total++
+              if (raw.customFields[f.fieldKey]) count++
+            }
+          } catch {}
+        }
+        return total > 0 ? ((count / total) * 100).toFixed(1) + '%' : '-'
+      } else {
+        let sum = 0
+        let count = 0
+        for (const rec of teamRecs) {
+          try {
+            const raw = JSON.parse(rec.rawData)
+            const v = raw.customFields?.[f.fieldKey]
+            if (typeof v === 'number') {
+              sum += v
+              count++
+            }
+          } catch {}
+        }
+        return count > 0 ? (sum / count).toFixed(1) : '-'
+      }
+    })
+    return [
+      r.teamNumber,
+      r.matchCount,
+      r.brokenCount,
+      r.avgAutoScore,
+      r.avgTeleopScore,
+      r.avgEndgameScore,
+      r.maxScore,
+      r.avgRating,
+      r.trend,
+      ...customCells
+    ]
+  })
   const eventName = props.event?.name ? props.event.name.replace(/[^a-z0-9]/gi, '_') : 'event'
   const timestamp = new Date().toISOString().replace(/[:.]/g, '-')
   downloadCSV(`${eventName}_rankings_${timestamp}.csv`, headers, rows)
 }
 
 function exportRecordsCSV() {
-  const headers = ['Record ID', 'Level', 'Match', 'Team', 'Scout', 'Auto', 'Teleop', 'Endgame', 'Total Score', 'Is Broken', 'Created At']
+  const activeCustomFields = props.event?.id
+    ? customFieldsStore.getActiveFields(props.event.id, 'MATCH')
+    : []
+  const customHeaders = activeCustomFields.map(f => f.unit ? `自定义: ${f.name} (${f.unit})` : `自定义: ${f.name}`)
+  const headers = ['Record ID', 'Level', 'Match', 'Team', 'Scout', 'Auto', 'Teleop', 'Endgame', 'Total Score', 'Is Broken', 'Created At', ...customHeaders]
   const sorted = sortRecordsChronologically(recordStore.activeRecords)
-  const rows = sorted.map(r => [
-    r.id,
-    getRecordTournamentLevel(r),
-    r.matchNumber,
-    r.teamNumber,
-    r.scoutName,
-    r.autoScore,
-    r.teleopScore,
-    r.endgameScore,
-    r.totalScore,
-    r.isBroken ? 'Yes' : 'No',
-    new Date(r.createdAt).toLocaleString()
-  ])
+  const rows = sorted.map(r => {
+    let customObj: Record<string, any> = {}
+    if (r.rawData) {
+      try {
+        const parsed = JSON.parse(r.rawData)
+        customObj = parsed.customFields || {}
+      } catch {}
+    }
+    const customCells = activeCustomFields.map(f => {
+      const val = customObj[f.fieldKey]
+      if (val === undefined || val === null) return ''
+      if (Array.isArray(val)) return val.join('; ')
+      return String(val)
+    })
+    return [
+      r.id,
+      getRecordTournamentLevel(r),
+      r.matchNumber,
+      r.teamNumber,
+      r.scoutName,
+      r.autoScore,
+      r.teleopScore,
+      r.endgameScore,
+      r.totalScore,
+      r.isBroken ? 'Yes' : 'No',
+      new Date(r.createdAt).toLocaleString(),
+      ...customCells
+    ]
+  })
   const eventName = props.event?.name ? props.event.name.replace(/[^a-z0-9]/gi, '_') : 'event'
   const timestamp = new Date().toISOString().replace(/[:.]/g, '-')
   downloadCSV(`${eventName}_records_${timestamp}.csv`, headers, rows)
@@ -261,6 +324,20 @@ async function sendDirectMessage(scoutId: string, scoutName?: string) {
       </div>
     </div>
 
+    <div class="settings-panel">
+      <h2>{{ t('custom_fields.panel_title') || '自定义考察指标' }}</h2>
+      <div class="settings-form" style="flex-direction: row; gap: 16px; flex-wrap: wrap;">
+        <button
+          class="btn-primary"
+          @click="showCustomFieldsModal = true"
+          style="margin-top: 0; background: rgba(57, 255, 20, 0.12); border: 1px solid var(--primary); color: var(--primary);"
+        >
+          <span class="material-icons" style="font-size: 18px; vertical-align: text-bottom; margin-right: 4px;">tune</span>
+          {{ t('custom_fields.btn_manage') || '自定义字段配置' }}
+        </button>
+      </div>
+    </div>
+
     <div class="scouts-header-bar">
       <h2>{{ t('event.scouts_title') }} ({{ uniqueScouts.length }})</h2>
       <button class="btn-refresh-scouts" @click="refreshMembers" :disabled="isLoadingMembers">
@@ -291,6 +368,7 @@ async function sendDirectMessage(scoutId: string, scoutName?: string) {
     </ul>
 
     <OfflineSyncModal v-model:visible="showOfflineSyncModal" :event-id="event?.id" />
+    <CustomFieldsManagerModal v-model:visible="showCustomFieldsModal" :event-id="event?.id || ''" />
   </div>
 </template>
 

@@ -353,3 +353,29 @@ export function deletePitPhoto(eventId: string, key: string): Promise<void> {
     `/events/${encodeURIComponent(eventId)}/pit/photos/${encodeURIComponent(key)}`
   )
 }
+
+// --- Custom Fields API ---
+
+export function fetchCustomFields(eventId: string): Promise<import('@/types').CustomFieldDefinition[]> {
+  return request<import('@/types').CustomFieldDefinition[]>('GET', `/events/${encodeURIComponent(eventId)}/custom-fields`)
+}
+
+export function createCustomField(
+  eventId: string,
+  def: Partial<import('@/types').CustomFieldDefinition>
+): Promise<import('@/types').CustomFieldDefinition> {
+  return request<import('@/types').CustomFieldDefinition>('POST', `/events/${encodeURIComponent(eventId)}/custom-fields`, def)
+}
+
+export function updateCustomField(
+  eventId: string,
+  id: string,
+  def: Partial<import('@/types').CustomFieldDefinition>
+): Promise<import('@/types').CustomFieldDefinition> {
+  return request<import('@/types').CustomFieldDefinition>('PUT', `/events/${encodeURIComponent(eventId)}/custom-fields/${encodeURIComponent(id)}`, def)
+}
+
+export function deleteCustomField(eventId: string, id: string): Promise<{ success: boolean; id: string }> {
+  return request<{ success: boolean; id: string }>('DELETE', `/events/${encodeURIComponent(eventId)}/custom-fields/${encodeURIComponent(id)}`)
+}
+

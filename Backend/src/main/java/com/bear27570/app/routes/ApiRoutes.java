@@ -163,6 +163,7 @@ public class ApiRoutes {
         new FtcProxyRoutes(ftcApiClient, gson).register(routes);
         new RecordRoutes(jdbi, gson).register(routes);
         new PitScoutRoutes(jdbi, gson).register(routes);
+        new CustomFieldRoutes(jdbi, gson).register(routes);
         new AiRoutes(jdbi, gson, heartbeatScheduler).register(routes);
 
         // ==================== Test Cleanup ====================

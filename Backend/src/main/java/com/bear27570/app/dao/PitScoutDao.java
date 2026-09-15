@@ -40,7 +40,7 @@ public interface PitScoutDao {
             :ballCompatibility, :launcherType, :flowerMechanism, :hasColorSensor,
             :claimedAutoStrategy, :claimedAutoScore, :claimedTeleopCycles, :claimedTeleopScore,
             :claimedEndgameScore, :claimedTotalScore,
-            :photoKeys, :version, :hostSeq, :isDeleted,
+            :photoKeys, :version, :hostSeq, :isDeleted, :rawData,
             COALESCE(NULLIF(TRIM(:createdAt), ''), CURRENT_TIMESTAMP),
             CASE 
                 WHEN NULLIF(TRIM(:updatedAt), '') IS NOT NULL AND NULLIF(TRIM(:updatedAt), '') > DATEADD('SECOND', 5, CURRENT_TIMESTAMP) THEN CURRENT_TIMESTAMP
@@ -52,7 +52,7 @@ public interface PitScoutDao {
             ball_compatibility, launcher_type, flower_mechanism, has_color_sensor,
             claimed_auto_strategy, claimed_auto_score, claimed_teleop_cycles, claimed_teleop_score,
             claimed_endgame_score, claimed_total_score,
-            photo_keys, version, host_seq, is_deleted,
+            photo_keys, version, host_seq, is_deleted, raw_data,
             created_at, updated_at
         )
         ON target.event_id = src.event_id AND target.team_number = src.team_number
@@ -94,6 +94,7 @@ public interface PitScoutDao {
                 ELSE GREATEST(COALESCE(target.host_seq, 0), src.host_seq)
             END,
             is_deleted                  = src.is_deleted,
+            raw_data                    = src.raw_data,
             updated_at                  = src.updated_at
         WHEN NOT MATCHED THEN
           INSERT (
@@ -102,7 +103,7 @@ public interface PitScoutDao {
             ball_compatibility, launcher_type, flower_mechanism, has_color_sensor,
             claimed_auto_strategy, claimed_auto_score, claimed_teleop_cycles, claimed_teleop_score,
             claimed_endgame_score, claimed_total_score,
-            photo_keys, version, host_seq, is_deleted,
+            photo_keys, version, host_seq, is_deleted, raw_data,
             created_at, updated_at
           ) VALUES (
             src.id, src.event_id, src.team_number, src.scout_id, src.scout_name, src.robot_name,
@@ -110,7 +111,7 @@ public interface PitScoutDao {
             src.ball_compatibility, src.launcher_type, src.flower_mechanism, src.has_color_sensor,
             src.claimed_auto_strategy, src.claimed_auto_score, src.claimed_teleop_cycles, src.claimed_teleop_score,
             src.claimed_endgame_score, src.claimed_total_score,
-            src.photo_keys, src.version, src.host_seq, src.is_deleted,
+            src.photo_keys, src.version, src.host_seq, src.is_deleted, src.raw_data,
             src.created_at, src.updated_at
           )
     """)
