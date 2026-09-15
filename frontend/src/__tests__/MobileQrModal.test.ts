@@ -22,6 +22,7 @@ vi.mock('qrcode', () => ({
 
 describe('MobileQrModal.vue', () => {
   beforeEach(() => {
+    document.body.innerHTML = ''
     setActivePinia(createPinia())
     vi.clearAllMocks()
 
@@ -151,5 +152,110 @@ describe('MobileQrModal.vue', () => {
 
     const runBtn = document.body.querySelector('.btn-run-cmd') as HTMLButtonElement
     expect(runBtn.disabled).toBe(true)
+  })
+
+  it('renders 502 troubleshooting card and allows switching to macOS tab', async () => {
+    global.fetch = vi.fn().mockImplementation(async (url: string) => {
+      if (url === '/api/system/network-info') {
+        return {
+          ok: true,
+          json: async () => ({
+            primaryIp: '192.168.137.1',
+            allIps: ['192.168.137.1', '172.20.10.2'],
+            primaryIpv6: null,
+            allIpv6s: [],
+            port: 8080,
+            os: 'windows',
+            isWindows: true,
+            isMac: false,
+            firewallAllowed: false,
+            firewallCommand: 'netsh advfirewall firewall add rule ...',
+            macFirewallCommand: 'sudo /usr/libexec/ApplicationFirewall/socketfilterfw --setglobalstate off'
+          })
+        } as Response
+      }
+      return { ok: false } as Response
+    })
+
+    const wrapper = mount(MobileQrModal, {
+      props: {
+        modelValue: true,
+        inviteCode: 'TEST502'
+      }
+    })
+
+    await wrapper.vm.$nextTick()
+    await new Promise((r) => setTimeout(r, 20))
+
+    // 502 troubleshooting card must be visible
+    const card502 = document.body.querySelector('.troubleshoot-502-card')
+    expect(card502).toBeTruthy()
+    expect(card502?.textContent).toContain('qr_modal.troubleshoot_502_banner_title')
+
+    // Hotspot card must be visible
+    const hotspotCard = document.body.querySelector('.hotspot-card')
+    expect(hotspotCard).toBeTruthy()
+
+    // Switch to macOS tab
+    const osBtns = document.body.querySelectorAll('.os-tab-btn')
+    expect(osBtns.length).toBe(2)
+    ;(osBtns[1] as HTMLButtonElement).click()
+
+    await wrapper.vm.$nextTick()
+    await new Promise((r) => setTimeout(r, 20))
+
+    // macOS troubleshooting card should be visible
+    const macCard = document.body.querySelector('.macos-troubleshoot-card')
+    expect(macCard).toBeTruthy()
+    expect(macCard?.textContent).toContain('qr_modal.macos_local_network_title')
+
+    // macOS command card should be visible and copyable
+    const macCmdCard = document.body.querySelector('.macos-cmd-card')
+    expect(macCmdCard).toBeTruthy()
+    expect(macCmdCard?.textContent).toContain('socketfilterfw')
+
+    const macCopyBtn = macCmdCard?.querySelector('.btn-copy-cmd') as HTMLButtonElement
+    expect(macCopyBtn).toBeTruthy()
+    macCopyBtn.click()
+
+    expect(navigator.clipboard.writeText).toHaveBeenCalledWith(
+      expect.stringContaining('socketfilterfw')
+    )
+  })
+
+  it('auto-detects macOS when backend returns isMac: true', async () => {
+    global.fetch = vi.fn().mockImplementation(async (url: string) => {
+      if (url === '/api/system/network-info') {
+        return {
+          ok: true,
+          json: async () => ({
+            primaryIp: '172.20.10.3',
+            allIps: ['172.20.10.3'],
+            primaryIpv6: null,
+            allIpv6s: [],
+            port: 8080,
+            os: 'macos',
+            isWindows: false,
+            isMac: true,
+            macFirewallCommand: 'sudo /usr/libexec/ApplicationFirewall/socketfilterfw --setglobalstate off'
+          })
+        } as Response
+      }
+      return { ok: false } as Response
+    })
+
+    const wrapper = mount(MobileQrModal, {
+      props: {
+        modelValue: true,
+        inviteCode: 'MAC123'
+      }
+    })
+
+    await wrapper.vm.$nextTick()
+    await new Promise((r) => setTimeout(r, 20))
+
+    // Automatically selects macOS tab
+    const macCard = document.body.querySelector('.macos-troubleshoot-card')
+    expect(macCard).toBeTruthy()
   })
 })

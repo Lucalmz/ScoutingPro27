@@ -18,7 +18,11 @@ const { t } = useI18n()
 
 const loading = ref(false)
 const mode = ref<'lan' | 'ipv6'>('lan')
+const activeTroubleshootTab = ref<'windows' | 'macos'>('windows')
 const networkInfo = ref<{
+  os?: string
+  isWindows?: boolean
+  isMac?: boolean
   primaryIp: string
   allIps: string[]
   primaryIpv6?: string | null
@@ -27,6 +31,7 @@ const networkInfo = ref<{
   joinBaseUrl?: string
   joinBaseUrlIpv6?: string
   firewallCommand?: string
+  macFirewallCommand?: string
   firewallAllowed?: boolean
 } | null>(null)
 
@@ -64,6 +69,12 @@ async function fetchNetworkInfo() {
         selectedIpv6.value = data.primaryIpv6
       } else if (data.allIpv6s && data.allIpv6s.length > 0) {
         selectedIpv6.value = data.allIpv6s[0]
+      }
+
+      if (data.isMac || (data.os === 'macos') || (typeof navigator !== 'undefined' && navigator.userAgent.toLowerCase().includes('mac'))) {
+        activeTroubleshootTab.value = 'macos'
+      } else {
+        activeTroubleshootTab.value = 'windows'
       }
     }
   } catch (e) {
@@ -136,6 +147,7 @@ async function copyPcLink() {
 
 const runningFirewallCmd = ref(false)
 const copiedFirewallCmd = ref(false)
+const copiedMacCmd = ref(false)
 
 const firewallCommand = computed(() => {
   if (networkInfo.value?.firewallCommand) {
@@ -187,6 +199,39 @@ async function copyFirewallCmd() {
   } catch (err) {
     toastStore.showError(t('qr_modal.copy_failed'))
   }
+}
+
+async function copyMacCmd() {
+  try {
+    await navigator.clipboard.writeText(macFirewallCommand.value)
+    copiedMacCmd.value = true
+    toastStore.showToast(t('qr_modal.copy_cmd_success'), 'success')
+    setTimeout(() => {
+      copiedMacCmd.value = false
+    }, 2000)
+  } catch (err) {
+    toastStore.showError(t('qr_modal.copy_failed'))
+  }
+}
+
+const macFirewallCommand = computed(() => {
+  if (networkInfo.value?.macFirewallCommand) {
+    return networkInfo.value.macFirewallCommand
+  }
+  return 'sudo /usr/libexec/ApplicationFirewall/socketfilterfw --setglobalstate off'
+})
+
+function getIpBadge(ip: string): string {
+  if (ip.startsWith('192.168.137.')) {
+    return t('qr_modal.nic_win_hotspot')
+  }
+  if (ip.startsWith('172.20.10.')) {
+    return t('qr_modal.nic_ios_hotspot')
+  }
+  if (ip === networkInfo.value?.primaryIp) {
+    return t('qr_modal.recommended')
+  }
+  return ''
 }
 
 function close() {
@@ -273,7 +318,7 @@ function close() {
             <div class="nic-controls">
               <select id="nic-select" v-model="selectedIp">
                 <option v-for="ip in (networkInfo?.allIps || [selectedIp])" :key="ip" :value="ip">
-                  {{ ip }} {{ ip === networkInfo?.primaryIp ? t('qr_modal.recommended') : '' }}
+                  {{ ip }} {{ getIpBadge(ip) }}
                 </option>
               </select>
               <button class="btn-refresh" :disabled="loading" @click="fetchNetworkInfo" :title="t('qr_modal.refresh_network')">
@@ -317,44 +362,135 @@ function close() {
             <span class="pc-link-hint">{{ t('qr_modal.copy_pc_link_tooltip') }}</span>
           </div>
 
-          <!-- Windows 防火墙入站快速放行卡片 -->
-          <div v-if="mode === 'ipv6'" class="firewall-helper-card">
-            <div class="firewall-header">
-              <span class="material-icons fw-icon">security</span>
-              <span class="fw-title">{{ t('qr_modal.firewall_card_title') }}</span>
-              <span v-if="networkInfo?.firewallAllowed" class="fw-status-badge fw-allowed">
-                <span class="material-icons badge-icon">check_circle</span>
-                <span>{{ t('qr_modal.firewall_allowed') }}</span>
-              </span>
-              <span v-else class="fw-status-badge fw-optional">
-                <span class="material-icons badge-icon">info</span>
-                <span>{{ t('qr_modal.firewall_optional') }}</span>
-              </span>
+          <!-- 独立环境排障与 502 应对专区 -->
+          <div class="troubleshoot-container">
+            <div class="troubleshoot-header-bar">
+              <div class="troubleshoot-title-group">
+                <span class="material-icons bar-icon">build_circle</span>
+                <span class="bar-title">{{ t('qr_modal.troubleshoot_accordion_title') }}</span>
+              </div>
+              <!-- OS 切换器 -->
+              <div class="os-switcher">
+                <button
+                  type="button"
+                  class="os-tab-btn"
+                  :class="{ active: activeTroubleshootTab === 'windows' }"
+                  @click="activeTroubleshootTab = 'windows'"
+                >
+                  <span class="material-icons os-btn-icon">laptop_windows</span>
+                  <span>Windows</span>
+                </button>
+                <button
+                  type="button"
+                  class="os-tab-btn"
+                  :class="{ active: activeTroubleshootTab === 'macos' }"
+                  @click="activeTroubleshootTab = 'macos'"
+                >
+                  <span class="material-icons os-btn-icon">laptop_mac</span>
+                  <span>macOS</span>
+                </button>
+              </div>
             </div>
-            <p class="fw-desc">{{ t('qr_modal.firewall_card_desc') }}</p>
-            <div class="fw-code-box">
-              <code>{{ firewallCommand }}</code>
-            </div>
-            <div class="fw-actions">
-              <button class="btn-run-cmd" :disabled="runningFirewallCmd || networkInfo?.firewallAllowed" @click="runFirewallCmd" :title="t('qr_modal.run_cmd_btn')">
-                <span class="material-icons" :class="{ spinning: runningFirewallCmd }">
-                  {{ runningFirewallCmd ? 'sync' : (networkInfo?.firewallAllowed ? 'check_circle' : 'bolt') }}
-                </span>
-                <span>{{ runningFirewallCmd ? t('qr_modal.run_cmd_running') : (networkInfo?.firewallAllowed ? t('qr_modal.firewall_allowed') : t('qr_modal.run_cmd_btn')) }}</span>
-              </button>
-              <button class="btn-copy-cmd" @click="copyFirewallCmd" :title="t('qr_modal.copy_cmd_btn')">
-                <span class="material-icons">{{ copiedFirewallCmd ? 'check' : 'content_copy' }}</span>
-                <span>{{ copiedFirewallCmd ? t('qr_modal.copied') : t('qr_modal.copy_cmd_btn') }}</span>
-              </button>
-            </div>
-          </div>
 
-          <!-- 现场排障小贴士 -->
-          <div class="troubleshoot-tips">
-            <span class="material-icons tip-icon">lightbulb</span>
-            <div class="tip-content">
-              <strong>{{ mode === 'ipv6' ? t('qr_modal.troubleshoot_ipv6_title') : t('qr_modal.troubleshoot_title') }}</strong>
-              {{ mode === 'ipv6' ? t('qr_modal.troubleshoot_ipv6_desc') : t('qr_modal.troubleshoot_desc') }}
+            <!-- Windows 排障面板 -->
+            <div v-if="activeTroubleshootTab === 'windows'" class="os-troubleshoot-panel">
+              <!-- 502 Bad Gateway 深度排障 -->
+              <div class="troubleshoot-502-card">
+                <div class="troubleshoot-502-header">
+                  <span class="material-icons warn-icon">report_problem</span>
+                  <span>{{ t('qr_modal.troubleshoot_502_banner_title') }}</span>
+                </div>
+                <ul class="troubleshoot-502-list">
+                  <li class="troubleshoot-502-item">{{ t('qr_modal.troubleshoot_502_cause_cellular') }}</li>
+                  <li class="troubleshoot-502-item">{{ t('qr_modal.troubleshoot_502_cause_ap') }}</li>
+                  <li class="troubleshoot-502-item">{{ t('qr_modal.troubleshoot_502_cause_ip') }}</li>
+                  <li class="troubleshoot-502-item">{{ t('qr_modal.troubleshoot_502_cause_router') }}</li>
+                </ul>
+              </div>
+
+              <!-- Windows 移动热点指引 -->
+              <div class="hotspot-card">
+                <div class="hotspot-header">
+                  <span class="material-icons hotspot-icon">wifi_tethering</span>
+                  <span>{{ t('qr_modal.hotspot_guide_win_title') }}</span>
+                </div>
+                <p class="hotspot-desc">{{ t('qr_modal.hotspot_guide_win_desc') }}</p>
+              </div>
+
+              <!-- Windows 防火墙入站放行卡片 -->
+              <div class="firewall-helper-card">
+                <div class="firewall-header">
+                  <span class="material-icons fw-icon">security</span>
+                  <span class="fw-title">{{ t('qr_modal.firewall_card_title') }}</span>
+                  <span v-if="networkInfo?.firewallAllowed" class="fw-status-badge fw-allowed">
+                    <span class="material-icons badge-icon">check_circle</span>
+                    <span>{{ t('qr_modal.firewall_allowed') }}</span>
+                  </span>
+                  <span v-else class="fw-status-badge fw-optional">
+                    <span class="material-icons badge-icon">info</span>
+                    <span>{{ t('qr_modal.firewall_optional') }}</span>
+                  </span>
+                </div>
+                <p class="fw-desc">{{ t('qr_modal.firewall_card_desc') }}</p>
+                <div class="fw-code-box">
+                  <code>{{ firewallCommand }}</code>
+                </div>
+                <div class="fw-actions">
+                  <button class="btn-run-cmd" :disabled="runningFirewallCmd || networkInfo?.firewallAllowed" @click="runFirewallCmd" :title="t('qr_modal.run_cmd_btn')">
+                    <span class="material-icons" :class="{ spinning: runningFirewallCmd }">
+                      {{ runningFirewallCmd ? 'sync' : (networkInfo?.firewallAllowed ? 'check_circle' : 'bolt') }}
+                    </span>
+                    <span>{{ runningFirewallCmd ? t('qr_modal.run_cmd_running') : (networkInfo?.firewallAllowed ? t('qr_modal.firewall_allowed') : t('qr_modal.run_cmd_btn')) }}</span>
+                  </button>
+                  <button class="btn-copy-cmd" @click="copyFirewallCmd" :title="t('qr_modal.copy_cmd_btn')">
+                    <span class="material-icons">{{ copiedFirewallCmd ? 'check' : 'content_copy' }}</span>
+                    <span>{{ copiedFirewallCmd ? t('qr_modal.copied') : t('qr_modal.copy_cmd_btn') }}</span>
+                  </button>
+                </div>
+              </div>
+            </div>
+
+            <!-- macOS 苹果电脑排障面板 -->
+            <div v-else-if="activeTroubleshootTab === 'macos'" class="os-troubleshoot-panel">
+              <div class="macos-troubleshoot-card">
+                <div class="macos-header">
+                  <span class="material-icons macos-icon">laptop_mac</span>
+                  <span>{{ t('qr_modal.macos_card_title') }}</span>
+                </div>
+                <div class="macos-item">
+                  <strong>{{ t('qr_modal.macos_local_network_title') }}</strong>
+                  <p>{{ t('qr_modal.macos_local_network_desc') }}</p>
+                </div>
+                <div class="macos-item">
+                  <strong>{{ t('qr_modal.macos_hotspot_title') }}</strong>
+                  <p>{{ t('qr_modal.macos_hotspot_desc') }}</p>
+                </div>
+                <div class="macos-item">
+                  <strong>{{ t('qr_modal.macos_iphone_hotspot_title') }}</strong>
+                  <p>{{ t('qr_modal.macos_iphone_hotspot_desc') }}</p>
+                </div>
+                <div class="macos-item">
+                  <strong>{{ t('qr_modal.macos_fw_title') }}</strong>
+                  <p>{{ t('qr_modal.macos_fw_desc') }}</p>
+                </div>
+              </div>
+
+              <!-- macOS 终端命令卡片 -->
+              <div class="macos-cmd-card">
+                <div class="macos-cmd-header">
+                  <span class="material-icons terminal-icon">terminal</span>
+                  <span class="cmd-title">{{ t('qr_modal.macos_cmd_box_title') }}</span>
+                </div>
+                <div class="fw-code-box">
+                  <code>{{ macFirewallCommand }}</code>
+                </div>
+                <div class="fw-actions">
+                  <button class="btn-copy-cmd" @click="copyMacCmd" :title="t('qr_modal.copy_cmd_btn')">
+                    <span class="material-icons">{{ copiedMacCmd ? 'check' : 'content_copy' }}</span>
+                    <span>{{ copiedMacCmd ? t('qr_modal.copied') : t('qr_modal.copy_cmd_btn') }}</span>
+                  </button>
+                </div>
+              </div>
             </div>
           </div>
         </div>
@@ -368,12 +504,14 @@ function close() {
   position: fixed;
   inset: 0;
   z-index: 1000;
-  background: rgba(0, 0, 0, 0.65);
-  backdrop-filter: blur(4px);
+  background: rgba(0, 0, 0, 0.7);
+  backdrop-filter: blur(6px);
   display: flex;
   align-items: center;
   justify-content: center;
   padding: 16px;
+  overflow-y: auto;
+  box-sizing: border-box;
 }
 
 .qr-modal-dialog {
@@ -381,16 +519,20 @@ function close() {
   border: 1px solid var(--border);
   border-radius: 16px;
   width: 100%;
-  max-width: 440px;
-  box-shadow: 0 25px 50px rgba(0, 0, 0, 0.5);
+  max-width: min(530px, 95vw);
+  max-height: min(88vh, 820px);
+  box-shadow: 0 25px 60px rgba(0, 0, 0, 0.6);
+  display: flex;
+  flex-direction: column;
   overflow: hidden;
-  animation: modal-scale-in 0.34s cubic-bezier(0.16, 1, 0.3, 1);
+  animation: modal-scale-in 0.3s cubic-bezier(0.16, 1, 0.3, 1);
+  box-sizing: border-box;
 }
 
 @keyframes modal-scale-in {
   from {
     opacity: 0;
-    transform: scale(0.95);
+    transform: scale(0.96);
   }
   to {
     opacity: 1;
@@ -402,8 +544,10 @@ function close() {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  padding: 16px 20px;
+  padding: 14px 20px;
   border-bottom: 1px solid var(--border);
+  flex-shrink: 0;
+  background: var(--card);
 }
 
 .title-with-icon {
@@ -441,11 +585,37 @@ function close() {
 }
 
 .qr-modal-body {
-  padding: 20px;
+  padding: 16px 20px 24px;
+  flex: 1 1 auto;
+  overflow-y: auto;
+  overflow-x: hidden;
+  overscroll-behavior: contain;
   display: flex;
   flex-direction: column;
   align-items: center;
   text-align: center;
+  gap: 12px;
+  box-sizing: border-box;
+  scroll-behavior: smooth;
+  scrollbar-width: thin;
+  scrollbar-color: rgba(255, 255, 255, 0.2) transparent;
+}
+
+.qr-modal-body::-webkit-scrollbar {
+  width: 6px;
+}
+
+.qr-modal-body::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+.qr-modal-body::-webkit-scrollbar-thumb {
+  background: rgba(255, 255, 255, 0.2);
+  border-radius: 9999px;
+}
+
+.qr-modal-body::-webkit-scrollbar-thumb:hover {
+  background: var(--muted-foreground);
 }
 
 .network-mode-tabs {
@@ -455,8 +625,8 @@ function close() {
   border: 1px solid var(--border);
   border-radius: 10px;
   padding: 4px;
-  margin-bottom: 14px;
   gap: 4px;
+  box-sizing: border-box;
 }
 
 .mode-tab-btn {
@@ -469,7 +639,7 @@ function close() {
   color: var(--muted-foreground);
   border: none;
   border-radius: 8px;
-  padding: 8px 10px;
+  padding: 7px 10px;
   font-size: 12px;
   font-weight: 500;
   cursor: pointer;
@@ -488,6 +658,36 @@ function close() {
   border: 1px solid rgba(57, 255, 20, 0.3);
 }
 
+.subtitle {
+  margin: 0;
+  font-size: 12.5px;
+  color: var(--muted-foreground);
+  line-height: 1.5;
+  width: 100%;
+}
+
+.code-badge-bar {
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+  background: rgba(59, 130, 246, 0.1);
+  border: 1px dashed var(--primary);
+  border-radius: 8px;
+  padding: 5px 14px;
+}
+
+.code-label {
+  font-size: 12px;
+  color: var(--muted-foreground);
+}
+
+.code-value {
+  font-size: 16px;
+  font-weight: 700;
+  color: var(--primary);
+  letter-spacing: 1px;
+}
+
 .ipv6-status-badge {
   display: inline-flex;
   align-items: center;
@@ -498,7 +698,6 @@ function close() {
   padding: 4px 12px;
   font-size: 11px;
   color: var(--primary);
-  margin-bottom: 14px;
 }
 
 .ipv6-status-badge .badge-icon {
@@ -519,8 +718,7 @@ function close() {
   background: rgba(239, 68, 68, 0.08);
   border: 1px solid rgba(239, 68, 68, 0.3);
   border-radius: 10px;
-  padding: 12px;
-  margin-bottom: 16px;
+  padding: 10px 12px;
   width: 100%;
   box-sizing: border-box;
   text-align: left;
@@ -535,9 +733,9 @@ function close() {
 
 .warn-content strong {
   display: block;
-  font-size: 13px;
+  font-size: 12.5px;
   color: #ef4444;
-  margin-bottom: 4px;
+  margin-bottom: 3px;
 }
 
 .warn-content p {
@@ -547,89 +745,15 @@ function close() {
   line-height: 1.4;
 }
 
-.pc-link-action-row {
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  gap: 6px;
-  width: 100%;
-  margin-bottom: 14px;
-}
-
-.btn-copy-pc {
-  width: 100%;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  gap: 8px;
-  background: rgba(59, 130, 246, 0.15);
-  border: 1px solid rgba(59, 130, 246, 0.4);
-  color: #60a5fa;
-  border-radius: 8px;
-  padding: 8px 16px;
-  font-size: 13px;
-  font-weight: 600;
-  cursor: pointer;
-  transition: all 0.2s ease;
-}
-
-.btn-copy-pc:hover {
-  background: rgba(59, 130, 246, 0.25);
-  border-color: #60a5fa;
-  box-shadow: 0 0 10px rgba(59, 130, 246, 0.3);
-}
-
-.btn-copy-pc .material-icons {
-  font-size: 18px;
-}
-
-.pc-link-hint {
-  font-size: 11px;
-  color: var(--muted-foreground);
-  line-height: 1.3;
-}
-
-.subtitle {
-  margin: 0 0 16px;
-  font-size: 13px;
-  color: var(--muted-foreground);
-  line-height: 1.5;
-}
-
-.code-badge-bar {
-  display: inline-flex;
-  align-items: center;
-  gap: 10px;
-  background: rgba(59, 130, 246, 0.1);
-  border: 1px dashed var(--primary);
-  border-radius: 8px;
-  padding: 6px 14px;
-  margin-bottom: 16px;
-}
-
-.code-label {
-  font-size: 12px;
-  color: var(--muted-foreground);
-}
-
-.code-value {
-  font-size: 16px;
-  font-weight: 700;
-  color: var(--primary);
-  letter-spacing: 1px;
-}
-
 .qr-canvas-container {
   background: #ffffff;
-  padding: 12px;
+  padding: 10px;
   border-radius: 12px;
   border: 1px solid var(--border);
   box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
-  margin-bottom: 16px;
   display: flex;
   align-items: center;
   justify-content: center;
-  max-width: 100%;
   box-sizing: border-box;
 }
 
@@ -645,23 +769,25 @@ function close() {
   gap: 8px;
   color: #6b7280;
   font-size: 12px;
+  padding: 30px 20px;
 }
 
 .nic-selector-row {
   display: flex;
   flex-direction: column;
-  gap: 6px;
-  margin-bottom: 12px;
+  gap: 5px;
   font-size: 12px;
   color: var(--muted-foreground);
   width: 100%;
   text-align: left;
+  box-sizing: border-box;
 }
 
 .nic-controls {
   display: flex;
   gap: 8px;
   width: 100%;
+  box-sizing: border-box;
 }
 
 .nic-controls select {
@@ -706,7 +832,7 @@ function close() {
   display: flex;
   gap: 8px;
   width: 100%;
-  margin-bottom: 14px;
+  box-sizing: border-box;
 }
 
 .url-input {
@@ -714,7 +840,7 @@ function close() {
   background: var(--background);
   border: 1px solid var(--border);
   border-radius: 8px;
-  padding: 8px 12px;
+  padding: 7px 10px;
   font-size: 12px;
   color: var(--muted-foreground);
   font-family: monospace;
@@ -728,8 +854,8 @@ function close() {
   color: #ffffff;
   border: none;
   border-radius: 8px;
-  padding: 8px 14px;
-  font-size: 13px;
+  padding: 7px 14px;
+  font-size: 12.5px;
   font-weight: 500;
   cursor: pointer;
   white-space: nowrap;
@@ -740,34 +866,208 @@ function close() {
   opacity: 0.9;
 }
 
-.troubleshoot-tips {
+.pc-link-action-row {
   display: flex;
-  align-items: flex-start;
-  gap: 8px;
-  background: rgba(245, 158, 11, 0.08);
-  border: 1px solid rgba(245, 158, 11, 0.3);
-  border-radius: 8px;
-  padding: 10px 12px;
-  font-size: 11px;
-  color: var(--muted-foreground);
-  text-align: left;
-  line-height: 1.5;
+  flex-direction: column;
+  align-items: center;
+  gap: 4px;
+  width: 100%;
+  box-sizing: border-box;
 }
 
-.tip-icon {
+.btn-copy-pc {
+  width: 100%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  background: rgba(59, 130, 246, 0.15);
+  border: 1px solid rgba(59, 130, 246, 0.4);
+  color: #60a5fa;
+  border-radius: 8px;
+  padding: 7px 14px;
+  font-size: 12.5px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: all 0.2s ease;
+}
+
+.btn-copy-pc:hover {
+  background: rgba(59, 130, 246, 0.25);
+  border-color: #60a5fa;
+  box-shadow: 0 0 10px rgba(59, 130, 246, 0.3);
+}
+
+.btn-copy-pc .material-icons {
+  font-size: 17px;
+}
+
+.pc-link-hint {
+  font-size: 11px;
+  color: var(--muted-foreground);
+  line-height: 1.3;
+}
+
+/* 独立排障与适配专区样式 */
+.troubleshoot-container {
+  width: 100%;
+  border-top: 1px solid var(--border);
+  padding-top: 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  box-sizing: border-box;
+}
+
+.troubleshoot-header-bar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  width: 100%;
+  gap: 8px;
+  box-sizing: border-box;
+}
+
+.troubleshoot-title-group {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  color: var(--foreground);
+}
+
+.bar-icon {
+  font-size: 17px;
+  color: var(--primary);
+}
+
+.bar-title {
+  font-size: 13px;
+  font-weight: 600;
+}
+
+.os-switcher {
+  display: flex;
+  background: var(--background);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 2px;
+  gap: 2px;
+}
+
+.os-tab-btn {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  background: transparent;
+  color: var(--muted-foreground);
+  border: none;
+  border-radius: 6px;
+  padding: 5px 9px;
+  font-size: 11.5px;
+  font-weight: 500;
+  cursor: pointer;
+  transition: all 0.2s ease;
+}
+
+.os-btn-icon {
+  font-size: 14px;
+}
+
+.os-tab-btn.active {
+  background: var(--card);
+  color: var(--foreground);
+  font-weight: 600;
+  box-shadow: 0 1px 4px rgba(0, 0, 0, 0.3);
+  border: 1px solid var(--border);
+}
+
+.os-troubleshoot-panel {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  width: 100%;
+  box-sizing: border-box;
+}
+
+.troubleshoot-502-card {
+  background: rgba(245, 158, 11, 0.08);
+  border: 1px solid rgba(245, 158, 11, 0.3);
+  border-radius: 10px;
+  padding: 10px 12px;
+  text-align: left;
+  box-sizing: border-box;
+  width: 100%;
+}
+
+.troubleshoot-502-header {
+  display: flex;
+  align-items: center;
+  gap: 6px;
   color: #f59e0b;
+  font-size: 12px;
+  font-weight: 700;
+  margin-bottom: 6px;
+}
+
+.warn-icon {
   font-size: 16px;
   flex-shrink: 0;
-  margin-top: 1px;
+}
+
+.troubleshoot-502-list {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+}
+
+.troubleshoot-502-item {
+  font-size: 11px;
+  color: var(--muted-foreground);
+  line-height: 1.45;
+}
+
+.hotspot-card {
+  background: rgba(59, 130, 246, 0.08);
+  border: 1px solid rgba(59, 130, 246, 0.25);
+  border-radius: 10px;
+  padding: 10px 12px;
+  text-align: left;
+  box-sizing: border-box;
+  width: 100%;
+}
+
+.hotspot-header {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  color: #60a5fa;
+  font-size: 12px;
+  font-weight: 600;
+  margin-bottom: 4px;
+}
+
+.hotspot-icon {
+  font-size: 16px;
+}
+
+.hotspot-desc {
+  font-size: 11px;
+  color: var(--muted-foreground);
+  margin: 0;
+  line-height: 1.45;
 }
 
 .firewall-helper-card {
   background: rgba(16, 185, 129, 0.06);
   border: 1px solid rgba(16, 185, 129, 0.25);
   border-radius: 10px;
-  padding: 12px;
-  margin-bottom: 14px;
+  padding: 10px 12px;
   text-align: left;
+  box-sizing: border-box;
+  width: 100%;
 }
 
 .firewall-header {
@@ -818,7 +1118,7 @@ function close() {
 .fw-desc {
   font-size: 11px;
   color: var(--muted-foreground);
-  margin: 0 0 8px;
+  margin: 0 0 6px;
   line-height: 1.4;
 }
 
@@ -827,7 +1127,7 @@ function close() {
   border: 1px solid rgba(255, 255, 255, 0.08);
   border-radius: 6px;
   padding: 6px 10px;
-  margin-bottom: 10px;
+  margin-bottom: 8px;
   overflow-x: auto;
 }
 
@@ -854,8 +1154,8 @@ function close() {
   color: #ffffff;
   border: none;
   border-radius: 6px;
-  padding: 7px 12px;
-  font-size: 12px;
+  padding: 6px 12px;
+  font-size: 11.5px;
   font-weight: 600;
   cursor: pointer;
   transition: all 0.2s ease;
@@ -885,8 +1185,8 @@ function close() {
   border: 1px solid rgba(255, 255, 255, 0.15);
   color: var(--foreground);
   border-radius: 6px;
-  padding: 7px 12px;
-  font-size: 12px;
+  padding: 6px 12px;
+  font-size: 11.5px;
   font-weight: 500;
   cursor: pointer;
   transition: background 0.2s;
@@ -901,12 +1201,82 @@ function close() {
   font-size: 14px;
 }
 
+/* macOS 专属卡片 */
+.macos-troubleshoot-card {
+  background: rgba(147, 51, 234, 0.08);
+  border: 1px solid rgba(147, 51, 234, 0.25);
+  border-radius: 10px;
+  padding: 10px 12px;
+  text-align: left;
+  box-sizing: border-box;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  width: 100%;
+}
+
+.macos-header {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  color: #c084fc;
+  font-size: 12px;
+  font-weight: 700;
+  margin-bottom: 2px;
+}
+
+.macos-icon {
+  font-size: 16px;
+}
+
+.macos-item strong {
+  display: block;
+  font-size: 11.5px;
+  color: var(--foreground);
+  margin-bottom: 2px;
+}
+
+.macos-item p {
+  margin: 0;
+  font-size: 11px;
+  color: var(--muted-foreground);
+  line-height: 1.4;
+}
+
+.macos-cmd-card {
+  background: rgba(0, 0, 0, 0.2);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  padding: 10px 12px;
+  text-align: left;
+  box-sizing: border-box;
+  width: 100%;
+}
+
+.macos-cmd-header {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-bottom: 6px;
+  color: var(--muted-foreground);
+}
+
+.terminal-icon {
+  font-size: 15px;
+}
+
+.cmd-title {
+  font-size: 11.5px;
+  font-weight: 600;
+  color: var(--foreground);
+}
+
 @media (max-width: 480px) {
   .qr-modal-backdrop {
-    padding: 10px;
+    padding: 8px;
   }
   .qr-modal-body {
-    padding: 14px 12px;
+    padding: 12px 10px 18px;
   }
   .url-copy-box {
     flex-direction: column;
@@ -916,6 +1286,13 @@ function close() {
   }
   .nic-controls {
     flex-direction: column;
+  }
+  .troubleshoot-header-bar {
+    flex-direction: column;
+    align-items: flex-start;
+  }
+  .os-switcher {
+    width: 100%;
   }
 }
 </style>

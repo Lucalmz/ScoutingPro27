@@ -18,8 +18,12 @@ public class SystemRoutes {
         routes.get("/api/system/network-info", ctx -> {
             NetworkUtil.NetworkInfo info = NetworkUtil.getCompleteNetworkInfo();
             int currentPort = ctx.port();
+            String osType = NetworkUtil.getOsType();
             boolean firewallAllowed = NetworkUtil.isWindowsFirewallPortAllowed(currentPort);
             Map<String, Object> data = new HashMap<>();
+            data.put("os", osType);
+            data.put("isWindows", "windows".equals(osType));
+            data.put("isMac", "macos".equals(osType));
             data.put("primaryIp", info.primaryIp());
             data.put("allIps", info.allIps());
             data.put("primaryIpv6", info.primaryIpv6());
@@ -27,6 +31,7 @@ public class SystemRoutes {
             data.put("port", currentPort);
             data.put("firewallAllowed", firewallAllowed);
             data.put("firewallCommand", NetworkUtil.getFirewallCommand(currentPort));
+            data.put("macFirewallCommand", NetworkUtil.getMacFirewallCommand(currentPort));
             data.put("joinBaseUrl", "http://" + info.primaryIp() + ":" + currentPort);
             if (info.primaryIpv6() != null && !info.primaryIpv6().isBlank()) {
                 data.put("joinBaseUrlIpv6", "http://[" + info.primaryIpv6() + "]:" + currentPort);

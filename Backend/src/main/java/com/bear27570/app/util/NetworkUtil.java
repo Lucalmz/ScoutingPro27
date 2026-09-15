@@ -172,10 +172,28 @@ public class NetworkUtil {
     }
 
     /**
+     * 获取操作系统类型标识 ("windows", "macos", "linux", "unknown")
+     */
+    public static String getOsType() {
+        String os = System.getProperty("os.name", "").toLowerCase();
+        if (os.contains("win")) return "windows";
+        if (os.contains("mac")) return "macos";
+        if (os.contains("nix") || os.contains("nux") || os.contains("aix")) return "linux";
+        return "unknown";
+    }
+
+    /**
      * 生成放行指定 TCP 端口的 Windows 防火墙标准命令行
      */
     public static String getFirewallCommand(int port) {
         return "netsh advfirewall firewall add rule name=\"ScoutingPro27 Inbound (" + port + ")\" dir=in action=allow protocol=TCP localport=" + port + " profile=any";
+    }
+
+    /**
+     * 生成 macOS 终端排查与临时放行防火墙限制的标准命令行
+     */
+    public static String getMacFirewallCommand(int port) {
+        return "sudo /usr/libexec/ApplicationFirewall/socketfilterfw --setglobalstate off";
     }
 
     /**
