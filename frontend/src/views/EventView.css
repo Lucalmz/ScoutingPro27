@@ -404,29 +404,19 @@
   box-shadow: 0 2px 8px rgba(234, 179, 8, 0.35);
 }
 
-@media (max-width: 680px) {
+@media (max-width: 768px) {
+  .topbar {
+    display: none !important;
+  }
   .tab-bar {
     display: none !important;
   }
+  .congestion-banner,
+  .standby-host-banner {
+    display: none !important;
+  }
   .tab-content {
-    padding: 10px 8px calc(72px + var(--sab));
-  }
-  .topbar {
-    padding: max(10px, var(--sat)) max(10px, var(--sar)) 10px max(10px, var(--sal));
-    gap: 8px;
-  }
-  .topbar-left {
-    gap: 8px;
-  }
-  .topbar-right {
-    gap: 6px;
-  }
-  .topbar-btn .topbar-btn-text {
-    display: none;
-  }
-  .btn-back {
-    padding: 6px 10px;
-    font-size: 13px;
+    padding: max(40px, calc(env(safe-area-inset-top, 0px) + 36px)) 10px calc(72px + var(--sab));
   }
 }
 

@@ -2,19 +2,28 @@
 import { ref, computed } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { useEventStore } from '@/stores/events'
-import { hapticLight } from '@/utils/haptics'
+import { useUserStore } from '@/stores/user'
+import { useInboxStore } from '@/stores/inbox'
+import { hapticLight, hapticMedium } from '@/utils/haptics'
 import type { EventTab } from '@/stores/navigation'
 
 const props = defineProps<{
   activeTab: EventTab
+  isHost?: boolean
 }>()
 
 const emit = defineEmits<{
   (e: 'update:activeTab', tab: EventTab): void
+  (e: 'openRename'): void
+  (e: 'openQr'): void
+  (e: 'openOfflineSync'): void
+  (e: 'exitEvent'): void
 }>()
 
 const { t } = useI18n()
 const eventStore = useEventStore()
+const userStore = useUserStore()
+const inboxStore = useInboxStore()
 const showMoreSheet = ref(false)
 
 interface NavItem {
@@ -54,7 +63,7 @@ const moreItems = computed<NavItem[]>(() => {
     { key: 'history', label: t('bottom_nav.history'), icon: 'history' },
     { key: 'ai', label: t('bottom_nav.ai'), icon: 'smart_toy' }
   ]
-  if (eventStore.isHost) {
+  if (props.isHost || eventStore.isHost) {
     items.push({ key: 'scouts', label: t('bottom_nav.scouts'), icon: 'groups' })
   }
   return items
@@ -84,6 +93,36 @@ function handleSelectMore(key: EventTab) {
   showMoreSheet.value = false
   emit('update:activeTab', key)
 }
+
+function handleOpenRename() {
+  hapticLight()
+  showMoreSheet.value = false
+  emit('openRename')
+}
+
+function handleOpenInbox() {
+  hapticLight()
+  showMoreSheet.value = false
+  inboxStore.toggleOpen()
+}
+
+function handleOpenQr() {
+  hapticLight()
+  showMoreSheet.value = false
+  emit('openQr')
+}
+
+function handleOpenOfflineSync() {
+  hapticLight()
+  showMoreSheet.value = false
+  emit('openOfflineSync')
+}
+
+function handleExit() {
+  hapticMedium()
+  showMoreSheet.value = false
+  emit('exitEvent')
+}
 </script>
 
 <template>
@@ -104,6 +143,23 @@ function handleSelectMore(key: EventTab) {
           <div class="sheet-handle"></div>
           <span class="sheet-title">{{ t('bottom_nav.more') }}</span>
         </div>
+
+        <!-- User Profile Card in Drawer -->
+        <div class="sheet-user-card" @click="handleOpenRename">
+          <div class="sheet-user-left">
+            <span class="material-icons sheet-user-avatar">account_circle</span>
+            <div class="sheet-user-info">
+              <span class="sheet-user-name">{{ userStore.username }}</span>
+              <span class="sheet-user-role">{{ (isHost || eventStore.isHost) ? t('event.host') : t('event.client') }}</span>
+            </div>
+          </div>
+          <button type="button" class="btn-sheet-edit-profile" :title="t('user.edit_nickname')">
+            <span class="material-icons" style="font-size: 16px;">edit</span>
+          </button>
+        </div>
+
+        <!-- Secondary Navigation Views -->
+        <div class="sheet-section-title">{{ t('bottom_nav.views') || 'Views' }}</div>
         <div class="sheet-grid">
           <button
             v-for="item in moreItems"
@@ -114,6 +170,42 @@ function handleSelectMore(key: EventTab) {
           >
             <span class="material-icons sheet-icon">{{ item.icon }}</span>
             <span class="sheet-label">{{ item.label }}</span>
+          </button>
+        </div>
+
+        <!-- Quick System Tools -->
+        <div class="sheet-section-title" style="margin-top: 14px;">{{ t('bottom_nav.tools') || 'Tools' }}</div>
+        <div class="sheet-tools-list">
+          <button type="button" class="sheet-tool-row" @click="handleOpenInbox">
+            <div class="sheet-tool-left">
+              <span class="material-icons sheet-tool-icon">inbox</span>
+              <span>Inbox</span>
+            </div>
+            <span v-if="inboxStore.unreadCount > 0" class="sheet-tool-badge">{{ inboxStore.unreadCount }}</span>
+          </button>
+
+          <button v-if="isHost || eventStore.isHost" type="button" class="sheet-tool-row" @click="handleOpenQr">
+            <div class="sheet-tool-left">
+              <span class="material-icons sheet-tool-icon">qr_code_2</span>
+              <span>{{ t('event.mobile_qr_btn') }}</span>
+            </div>
+            <span class="material-icons" style="font-size: 16px; color: #888;">chevron_right</span>
+          </button>
+
+          <button type="button" class="sheet-tool-row" @click="handleOpenOfflineSync">
+            <div class="sheet-tool-left">
+              <span class="material-icons sheet-tool-icon">usb</span>
+              <span>{{ t('offline_sync.open_modal') }}</span>
+            </div>
+            <span class="material-icons" style="font-size: 16px; color: #888;">chevron_right</span>
+          </button>
+        </div>
+
+        <!-- Exit Event / Back to Dashboard -->
+        <div class="sheet-exit-wrap">
+          <button type="button" class="btn-sheet-exit" @click="handleExit">
+            <span class="material-icons" style="font-size: 18px; margin-right: 6px;">arrow_back</span>
+            <span>{{ t('event.back') }} / {{ t('dashboard.title') || 'Dashboard' }}</span>
           </button>
         </div>
       </div>
@@ -162,7 +254,7 @@ function handleSelectMore(key: EventTab) {
   user-select: none;
 }
 
-@media (max-width: 680px) {
+@media (max-width: 768px) {
   .mobile-bottom-nav {
     display: block;
   }
@@ -399,5 +491,146 @@ function handleSelectMore(key: EventTab) {
     opacity: 1;
     transform: translateY(0) scale(1);
   }
+}
+
+/* User Profile Card in Drawer */
+.sheet-user-card {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 12px 14px;
+  background: rgba(255, 255, 255, 0.05);
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  border-radius: 12px;
+  margin-bottom: 14px;
+  cursor: pointer;
+  transition: all 0.2s ease;
+}
+
+.sheet-user-card:active {
+  background: rgba(255, 255, 255, 0.08);
+}
+
+.sheet-user-left {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.sheet-user-avatar {
+  font-size: 32px;
+  color: #39ff14;
+}
+
+.sheet-user-info {
+  display: flex;
+  flex-direction: column;
+}
+
+.sheet-user-name {
+  font-size: 15px;
+  font-weight: 700;
+  color: #ffffff;
+}
+
+.sheet-user-role {
+  font-size: 11px;
+  color: #8b949e;
+}
+
+.btn-sheet-edit-profile {
+  background: rgba(255, 255, 255, 0.08);
+  border: none;
+  color: #9ca3af;
+  border-radius: 8px;
+  padding: 6px;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.sheet-section-title {
+  font-size: 11px;
+  font-weight: 600;
+  color: #8b949e;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  margin-bottom: 8px;
+  padding-left: 2px;
+}
+
+/* Tools List */
+.sheet-tools-list {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.sheet-tool-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 12px 14px;
+  background: rgba(255, 255, 255, 0.04);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: 10px;
+  color: #ffffff;
+  cursor: pointer;
+  font-size: 13px;
+  font-weight: 500;
+  transition: background 0.15s ease;
+  min-height: 46px;
+}
+
+.sheet-tool-row:active {
+  background: rgba(255, 255, 255, 0.08);
+}
+
+.sheet-tool-left {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.sheet-tool-icon {
+  font-size: 20px;
+  color: #9ca3af;
+}
+
+.sheet-tool-badge {
+  background: #ef4444;
+  color: #ffffff;
+  font-size: 11px;
+  font-weight: 700;
+  padding: 1px 6px;
+  border-radius: 9999px;
+}
+
+/* Exit Zone */
+.sheet-exit-wrap {
+  margin-top: 16px;
+  padding-top: 12px;
+  border-top: 1px solid rgba(255, 255, 255, 0.08);
+}
+
+.btn-sheet-exit {
+  width: 100%;
+  height: 44px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: rgba(239, 68, 68, 0.12);
+  border: 1px solid rgba(239, 68, 68, 0.3);
+  color: #f87171;
+  border-radius: 10px;
+  font-size: 13px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: all 0.2s ease;
+}
+
+.btn-sheet-exit:active {
+  background: rgba(239, 68, 68, 0.2);
 }
 </style>

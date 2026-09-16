@@ -25,11 +25,16 @@ import RenameModal from '@/components/common/RenameModal.vue'
 import OfflineSyncModal from '@/components/common/OfflineSyncModal.vue'
 import MobileQrModal from '@/components/common/MobileQrModal.vue'
 import MobileBottomNav from '@/components/common/MobileBottomNav.vue'
+import MobileStatusPill from '@/components/common/MobileStatusPill.vue'
+import MobilePhaseWizardForm from '@/components/scouting/mobile/MobilePhaseWizardForm.vue'
+import { useIsMobile } from '@/composables/useIsMobile'
 import { syncRecords } from '@/services/api'
 import { transitionState } from '@/utils/transitionState'
 import { useToastStore } from '@/stores/toast'
 import { useEventWebRtcBridge } from './useEventWebRtcBridge'
 import { useEventTransitions } from './useEventTransitions'
+
+const { isMobile } = useIsMobile()
 
 const route = useRoute()
 const router = useRouter()
@@ -284,6 +289,15 @@ async function handleTakeoverHost() {
 
 <template>
   <div class="event-view">
+    <!-- Mobile Floating Status Pill (Zero Topbar Mode) -->
+    <MobileStatusPill
+      v-if="isMobile"
+      :event-name="event?.name"
+      :invite-code="event?.inviteCode"
+      :is-host="isHost"
+      @takeover-host="handleTakeoverHost"
+    />
+
     <!-- Header -->
     <header ref="headerRef" class="topbar" :style="{ viewTransitionName: 'event-topbar' }">
       <div class="topbar-left">
@@ -396,16 +410,28 @@ async function handleTakeoverHost() {
         name="tab-brush" 
         mode="out-in"
       >
-        <ScoutingForm
-          v-if="activeTab === 'scout'"
-          :event-id="eventId"
-          :scout-id="userStore.userId"
-          :scout-name="userStore.username"
-          :edit-record="editingRecord"
-          :assigned-task="activeScoutTask"
-          @submit="onRecordSubmitted"
-          @cancelEdit="editingRecord = null"
-        />
+        <template v-if="activeTab === 'scout'">
+          <MobilePhaseWizardForm
+            v-if="isMobile"
+            :event-id="eventId"
+            :scout-id="userStore.userId"
+            :scout-name="userStore.username"
+            :edit-record="editingRecord"
+            :assigned-task="activeScoutTask"
+            @submit="onRecordSubmitted"
+            @cancelEdit="editingRecord = null"
+          />
+          <ScoutingForm
+            v-else
+            :event-id="eventId"
+            :scout-id="userStore.userId"
+            :scout-name="userStore.username"
+            :edit-record="editingRecord"
+            :assigned-task="activeScoutTask"
+            @submit="onRecordSubmitted"
+            @cancelEdit="editingRecord = null"
+          />
+        </template>
         <PitScoutView
           v-else-if="activeTab === 'pit'"
           :event-id="eventId"
@@ -441,7 +467,15 @@ async function handleTakeoverHost() {
       v-model="showMobileQrModal"
       :invite-code="event.inviteCode"
     />
-    <MobileBottomNav :active-tab="activeTab" @update:active-tab="switchTab" />
+    <MobileBottomNav
+      :active-tab="activeTab"
+      :is-host="isHost"
+      @update:active-tab="switchTab"
+      @open-rename="handleOpenRenameModal"
+      @open-qr="showMobileQrModal = true"
+      @open-offline-sync="showOfflineSyncModal = true"
+      @exit-event="goBack"
+    />
   </div>
 </template>
 
