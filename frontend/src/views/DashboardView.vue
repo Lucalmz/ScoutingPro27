@@ -209,7 +209,7 @@ function handleOpenRenameModal() {
     </header>
 
     <main class="main-content">
-      <h2>{{ t('dashboard.welcome') }}</h2>
+      <h2>{{ t('dashboard.welcome') }} {{ userStore.username }}</h2>
 
       <div class="action-buttons">
         <button v-if="isDesktopHost()" class="action-btn primary" @click="showCreateModal = true">
@@ -236,6 +236,9 @@ function handleOpenRenameModal() {
       <p v-else-if="eventStore.error && eventStore.events.length === 0" class="error-msg">{{ eventStore.error }}</p>
       <div v-else-if="eventStore.events.length === 0" class="empty-state">
         <p>{{ t('dashboard.no_events') }}</p>
+        <p v-if="!isDesktopHost()" class="mobile-tip">
+          {{ t('dashboard.mobile_no_events_tip') }}
+        </p>
       </div>
       <transition-group 
         v-else 

@@ -19,6 +19,103 @@ export { ApiError }
 
 const BASE = '/api'
 
+export function isStaticCloudHost(): boolean {
+  if (typeof window === 'undefined') return false
+  const host = window.location.hostname.toLowerCase()
+  return (
+    host.endsWith('github.io') ||
+    host.endsWith('pages.dev') ||
+    host.endsWith('vercel.app') ||
+    host.endsWith('netlify.app') ||
+    host.includes('gitlab.io')
+  )
+}
+
+let staticHostDetected = false
+
+function handleStaticHostFallback<T>(method: string, path: string, body?: unknown): Promise<T> {
+  // 1. User check
+  if (path.startsWith('/user/check')) {
+    return Promise.resolve({ exists: false } as unknown as T)
+  }
+  // 2. User login / register
+  if (path.startsWith('/user/login') || path.startsWith('/user/register')) {
+    const b = (body || {}) as LoginRequest
+    const clientUser: LoginResponse = {
+      id: 'scout-' + Date.now().toString(36) + '-' + Math.random().toString(36).slice(2, 6),
+      username: b.username || 'Scout',
+      token: 'pwa-' + Date.now().toString(36)
+    }
+    return Promise.resolve(clientUser as unknown as T)
+  }
+  // 3. Verify token
+  if (path.startsWith('/user/verify-token')) {
+    return Promise.resolve({ valid: true, userId: 'pwa-user', username: 'PWA Scout' } as unknown as T)
+  }
+  // 4. Rename user
+  if (path.startsWith('/user/rename')) {
+    const b = (body || {}) as UpdateProfileParams
+    return Promise.resolve({
+      id: b.newId || 'scout-' + Date.now().toString(36),
+      username: b.newUsername || 'Scout',
+      token: 'pwa-' + Date.now().toString(36)
+    } as unknown as T)
+  }
+  // 5. Events list
+  if (path.startsWith('/events') && method === 'GET') {
+    return Promise.resolve([] as unknown as T)
+  }
+  // 6. Join event
+  if (path.startsWith('/events/join')) {
+    const b = (body || {}) as { inviteCode: string }
+    const code = (b.inviteCode || '').trim().toUpperCase()
+    const pwaEvt: ScoutingEvent = {
+      id: 'evt-' + code,
+      name: `Event ${code}`,
+      inviteCode: code,
+      hostId: 'remote-host'
+    }
+    return Promise.resolve(pwaEvt as unknown as T)
+  }
+  // 7. Create event
+  if (path.startsWith('/events') && method === 'POST') {
+    const b = (body || {}) as { name: string }
+    const code = 'SP' + Math.random().toString(36).slice(2, 6).toUpperCase()
+    const pwaEvt: CreateEventResponse = {
+      id: 'evt-' + code,
+      inviteCode: code
+    }
+    return Promise.resolve(pwaEvt as unknown as T)
+  }
+  // 8. Records
+  if (path.startsWith('/records/batch')) {
+    return Promise.resolve({ synced: Array.isArray(body) ? body.length : 0, failed: 0 } as unknown as T)
+  }
+  if (path.startsWith('/records') && method === 'GET') {
+    return Promise.resolve([] as unknown as T)
+  }
+  // 9. Schedule
+  if (path.includes('/schedule')) {
+    return Promise.resolve({ schedules: [], assignments: [] } as unknown as T)
+  }
+  // 10. Pit records & Custom fields & Tags & Members
+  if (
+    path.includes('/pit/records') ||
+    path.includes('/custom-fields') ||
+    path.includes('/tags') ||
+    path.includes('/members') ||
+    path.includes('/banned-teams')
+  ) {
+    return Promise.resolve([] as unknown as T)
+  }
+  // 11. Pit photo upload -> throw so photoStorage falls back to WebRTC
+  if (path.includes('/pit/photos') && method === 'POST') {
+    return Promise.reject(new Error('Static cloud host does not support direct HTTP photo upload; falling back to WebRTC DataChannel'))
+  }
+
+  return Promise.resolve([] as unknown as T)
+}
+
 export class LocalApiTimeoutError extends Error {
   constructor(path: string, timeoutMs: number) {
     super(`应用响应异常（请求 ${path} 挂起超过 ${timeoutMs}ms），可能需要重启应用`)
@@ -32,6 +129,12 @@ async function request<T>(
   body?: unknown,
   timeoutMs = 8000
 ): Promise<T> {
+  // On static cloud hosts (e.g. GitHub Pages), there is no local backend HTTP API.
+  // Directly provide zero-latency synthetic responses to avoid 404 network spam.
+  if (isStaticCloudHost() || staticHostDetected) {
+    return handleStaticHostFallback<T>(method, path, body)
+  }
+
   const controller = new AbortController()
   const timeoutId = setTimeout(() => controller.abort(), timeoutMs)
 
@@ -84,7 +187,17 @@ async function request<T>(
       window.dispatchEvent(new Event('auth-unauthorized'))
     }
     const text = await res.text().catch(() => '')
-    throw new ApiError(res.status, path, method, text)
+    const isHtmlError = text.includes('<!DOCTYPE') || text.includes('<html') || text.includes('<head')
+    if (res.status === 404 && isHtmlError) {
+      staticHostDetected = true
+      console.warn(`[api] Detected static host 404 on ${path}. Switching to static host fallback mode.`)
+      return handleStaticHostFallback<T>(method, path, body)
+    }
+    let cleanMessage = text
+    if (isHtmlError) {
+      cleanMessage = `HTTP ${res.status} ${res.statusText || 'Not Found'}`
+    }
+    throw new ApiError(res.status, path, method, cleanMessage)
   }
   if (res.status === 204) return undefined as T
   const text = await res.text()

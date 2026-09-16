@@ -1,6 +1,7 @@
 import { defineStore } from 'pinia'
 import { ref, computed, watch } from 'vue'
-import { listEvents, createEvent, joinEvent, syncExternalEvent } from '@/services/api'
+import { listEvents, createEvent, joinEvent, syncExternalEvent, isStaticCloudHost } from '@/services/api'
+import { isDesktopHost } from '@/services/photoStorage'
 import { useUserStore } from '@/stores/user'
 import type { ScoutingEvent } from '@/types'
 
@@ -59,12 +60,29 @@ export const useEventStore = defineStore('events', () => {
   })
 
   async function fetchEvents(userId: string) {
+    restoreFromCache()
+    if (isStaticCloudHost()) {
+      error.value = null
+      return
+    }
     loading.value = true
     error.value = null
     try {
-      events.value = await listEvents(userId)
+      const remoteEvents = await listEvents(userId)
+      if (Array.isArray(remoteEvents)) {
+        const map = new Map(events.value.map(e => [e.id, e]))
+        for (const re of remoteEvents) {
+          map.set(re.id, re)
+        }
+        events.value = Array.from(map.values())
+      }
     } catch (e: any) {
-      error.value = e.message ?? 'Failed to load events'
+      console.warn('[eventStore] Failed to fetch events from backend:', e)
+      if (!isDesktopHost() || e?.status === 404) {
+        error.value = null
+      } else {
+        error.value = e.message ?? 'Failed to load events'
+      }
     } finally {
       loading.value = false
     }
@@ -97,12 +115,12 @@ export const useEventStore = defineStore('events', () => {
     }
   }
 
-  async function join(inviteCode: string, eventName: string): Promise<ScoutingEvent | null> {
+  async function join(inviteCode: string, eventName?: string): Promise<ScoutingEvent | null> {
     loading.value = true
     error.value = null
+    const cleanCode = inviteCode.trim().toUpperCase()
     try {
-      const evt = await joinEvent(inviteCode)
-      // Note: we can ignore eventName since the real name comes from evt
+      const evt = await joinEvent(cleanCode)
       const existingIdx = events.value.findIndex(e => e.id === evt.id)
       if (existingIdx >= 0) {
         events.value[existingIdx] = evt
@@ -114,12 +132,12 @@ export const useEventStore = defineStore('events', () => {
     } catch (e: any) {
       // In standalone PWA / client mode without local backend API:
       const pwaEvt: ScoutingEvent = {
-        id: 'evt-' + inviteCode.trim().toUpperCase(),
-        name: eventName || `Event ${inviteCode.trim().toUpperCase()}`,
-        inviteCode: inviteCode.trim().toUpperCase(),
+        id: 'evt-' + cleanCode,
+        name: eventName || `Event ${cleanCode}`,
+        inviteCode: cleanCode,
         hostId: 'remote-host'
       }
-      const existingIdx = events.value.findIndex(e => e.inviteCode === pwaEvt.inviteCode)
+      const existingIdx = events.value.findIndex(e => e.inviteCode === pwaEvt.inviteCode || e.id === pwaEvt.id)
       if (existingIdx >= 0) {
         events.value[existingIdx] = pwaEvt
       } else {

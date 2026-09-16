@@ -22,6 +22,7 @@
   "dashboard": {
     "welcome": "Welcome,",
     "no_events": "You haven't joined any events yet.",
+    "mobile_no_events_tip": "Tap 'Join Event' above and enter the 6-digit invite code from the host screen to start!",
     "host_client": "Host | Client",
     "create_event": "Create Event",
     "join_event": "Join Event",

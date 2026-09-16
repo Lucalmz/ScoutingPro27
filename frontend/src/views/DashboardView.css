@@ -386,3 +386,24 @@ h2 {
     font-size: 16px;
   }
 }
+
+.empty-state {
+  text-align: center;
+  padding: 40px 20px;
+  color: var(--muted-foreground);
+}
+
+.empty-state .mobile-tip {
+  margin-top: 10px;
+  font-size: 13px;
+  color: var(--primary);
+  opacity: 0.9;
+  line-height: 1.5;
+}
+
+.error-msg {
+  color: #ef4444;
+  text-align: center;
+  margin: 20px 0;
+  font-size: 14px;
+}

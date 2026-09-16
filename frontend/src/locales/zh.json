@@ -22,6 +22,7 @@
   "dashboard": {
     "welcome": "欢迎，",
     "no_events": "您尚未加入任何赛事。",
+    "mobile_no_events_tip": "请点击上方【加入赛事】按钮，输入电脑主机屏幕上的 6 位邀请码即可进入！",
     "host_client": "主机 | 客户端",
     "create_event": "创建赛事",
     "join_event": "加入赛事",
