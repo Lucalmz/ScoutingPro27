@@ -8,11 +8,31 @@ import type { ScoutingRecord } from '../types'
 
 vi.mock('vue-i18n', async (importOriginal) => {
   const actual = await importOriginal<typeof import('vue-i18n')>()
+  const dict: Record<string, string> = {
+    'wizard.pre_match': '赛前准备',
+    'wizard.tag_defense': '防守强',
+    'wizard.tag_slipping': '底盘打滑',
+    'wizard.tag_mechanics': '掉链/脱困',
+    'wizard.tag_accuracy': '高命中率',
+    'wizard.tag_fouls': '违规判罚',
+    'wizard.tag_synergy': '配合默契',
+    'wizard.start_auto': '开始自动阶段',
+    'wizard.prev_step': '上一步',
+    'wizard.next_step': '下一步',
+    'wizard.to_summary': '结算核对',
+    'wizard.modify': '修改',
+    'wizard.confirm_submit': '确认并提交记录',
+    'wizard.cancel_edit': '取消编辑',
+    'wizard.level_qual': '资格赛',
+    'wizard.level_playoff': '淘汰赛',
+    'scouting.red': '红方',
+    'scouting.blue': '蓝方'
+  }
   return {
     ...actual,
     useI18n: () => ({
-      t: (key: string) => key,
-      te: () => false
+      t: (key: string) => dict[key] || key,
+      te: (key: string) => Boolean(dict[key])
     })
   }
 })
@@ -22,7 +42,7 @@ describe('MobilePhaseWizardForm.vue', () => {
     setActivePinia(createPinia())
   })
 
-  it('renders Step 0 (Pre-match) initially and disables progression until valid', async () => {
+  it('renders Step 0 (Pre-match) initially, supports stepper adjustments and disables progression until valid', async () => {
     const wrapper = mount(MobilePhaseWizardForm, {
       props: {
         eventId: 'evt_1',
@@ -39,6 +59,23 @@ describe('MobilePhaseWizardForm.vue', () => {
     // Initial inputs
     const numInputs = wrapper.findAll('.giant-num-input')
     expect(numInputs.length).toBe(2) // Match & Team
+    expect((numInputs[0].element as HTMLInputElement).value).toBe('1')
+
+    // Test match steppers [+] and [-]
+    const plusBtn = wrapper.find('.btn-stepper-plus')
+    await plusBtn.trigger('click')
+    expect((numInputs[0].element as HTMLInputElement).value).toBe('2')
+
+    const minusBtn = wrapper.find('.btn-stepper-minus')
+    await minusBtn.trigger('click')
+    expect((numInputs[0].element as HTMLInputElement).value).toBe('1')
+
+    // Test tournament level toggle
+    const levelBtns = wrapper.findAll('.btn-level-seg')
+    expect(levelBtns.length).toBe(2)
+    expect(levelBtns[0].classes()).toContain('is-active')
+    await levelBtns[1].trigger('click') // Switch to playoff
+    expect(levelBtns[1].classes()).toContain('is-active')
 
     // Primary next button is disabled
     const nextBtn = wrapper.find('.btn-wizard-primary')
@@ -156,7 +193,7 @@ describe('MobilePhaseWizardForm.vue', () => {
     expect(wrapper.find('.red-btn').classes()).toContain('is-selected')
   })
 
-  it('populates existing data in editRecord mode and emits cancelEdit on submit', async () => {
+  it('populates existing data in editRecord mode and provides cancelEdit button', async () => {
     const mockRecord: ScoutingRecord = {
       id: 'rec_edit_1',
       eventId: 'evt_1',
@@ -198,6 +235,15 @@ describe('MobilePhaseWizardForm.vue', () => {
       }
     })
 
+    // Edit mode top bar should be visible with cancel button
+    const editBar = wrapper.find('.edit-mode-bar')
+    expect(editBar.exists()).toBe(true)
+
+    const cancelChip = wrapper.find('.btn-cancel-edit-chip')
+    expect(cancelChip.exists()).toBe(true)
+    await cancelChip.trigger('click')
+    expect(wrapper.emitted('cancelEdit')).toBeTruthy()
+
     const numInputs = wrapper.findAll('.giant-num-input')
     expect((numInputs[0].element as HTMLInputElement).value).toBe('8')
     expect((numInputs[1].element as HTMLInputElement).value).toBe('9999')
@@ -211,6 +257,24 @@ describe('MobilePhaseWizardForm.vue', () => {
     // Submit edit
     await wrapper.find('.btn-wizard-submit').trigger('click')
     expect(wrapper.emitted('submit')).toBeTruthy()
-    expect(wrapper.emitted('cancelEdit')).toBeTruthy()
+  })
+
+  it('shows banned warning card when team is in bannedTeams list', async () => {
+    const recordStore = useRecordStore()
+    recordStore.bannedTeams = [12345]
+
+    const wrapper = mount(MobilePhaseWizardForm, {
+      props: {
+        eventId: 'evt_1',
+        scoutId: 'scout_1',
+        scoutName: 'Alice'
+      }
+    })
+
+    const teamInput = wrapper.findAll('.giant-num-input')[1]
+    await teamInput.setValue('12345')
+
+    const warning = wrapper.find('.banned-warning-card')
+    expect(warning.exists()).toBe(true)
   })
 })

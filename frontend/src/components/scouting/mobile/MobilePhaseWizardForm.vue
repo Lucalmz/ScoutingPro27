@@ -15,6 +15,7 @@ import {
 } from '@/utils/haptics'
 import type { ScoutingRecord, ScoutingFormData } from '@/types'
 import DynamicFieldsRenderer from '@/components/customFields/DynamicFieldsRenderer.vue'
+import TagPicker from '@/components/common/TagPicker.vue'
 import { isAssignmentCompleted, getRecordTournamentLevel } from '@/utils/tournament'
 import { formatUserFriendlyError } from '@/utils/errorHelper'
 
@@ -42,7 +43,7 @@ const recordStore = useRecordStore()
 const currentStep = ref<number>(0)
 
 const steps = [
-  { id: 0, labelKey: 'scouting.match_info', defaultLabel: '赛前准备', icon: 'flag' },
+  { id: 0, labelKey: 'wizard.pre_match', defaultLabel: '赛前准备', icon: 'flag' },
   { id: 1, labelKey: 'scouting.autonomous', defaultLabel: '自动阶段', icon: 'smart_toy' },
   { id: 2, labelKey: 'scouting.teleop', defaultLabel: '手动驾驶', icon: 'sports_esports' },
   { id: 3, labelKey: 'scouting.endgame', defaultLabel: '残局阶段', icon: 'timer' },
@@ -53,6 +54,20 @@ const steps = [
 const matchNumber = ref('1')
 const allianceColor = ref<'none' | 'red' | 'blue'>('none')
 const currentTournamentLevel = ref<string>('QUALIFICATION')
+
+function incrementMatch() {
+  const n = parseInt(matchNumber.value) || 0
+  matchNumber.value = String(n + 1)
+  hapticSelection()
+}
+
+function decrementMatch() {
+  const n = parseInt(matchNumber.value) || 1
+  if (n > 1) {
+    matchNumber.value = String(n - 1)
+    hapticSelection()
+  }
+}
 
 interface TeamScoutData {
   teamNumber: string
@@ -102,15 +117,15 @@ const team = ref<TeamScoutData>(createEmptyTeam())
 let lastTeleopTapTime = 0
 const TELEOP_TAP_WINDOW_MS = 2000
 
-// Quick notes presets for Endgame
-const quickNotesPresets = [
-  { label: '防守强', en: 'Defense' },
-  { label: '底盘打滑', en: 'Slipping' },
-  { label: '掉链/脱困', en: 'Mechanics' },
-  { label: '高命中率', en: 'High Acc' },
-  { label: '违规判罚', en: 'Fouls' },
-  { label: '配合默契', en: 'Synergy' }
-]
+// Localized Quick notes presets
+const quickNotesPresets = computed(() => [
+  { key: 'defense', label: t('wizard.tag_defense') || '防守强' },
+  { key: 'slipping', label: t('wizard.tag_slipping') || '底盘打滑' },
+  { key: 'mechanics', label: t('wizard.tag_mechanics') || '掉链/脱困' },
+  { key: 'accuracy', label: t('wizard.tag_accuracy') || '高命中率' },
+  { key: 'fouls', label: t('wizard.tag_fouls') || '违规判罚' },
+  { key: 'synergy', label: t('wizard.tag_synergy') || '配合默契' }
+])
 
 function toggleQuickNote(noteText: string) {
   hapticSelection()
@@ -264,6 +279,13 @@ function undoTeleop() {
     } else {
       team.value.teleopCycles.pop()
     }
+  }
+}
+
+function removeCycleAtIndex(index: number) {
+  hapticLight()
+  if (index >= 0 && index < team.value.teleopCycles.length) {
+    team.value.teleopCycles.splice(index, 1)
   }
 }
 
@@ -488,6 +510,18 @@ async function handleSubmit() {
 
 <template>
   <div class="mobile-wizard-container" :class="[`color-${allianceColor}`, `step-${currentStep}`]">
+    <!-- Edit Mode Header Banner -->
+    <div v-if="editRecord" class="edit-mode-bar">
+      <div class="edit-mode-info">
+        <span class="material-icons" style="font-size: 16px; color: #f59e0b;">edit_note</span>
+        <span>{{ t('history.btn_edit') }} (Match #{{ editRecord.matchNumber }} • #{{ editRecord.teamNumber }})</span>
+      </div>
+      <button type="button" class="btn-cancel-edit-chip" @click="emit('cancelEdit')">
+        <span class="material-icons" style="font-size: 14px;">close</span>
+        <span>{{ t('wizard.cancel_edit') }}</span>
+      </button>
+    </div>
+
     <!-- Step Progress Tabs Bar -->
     <div class="wizard-stepper">
       <button
@@ -515,8 +549,8 @@ async function handleSubmit() {
       <!-- STEP 0: PRE-MATCH SETUP -->
       <section v-if="currentStep === 0" class="step-pane step-pre-match">
         <div class="pane-header">
-          <h2 class="pane-title">{{ t('scouting.match_info') || '赛前准备' }}</h2>
-          <span class="pane-subtitle">配置本场队伍与联盟颜色</span>
+          <h2 class="pane-title">{{ t('wizard.pre_match') }}</h2>
+          <span class="pane-subtitle">{{ t('wizard.pre_match_sub') }}</span>
         </div>
 
         <!-- Assigned Task Card (if available) -->
@@ -525,20 +559,20 @@ async function handleSubmit() {
             <span class="material-icons" style="color: #39ff14;">assignment_ind</span>
           </div>
           <div class="task-card-content">
-            <div class="task-card-badge">排班推荐</div>
+            <div class="task-card-badge">{{ t('wizard.assigned_task') }}</div>
             <div class="task-card-title">
               Match #{{ nextPendingAssignment.matchNumber }} • Team #{{ nextPendingAssignment.teamNumber }}
               <span :class="nextPendingAssignment.allianceColor === 'red' ? 'text-red' : 'text-blue'">
-                ({{ nextPendingAssignment.allianceColor === 'red' ? '红方' : '蓝方' }})
+                ({{ nextPendingAssignment.allianceColor === 'red' ? t('scouting.red') : t('scouting.blue') }})
               </span>
             </div>
           </div>
-          <button type="button" class="btn-task-apply">一键填入</button>
+          <button type="button" class="btn-task-apply">{{ t('wizard.apply_task') }}</button>
         </div>
 
         <!-- Alliance Color Huge Selection Cards -->
         <div class="input-block">
-          <label class="field-label">{{ t('scouting.alliance_color') || '选择所属联盟' }} *</label>
+          <label class="field-label">{{ t('scouting.alliance_color') }} *</label>
           <div class="alliance-grid">
             <button
               type="button"
@@ -547,7 +581,7 @@ async function handleSubmit() {
               @click="allianceColor = 'red'; hapticSelection()"
             >
               <div class="alliance-tag">RED ALLIANCE</div>
-              <span class="alliance-name">🔴 {{ t('scouting.red') || '红方' }}</span>
+              <span class="alliance-name">🔴 {{ t('scouting.red') }}</span>
               <span v-if="allianceColor === 'red'" class="material-icons check-mark">check_circle</span>
             </button>
 
@@ -558,8 +592,31 @@ async function handleSubmit() {
               @click="allianceColor = 'blue'; hapticSelection()"
             >
               <div class="alliance-tag">BLUE ALLIANCE</div>
-              <span class="alliance-name">🔵 {{ t('scouting.blue') || '蓝方' }}</span>
+              <span class="alliance-name">🔵 {{ t('scouting.blue') }}</span>
               <span v-if="allianceColor === 'blue'" class="material-icons check-mark">check_circle</span>
+            </button>
+          </div>
+        </div>
+
+        <!-- Tournament Level Switcher (Qual / Playoff) -->
+        <div class="input-block">
+          <label class="field-label">{{ t('wizard.tournament_level') }}</label>
+          <div class="segmented-level-grid">
+            <button
+              type="button"
+              class="btn-level-seg"
+              :class="{ 'is-active': currentTournamentLevel === 'QUALIFICATION' }"
+              @click="currentTournamentLevel = 'QUALIFICATION'; hapticSelection()"
+            >
+              {{ t('wizard.level_qual') }}
+            </button>
+            <button
+              type="button"
+              class="btn-level-seg"
+              :class="{ 'is-active': currentTournamentLevel === 'PLAYOFF' }"
+              @click="currentTournamentLevel = 'PLAYOFF'; hapticSelection()"
+            >
+              {{ t('wizard.level_playoff') }}
             </button>
           </div>
         </div>
@@ -567,20 +624,31 @@ async function handleSubmit() {
         <!-- Match & Team Number Inputs -->
         <div class="input-row-grid">
           <div class="input-block">
-            <label class="field-label">{{ t('scouting.match_number') || '场次编号' }} *</label>
-            <div class="number-input-wrap">
+            <label class="field-label">{{ t('wizard.match_no') }} *</label>
+            <div class="number-stepper-wrap">
+              <button
+                type="button"
+                class="btn-stepper btn-stepper-minus"
+                @click="decrementMatch"
+                :disabled="parseInt(matchNumber) <= 1"
+              >-</button>
               <input
                 type="number"
                 inputmode="numeric"
                 v-model="matchNumber"
-                class="giant-num-input"
+                class="giant-num-input num-input-stepper"
                 placeholder="1"
               />
+              <button
+                type="button"
+                class="btn-stepper btn-stepper-plus"
+                @click="incrementMatch"
+              >+</button>
             </div>
           </div>
 
           <div class="input-block">
-            <label class="field-label">{{ t('scouting.team_number') || '队伍编号' }} *</label>
+            <label class="field-label">{{ t('wizard.team_no') }} *</label>
             <div class="number-input-wrap">
               <input
                 type="number"
@@ -593,10 +661,16 @@ async function handleSubmit() {
           </div>
         </div>
 
+        <!-- Banned Team Warning (Weak Team) -->
+        <div v-if="recordStore.bannedTeams.includes(parseInt(team.teamNumber))" class="banned-warning-card">
+          <span class="material-icons" style="font-size: 16px; color: #ef4444;">warning</span>
+          <span>{{ t('scouting.banned_warning') }}</span>
+        </div>
+
         <!-- Pit Scout Preview Pill (if available) -->
         <div v-if="pitSummary" class="pit-scout-pill">
           <span class="material-icons" style="font-size: 16px; color: #39ff14;">inventory_2</span>
-          <span>展位档案: 底盘 <strong>{{ pitSummary.drivetrain }}</strong> • 宣称自动 <strong>{{ pitSummary.autoScore }}</strong> 分 • 手动 <strong>{{ pitSummary.teleopCycles }}</strong> 轮</span>
+          <span>{{ t('wizard.pit_preview') }}: {{ t('wizard.drivetrain') }} <strong>{{ pitSummary.drivetrain }}</strong> • {{ t('wizard.claimed_auto') }} <strong>{{ pitSummary.autoScore }}</strong> {{ t('wizard.pts_unit') }} • {{ t('wizard.claimed_teleop') }} <strong>{{ pitSummary.teleopCycles }}</strong> {{ t('wizard.cycles_unit') }}</span>
         </div>
       </section>
 
@@ -605,12 +679,12 @@ async function handleSubmit() {
         <div class="pane-header">
           <div class="pane-header-row">
             <div>
-              <h2 class="pane-title">{{ t('scouting.autonomous') || '自动机阶段' }} (30s)</h2>
-              <span class="pane-subtitle">记录自动离开、进球与停泊</span>
+              <h2 class="pane-title">{{ t('scouting.autonomous') }} (30s)</h2>
+              <span class="pane-subtitle">{{ t('wizard.auto_sub') }}</span>
             </div>
             <div class="phase-score-badge">
               <span class="score-val">{{ autoScore }}</span>
-              <span class="score-unit">分</span>
+              <span class="score-unit">{{ t('wizard.pts_unit') }}</span>
             </div>
           </div>
         </div>
@@ -621,8 +695,8 @@ async function handleSubmit() {
             <div class="hero-btn-inner">
               <span class="material-icons hero-icon">sports_baseball</span>
               <div class="hero-text-col">
-                <span class="hero-btn-title">自动进球 (+1 球)</span>
-                <span class="hero-btn-subtitle">+3 分/球 • 当前累积 {{ team.autoBalls }} 球 ({{ team.autoBalls * 3 }}分)</span>
+                <span class="hero-btn-title">{{ t('wizard.auto_hit_btn') }}</span>
+                <span class="hero-btn-subtitle">{{ t('wizard.auto_hit_sub', { count: team.autoBalls, pts: team.autoBalls * 3 }) }}</span>
               </div>
             </div>
           </button>
@@ -632,14 +706,14 @@ async function handleSubmit() {
         <div class="secondary-actions-grid">
           <button type="button" class="btn-secondary-action btn-miss" @click="addAutoMiss">
             <span class="material-icons" style="font-size: 18px;">close</span>
-            <span>丢球 Miss</span>
+            <span>{{ t('wizard.miss_btn') }}</span>
             <span v-if="team.autoMissedCycles.length > 0" class="mini-count-badge">
               {{ team.autoMissedCycles.reduce((a, b) => a + b, 0) }}
             </span>
           </button>
           <button type="button" class="btn-secondary-action btn-undo" @click="undoAuto">
             <span class="material-icons" style="font-size: 18px;">undo</span>
-            <span>撤销 Undo</span>
+            <span>{{ t('wizard.undo_btn') }}</span>
           </button>
         </div>
 
@@ -654,8 +728,8 @@ async function handleSubmit() {
             <div class="toggle-card-left">
               <span class="material-icons toggle-icon">directions_run</span>
               <div class="toggle-text-wrap">
-                <span class="toggle-title">{{ t('scouting.auto_leave') || '完全离开起步区' }}</span>
-                <span class="toggle-pts">+3 分</span>
+                <span class="toggle-title">{{ t('scouting.auto_leave') }}</span>
+                <span class="toggle-pts">{{ t('wizard.leave_pts') }}</span>
               </div>
             </div>
             <div class="toggle-check-box">
@@ -672,8 +746,8 @@ async function handleSubmit() {
             <div class="toggle-card-left">
               <span class="material-icons toggle-icon">local_parking</span>
               <div class="toggle-text-wrap">
-                <span class="toggle-title">{{ t('scouting.auto_park') || '装载区停泊' }}</span>
-                <span class="toggle-pts">+5 分</span>
+                <span class="toggle-title">{{ t('scouting.auto_park') }}</span>
+                <span class="toggle-pts">{{ t('wizard.park_pts') }}</span>
               </div>
             </div>
             <div class="toggle-check-box">
@@ -688,12 +762,12 @@ async function handleSubmit() {
         <div class="pane-header">
           <div class="pane-header-row">
             <div>
-              <h2 class="pane-title">{{ t('scouting.teleop') || '手动驾驶阶段' }} (120s)</h2>
-              <span class="pane-subtitle">看台闭眼盲操打卡</span>
+              <h2 class="pane-title">{{ t('scouting.teleop') }} (120s)</h2>
+              <span class="pane-subtitle">{{ t('wizard.teleop_sub') }}</span>
             </div>
             <div class="phase-score-badge">
               <span class="score-val">{{ teleopScore }}</span>
-              <span class="score-unit">分</span>
+              <span class="score-unit">{{ t('wizard.pts_unit') }}</span>
             </div>
           </div>
         </div>
@@ -701,31 +775,35 @@ async function handleSubmit() {
         <!-- Live Cycles Ticker -->
         <div class="cycles-ticker-bar">
           <div class="ticker-stat">
-            <span class="ticker-label">总进球</span>
+            <span class="ticker-label">{{ t('wizard.total_scored') }}</span>
             <span class="ticker-val text-green">{{ getTeleopBallsTotal() }}</span>
           </div>
           <div class="ticker-divider"></div>
           <div class="ticker-stat">
-            <span class="ticker-label">已打轮次</span>
-            <span class="ticker-val">{{ team.teleopCycles.length }} 轮</span>
+            <span class="ticker-label">{{ t('wizard.completed_cycles') }}</span>
+            <span class="ticker-val">{{ team.teleopCycles.length }} {{ t('wizard.cycles_unit') }}</span>
           </div>
           <div class="ticker-divider"></div>
           <div class="ticker-stat">
-            <span class="ticker-label">丢球</span>
+            <span class="ticker-label">{{ t('wizard.missed_balls') }}</span>
             <span class="ticker-val text-red">{{ getTeleopMissedTotal() }}</span>
           </div>
         </div>
 
-        <!-- Cycle History Chips Row -->
+        <!-- Cycle History Chips Row (clickable to adjust/delete) -->
         <div v-if="team.teleopCycles.length > 0" class="cycle-chips-scroll">
-          <div
+          <button
             v-for="(balls, idx) in team.teleopCycles"
             :key="'c-' + idx"
+            type="button"
             class="cycle-chip"
+            @click="removeCycleAtIndex(idx)"
+            :title="t('wizard.undo_btn')"
           >
             <span class="chip-idx">#{{ idx + 1 }}</span>
-            <span class="chip-val">{{ balls }}球</span>
-          </div>
+            <span class="chip-val">{{ balls }} {{ t('wizard.balls_unit') }}</span>
+            <span class="material-icons chip-remove-icon">close</span>
+          </button>
         </div>
 
         <!-- 96px HERO BUTTON FOR BLIND TAPPING -->
@@ -738,8 +816,8 @@ async function handleSubmit() {
             <div class="hero-btn-inner">
               <span class="material-icons hero-icon-giant">sports_score</span>
               <div class="hero-text-col">
-                <span class="hero-giant-title">🎯 进球 SCORED (+1)</span>
-                <span class="hero-giant-subtitle">+2 分/球 • 快速连续连按自动成轮</span>
+                <span class="hero-giant-title">{{ t('wizard.teleop_giant_hit') }}</span>
+                <span class="hero-giant-subtitle">{{ t('wizard.teleop_giant_sub') }}</span>
               </div>
             </div>
           </button>
@@ -749,12 +827,12 @@ async function handleSubmit() {
         <div class="secondary-actions-grid">
           <button type="button" class="btn-secondary-action btn-miss" @click="addTeleopMiss">
             <span class="material-icons" style="font-size: 20px;">cancel</span>
-            <span>❌ 丢球 Miss (+1)</span>
+            <span>{{ t('wizard.teleop_miss') }}</span>
             <span v-if="getTeleopMissedTotal() > 0" class="mini-count-badge">{{ getTeleopMissedTotal() }}</span>
           </button>
           <button type="button" class="btn-secondary-action btn-undo" @click="undoTeleop">
             <span class="material-icons" style="font-size: 20px;">undo</span>
-            <span>↩ 撤销上一球 Undo</span>
+            <span>{{ t('wizard.teleop_undo') }}</span>
           </button>
         </div>
       </section>
@@ -764,12 +842,12 @@ async function handleSubmit() {
         <div class="pane-header">
           <div class="pane-header-row">
             <div>
-              <h2 class="pane-title">{{ t('scouting.endgame') || '残局终局阶段' }} (30s)</h2>
-              <span class="pane-subtitle">花朵、悬挂停泊与状态备注</span>
+              <h2 class="pane-title">{{ t('scouting.endgame') }} (30s)</h2>
+              <span class="pane-subtitle">{{ t('wizard.endgame_sub') }}</span>
             </div>
             <div class="phase-score-badge">
               <span class="score-val">{{ endgameScore }}</span>
-              <span class="score-unit">分</span>
+              <span class="score-unit">{{ t('wizard.pts_unit') }}</span>
             </div>
           </div>
         </div>
@@ -785,8 +863,8 @@ async function handleSubmit() {
             <div class="toggle-card-left">
               <span class="material-icons toggle-icon" style="color: #ec4899;">local_florist</span>
               <div class="toggle-text-wrap">
-                <span class="toggle-title">{{ t('scouting.flower_placed') || '放置花朵大球' }}</span>
-                <span class="toggle-pts">+10 分</span>
+                <span class="toggle-title">{{ t('scouting.flower_placed') }}</span>
+                <span class="toggle-pts">{{ t('wizard.flower_pts') }}</span>
               </div>
             </div>
             <div class="toggle-check-box">
@@ -803,8 +881,8 @@ async function handleSubmit() {
             <div class="toggle-card-left">
               <span class="material-icons toggle-icon" style="color: #10b981;">spa</span>
               <div class="toggle-text-wrap">
-                <span class="toggle-title">{{ t('scouting.flower_bottom_bonus') || '底部花朵奖励' }}</span>
-                <span class="toggle-pts">+5 分</span>
+                <span class="toggle-title">{{ t('scouting.flower_bottom_bonus') }}</span>
+                <span class="toggle-pts">{{ t('wizard.park_pts') }}</span>
               </div>
             </div>
             <div class="toggle-check-box">
@@ -821,8 +899,8 @@ async function handleSubmit() {
             <div class="toggle-card-left">
               <span class="material-icons toggle-icon" style="color: #3b82f6;">local_parking</span>
               <div class="toggle-text-wrap">
-                <span class="toggle-title">{{ t('scouting.teleop_park') || '终局装载区停泊' }}</span>
-                <span class="toggle-pts">+5 分</span>
+                <span class="toggle-title">{{ t('scouting.teleop_park') }}</span>
+                <span class="toggle-pts">{{ t('wizard.park_pts') }}</span>
               </div>
             </div>
             <div class="toggle-check-box">
@@ -840,8 +918,8 @@ async function handleSubmit() {
             <div class="toggle-card-left">
               <span class="material-icons toggle-icon" style="color: #ef4444;">healing</span>
               <div class="toggle-text-wrap">
-                <span class="toggle-title">{{ t('scouting.is_broken') || '机器人故障/失能' }}</span>
-                <span class="toggle-pts" style="color: #ef4444;">机械脱扣 / 断电 / 趴窝</span>
+                <span class="toggle-title">{{ t('scouting.is_broken') }}</span>
+                <span class="toggle-pts" style="color: #ef4444;">{{ t('wizard.broken_sub') }}</span>
               </div>
             </div>
             <div class="toggle-check-box broken-check">
@@ -852,11 +930,11 @@ async function handleSubmit() {
 
         <!-- Quick Notes Chips -->
         <div class="notes-section">
-          <label class="field-label">快捷评价标签</label>
+          <label class="field-label">{{ t('wizard.quick_notes') }}</label>
           <div class="quick-notes-grid">
             <button
               v-for="chip in quickNotesPresets"
-              :key="chip.label"
+              :key="chip.key"
               type="button"
               class="quick-note-chip"
               :class="{ 'is-active': team.notes.includes(chip.label) }"
@@ -871,9 +949,18 @@ async function handleSubmit() {
               v-model="team.notes"
               class="notes-textarea"
               rows="3"
-              :placeholder="t('scouting.notes_placeholder') || '点击上方快捷标签或输入备注...'"
+              :placeholder="t('scouting.notes_placeholder')"
             ></textarea>
           </div>
+        </div>
+
+        <!-- Team TagPicker (Shared Tags) -->
+        <div v-if="parseInt(team.teamNumber) > 0" class="team-tags-container">
+          <label class="field-label">{{ t('scouting.team_tags') }} (#{{ team.teamNumber }})</label>
+          <TagPicker
+            :event-id="props.eventId"
+            :team-number="parseInt(team.teamNumber)"
+          />
         </div>
 
         <!-- Custom Fields (if defined) -->
@@ -885,8 +972,8 @@ async function handleSubmit() {
       <!-- STEP 4: SUMMARY & SUBMIT -->
       <section v-else-if="currentStep === 4" class="step-pane step-summary">
         <div class="pane-header">
-          <h2 class="pane-title">{{ t('scouting.total_score') || '核对与提交' }}</h2>
-          <span class="pane-subtitle">检查本场记录并一键保存提交</span>
+          <h2 class="pane-title">{{ t('scouting.total_score') }}</h2>
+          <span class="pane-subtitle">{{ t('wizard.summary_sub') }}</span>
         </div>
 
         <!-- Grand Score Card -->
@@ -894,44 +981,44 @@ async function handleSubmit() {
           <div class="summary-hero-top">
             <span class="summary-match-badge">Match #{{ matchNumber }}</span>
             <span class="summary-alliance-badge" :class="allianceColor">
-              {{ allianceColor === 'red' ? '🔴 RED' : '🔵 BLUE' }}
+              {{ allianceColor === 'red' ? '🔴 ' + t('scouting.red') : '🔵 ' + t('scouting.blue') }}
             </span>
             <span class="summary-team-badge">Team #{{ team.teamNumber }}</span>
           </div>
 
           <div class="summary-total-row">
             <div class="total-label-col">
-              <span class="total-label-text">预测总积分</span>
-              <span class="total-label-sub">TOTAL PREDICTED SCORE</span>
+              <span class="total-label-text">{{ t('wizard.total_predicted') }}</span>
+              <span class="total-label-sub">{{ t('wizard.predicted_sub') }}</span>
             </div>
             <div class="total-score-val">{{ totalScore }}</div>
           </div>
 
           <div class="summary-breakdown-grid">
             <div class="breakdown-col">
-              <span class="breakdown-label">自动 (Auto)</span>
-              <span class="breakdown-val">{{ autoScore }} 分</span>
-              <span class="breakdown-sub">{{ team.autoBalls }}进 / 离开{{ team.autoLeave ? '√' : '×' }}</span>
+              <span class="breakdown-label">{{ t('wizard.auto_stage') }}</span>
+              <span class="breakdown-val">{{ autoScore }} {{ t('wizard.pts_unit') }}</span>
+              <span class="breakdown-sub">{{ t('wizard.auto_summary_sub', { balls: team.autoBalls, leave: team.autoLeave ? '√' : '×' }) }}</span>
             </div>
             <div class="breakdown-col">
-              <span class="breakdown-label">手动 (TeleOp)</span>
-              <span class="breakdown-val">{{ teleopScore }} 分</span>
-              <span class="breakdown-sub">{{ getTeleopBallsTotal() }}进 / {{ team.teleopCycles.length }}轮</span>
+              <span class="breakdown-label">{{ t('wizard.teleop_stage') }}</span>
+              <span class="breakdown-val">{{ teleopScore }} {{ t('wizard.pts_unit') }}</span>
+              <span class="breakdown-sub">{{ t('wizard.teleop_summary_sub', { balls: getTeleopBallsTotal(), cycles: team.teleopCycles.length }) }}</span>
             </div>
             <div class="breakdown-col">
-              <span class="breakdown-label">残局 (Endgame)</span>
-              <span class="breakdown-val">{{ endgameScore }} 分</span>
-              <span class="breakdown-sub">花朵{{ team.flowerPlaced ? '√' : '×' }} / 停泊{{ team.teleopPark ? '√' : '×' }}</span>
+              <span class="breakdown-label">{{ t('wizard.endgame_stage') }}</span>
+              <span class="breakdown-val">{{ endgameScore }} {{ t('wizard.pts_unit') }}</span>
+              <span class="breakdown-sub">{{ t('wizard.endgame_summary_sub', { flower: team.flowerPlaced ? '√' : '×', park: team.teleopPark ? '√' : '×' }) }}</span>
             </div>
           </div>
 
           <div v-if="team.isBroken" class="broken-alert-banner">
             <span class="material-icons" style="font-size: 18px;">warning</span>
-            <span>已标记：机器人发生机械或电气故障</span>
+            <span>{{ t('wizard.broken_alert') }}</span>
           </div>
 
           <div v-if="team.notes" class="notes-preview-box">
-            <span class="notes-preview-title">备注：</span>
+            <span class="notes-preview-title">{{ t('wizard.notes_prefix') }}</span>
             <span>{{ team.notes }}</span>
           </div>
         </div>
@@ -947,34 +1034,53 @@ async function handleSubmit() {
     <!-- Sticky Bottom Wizard Action Bar -->
     <div class="wizard-bottom-bar">
       <!-- Step 0 Next -->
-      <button
-        v-if="currentStep === 0"
-        type="button"
-        class="btn-wizard-nav btn-wizard-primary"
-        :disabled="!canGoToAuto"
-        @click="nextStep"
-      >
-        <span>{{ t('scouting.autonomous') || '开始自动阶段' }} (Start Auto)</span>
-        <span class="material-icons" style="margin-left: 6px;">arrow_forward</span>
-      </button>
+      <template v-if="currentStep === 0">
+        <button
+          v-if="editRecord"
+          type="button"
+          class="btn-wizard-nav btn-wizard-cancel"
+          @click="emit('cancelEdit')"
+        >
+          <span class="material-icons" style="margin-right: 4px;">close</span>
+          <span>{{ t('wizard.cancel_edit') }}</span>
+        </button>
+        <button
+          type="button"
+          class="btn-wizard-nav btn-wizard-primary"
+          :disabled="!canGoToAuto"
+          @click="nextStep"
+        >
+          <span>{{ t('wizard.start_auto') }}</span>
+          <span class="material-icons" style="margin-left: 6px;">arrow_forward</span>
+        </button>
+      </template>
 
       <!-- Step 1-3 Previous & Next -->
       <template v-else-if="currentStep >= 1 && currentStep <= 3">
         <button type="button" class="btn-wizard-nav btn-wizard-prev" @click="prevStep">
           <span class="material-icons" style="margin-right: 4px;">arrow_back</span>
-          <span>上一步</span>
+          <span>{{ t('wizard.prev_step') }}</span>
         </button>
         <button type="button" class="btn-wizard-nav btn-wizard-primary" @click="nextStep">
-          <span>{{ currentStep === 3 ? '结算核对' : '下一步' }}</span>
+          <span>{{ currentStep === 3 ? t('wizard.to_summary') : t('wizard.next_step') }}</span>
           <span class="material-icons" style="margin-left: 4px;">arrow_forward</span>
         </button>
       </template>
 
       <!-- Step 4 Submit & Cancel -->
       <template v-else-if="currentStep === 4">
-        <button type="button" class="btn-wizard-nav btn-wizard-prev" @click="prevStep">
+        <button
+          v-if="editRecord"
+          type="button"
+          class="btn-wizard-nav btn-wizard-cancel"
+          @click="emit('cancelEdit')"
+        >
+          <span class="material-icons" style="margin-right: 4px;">close</span>
+          <span>{{ t('wizard.cancel_edit') }}</span>
+        </button>
+        <button v-else type="button" class="btn-wizard-nav btn-wizard-prev" @click="prevStep">
           <span class="material-icons" style="margin-right: 4px;">arrow_back</span>
-          <span>修改</span>
+          <span>{{ t('wizard.modify') }}</span>
         </button>
 
         <button
@@ -986,7 +1092,7 @@ async function handleSubmit() {
           <span class="material-icons" style="margin-right: 6px;">
             {{ submitting ? 'hourglass_top' : 'check_circle' }}
           </span>
-          <span>{{ editRecord ? (t('history.btn_save') || '保存修改') : (t('scouting.submit') || '确认并提交记录') }}</span>
+          <span>{{ editRecord ? (t('history.btn_save') || '保存修改') : t('wizard.confirm_submit') }}</span>
         </button>
       </template>
     </div>
@@ -998,10 +1104,44 @@ async function handleSubmit() {
   display: flex;
   flex-direction: column;
   min-height: calc(100vh - 120px);
-  padding-bottom: 74px; /* clearance for sticky wizard bottom bar */
+  padding-bottom: 74px;
   position: relative;
   user-select: none;
   -webkit-user-select: none;
+}
+
+/* Edit Mode Top Bar */
+.edit-mode-bar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  background: rgba(245, 158, 11, 0.15);
+  border: 1px solid rgba(245, 158, 11, 0.35);
+  border-radius: 10px;
+  padding: 6px 12px;
+  margin-bottom: 10px;
+}
+
+.edit-mode-info {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 12px;
+  font-weight: 600;
+  color: #f59e0b;
+}
+
+.btn-cancel-edit-chip {
+  background: rgba(255, 255, 255, 0.1);
+  border: 1px solid rgba(255, 255, 255, 0.2);
+  color: #ffffff;
+  border-radius: 6px;
+  padding: 2px 8px;
+  font-size: 11px;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  gap: 2px;
 }
 
 /* Stepper Progress Bar */
@@ -1244,6 +1384,69 @@ async function handleSubmit() {
   font-size: 16px;
 }
 
+/* Tournament Level Switcher */
+.segmented-level-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 8px;
+}
+
+.btn-level-seg {
+  height: 38px;
+  border-radius: 10px;
+  background: rgba(22, 27, 34, 0.8);
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  color: #8b949e;
+  font-size: 13px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: all 0.2s ease;
+}
+
+.btn-level-seg.is-active {
+  background: rgba(57, 255, 20, 0.15);
+  border-color: #39ff14;
+  color: #39ff14;
+  font-weight: 700;
+}
+
+/* Stepper Input Wrap */
+.number-stepper-wrap {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.btn-stepper {
+  width: 40px;
+  height: 52px;
+  border-radius: 10px;
+  background: rgba(255, 255, 255, 0.08);
+  border: 1px solid rgba(255, 255, 255, 0.15);
+  color: #ffffff;
+  font-size: 1.2rem;
+  font-weight: 700;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+}
+
+.btn-stepper:active {
+  background: rgba(57, 255, 20, 0.2);
+  border-color: #39ff14;
+}
+
+.btn-stepper:disabled {
+  opacity: 0.3;
+  cursor: not-allowed;
+}
+
+.num-input-stepper {
+  flex: 1;
+}
+
 .input-row-grid {
   display: grid;
   grid-template-columns: 1fr 1fr;
@@ -1268,6 +1471,19 @@ async function handleSubmit() {
   outline: none;
   border-color: var(--primary, #39ff14);
   box-shadow: 0 0 12px rgba(57, 255, 20, 0.3);
+}
+
+.banned-warning-card {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 12px;
+  background: rgba(239, 68, 68, 0.15);
+  border: 1px solid rgba(239, 68, 68, 0.35);
+  border-radius: 10px;
+  color: #f87171;
+  font-size: 12px;
+  font-weight: 600;
 }
 
 .pit-scout-pill {
@@ -1565,6 +1781,13 @@ async function handleSubmit() {
   padding: 3px 8px;
   font-size: 12px;
   white-space: nowrap;
+  color: #ffffff;
+  cursor: pointer;
+}
+
+.cycle-chip:active {
+  background: rgba(239, 68, 68, 0.2);
+  border-color: #ef4444;
 }
 
 .chip-idx {
@@ -1577,7 +1800,13 @@ async function handleSubmit() {
   font-weight: 700;
 }
 
-/* Notes & Custom Fields */
+.chip-remove-icon {
+  font-size: 12px;
+  color: #8b949e;
+  margin-left: 2px;
+}
+
+/* Notes & TagPicker & Custom Fields */
 .quick-notes-grid {
   display: flex;
   flex-wrap: wrap;
@@ -1617,6 +1846,14 @@ async function handleSubmit() {
 .notes-textarea:focus {
   outline: none;
   border-color: #39ff14;
+}
+
+.team-tags-container {
+  margin-top: 6px;
+  padding: 12px;
+  background: rgba(22, 27, 34, 0.6);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: 12px;
 }
 
 /* Summary Card */
@@ -1813,6 +2050,13 @@ async function handleSubmit() {
   background: rgba(255, 255, 255, 0.08);
   border: 1px solid rgba(255, 255, 255, 0.15);
   color: #ffffff;
+}
+
+.btn-wizard-cancel {
+  flex: 0.35;
+  background: rgba(239, 68, 68, 0.15);
+  border: 1px solid rgba(239, 68, 68, 0.35);
+  color: #f87171;
 }
 
 .btn-wizard-primary {
