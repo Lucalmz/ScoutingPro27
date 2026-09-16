@@ -114,6 +114,17 @@ const transportTooltip = computed(() => {
       </span>
       <span>{{ t('connection.reconnect_now') }}</span>
     </button>
+
+    <!-- Pending SAS Verification Alert Button -->
+    <button
+      v-if="conn.pendingSasQueue.length > 0 && !conn.isSasModalOpen"
+      class="pending-sas-btn"
+      :title="t('connection.sas_pending_badge_tooltip', '有新节点等待安全核验，点击打开核验窗口')"
+      @click="conn.openSasModal"
+    >
+      <span class="material-icons pending-icon">shield</span>
+      <span>{{ t('connection.sas_pending_badge', { count: conn.pendingSasQueue.length }) }}</span>
+    </button>
   </div>
 </template>
 
@@ -251,6 +262,42 @@ const transportTooltip = computed(() => {
 
 .btn-icon {
   font-size: 14px;
+}
+
+.pending-sas-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  background: rgba(245, 158, 11, 0.15);
+  border: 1px solid rgba(245, 158, 11, 0.5);
+  color: #fbbf24;
+  font-size: 11px;
+  font-weight: 600;
+  padding: 3px 8px;
+  border-radius: 6px;
+  cursor: pointer;
+  animation: pulsePending 2s infinite ease-in-out;
+  transition: all 0.2s;
+}
+
+.pending-sas-btn:hover {
+  background: rgba(245, 158, 11, 0.25);
+  border-color: #f59e0b;
+  color: #ffffff;
+}
+
+.pending-icon {
+  font-size: 13px;
+  color: #f59e0b;
+}
+
+@keyframes pulsePending {
+  0%, 100% {
+    box-shadow: 0 0 0 0 rgba(245, 158, 11, 0.4);
+  }
+  50% {
+    box-shadow: 0 0 0 5px rgba(245, 158, 11, 0);
+  }
 }
 
 .spinning {

@@ -299,12 +299,13 @@ export function useEventWebRtcBridge({
         })
       },
 
-      onSasVerified: () => {
-        connStore.clearPendingSas()
+      onSasVerified: (peerId?: string) => {
+        connStore.clearPendingSas(peerId)
+        toastStore.showToast(t('connection.sas_verified_toast'), 'success')
       },
 
-      onSasRejected: (peerId, reason) => {
-        connStore.clearPendingSas()
+      onSasRejected: (peerId?: string, reason?: string) => {
+        connStore.clearPendingSas(peerId)
         toastStore.showError(t('event.sas_rejected_toast', { reason: reason || '' }))
       },
 
@@ -427,10 +428,10 @@ export function useEventWebRtcBridge({
               type: 'REQUEST_CUSTOM_FIELDS_SYNC',
               eventId: evt.id
             })
-            customFieldsStore.fetchFields(evt.id).catch((e) => {
+            customFieldsStore.fetchFields(evt.id).catch((e: any) => {
               console.warn('[EventView] Failed to fetch custom fields:', e)
             })
-            connStore.rtcService.requestTagsSync(evt.id).catch((e) => {
+            connStore.rtcService.requestTagsSync(evt.id).catch((e: any) => {
               console.warn('[EventView] Failed to request tags sync:', e)
             })
           }

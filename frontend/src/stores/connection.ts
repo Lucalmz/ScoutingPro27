@@ -20,12 +20,33 @@ export const useConnectionStore = defineStore('connection', () => {
   const takeoverPrompt = ref<{ requesterUsername: string; timeoutSeconds: number } | null>(null)
   const isKicked = ref<{ reason: string } | null>(null)
   const isIceStalled = ref(false)
-  const pendingSas = ref<{
+  interface PendingSasItem {
     peerId: string
     username: string
     ecdhPublicKey?: string
     fingerprint: string
-  } | null>(null)
+  }
+
+  const pendingSasQueue = ref<PendingSasItem[]>([])
+  const isSasModalOpen = ref(false)
+
+  const pendingSas = computed<PendingSasItem | null>({
+    get: () => pendingSasQueue.value[0] || null,
+    set: (val: PendingSasItem | null) => {
+      if (!val) {
+        pendingSasQueue.value = []
+        isSasModalOpen.value = false
+      } else {
+        const idx = pendingSasQueue.value.findIndex(item => item.peerId === val.peerId)
+        if (idx >= 0) {
+          pendingSasQueue.value[idx] = val
+        } else {
+          pendingSasQueue.value.push(val)
+        }
+        isSasModalOpen.value = true
+      }
+    }
+  })
   const isStandbyHost = ref(false)
   const standbyHostInfo = ref<{ hostSessionId: string; hostDeviceId?: string } | null>(null)
 
@@ -183,12 +204,40 @@ export const useConnectionStore = defineStore('connection', () => {
     }
   }
 
-  function setPendingSas(p: { peerId: string; username: string; ecdhPublicKey?: string; fingerprint: string } | null) {
-    pendingSas.value = p
+  function openSasModal() {
+    if (pendingSasQueue.value.length > 0) {
+      isSasModalOpen.value = true
+    }
   }
 
-  function clearPendingSas() {
-    pendingSas.value = null
+  function closeSasModal() {
+    isSasModalOpen.value = false
+  }
+
+  function setPendingSas(p: PendingSasItem | null) {
+    if (!p) {
+      pendingSasQueue.value = []
+      isSasModalOpen.value = false
+      return
+    }
+    const idx = pendingSasQueue.value.findIndex(item => item.peerId === p.peerId)
+    if (idx >= 0) {
+      pendingSasQueue.value[idx] = p
+    } else {
+      pendingSasQueue.value.push(p)
+    }
+    isSasModalOpen.value = true
+  }
+
+  function clearPendingSas(peerId?: string) {
+    if (peerId) {
+      pendingSasQueue.value = pendingSasQueue.value.filter(item => item.peerId !== peerId)
+    } else if (pendingSasQueue.value.length > 0) {
+      pendingSasQueue.value.shift()
+    }
+    if (pendingSasQueue.value.length === 0) {
+      isSasModalOpen.value = false
+    }
   }
 
   function setIsIceStalled(s: boolean) {
@@ -198,18 +247,19 @@ export const useConnectionStore = defineStore('connection', () => {
   function confirmSas(peerId?: string) {
     const target = peerId || pendingSas.value?.peerId || 'host'
     rtcService.value?.confirmSas(target)
-    pendingSas.value = null
+    clearPendingSas(target)
   }
 
   function rejectSas(peerId?: string, reason?: string) {
     const target = peerId || pendingSas.value?.peerId || 'host'
     rtcService.value?.rejectSas(target, reason)
-    pendingSas.value = null
+    clearPendingSas(target)
   }
 
   function disconnect() {
     rtcService.value?.disconnect()
-    pendingSas.value = null
+    pendingSasQueue.value = []
+    isSasModalOpen.value = false
     sessionConflict.value = null
     status.value = 'offline'
   }
@@ -223,6 +273,10 @@ export const useConnectionStore = defineStore('connection', () => {
     isKicked,
     isIceStalled,
     pendingSas,
+    pendingSasQueue,
+    isSasModalOpen,
+    openSasModal,
+    closeSasModal,
     isConnected,
     isOffline,
     isLongOffline,

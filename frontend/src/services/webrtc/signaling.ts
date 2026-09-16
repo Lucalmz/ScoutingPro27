@@ -139,7 +139,10 @@ export class SignalingChannel {
         'host_heartbeat',
         'host_takeover',
         'HOST_LEAVING',
-        'key_exchange'
+        'key_exchange',
+        'sas_challenge',
+        'sas_verified',
+        'sas_rejected'
       ]
       const hasAllowedType = msg.type && ALLOWED_SIGNAL_TYPES.includes(msg.type)
       const hasSdpPayload = msg.offer || msg.answer || msg.candidate || msg.encrypted

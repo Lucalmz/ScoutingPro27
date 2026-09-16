@@ -500,18 +500,11 @@ export function createClientSession(ctx: ClientSessionContext) {
     } else if (data.type === 'sas_verified') {
       console.log('[WebRTC Client Security] Host verified SAS code.')
       if (sas.clientSasState === 'PENDING_VERIFICATION') {
-        sas.clientSasState = 'VERIFIED'
-        const pendingOut = [...sas.clientPendingOutgoing]
-        sas.clientPendingOutgoing = []
-        for (const item of pendingOut) {
-          ctx.sendMessage(item.msg, item.targetId)
+        if (ctx.confirmSas) {
+          ctx.confirmSas('host')
+        } else {
+          sas.confirmSas('host', false, ctx.getCurrentInviteCode(), ctx.callbacks, ctx.sendMessage, ctx.handleChannelMessage)
         }
-        const pendingIn = [...sas.clientPendingIncoming]
-        sas.clientPendingIncoming = []
-        for (const item of pendingIn) {
-          ctx.handleChannelMessage(item.ev, item.senderId)
-        }
-        ctx.callbacks.onSasVerified?.('host')
       }
     } else if (data.type === 'sas_rejected') {
       console.warn('[WebRTC Client Security] Host rejected SAS verification:', data.reason)
