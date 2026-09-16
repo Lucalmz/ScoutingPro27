@@ -23,7 +23,7 @@ export function calculateBragIndex(
       teleopRatio: 1.0,
       endgameUnfulfilled: false,
       hangUnfulfilled: false,
-      label: '⏳ 待实测'
+      label: '待实测'
     }
   }
 
@@ -36,7 +36,7 @@ export function calculateBragIndex(
       teleopRatio: 1.0,
       endgameUnfulfilled: false,
       hangUnfulfilled: false,
-      label: '⏳ 自述待补充'
+      label: '自述待补充'
     }
   }
 

@@ -19,6 +19,7 @@ import HistoryList from '@/components/history/HistoryList.vue'
 import AiChatView from '@/components/ai/AiChatView.vue'
 import EventScoutsPanel from '@/components/scouting/EventScoutsPanel.vue'
 import ScheduleManager from '@/components/schedule/ScheduleManager.vue'
+import SasVerificationModal from '@/components/common/SasVerificationModal.vue'
 import SessionConflictModal from '@/components/common/SessionConflictModal.vue'
 import TakeoverPromptModal from '@/components/common/TakeoverPromptModal.vue'
 import RenameModal from '@/components/common/RenameModal.vue'
@@ -458,6 +459,7 @@ async function handleTakeoverHost() {
       </Transition>
     </main>
 
+    <SasVerificationModal />
     <SessionConflictModal />
     <TakeoverPromptModal />
     <RenameModal v-model:visible="showRenameModal" :event-id="event?.id" />

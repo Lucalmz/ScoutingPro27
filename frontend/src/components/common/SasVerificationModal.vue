@@ -1,8 +1,10 @@
 <script setup lang="ts">
 import { ref, computed, watch, onUnmounted } from 'vue'
+import { useRouter } from 'vue-router'
 import { useConnectionStore } from '@/stores/connection'
 import { useI18n } from 'vue-i18n'
 
+const router = useRouter()
 const conn = useConnectionStore()
 const { t } = useI18n()
 
@@ -42,52 +44,71 @@ function handleConfirm() {
 function handleReject() {
   conn.rejectSas(undefined, 'User manually rejected SAS security code')
 }
+
+function handleDismiss() {
+  conn.clearPendingSas()
+}
+
+function handleLeaveEvent() {
+  conn.rejectSas(undefined, 'User chose to leave event during SAS verification')
+  conn.disconnect()
+  router.push('/')
+}
 </script>
 
 <template>
-  <Transition name="modal">
-    <div v-if="pending" class="sas-modal-overlay">
-      <div class="sas-modal-card">
-      <div class="sas-modal-header">
-        <span class="material-icons header-icon">verified_user</span>
-        <h3>{{ t('connection.sas_modal_title', '端到端通信安全核验 (SAS)') }}</h3>
-      </div>
+  <Teleport to="body">
+    <Transition name="modal">
+      <div v-if="pending" class="sas-modal-overlay">
+        <div class="sas-modal-card">
+          <div class="sas-modal-header">
+            <span class="material-icons header-icon">verified_user</span>
+            <h3>{{ t('connection.sas_modal_title', '端到端通信安全核验 (SAS)') }}</h3>
+            <button class="btn-close-sas" @click="handleDismiss" :title="t('common.close', '关闭')">
+              <span class="material-icons">close</span>
+            </button>
+          </div>
 
-      <div class="sas-modal-body">
-        <div class="sas-warning-box">
-          <span class="material-icons warning-icon">shield</span>
-          <p>
-            {{ t('connection.sas_modal_desc', '为防范公网中间人攻击与会话劫持，在核验完成前，所有业务数据与侦察记录传输已强制挂起拦截。') }}
-          </p>
-        </div>
+          <div class="sas-modal-body">
+            <div class="sas-warning-box">
+              <span class="material-icons warning-icon">shield</span>
+              <p>
+                {{ t('connection.sas_modal_desc', '为防范公网中间人攻击与会话劫持，在核验完成前，所有业务数据与侦察记录传输已强制挂起拦截。') }}
+              </p>
+            </div>
 
-        <div class="sas-peer-info">
-          <span class="peer-label">{{ t('connection.sas_peer_label', '对端用户') }}:</span>
-          <span class="peer-value">{{ pending.username }} ({{ pending.peerId }})</span>
-        </div>
+            <div class="sas-peer-info">
+              <span class="peer-label">{{ t('connection.sas_peer_label', '对端用户') }}:</span>
+              <span class="peer-value">{{ pending.username }} ({{ pending.peerId }})</span>
+            </div>
 
-        <div class="sas-code-container">
-          <div class="sas-code-label">{{ t('connection.sas_code_prompt', '请当面或通过语音核对以下 6 位安全码是否完全一致') }}</div>
-          <div class="sas-code-display">{{ pending.fingerprint }}</div>
-          <div class="sas-countdown">
-            {{ t('connection.sas_countdown', '超时自动断开') }}: <strong>{{ remainingSeconds }}s</strong>
+            <div class="sas-code-container">
+              <div class="sas-code-label">{{ t('connection.sas_code_prompt', '请当面或通过语音核对以下 6 位安全码是否完全一致') }}</div>
+              <div class="sas-code-display">{{ pending.fingerprint }}</div>
+              <div class="sas-countdown">
+                {{ t('connection.sas_countdown', '超时自动断开') }}: <strong>{{ remainingSeconds }}s</strong>
+              </div>
+            </div>
+          </div>
+
+          <div class="sas-modal-footer">
+            <button class="btn btn-secondary" @click="handleLeaveEvent">
+              <span class="material-icons">exit_to_app</span>
+              {{ t('connection.sas_btn_leave', '离开赛事') }}
+            </button>
+            <button class="btn btn-danger" @click="handleReject">
+              <span class="material-icons">link_off</span>
+              {{ t('connection.sas_btn_reject', '不一致（立即断开）') }}
+            </button>
+            <button class="btn btn-success" @click="handleConfirm">
+              <span class="material-icons">check</span>
+              {{ t('connection.sas_btn_confirm', '确认一致') }}
+            </button>
           </div>
         </div>
       </div>
-
-      <div class="sas-modal-footer">
-        <button class="btn btn-danger" @click="handleReject">
-          <span class="material-icons">close</span>
-          {{ t('connection.sas_btn_reject', '不一致（立即断开）') }}
-        </button>
-        <button class="btn btn-success" @click="handleConfirm">
-          <span class="material-icons">check</span>
-          {{ t('connection.sas_btn_confirm', '确认一致') }}
-        </button>
-      </div>
-    </div>
-    </div>
-  </Transition>
+    </Transition>
+  </Teleport>
 </template>
 
 <style scoped>
@@ -100,7 +121,7 @@ function handleReject() {
   background: rgba(0, 0, 0, 0.75);
   backdrop-filter: blur(8px);
   -webkit-backdrop-filter: blur(8px);
-  z-index: 9999;
+  z-index: 100000;
   display: flex;
   align-items: center;
   justify-content: center;
@@ -125,6 +146,25 @@ function handleReject() {
   padding: 1.25rem;
   background: var(--input, #111111);
   border-bottom: 1px solid var(--border, #262626);
+}
+
+.btn-close-sas {
+  margin-left: auto;
+  background: transparent;
+  border: none;
+  color: var(--text-muted, #8b949e);
+  cursor: pointer;
+  padding: 4px;
+  border-radius: 6px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: all 0.2s;
+}
+
+.btn-close-sas:hover {
+  background: rgba(255, 255, 255, 0.1);
+  color: #ffffff;
 }
 
 .sas-modal-header h3 {
@@ -247,6 +287,17 @@ function handleReject() {
   border: none;
   cursor: pointer;
   transition: all 0.15s ease;
+}
+
+.btn-secondary {
+  background: rgba(255, 255, 255, 0.1);
+  color: #c9d1d9;
+  border: 1px solid rgba(255, 255, 255, 0.15);
+}
+
+.btn-secondary:hover {
+  background: rgba(255, 255, 255, 0.18);
+  color: #ffffff;
 }
 
 .btn-danger {

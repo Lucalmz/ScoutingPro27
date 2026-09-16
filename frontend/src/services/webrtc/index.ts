@@ -41,6 +41,8 @@ export function createWebRtcService(callbacks: WebRtcCallbacks): WebRtcService {
   let currentHostSessionId = ''
   let currentClientSessionId = ''
   let currentEventMetadata: ScoutingEvent | null = null
+  let currentUsername = ''
+  let currentUserId = ''
 
   // Host Mutex & Standby State
   let isStandbyHostMode = false
@@ -261,7 +263,9 @@ export function createWebRtcService(callbacks: WebRtcCallbacks): WebRtcService {
         clientPc = null
       }
     },
-    setStatus
+    setStatus,
+    getUsername: () => currentUsername,
+    getUserId: () => currentUserId
   })
 
   async function handleChannelMessage(ev: MessageEvent, senderId?: string): Promise<void> {
@@ -271,7 +275,21 @@ export function createWebRtcService(callbacks: WebRtcCallbacks): WebRtcService {
         : 'VERIFIED'
       : sas.clientSasState
 
-    if (peerSas === 'PENDING_VERIFICATION') {
+    let isControlMsg = false
+    try {
+      if (typeof ev.data === 'string') {
+        const parsed = JSON.parse(ev.data)
+        if (
+          parsed.type === 'SESSION_CONFLICT' ||
+          parsed.type === 'SESSION_KICKED' ||
+          parsed.type === 'TAKEOVER_PROMPT'
+        ) {
+          isControlMsg = true
+        }
+      }
+    } catch {}
+
+    if (peerSas === 'PENDING_VERIFICATION' && !isControlMsg) {
       console.log(`[WebRTC Security Gating] Buffering incoming message from ${senderId || 'host'} (SAS pending verification).`)
       if (isHostMode && senderId) {
         const q = sas.hostPendingIncoming.get(senderId) || []
@@ -293,9 +311,19 @@ export function createWebRtcService(callbacks: WebRtcCallbacks): WebRtcService {
 
   function confirmSas(peerId = 'host'): void {
     sas.confirmSas(peerId, isHostMode, currentInviteCode, callbacks, sendMessage, handleChannelMessage)
+    if (isHostMode && peerId && peerId !== 'host') {
+      signaling?.send({ type: 'sas_verified', hostSessionId }, peerId)
+    } else if (!isHostMode) {
+      signaling?.send({ type: 'sas_verified', clientSessionId: currentClientSessionId })
+    }
   }
 
   function rejectSas(peerId = 'host', reason = 'Security code verification rejected'): void {
+    if (isHostMode && peerId && peerId !== 'host') {
+      signaling?.send({ type: 'sas_rejected', reason, hostSessionId }, peerId)
+    } else if (!isHostMode) {
+      signaling?.send({ type: 'sas_rejected', reason, clientSessionId: currentClientSessionId })
+    }
     sas.rejectSas(
       peerId,
       reason,
@@ -344,6 +372,9 @@ export function createWebRtcService(callbacks: WebRtcCallbacks): WebRtcService {
     sendMessage,
     handleChannelMessage,
     rejectSas,
+    confirmSas,
+    getUsername: () => currentUsername,
+    getUserId: () => currentUserId,
     callbacks
   })
 
@@ -392,6 +423,9 @@ export function createWebRtcService(callbacks: WebRtcCallbacks): WebRtcService {
     sendMessage,
     handleChannelMessage,
     rejectSas,
+    confirmSas,
+    getUsername: () => currentUsername,
+    getUserId: () => currentUserId,
     callbacks
   })
 
@@ -534,12 +568,14 @@ export function createWebRtcService(callbacks: WebRtcCallbacks): WebRtcService {
   // =====================================================
   // Host: create room & wait for client offer
   // =====================================================
-  async function host(inviteCode: string, eventMetadata?: ScoutingEvent): Promise<void> {
+  async function host(inviteCode: string, eventMetadata?: ScoutingEvent, username?: string, userId?: string): Promise<void> {
     isHostMode = true
     isStandbyHostMode = false
     isProbing = true
     isExplicitlyClosed = false
     currentInviteCode = inviteCode
+    if (username) currentUsername = username
+    if (userId) currentUserId = userId
     if (eventMetadata) {
       currentEventMetadata = eventMetadata
     }
@@ -702,10 +738,12 @@ export function createWebRtcService(callbacks: WebRtcCallbacks): WebRtcService {
   // =====================================================
   // Client: join a room via invite code
   // =====================================================
-  async function join(inviteCode: string): Promise<void> {
+  async function join(inviteCode: string, username?: string, userId?: string): Promise<void> {
     isHostMode = false
     isExplicitlyClosed = false
     currentInviteCode = inviteCode
+    if (username) currentUsername = username
+    if (userId) currentUserId = userId
     setStatus('connecting')
 
     try {

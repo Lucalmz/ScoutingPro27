@@ -21,6 +21,20 @@ vi.mock('vue-i18n', () => ({
   })
 }))
 
+vi.mock('vue-router', () => ({
+  useRouter: () => ({
+    push: vi.fn()
+  })
+}))
+
+const mountModal = () => mount(SessionConflictModal, {
+  global: {
+    stubs: {
+      teleport: true
+    }
+  }
+})
+
 describe('SessionConflictModal.vue', () => {
   beforeEach(() => {
     setActivePinia(createPinia())
@@ -31,7 +45,7 @@ describe('SessionConflictModal.vue', () => {
     const connStore = useConnectionStore()
     connStore.sessionConflict = null
 
-    const wrapper = mount(SessionConflictModal)
+    const wrapper = mountModal()
     expect(wrapper.find('.modal-card').exists()).toBe(false)
   })
 
@@ -47,7 +61,7 @@ describe('SessionConflictModal.vue', () => {
     })
 
     it('renders both rename and merge account branches with divider', () => {
-      const wrapper = mount(SessionConflictModal)
+      const wrapper = mountModal()
       expect(wrapper.find('.modal-card').exists()).toBe(true)
 
       // Title & desc
@@ -83,7 +97,7 @@ describe('SessionConflictModal.vue', () => {
       })
       const requestSyncSpy = vi.spyOn(connStore, 'requestSync').mockImplementation(() => {})
 
-      const wrapper = mount(SessionConflictModal)
+      const wrapper = mountModal()
       const renameBtn = wrapper.find('.option-block .btn-primary')
       await renameBtn.trigger('click')
       await flushPromises()
@@ -108,7 +122,7 @@ describe('SessionConflictModal.vue', () => {
       const toastSpy = vi.spyOn(toastStore, 'showToast').mockImplementation(() => {})
       const requestSyncSpy = vi.spyOn(connStore, 'requestSync').mockImplementation(() => {})
 
-      const wrapper = mount(SessionConflictModal)
+      const wrapper = mountModal()
       const passwordInput = wrapper.find('.merge-block input[type="password"]')
       await passwordInput.setValue('CorrectSecretPass')
 
@@ -136,7 +150,7 @@ describe('SessionConflictModal.vue', () => {
         error: 'Invalid target account password'
       })
 
-      const wrapper = mount(SessionConflictModal)
+      const wrapper = mountModal()
       const passwordInput = wrapper.find('.merge-block input[type="password"]')
       await passwordInput.setValue('WrongPassword')
 
@@ -160,7 +174,7 @@ describe('SessionConflictModal.vue', () => {
     })
 
     it('renders takeover and temporary rename options', () => {
-      const wrapper = mount(SessionConflictModal)
+      const wrapper = mountModal()
       expect(wrapper.find('.modal-card').exists()).toBe(true)
       expect(wrapper.text()).toContain('conflict.option_takeover')
       expect(wrapper.find('.takeover-action button').exists()).toBe(true)
@@ -174,7 +188,7 @@ describe('SessionConflictModal.vue', () => {
       userStore.user = { id: 'charlie-user-uuid', username: 'Charlie', token: 'token' }
       const takeoverSpy = vi.spyOn(connStore, 'requestTakeover').mockImplementation(() => {})
 
-      const wrapper = mount(SessionConflictModal)
+      const wrapper = mountModal()
       const takeoverBtn = wrapper.find('.takeover-action button')
       await takeoverBtn.trigger('click')
 

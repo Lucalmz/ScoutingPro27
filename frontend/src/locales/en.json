@@ -269,6 +269,7 @@
     "sas_countdown": "Auto disconnect in",
     "sas_btn_confirm": "Confirm Match",
     "sas_btn_reject": "Mismatch (Disconnect)",
+    "sas_btn_leave": "Leave Event",
     "ice_stalled": "Probing link...",
     "ice_stalled_tooltip": "Link connection check in progress, retrying or switching to fallback..."
   },
@@ -469,8 +470,9 @@
     "option_duplicate_merge_title": "Option 2: Merge into Existing Account",
     "option_duplicate_merge_hint": "If this is your existing account from another device, enter its password to verify ownership and merge data:",
     "target_password_placeholder": "Enter target account password to verify ownership",
-    "btn_merging": "Merging...",
-    "btn_confirm_merge": "Verify & Merge Account"
+    "btn_merging": "Verifying & Merging...",
+    "btn_confirm_merge": "Verify Password & Merge",
+    "btn_exit": "Leave Event / Return to Dashboard"
   },
   "takeover": {
     "title": "Device Takeover Request",
@@ -1049,10 +1051,10 @@
     "total_scored": "Scored",
     "completed_cycles": "Cycles",
     "missed_balls": "Missed",
-    "teleop_giant_hit": "🎯 SCORED (+1)",
+    "teleop_giant_hit": "SCORED (+1)",
     "teleop_giant_sub": "+2 pts/ball • Rapid taps cluster into cycle",
-    "teleop_miss": "❌ Miss (+1)",
-    "teleop_undo": "↩ Undo Last Ball",
+    "teleop_miss": "Miss (+1)",
+    "teleop_undo": "Undo Last Ball",
     "flower_pts": "+10 pts",
     "broken_sub": "Mechanical jam / power loss / stalled",
     "quick_notes": "Quick Note Tags",

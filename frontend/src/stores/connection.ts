@@ -207,6 +207,13 @@ export const useConnectionStore = defineStore('connection', () => {
     pendingSas.value = null
   }
 
+  function disconnect() {
+    rtcService.value?.disconnect()
+    pendingSas.value = null
+    sessionConflict.value = null
+    status.value = 'offline'
+  }
+
   return {
     status,
     transportInfo,
@@ -235,6 +242,7 @@ export const useConnectionStore = defineStore('connection', () => {
     setIsIceStalled,
     confirmSas,
     rejectSas,
+    disconnect,
     requestTakeover,
     respondTakeoverDecision,
     setRtcService,

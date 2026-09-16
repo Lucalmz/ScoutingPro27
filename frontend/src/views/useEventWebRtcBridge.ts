@@ -372,9 +372,9 @@ export function useEventWebRtcBridge({
 
     try {
       if (eventStore.isHost) {
-        await rtc.host(evt.inviteCode, evt)
+        await rtc.host(evt.inviteCode, evt, userStore.username, userStore.userId)
       } else {
-        await rtc.join(evt.inviteCode)
+        await rtc.join(evt.inviteCode, userStore.username, userStore.userId)
       }
     } catch {
       // WebRTC may not always succeed; app remains usable offline

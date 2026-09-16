@@ -54,10 +54,15 @@ export function createMessageDispatcher(ctx: MessageDispatcherContext) {
   function sendMessage(msg: WebRtcMessage, targetId?: string): Promise<void> {
     console.log(`[WebRTC] Sending message ${msg.type} to ${targetId || 'all'}`)
     const payload = JSON.stringify(msg)
+    const isControlMsg =
+      msg.type === 'SESSION_CONFLICT' ||
+      msg.type === 'SESSION_KICKED' ||
+      msg.type === 'TAKEOVER_PROMPT'
+
     if (ctx.isHostMode()) {
       if (targetId) {
         const peerSas = ctx.sas.clientSasStates.get(targetId)
-        if (peerSas === 'PENDING_VERIFICATION') {
+        if (peerSas === 'PENDING_VERIFICATION' && !isControlMsg) {
           console.log(`[WebRTC Security Gating] Host: Buffering outgoing ${msg.type} for peer ${targetId} (SAS pending).`)
           const q = ctx.sas.hostPendingOutgoing.get(targetId) || []
           q.push({ msg, targetId })
@@ -78,7 +83,7 @@ export function createMessageDispatcher(ctx: MessageDispatcherContext) {
         const promises: Promise<void>[] = []
         ctx.clients.forEach((c, peerId) => {
           const peerSas = ctx.sas.clientSasStates.get(peerId)
-          if (peerSas === 'PENDING_VERIFICATION') {
+          if (peerSas === 'PENDING_VERIFICATION' && !isControlMsg) {
             console.log(`[WebRTC Security Gating] Host: Buffering broadcast ${msg.type} for peer ${peerId} (SAS pending).`)
             const q = ctx.sas.hostPendingOutgoing.get(peerId) || []
             q.push({ msg, targetId: peerId })
@@ -94,7 +99,7 @@ export function createMessageDispatcher(ctx: MessageDispatcherContext) {
         return Promise.all(promises).then(() => {})
       }
     } else {
-      if (ctx.sas.clientSasState === 'PENDING_VERIFICATION') {
+      if (ctx.sas.clientSasState === 'PENDING_VERIFICATION' && !isControlMsg) {
         console.log(`[WebRTC Security Gating] Client: Buffering outgoing ${msg.type} to host (SAS pending).`)
         ctx.sas.clientPendingOutgoing.push({ msg, targetId })
         return Promise.resolve()

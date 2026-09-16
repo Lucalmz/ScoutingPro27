@@ -593,7 +593,10 @@ async function handleSubmit() {
               @click="allianceColor = 'red'; hapticSelection()"
             >
               <div class="alliance-tag">RED ALLIANCE</div>
-              <span class="alliance-name">🔴 {{ t('scouting.red') }}</span>
+              <div class="alliance-label-row">
+                <span class="alliance-dot red"></span>
+                <span class="alliance-name">{{ t('scouting.red') }}</span>
+              </div>
               <span v-if="allianceColor === 'red'" class="material-icons check-mark">check_circle</span>
             </button>
 
@@ -604,7 +607,10 @@ async function handleSubmit() {
               @click="allianceColor = 'blue'; hapticSelection()"
             >
               <div class="alliance-tag">BLUE ALLIANCE</div>
-              <span class="alliance-name">🔵 {{ t('scouting.blue') }}</span>
+              <div class="alliance-label-row">
+                <span class="alliance-dot blue"></span>
+                <span class="alliance-name">{{ t('scouting.blue') }}</span>
+              </div>
               <span v-if="allianceColor === 'blue'" class="material-icons check-mark">check_circle</span>
             </button>
           </div>
@@ -667,7 +673,7 @@ async function handleSubmit() {
                 inputmode="numeric"
                 v-model="team.teamNumber"
                 class="giant-num-input"
-                placeholder="27570"
+                placeholder=""
               />
             </div>
           </div>
@@ -993,7 +999,8 @@ async function handleSubmit() {
           <div class="summary-hero-top">
             <span class="summary-match-badge">Match #{{ matchNumber }}</span>
             <span class="summary-alliance-badge" :class="allianceColor">
-              {{ allianceColor === 'red' ? '🔴 ' + t('scouting.red') : '🔵 ' + t('scouting.blue') }}
+              <span class="alliance-dot mini" :class="allianceColor"></span>
+              <span>{{ allianceColor === 'red' ? t('scouting.red') : t('scouting.blue') }}</span>
             </span>
             <span class="summary-team-badge">Team #{{ team.teamNumber }}</span>
           </div>
@@ -1363,10 +1370,40 @@ async function handleSubmit() {
   opacity: 0.7;
 }
 
+.alliance-label-row {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  margin-top: 2px;
+}
+
+.alliance-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  display: inline-block;
+  flex-shrink: 0;
+}
+
+.alliance-dot.red {
+  background: #ef4444;
+  box-shadow: 0 0 6px #ef4444;
+}
+
+.alliance-dot.blue {
+  background: #3b82f6;
+  box-shadow: 0 0 6px #3b82f6;
+}
+
+.alliance-dot.mini {
+  width: 6px;
+  height: 6px;
+  margin-right: 4px;
+}
+
 .alliance-name {
   font-size: 15px;
   font-weight: 800;
-  margin-top: 2px;
 }
 
 .alliance-btn.red-btn {

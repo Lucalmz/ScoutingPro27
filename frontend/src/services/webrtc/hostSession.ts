@@ -40,6 +40,9 @@ export interface HostSessionContext {
   sendMessage: (msg: WebRtcMessage, targetId?: string) => Promise<void>
   handleChannelMessage: (ev: MessageEvent, senderId?: string) => Promise<void>
   rejectSas: (peerId?: string, reason?: string) => void
+  confirmSas?: (peerId: string) => void
+  getUsername?: () => string
+  getUserId?: () => string
   callbacks: WebRtcCallbacks
 }
 
@@ -376,28 +379,38 @@ export function createHostSignalingHandler(ctx: HostSessionContext) {
               console.warn(
                 `[WebRTC Host Security TOFU] First-seen unverified peer ${sender} (${effectiveUsername}) requires manual SAS verification.`
               )
+              const isAlreadyPending = sas.sasTimeoutTimers.has(sender)
               sas.clientSasStates.set(sender, 'PENDING_VERIFICATION')
               const fingerprint = sas.clientFingerprints.get(sender)
               if (fingerprint) {
-                if (sas.sasTimeoutTimers.has(sender)) {
-                  clearTimeout(sas.sasTimeoutTimers.get(sender))
-                }
-                sas.sasTimeoutTimers.set(
-                  sender,
-                  setTimeout(() => {
-                    if (sas.clientSasStates.get(sender) === 'PENDING_VERIFICATION') {
-                      ctx.rejectSas(sender, 'SAS verification timeout (60s)')
-                    }
-                  }, 60000)
-                )
+                if (!isAlreadyPending) {
+                  sas.sasTimeoutTimers.set(
+                    sender,
+                    setTimeout(() => {
+                      if (sas.clientSasStates.get(sender) === 'PENDING_VERIFICATION') {
+                        ctx.rejectSas(sender, 'SAS verification timeout (60s)')
+                      }
+                    }, 60000)
+                  )
 
-                ctx.callbacks.onSasVerificationRequired?.(
+                  ctx.callbacks.onSasVerificationRequired?.(
+                    {
+                      peerId: sender,
+                      username: effectiveUsername,
+                      ecdhPublicKey: data.ecdhPublicKey
+                    },
+                    fingerprint
+                  )
+                }
+
+                signaling.send(
                   {
-                    peerId: sender,
-                    username: effectiveUsername,
-                    ecdhPublicKey: data.ecdhPublicKey
+                    type: 'sas_challenge',
+                    fingerprint,
+                    hostSessionId,
+                    username: ctx.getUsername?.() || 'Host'
                   },
-                  fingerprint
+                  sender
                 )
               }
             }
@@ -408,28 +421,38 @@ export function createHostSignalingHandler(ctx: HostSessionContext) {
               return
             } else {
               console.warn(`[WebRTC Host Security NOTICE] ${trustEval.message}`)
+              const isAlreadyPending = sas.sasTimeoutTimers.has(sender)
               sas.clientSasStates.set(sender, 'PENDING_VERIFICATION')
               const fingerprint = sas.clientFingerprints.get(sender)
               if (fingerprint) {
-                if (sas.sasTimeoutTimers.has(sender)) {
-                  clearTimeout(sas.sasTimeoutTimers.get(sender))
-                }
-                sas.sasTimeoutTimers.set(
-                  sender,
-                  setTimeout(() => {
-                    if (sas.clientSasStates.get(sender) === 'PENDING_VERIFICATION') {
-                      ctx.rejectSas(sender, 'SAS verification timeout (60s)')
-                    }
-                  }, 60000)
-                )
+                if (!isAlreadyPending) {
+                  sas.sasTimeoutTimers.set(
+                    sender,
+                    setTimeout(() => {
+                      if (sas.clientSasStates.get(sender) === 'PENDING_VERIFICATION') {
+                        ctx.rejectSas(sender, 'SAS verification timeout (60s)')
+                      }
+                    }, 60000)
+                  )
 
-                ctx.callbacks.onSasVerificationRequired?.(
+                  ctx.callbacks.onSasVerificationRequired?.(
+                    {
+                      peerId: sender,
+                      username: effectiveUsername,
+                      ecdhPublicKey: data.ecdhPublicKey
+                    },
+                    fingerprint
+                  )
+                }
+
+                signaling.send(
                   {
-                    peerId: sender,
-                    username: effectiveUsername,
-                    ecdhPublicKey: data.ecdhPublicKey
+                    type: 'sas_challenge',
+                    fingerprint,
+                    hostSessionId,
+                    username: ctx.getUsername?.() || 'Host'
                   },
-                  fingerprint
+                  sender
                 )
               }
             }
@@ -528,6 +551,18 @@ export function createHostSignalingHandler(ctx: HostSessionContext) {
           }
         }
       })
+    } else if (data.type === 'sas_verified') {
+      console.log(`[WebRTC Host Security] Peer ${sender} confirmed SAS verification.`)
+      if (sas.clientSasStates.get(sender) === 'PENDING_VERIFICATION') {
+        if (ctx.confirmSas) {
+          ctx.confirmSas(sender)
+        } else {
+          sas.confirmSas(sender, true, currentInviteCode, ctx.callbacks, ctx.sendMessage, ctx.handleChannelMessage)
+        }
+      }
+    } else if (data.type === 'sas_rejected') {
+      console.warn(`[WebRTC Host Security] Peer ${sender} rejected SAS verification.`)
+      ctx.rejectSas(sender, data.reason || 'Rejected by peer')
     }
   }
 }

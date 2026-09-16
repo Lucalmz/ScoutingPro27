@@ -269,6 +269,7 @@
     "sas_countdown": "超时自动断开",
     "sas_btn_confirm": "确认一致",
     "sas_btn_reject": "不一致（立即断开）",
+    "sas_btn_leave": "离开赛事",
     "ice_stalled": "线路探测中...",
     "ice_stalled_tooltip": "链路连接检测中，正在自动尝试重试或备用通道..."
   },
@@ -470,7 +471,8 @@
     "option_duplicate_merge_hint": "如果这是您在其他设备上的已有主账号，请输入该账号密码验证所有权并合并本机数据：",
     "target_password_placeholder": "请输入主账号密码验证所有权",
     "btn_merging": "验证并合并中...",
-    "btn_confirm_merge": "验证密码并合并账号"
+    "btn_confirm_merge": "验证密码并合并账号",
+    "btn_exit": "离开赛事 / 返回大厅"
   },
   "takeover": {
     "title": "新设备请求接管身份",
@@ -1049,10 +1051,10 @@
     "total_scored": "总进球",
     "completed_cycles": "已打轮次",
     "missed_balls": "丢球",
-    "teleop_giant_hit": "🎯 进球 SCORED (+1)",
+    "teleop_giant_hit": "进球 SCORED (+1)",
     "teleop_giant_sub": "+2 分/球 • 快速连续连按自动成轮",
-    "teleop_miss": "❌ 丢球 Miss (+1)",
-    "teleop_undo": "↩ 撤销上一球 Undo",
+    "teleop_miss": "丢球 Miss (+1)",
+    "teleop_undo": "撤销上一球 Undo",
     "flower_pts": "+10 分",
     "broken_sub": "机械脱扣 / 断电 / 趴窝",
     "quick_notes": "快捷评价标签",

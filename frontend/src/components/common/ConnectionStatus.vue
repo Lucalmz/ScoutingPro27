@@ -3,7 +3,6 @@ import { computed } from 'vue'
 import { useConnectionStore } from '@/stores/connection'
 import { useI18n } from 'vue-i18n'
 import { hapticLight } from '@/utils/haptics'
-import SasVerificationModal from './SasVerificationModal.vue'
 
 const conn = useConnectionStore()
 const { t } = useI18n()
@@ -115,9 +114,6 @@ const transportTooltip = computed(() => {
       </span>
       <span>{{ t('connection.reconnect_now') }}</span>
     </button>
-
-    <!-- SAS Verification Modal -->
-    <SasVerificationModal />
   </div>
 </template>
 

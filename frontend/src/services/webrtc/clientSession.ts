@@ -50,6 +50,9 @@ export interface ClientSessionContext {
   sendMessage: (msg: WebRtcMessage, targetId?: string) => Promise<void>
   handleChannelMessage: (ev: MessageEvent, senderId?: string) => Promise<void>
   rejectSas: (peerId?: string, reason?: string) => void
+  confirmSas?: (peerId?: string) => void
+  getUsername?: () => string
+  getUserId?: () => string
   callbacks: WebRtcCallbacks
 }
 
@@ -71,6 +74,14 @@ export function createClientSession(ctx: ClientSessionContext) {
 
   function triggerClientReconnect() {
     if (ctx.isExplicitlyClosed() || ctx.getStatus() === 'long_offline') return
+    if (ctx.sas.clientSasState === 'PENDING_VERIFICATION') {
+      console.log('[WebRTC Client] SAS verification pending; pausing auto-reconnect.')
+      return
+    }
+    if (ctx.sas.clientSasState === 'REJECTED') {
+      console.warn('[WebRTC Client] SAS verification rejected; suppressing auto-reconnect.')
+      return
+    }
 
     clearReconnectTimer()
 
@@ -142,6 +153,9 @@ export function createClientSession(ctx: ClientSessionContext) {
     dc.onclose = () => {
       ctx.setClientSender(null)
       if (isRebuilding) return
+      if (ctx.sas.clientSasState === 'PENDING_VERIFICATION' || ctx.sas.clientSasState === 'REJECTED') {
+        return
+      }
       if (!ctx.isExplicitlyClosed() && ctx.getStatus() !== 'long_offline') {
         triggerClientReconnect()
       }
@@ -173,7 +187,9 @@ export function createClientSession(ctx: ClientSessionContext) {
         type: offer.type,
         sdp: optimizeSdpCandidates(pc?.localDescription?.sdp || offer.sdp || ''),
         ticket: handshakeTicket,
-        deviceId: localDeviceId
+        deviceId: localDeviceId,
+        username: ctx.getUsername?.(),
+        userId: ctx.getUserId?.()
       }
 
       let offerPayload: any = rawOffer
@@ -196,7 +212,9 @@ export function createClientSession(ctx: ClientSessionContext) {
         ecdhPublicKey: localEcdhPubHex,
         deviceId: localDeviceId,
         clientSessionId,
-        hostSessionId: ctx.getCurrentHostSessionId()
+        hostSessionId: ctx.getCurrentHostSessionId(),
+        username: ctx.getUsername?.(),
+        userId: ctx.getUserId?.()
       })
     } catch (err) {
       console.error('Error creating offer:', err)
@@ -453,6 +471,51 @@ export function createClientSession(ctx: ClientSessionContext) {
         pending.push(candidateData)
         ctx.setClientPendingCandidates(pending)
       }
+    } else if (data.type === 'sas_challenge') {
+      console.warn('[WebRTC Client Security] Host issued SAS security challenge. Code:', data.fingerprint)
+      sas.clientSasState = 'PENDING_VERIFICATION'
+      sas.clientSecurityFingerprint = data.fingerprint
+      clearReconnectTimer()
+
+      if (sas.sasTimeoutTimers.has('host')) {
+        clearTimeout(sas.sasTimeoutTimers.get('host'))
+      }
+      sas.sasTimeoutTimers.set(
+        'host',
+        setTimeout(() => {
+          if (sas.clientSasState === 'PENDING_VERIFICATION') {
+            ctx.rejectSas('host', 'SAS verification timeout (60s)')
+          }
+        }, 60000)
+      )
+
+      ctx.callbacks.onSasVerificationRequired?.(
+        {
+          peerId: 'host',
+          username: data.username || 'Host',
+          ecdhPublicKey: sas.clientHostEcdhPubHex || ''
+        },
+        data.fingerprint
+      )
+    } else if (data.type === 'sas_verified') {
+      console.log('[WebRTC Client Security] Host verified SAS code.')
+      if (sas.clientSasState === 'PENDING_VERIFICATION') {
+        sas.clientSasState = 'VERIFIED'
+        const pendingOut = [...sas.clientPendingOutgoing]
+        sas.clientPendingOutgoing = []
+        for (const item of pendingOut) {
+          ctx.sendMessage(item.msg, item.targetId)
+        }
+        const pendingIn = [...sas.clientPendingIncoming]
+        sas.clientPendingIncoming = []
+        for (const item of pendingIn) {
+          ctx.handleChannelMessage(item.ev, item.senderId)
+        }
+        ctx.callbacks.onSasVerified?.('host')
+      }
+    } else if (data.type === 'sas_rejected') {
+      console.warn('[WebRTC Client Security] Host rejected SAS verification:', data.reason)
+      ctx.rejectSas('host', data.reason || 'Rejected by host')
     }
   }
 

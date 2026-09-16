@@ -36,6 +36,8 @@ export interface ChannelMessageHandlerContext {
   setHostSeqCounter: (n: number) => void
   closeClient: () => void
   setStatus: (s: ConnectionStatus) => void
+  getUsername?: () => string
+  getUserId?: () => string
 }
 
 export function createChannelMessageHandler(ctx: ChannelMessageHandlerContext) {
@@ -99,7 +101,8 @@ export function createChannelMessageHandler(ctx: ChannelMessageHandlerContext) {
               let hostUser: any = null
               if (getActivePinia()) {
                 try {
-                  hostUser = useUserStore().user
+                  const uStore = useUserStore()
+                  hostUser = uStore.user || (uStore.username ? { id: uStore.userId, username: uStore.username } : null)
                 } catch {}
               }
               if (!hostUser && typeof localStorage !== 'undefined') {
@@ -107,6 +110,9 @@ export function createChannelMessageHandler(ctx: ChannelMessageHandlerContext) {
                   const raw = localStorage.getItem('scoutingpro-user')
                   if (raw) hostUser = JSON.parse(raw)
                 } catch {}
+              }
+              if (!hostUser && ctx.getUsername?.()) {
+                hostUser = { id: ctx.getUserId?.() || 'host', username: ctx.getUsername?.() }
               }
 
               if (

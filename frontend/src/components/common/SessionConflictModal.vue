@@ -1,11 +1,13 @@
 <script setup lang="ts">
 import { ref, watch, computed } from 'vue'
+import { useRouter } from 'vue-router'
 import { useUserStore } from '@/stores/user'
 import { useConnectionStore } from '@/stores/connection'
 import { useEventStore } from '@/stores/events'
 import { useToastStore } from '@/stores/toast'
 import { useI18n } from 'vue-i18n'
 
+const router = useRouter()
 const { t } = useI18n()
 const userStore = useUserStore()
 const connStore = useConnectionStore()
@@ -20,6 +22,16 @@ const mergeErrorMsg = ref<string | null>(null)
 const isTakeoverRequested = ref(false)
 const cooldownSeconds = ref(0)
 let cooldownTimer: any = null
+
+function handleClose() {
+  connStore.clearSessionConflict()
+}
+
+function handleExitEvent() {
+  connStore.clearSessionConflict()
+  connStore.disconnect()
+  router.push('/')
+}
 
 const conflictData = computed(() => connStore.sessionConflict)
 
@@ -131,17 +143,21 @@ function handleTakeover() {
 </script>
 
 <template>
-  <Transition name="modal">
-    <div v-if="conflictData" class="modal-overlay">
-      <div class="modal-card">
-      <div class="modal-header">
-        <div class="header-icon" :class="{ 'warning-icon': isDuplicateName }">
-          <span class="icon">{{ isDuplicateName ? 'badge' : 'warning' }}</span>
-        </div>
-        <h3 class="modal-title">
-          {{ isDuplicateName ? t('conflict.duplicate_name_title') : t('conflict.title') }}
-        </h3>
-      </div>
+  <Teleport to="body">
+    <Transition name="modal">
+      <div v-if="conflictData" class="modal-overlay">
+        <div class="modal-card">
+          <div class="modal-header">
+            <div class="header-icon" :class="{ 'warning-icon': isDuplicateName }">
+              <span class="icon">{{ isDuplicateName ? 'badge' : 'warning' }}</span>
+            </div>
+            <h3 class="modal-title">
+              {{ isDuplicateName ? t('conflict.duplicate_name_title') : t('conflict.title') }}
+            </h3>
+            <button class="btn-close-modal" @click="handleClose" :title="t('common.close', '关闭')">
+              <span class="material-icons">close</span>
+            </button>
+          </div>
 
       <p class="modal-desc">
         {{ isDuplicateName ? t('conflict.duplicate_name_desc', { name: conflictData.conflictingUsername }) : t('conflict.description', { name: conflictData.conflictingUsername }) }}
@@ -277,9 +293,17 @@ function handleTakeover() {
           </div>
         </template>
       </div>
+
+      <div class="modal-footer-actions">
+        <button class="btn btn-secondary-exit" @click="handleExitEvent">
+          <span class="material-icons">exit_to_app</span>
+          {{ t('conflict.btn_exit', '离开赛事 / 返回大厅') }}
+        </button>
+      </div>
     </div>
   </div>
   </Transition>
+</Teleport>
 </template>
 
 <style scoped>
@@ -295,7 +319,7 @@ function handleTakeover() {
   display: flex;
   align-items: center;
   justify-content: center;
-  z-index: 9999;
+  z-index: 100000;
   padding: 1.5rem;
 }
 
@@ -315,6 +339,53 @@ function handleTakeover() {
   align-items: center;
   gap: 0.75rem;
   margin-bottom: 0.75rem;
+}
+
+.btn-close-modal {
+  margin-left: auto;
+  background: transparent;
+  border: none;
+  color: var(--text-muted, #8b949e);
+  cursor: pointer;
+  padding: 4px;
+  border-radius: 6px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: all 0.2s;
+}
+
+.btn-close-modal:hover {
+  background: rgba(255, 255, 255, 0.1);
+  color: #ffffff;
+}
+
+.modal-footer-actions {
+  margin-top: 1.25rem;
+  display: flex;
+  justify-content: flex-end;
+  border-top: 1px solid var(--border, #262626);
+  padding-top: 1rem;
+}
+
+.btn-secondary-exit {
+  background: rgba(255, 255, 255, 0.08);
+  color: #c9d1d9;
+  border: 1px solid rgba(255, 255, 255, 0.15);
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 8px 14px;
+  border-radius: 8px;
+  font-size: 13px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: all 0.2s;
+}
+
+.btn-secondary-exit:hover {
+  background: rgba(255, 255, 255, 0.16);
+  color: #ffffff;
 }
 
 .header-icon {
