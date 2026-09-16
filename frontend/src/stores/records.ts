@@ -18,6 +18,7 @@ import { useToastStore } from '@/stores/toast'
 import type { ScoutingRecord, RankingRow, OfficialMatch, TeamTagItem } from '@/types'
 import { calculateScoutReliability, calculateRankings } from '@/utils/analytics/rankings'
 import { calculateMatchDiscrepancies, type MatchDiscrepancy } from '@/utils/analytics/audit'
+import { i18n } from '@/i18n'
 
 function loadFromStorage<T>(key: string, defaultVal: T): T {
   try {
@@ -51,7 +52,7 @@ export const useRecordStore = defineStore('records', () => {
     } catch (e) {
       console.error(`Failed to save ${key} to localStorage (Quota exceeded?)`, e)
       error.value = 'Local storage quota exceeded. Please clear some space.'
-      useToastStore().showToast('本地存储空间不足，数据可能丢失！', 'error')
+      useToastStore().showToast(i18n.global.t('toast.storage_quota_exceeded'), 'error')
     }
   }
 
@@ -403,9 +404,11 @@ export const useRecordStore = defineStore('records', () => {
             if (newlyConflicted) {
               try {
                 const inboxStore = useInboxStore()
+                const matchStr = String(savedLocal.matchNumber)
+                const teamStr = String(savedLocal.teamNumber)
                 inboxStore.addMessage({
-                  title: `数据冲突: Match #${savedLocal.matchNumber} 战队 ${savedLocal.teamNumber}`,
-                  body: `检测到多位侦察员针对同一场次相同战队提交了不同记录，请前往对账解决。`,
+                  title: i18n.global.t('toast.conflict_detected_title', { match: matchStr, team: teamStr }),
+                  body: i18n.global.t('toast.conflict_detected_body'),
                   type: 'conflict',
                   conflictMatchNumber: savedLocal.matchNumber,
                   conflictTeamNumber: savedLocal.teamNumber,

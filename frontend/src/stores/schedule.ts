@@ -9,6 +9,7 @@ import {
 } from '@/services/api'
 import { useConnectionStore } from './connection'
 import { getTournamentLevelOrder } from '@/utils/tournament'
+import { i18n } from '@/i18n'
 
 /**
  * Deduplicate and normalize schedule items by numeric matchNumber
@@ -291,7 +292,7 @@ export const useScheduleStore = defineStore('schedule', () => {
   // --- 从 FTC 官方比赛数据一键导入 ---
   async function importFromFtcOfficial(eventId: string, officialMatches: OfficialMatch[], replace = true) {
     if (!officialMatches || officialMatches.length === 0) {
-      throw new Error('没有可用的官方比赛数据')
+      throw new Error(i18n.global.t('schedule.no_official_data'))
     }
 
     const items: MatchScheduleItem[] = []
@@ -328,7 +329,7 @@ export const useScheduleStore = defineStore('schedule', () => {
     }
 
     if (items.length === 0) {
-      throw new Error('未能从官方数据中解析出有效的红蓝对阵队伍')
+      throw new Error(i18n.global.t('schedule.no_valid_alliances'))
     }
 
     return await importSchedules(eventId, items, replace, true)

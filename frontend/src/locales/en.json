@@ -20,6 +20,7 @@
     "lang_en": "English"
   },
   "dashboard": {
+    "title": "Dashboard",
     "welcome": "Welcome,",
     "no_events": "You haven't joined any events yet.",
     "mobile_no_events_tip": "Tap 'Join Event' above and enter the 6-digit invite code from the host screen to start!",
@@ -43,6 +44,7 @@
   "event": {
     "back": "Back",
     "event": "Event",
+    "role": "Role",
     "code": "Code:",
     "host": "Host",
     "client": "Client",
@@ -224,6 +226,8 @@
     "offline": "Offline",
     "long_offline": "Long Offline",
     "reconnect_now": "Reconnect",
+    "congested": "Congested",
+    "status": "Status",
     "congested_banner": "Network is congested, data is queuing for sync...",
     "degraded": "Offline (Data saved locally)",
     "unstable": "Congested...",
@@ -259,7 +263,14 @@
     "network_error": "Network error, please check connection",
     "welcome_back": "Welcome back {name}",
     "conflict_error": "Save failed: You have already submitted data for Match {match} - Team {team}.",
-    "conflict_badge": "[CONFLICT! Please check match/team]"
+    "conflict_badge": "[CONFLICT! Please check match/team]",
+    "storage_quota_exceeded": "Local storage quota exceeded, data might be lost!",
+    "conflict_detected_title": "Data Conflict: Match #{match} Team {team}",
+    "conflict_detected_body": "Multiple scouters submitted conflicting records for this match and team. Please resolve via reconciliation.",
+    "account_merged_success": "Successfully merged account into {name}",
+    "account_merge_failed": "Failed to merge account. Please try again.",
+    "login_failed": "Login failed. Please try again.",
+    "register_failed": "Registration failed. Please try again."
   },
   "errors": {
     "network_unreachable": "Unable to connect to the backend service. Please ensure ScoutingPro is running and network is connected.",
@@ -587,6 +598,8 @@
     "ftc_no_matches_found": "No schedule found on FTC API for event [{code}]",
     "sync_official_success": "Successfully synced {count} official matches and scores!",
     "sync_official_failed": "Official schedule sync failed: ",
+    "no_official_data": "No official match data available",
+    "no_valid_alliances": "Failed to parse valid red and blue alliances from official data",
     "ftc_bound_desc": "Will pull all Qualification and Playoff matches and scores directly from FIRST Inspires API.",
     "ftc_unbound_notice": "No FTC event code bound yet",
     "ftc_unbound_desc": "Go to 'Scouts & Settings' to bind an FTC Official Event Code (e.g. USNYROC2) to enable one-click sync.",
@@ -732,7 +745,9 @@
     "scouts": "Scouts",
     "history": "History",
     "ai": "AI Chat",
-    "more": "More"
+    "more": "More",
+    "views": "Views",
+    "tools": "Tools"
   },
   "pit_scout": {
     "title": "Pit Scouting",

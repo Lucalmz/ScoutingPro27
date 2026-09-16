@@ -3,6 +3,7 @@ import { ref, computed } from 'vue'
 import { login as apiLogin } from '@/services/api'
 import { useToastStore } from '@/stores/toast'
 import type { User } from '@/types'
+import { i18n } from '@/i18n'
 
 export const useUserStore = defineStore('user', () => {
   const user = ref<User | null>(null)
@@ -57,7 +58,7 @@ export const useUserStore = defineStore('user', () => {
       }
       const msg = e.message ?? 'Login failed'
       error.value = msg
-      useToastStore().showError(e, '登录失败，请重试')
+      useToastStore().showError(e, i18n.global.t('toast.login_failed'))
       return false
     } finally {
       loading.value = false
@@ -86,7 +87,7 @@ export const useUserStore = defineStore('user', () => {
       }
       const msg = e.message ?? 'Registration failed'
       error.value = msg
-      useToastStore().showError(e, '注册失败，请重试')
+      useToastStore().showError(e, i18n.global.t('toast.register_failed'))
       return false
     } finally {
       loading.value = false
@@ -245,12 +246,12 @@ export const useUserStore = defineStore('user', () => {
         connStore.rtcService.sendIdentityMigration(currentEventId, oldId, targetId, targetName)
       }
 
-      useToastStore().showToast(`已成功将账号合并至 ${targetName}`, 'success')
+      useToastStore().showToast(i18n.global.t('toast.account_merged_success', { name: targetName }), 'success')
       return { success: true, oldId, newId: targetId, newUsername: targetName }
     } catch (e: any) {
-      const errMsg = e?.message || '账号合并失败'
+      const errMsg = e?.message || i18n.global.t('toast.account_merge_failed')
       error.value = errMsg
-      useToastStore().showError(e, '账号合并失败，请重试')
+      useToastStore().showError(e, i18n.global.t('toast.account_merge_failed'))
       return { success: false, oldId, newId: oldId, newUsername: currentUsername, error: errMsg }
     } finally {
       loading.value = false

@@ -289,6 +289,18 @@ function removeCycleAtIndex(index: number) {
   }
 }
 
+function decrementCycleAtIndex(index: number) {
+  hapticLight()
+  if (index >= 0 && index < team.value.teleopCycles.length) {
+    const cur = team.value.teleopCycles[index] ?? 1
+    if (cur > 1) {
+      team.value.teleopCycles[index] = cur - 1
+    } else {
+      team.value.teleopCycles.splice(index, 1)
+    }
+  }
+}
+
 // Schedule Task Matching
 const nextPendingAssignment = computed(() => {
   if (!props.scoutId) return null
@@ -797,12 +809,12 @@ async function handleSubmit() {
             :key="'c-' + idx"
             type="button"
             class="cycle-chip"
-            @click="removeCycleAtIndex(idx)"
+            @click="decrementCycleAtIndex(idx)"
             :title="t('wizard.undo_btn')"
           >
             <span class="chip-idx">#{{ idx + 1 }}</span>
             <span class="chip-val">{{ balls }} {{ t('wizard.balls_unit') }}</span>
-            <span class="material-icons chip-remove-icon">close</span>
+            <span class="material-icons chip-remove-icon" @click.stop="removeCycleAtIndex(idx)">close</span>
           </button>
         </div>
 
@@ -998,7 +1010,7 @@ async function handleSubmit() {
             <div class="breakdown-col">
               <span class="breakdown-label">{{ t('wizard.auto_stage') }}</span>
               <span class="breakdown-val">{{ autoScore }} {{ t('wizard.pts_unit') }}</span>
-              <span class="breakdown-sub">{{ t('wizard.auto_summary_sub', { balls: team.autoBalls, leave: team.autoLeave ? '√' : '×' }) }}</span>
+              <span class="breakdown-sub">{{ t('wizard.auto_summary_sub', { balls: team.autoBalls, leave: team.autoLeave ? '✓' : '✕' }) }}</span>
             </div>
             <div class="breakdown-col">
               <span class="breakdown-label">{{ t('wizard.teleop_stage') }}</span>
@@ -1008,7 +1020,7 @@ async function handleSubmit() {
             <div class="breakdown-col">
               <span class="breakdown-label">{{ t('wizard.endgame_stage') }}</span>
               <span class="breakdown-val">{{ endgameScore }} {{ t('wizard.pts_unit') }}</span>
-              <span class="breakdown-sub">{{ t('wizard.endgame_summary_sub', { flower: team.flowerPlaced ? '√' : '×', park: team.teleopPark ? '√' : '×' }) }}</span>
+              <span class="breakdown-sub">{{ t('wizard.endgame_summary_sub', { flower: team.flowerPlaced ? '✓' : '✕', park: team.teleopPark ? '✓' : '✕' }) }}</span>
             </div>
           </div>
 

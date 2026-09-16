@@ -32,10 +32,17 @@ export class DataChannelSender {
   }
 
   public enqueueSend(payload: string): Promise<void> {
+    if (this.dc.readyState === 'closed' || this.dc.readyState === 'closing') {
+      return Promise.reject(new Error(`DataChannel is not open (state: ${this.dc.readyState})`))
+    }
     return new Promise<void>((resolve, reject) => {
       this.queue.push({ payload, resolve, reject })
       this.processQueue()
     })
+  }
+
+  public abort(reason = 'DataChannel sender aborted'): void {
+    this.failFastRemaining(new Error(reason))
   }
 
   private async processQueue(): Promise<void> {
@@ -57,6 +64,11 @@ export class DataChannelSender {
         if (err instanceof BackpressureTimeoutError) {
           this.onCongestion?.(true)
           this.failFastRemaining(new Error('Queue aborted due to network congestion'))
+          break
+        }
+
+        if (this.dc.readyState === 'closed' || this.dc.readyState === 'closing') {
+          this.failFastRemaining(new Error(`Queue aborted: DataChannel is ${this.dc.readyState}`))
           break
         }
       }

@@ -277,4 +277,43 @@ describe('MobilePhaseWizardForm.vue', () => {
     const warning = wrapper.find('.banned-warning-card')
     expect(warning.exists()).toBe(true)
   })
+
+  it('supports teleop cycle chips: tapping chip decrements ball count, tapping close icon removes cycle', async () => {
+    const wrapper = mount(MobilePhaseWizardForm, {
+      props: {
+        eventId: 'evt_1',
+        scoutId: 'scout_1',
+        scoutName: 'Alice'
+      }
+    })
+
+    // Setup match
+    await wrapper.find('.red-btn').trigger('click')
+    await wrapper.findAll('.giant-num-input')[1].setValue('27570')
+
+    // Go to Teleop step (Step 2)
+    const steps = wrapper.findAll('.stepper-step')
+    await steps[2].trigger('click')
+    expect(wrapper.find('.step-teleop').exists()).toBe(true)
+
+    // Add shots: 2 balls in cycle #1
+    const teleopHeroHit = wrapper.find('.teleop-hero-hit')
+    await teleopHeroHit.trigger('click') // 1 ball
+    await teleopHeroHit.trigger('click') // 2 balls
+    let chips = wrapper.findAll('.cycle-chip')
+    expect(chips.length).toBe(1)
+    expect(chips[0].text()).toContain('2')
+
+    // Tapping chip decrements ball count from 2 to 1
+    await chips[0].trigger('click')
+    chips = wrapper.findAll('.cycle-chip')
+    expect(chips.length).toBe(1)
+    expect(chips[0].text()).toContain('1')
+
+    // Tapping close icon removes cycle completely
+    const closeIcon = chips[0].find('.chip-remove-icon')
+    await closeIcon.trigger('click')
+    chips = wrapper.findAll('.cycle-chip')
+    expect(chips.length).toBe(0)
+  })
 })

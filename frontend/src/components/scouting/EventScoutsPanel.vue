@@ -18,7 +18,8 @@ const props = defineProps<{
   event: ScoutingEvent | null
 }>()
 
-const { t } = useI18n()
+const { t, locale } = useI18n()
+const isZh = computed(() => (locale.value || '').startsWith('zh'))
 const eventStore = useEventStore()
 const recordStore = useRecordStore()
 const connStore = useConnectionStore()
@@ -111,8 +112,14 @@ function exportRankingsCSV() {
   const activeCustomFields = props.event?.id
     ? customFieldsStore.getActiveFields(props.event.id, 'MATCH').filter(f => f.fieldType === 'number' || f.fieldType === 'level' || f.fieldType === 'boolean')
     : []
-  const customHeaders = activeCustomFields.map(f => f.fieldType === 'boolean' ? `自定义: ${f.name} 发生率(%)` : `自定义: 场均${f.name}`)
-  const headers = ['Team', 'Matches', 'Breakdown Count', 'Avg Auto', 'Avg Teleop', 'Avg Endgame', 'Max Score', 'Avg Rating', 'Trend', ...customHeaders]
+  const customHeaders = activeCustomFields.map(f =>
+    f.fieldType === 'boolean'
+      ? (isZh.value ? `自定义: ${f.name} 发生率(%)` : `Custom: ${f.name} Rate (%)`)
+      : (isZh.value ? `自定义: 场均${f.name}` : `Custom: Avg ${f.name}`)
+  )
+  const headers = isZh.value
+    ? ['队伍', '场数', '抛锚场次', '场均Auto', '场均Teleop', '场均Endgame', '最高分', '平均评分', '趋势', ...customHeaders]
+    : ['Team', 'Matches', 'Breakdown Count', 'Avg Auto', 'Avg Teleop', 'Avg Endgame', 'Max Score', 'Avg Rating', 'Trend', ...customHeaders]
   const rows = recordStore.rankings.map(r => {
     const teamRecs = recordStore.activeRecords.filter(rec => rec.teamNumber === r.teamNumber && !rec.isBroken)
     const customCells = activeCustomFields.map(f => {
@@ -168,8 +175,14 @@ function exportRecordsCSV() {
   const activeCustomFields = props.event?.id
     ? customFieldsStore.getActiveFields(props.event.id, 'MATCH')
     : []
-  const customHeaders = activeCustomFields.map(f => f.unit ? `自定义: ${f.name} (${f.unit})` : `自定义: ${f.name}`)
-  const headers = ['Record ID', 'Level', 'Match', 'Team', 'Scout', 'Auto', 'Teleop', 'Endgame', 'Total Score', 'Is Broken', 'Created At', ...customHeaders]
+  const customHeaders = activeCustomFields.map(f =>
+    f.unit
+      ? (isZh.value ? `自定义: ${f.name} (${f.unit})` : `Custom: ${f.name} (${f.unit})`)
+      : (isZh.value ? `自定义: ${f.name}` : `Custom: ${f.name}`)
+  )
+  const headers = isZh.value
+    ? ['记录ID', '级别', '场次', '队伍', '侦察员', 'Auto', 'Teleop', 'Endgame', '总分', '是否抛锚', '记录时间', ...customHeaders]
+    : ['Record ID', 'Level', 'Match', 'Team', 'Scout', 'Auto', 'Teleop', 'Endgame', 'Total Score', 'Is Broken', 'Created At', ...customHeaders]
   const sorted = sortRecordsChronologically(recordStore.activeRecords)
   const rows = sorted.map(r => {
     let customObj: Record<string, any> = {}
