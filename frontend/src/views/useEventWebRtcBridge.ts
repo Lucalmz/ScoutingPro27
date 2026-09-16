@@ -176,6 +176,10 @@ export function useEventWebRtcBridge({
         }
       },
 
+      onPitScoutAckReceived: (teamNumbers) => {
+        pitStore.markSynced(teamNumbers)
+      },
+
       onPitScoutFullSyncReceived: (incomingRecords) => {
         pitStore.applyFullSync(incomingRecords)
       },
@@ -250,6 +254,11 @@ export function useEventWebRtcBridge({
         connStore.setTakeoverPrompt({ requesterUsername, timeoutSeconds })
       },
 
+      onTakeoverSuccess: () => {
+        connStore.clearSessionConflict()
+        toastStore.showToast(t('conflict.takeover_success') || '会话接管成功！', 'success')
+      },
+
       onSessionKicked: (reason: string) => {
         connStore.setIsKicked({ reason })
         connStore.setStatus('offline')
@@ -272,17 +281,32 @@ export function useEventWebRtcBridge({
       },
 
       onEventMetadataReceived: async (eventMeta: ScoutingEvent) => {
+        let actualEvent = eventMeta
         try {
           const { syncExternalEvent } = await import('@/services/api')
           const synced = await syncExternalEvent(eventMeta)
           if (synced) {
-            eventStore.currentEvent = synced
-          } else {
-            eventStore.currentEvent = eventMeta
+            actualEvent = synced
           }
         } catch (e) {
           console.warn('[EventView] Failed to sync external event metadata:', e)
-          eventStore.currentEvent = eventMeta
+        }
+        eventStore.currentEvent = actualEvent
+        if (!eventStore.events.some((e) => e.id === actualEvent.id)) {
+          eventStore.events.push(actualEvent)
+        }
+
+        // 核心修复 Bug 2：若当前路由或本地使用的还是临时事件 ID (如 evt-CODE)，自动升迁至真实 UUID
+        const currentRouteEventId = router.currentRoute.value.params.eventId as string
+        if (actualEvent.id && currentRouteEventId && actualEvent.id !== currentRouteEventId) {
+          console.log(`[EventView] Migrating temporary event ID "${currentRouteEventId}" to authoritative UUID "${actualEvent.id}"`)
+          recordStore.migrateEventId(currentRouteEventId, actualEvent.id)
+          pitStore.migrateEventId(currentRouteEventId, actualEvent.id)
+          scheduleStore.migrateEventId(currentRouteEventId, actualEvent.id)
+          router.replace({
+            path: `/event/${actualEvent.id}`,
+            query: router.currentRoute.value.query
+          })
         }
       },
 
@@ -404,8 +428,10 @@ export function useEventWebRtcBridge({
             userStore.token
           )
 
-          // 只推送本地尚未同步到 Host 的记录
-          const myRecs = recordStore.myRecords(userStore.userId).filter((r) => r.syncStatus === 'PENDING')
+          // 只推送本地尚未同步到 Host 的记录（严禁排除 isDeleted 墓碑，确保离线删除能同步到 Host）
+          const myRecs = recordStore.records.filter(
+            (r) => r.eventId === evt.id && r.scoutId === userStore.userId && r.syncStatus === 'PENDING'
+          )
           if (myRecs.length > 0) {
             connStore.pushRecords(myRecs)
           }

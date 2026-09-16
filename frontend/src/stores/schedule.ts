@@ -655,6 +655,28 @@ export const useScheduleStore = defineStore('schedule', () => {
     }
   }
 
+  function migrateEventId(oldId: string, newId: string) {
+    if (!oldId || !newId || oldId === newId) return
+    currentEventId.value = newId
+    let changed = false
+    for (const s of schedules.value) {
+      if (s.eventId === oldId) {
+        s.eventId = newId
+        changed = true
+      }
+    }
+    for (const key of Object.keys(assignments.value)) {
+      const a = assignments.value[key]
+      if (a && a.eventId === oldId) {
+        a.eventId = newId
+        changed = true
+      }
+    }
+    if (changed) {
+      saveToLocalStorage(newId)
+    }
+  }
+
   return {
     currentEventId,
     schedules,
@@ -686,6 +708,7 @@ export const useScheduleStore = defineStore('schedule', () => {
     broadcastAssignmentUpdate,
     applyScheduleFullSync,
     applyAssignmentUpdate,
-    migrateScoutId
+    migrateScoutId,
+    migrateEventId
   }
 })

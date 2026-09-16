@@ -194,5 +194,19 @@ describe('SessionConflictModal.vue', () => {
 
       expect(takeoverSpy).toHaveBeenCalledWith('Charlie', 'charlie-user-uuid')
     })
+
+    it('safely disconnects and navigates to dashboard when close or exit button clicked', async () => {
+      const userStore = useUserStore()
+      const connStore = useConnectionStore()
+      userStore.user = { id: 'charlie-user-uuid', username: 'Charlie', token: 'token' }
+      const disconnectSpy = vi.spyOn(connStore, 'disconnect').mockImplementation(() => {})
+
+      const wrapper = mountModal()
+      const closeBtn = wrapper.find('.btn-close-modal')
+      await closeBtn.trigger('click')
+
+      expect(connStore.sessionConflict).toBeNull()
+      expect(disconnectSpy).toHaveBeenCalled()
+    })
   })
 })

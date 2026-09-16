@@ -481,7 +481,8 @@
     "target_password_placeholder": "Enter target account password to verify ownership",
     "btn_merging": "Verifying & Merging...",
     "btn_confirm_merge": "Verify Password & Merge",
-    "btn_exit": "Leave Event / Return to Dashboard"
+    "btn_exit": "Leave Event / Return to Dashboard",
+    "takeover_success": "Session takeover successful! Resumed collaboration"
   },
   "takeover": {
     "title": "Device Takeover Request",

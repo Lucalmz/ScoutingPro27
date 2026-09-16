@@ -192,6 +192,15 @@ export function createMessageDispatcher(ctx: MessageDispatcherContext) {
       )
     }
 
+    sendMessage(
+      {
+        type: 'TAKEOVER_SUCCESS',
+        authCode: ctx.getCurrentInviteCode() || undefined,
+        message: 'Session takeover successfully completed'
+      },
+      newClientId
+    )
+
     ctx.onRequestSync?.(0, newClientId)
   }
 

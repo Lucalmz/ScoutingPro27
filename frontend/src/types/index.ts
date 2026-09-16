@@ -7,7 +7,6 @@ export interface User {
   id: string
   username: string
   token?: string
-  legacyAliasNotice?: string
 }
 
 // --- System Messaging & Outbox ---
@@ -140,7 +139,6 @@ export interface LoginResponse {
   id: string
   username: string
   token: string
-  legacyAliasNotice?: string
 }
 
 export interface CreateEventRequest {
@@ -198,6 +196,7 @@ export type WebRtcMessage =
   | WebRtcTakeoverPrompt
   | WebRtcTakeoverDecision
   | WebRtcSessionKicked
+  | WebRtcTakeoverSuccess
   | WebRtcIdentityMigration
   | WebRtcAckMigration
   | WebRtcEventMetadata
@@ -207,6 +206,7 @@ export type WebRtcMessage =
   | WebRtcPitScoutUpdate
   | WebRtcPitFullSync
   | WebRtcPitScoutBatchSync
+  | WebRtcPitScoutAck
   | WebRtcRequestPitSync
   | WebRtcOfficialRosterSync
   | WebRtcPitPhotoUpload
@@ -268,6 +268,12 @@ export interface WebRtcPitScoutBatchSync {
   records: PitScoutingRecord[]
   authCode?: string
   senderId?: string
+}
+
+export interface WebRtcPitScoutAck {
+  type: 'PIT_SCOUT_ACK'
+  teamNumbers: number[]
+  authCode?: string
 }
 
 export interface WebRtcRequestPitSync {
@@ -340,6 +346,12 @@ export interface WebRtcSessionKicked {
   type: 'SESSION_KICKED'
   reason: string
   authCode?: string
+}
+
+export interface WebRtcTakeoverSuccess {
+  type: 'TAKEOVER_SUCCESS'
+  authCode?: string
+  message?: string
 }
 
 export interface WebRtcMergeAccountRequest {

@@ -2286,12 +2286,12 @@ describe('WebRTC Pit Scouting & Batch Sync Protocol', () => {
     // Host receives record
     expect(callbacks.onPitScoutUpdateReceived).toHaveBeenCalledWith(pitRecord)
 
-    // Host forwards to Client 2 (but NOT back to Client 1)
+    // Host forwards to Client 2 (PIT_SCOUT_UPDATE) and replies ACK to Client 1
     expect(dc2.send).toHaveBeenCalled()
     const forwardedMsg = JSON.parse(dc2.send.mock.calls[0][0])
     expect(forwardedMsg.type).toBe('PIT_SCOUT_UPDATE')
     expect(forwardedMsg.record.teamNumber).toBe(27570)
-    expect(dc1.send).not.toHaveBeenCalled()
+    expect(dc1.send).toHaveBeenCalledWith(expect.stringContaining('"type":"PIT_SCOUT_ACK"'))
 
     hostService.disconnect()
   })

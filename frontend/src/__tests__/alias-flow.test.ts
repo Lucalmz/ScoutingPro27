@@ -77,11 +77,10 @@ describe('Legacy Alias End-to-End Flow & Authoritative ID Binding', () => {
     vi.mocked(api.login).mockResolvedValue({
       id: aliasAliceId,
       username: 'Alice (legacy-1)',
-      token: 'jwt_token_alias_alice',
-      legacyAliasNotice: '提示：由于重名冲突，您当前已自动登录至旧版别名账户「Alice (legacy-1)」。'
+      token: 'jwt_token_alias_alice'
     })
 
-    const loginSuccess = await userStore.login('Alice', 'SecondaryPassword123')
+    const loginSuccess = await userStore.login('Alice (legacy-1)', 'SecondaryPassword123')
     expect(loginSuccess).toBe(true)
 
     // 2. Authoritative Verification:

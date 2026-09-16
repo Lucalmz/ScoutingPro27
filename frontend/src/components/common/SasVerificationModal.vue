@@ -165,6 +165,7 @@ function handleLeaveEvent() {
   align-items: center;
   justify-content: center;
   padding: 1rem;
+  overflow-y: auto;
 }
 
 .sas-modal-card {
@@ -175,7 +176,9 @@ function handleLeaveEvent() {
   box-shadow: 0 20px 30px rgba(0, 0, 0, 0.8), 0 0 24px rgba(57, 255, 20, 0.08);
   width: 100%;
   max-width: 480px;
-  overflow: hidden;
+  overflow-y: auto;
+  max-height: 90vh;
+  box-sizing: border-box;
 }
 
 .sas-modal-header {
@@ -331,11 +334,13 @@ function handleLeaveEvent() {
   padding: 1rem 1.25rem;
   background: var(--input, #111111);
   border-top: 1px solid var(--border, #262626);
+  flex-wrap: wrap;
 }
 
 .btn {
   display: inline-flex;
   align-items: center;
+  justify-content: center;
   gap: 0.35rem;
   padding: 0.55rem 1rem;
   font-size: 0.9rem;
@@ -375,5 +380,27 @@ function handleLeaveEvent() {
 .btn-success:hover {
   filter: brightness(1.1);
   box-shadow: var(--glow-primary-hover);
+}
+
+@media (max-width: 480px) {
+  .sas-modal-overlay {
+    padding: 0.75rem;
+  }
+  .sas-modal-card {
+    max-height: 94vh;
+  }
+  .sas-modal-footer {
+    flex-direction: column-reverse;
+    gap: 0.5rem;
+    padding: 0.75rem 1rem;
+  }
+  .sas-modal-footer .btn {
+    width: 100%;
+  }
+  .sas-code-display {
+    font-size: 1.75rem;
+    letter-spacing: 0.25rem;
+    padding: 0.4rem 0.75rem;
+  }
 }
 </style>

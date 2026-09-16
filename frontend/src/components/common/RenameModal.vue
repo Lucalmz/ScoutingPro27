@@ -143,9 +143,10 @@ async function handleSave() {
         emit('update:visible', false)
       }
     } else {
-      if (res.error?.includes('401') || res.error?.includes('invalid old password')) {
+      const errLower = (res.error || '').toLowerCase()
+      if (errLower.includes('401') || errLower.includes('old password') || errLower.includes('incorrect password')) {
         errorMsg.value = t('user.old_password_incorrect')
-      } else if (res.error?.includes('409') || res.error?.includes('username already taken')) {
+      } else if (errLower.includes('409') || errLower.includes('already taken') || errLower.includes('conflict')) {
         errorMsg.value = t('user.name_taken')
       } else {
         errorMsg.value = (t('user.rename_failed') + (res.error || '')).trim()

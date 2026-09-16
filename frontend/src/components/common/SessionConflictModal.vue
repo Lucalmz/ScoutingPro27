@@ -1,11 +1,12 @@
 <script setup lang="ts">
-import { ref, watch, computed } from 'vue'
+import { ref, watch, computed, onUnmounted } from 'vue'
 import { useRouter } from 'vue-router'
 import { useUserStore } from '@/stores/user'
 import { useConnectionStore } from '@/stores/connection'
 import { useEventStore } from '@/stores/events'
 import { useToastStore } from '@/stores/toast'
 import { useI18n } from 'vue-i18n'
+import { formatUserFriendlyError } from '@/utils/errorHelper'
 
 const router = useRouter()
 const { t } = useI18n()
@@ -24,13 +25,13 @@ const cooldownSeconds = ref(0)
 let cooldownTimer: any = null
 
 function handleClose() {
-  connStore.clearSessionConflict()
+  handleExitEvent()
 }
 
 function handleExitEvent() {
   connStore.clearSessionConflict()
   connStore.disconnect()
-  router.push('/')
+  router.push(userStore.isLoggedIn ? '/dashboard' : '/')
 }
 
 const conflictData = computed(() => connStore.sessionConflict)
@@ -91,35 +92,14 @@ async function handleMergeAccount() {
   try {
     const res = await userStore.mergeAccount(targetName, pwd)
     if (res.success) {
-      const currentEventId = eventStore.currentEvent?.id
-      if (currentEventId && res.oldId && res.newId) {
-        connStore.rtcService?.sendIdentityMigration(currentEventId, res.oldId, res.newId, res.newUsername)
-      }
-
       connStore.clearSessionConflict()
       connStore.requestSync(0, undefined, res.newId, res.newUsername)
       toastStore.showToast(t('user.merge_success_toast', { username: res.newUsername }) || `账号已成功合并至 ${res.newUsername}`, 'success')
     } else {
-      let msg = res.error || t('user.merge_failed')
-      if (msg.includes('401') || msg.includes('Invalid target account password')) {
-        msg = t('conflict.merge_invalid_password') || t('user.invalid_target_password')
-      } else if (msg.includes('404') || msg.includes('Target user not found')) {
-        msg = t('user.target_user_not_found')
-      } else if (msg.includes('Cannot merge user into itself')) {
-        msg = t('user.merge_into_self')
-      }
-      mergeErrorMsg.value = msg
+      mergeErrorMsg.value = formatUserFriendlyError(res.error, t('user.merge_failed')).message
     }
   } catch (err: any) {
-    let msg = err?.message || t('user.merge_failed')
-    if (msg.includes('401') || msg.includes('Invalid target account password')) {
-      msg = t('conflict.merge_invalid_password') || t('user.invalid_target_password')
-    } else if (msg.includes('404') || msg.includes('Target user not found')) {
-      msg = t('user.target_user_not_found')
-    } else if (msg.includes('Cannot merge user into itself')) {
-      msg = t('user.merge_into_self')
-    }
-    mergeErrorMsg.value = msg
+    mergeErrorMsg.value = formatUserFriendlyError(err, t('user.merge_failed')).message
   } finally {
     merging.value = false
   }
@@ -140,6 +120,13 @@ function handleTakeover() {
     }
   }, 1000)
 }
+
+onUnmounted(() => {
+  if (cooldownTimer) {
+    clearInterval(cooldownTimer)
+    cooldownTimer = null
+  }
+})
 </script>
 
 <template>
@@ -321,6 +308,7 @@ function handleTakeover() {
   justify-content: center;
   z-index: 100000;
   padding: 1.5rem;
+  overflow-y: auto;
 }
 
 .modal-card {
@@ -332,6 +320,9 @@ function handleTakeover() {
   padding: 1.75rem;
   box-shadow: 0 16px 40px rgba(0, 0, 0, 0.8), 0 0 24px rgba(57, 255, 20, 0.08);
   color: var(--foreground, #f1f5f9);
+  max-height: 90vh;
+  overflow-y: auto;
+  box-sizing: border-box;
 }
 
 .modal-header {
@@ -602,5 +593,31 @@ function handleTakeover() {
 
 .icon {
   font-family: 'Material Icons', sans-serif;
+}
+
+@media (max-width: 480px) {
+  .modal-overlay {
+    padding: 0.75rem;
+  }
+  .modal-card {
+    padding: 1.25rem 1rem;
+    max-height: 94vh;
+  }
+  .input-row {
+    flex-direction: column;
+    gap: 0.5rem;
+  }
+  .input-row .btn {
+    width: 100%;
+    justify-content: center;
+  }
+  .modal-desc {
+    font-size: 0.85rem;
+    margin-bottom: 1rem;
+  }
+  .btn-secondary-exit {
+    width: 100%;
+    justify-content: center;
+  }
 }
 </style>

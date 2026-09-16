@@ -66,12 +66,12 @@ const clientExportMode = ref<'PENDING_ONLY' | 'ALL_MY'>('PENDING_ONLY')
 const hostFilteredRecords = computed(() => {
   if (!currentEvent.value) return []
   const from = Number(hostFromSeq.value) || 0
-  return recordStore.records.filter((r) => r.eventId === currentEvent.value!.id && !r.isDeleted && (from <= 0 || (r.hostSeq || 0) > from))
+  return recordStore.records.filter((r) => r.eventId === currentEvent.value!.id && (from <= 0 || (r.hostSeq || 0) > from))
 })
 
 const clientFilteredRecords = computed(() => {
   if (!currentEvent.value) return []
-  const myRecs = recordStore.myRecords(userStore.userId).filter((r) => r.eventId === currentEvent.value!.id)
+  const myRecs = recordStore.records.filter((r) => r.eventId === currentEvent.value!.id && r.scoutId === userStore.userId)
   return clientExportMode.value === 'PENDING_ONLY' ? myRecs.filter((r) => r.syncStatus === 'PENDING') : myRecs
 })
 

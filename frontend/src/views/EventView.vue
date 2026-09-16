@@ -8,6 +8,7 @@ import { useConnectionStore } from '@/stores/connection'
 import { useNavigationStore, type EventTab } from '@/stores/navigation'
 import { useInboxStore } from '@/stores/inbox'
 import { usePitScoutStore } from '@/stores/pitScout'
+import { useScheduleStore } from '@/stores/schedule'
 import { flushOfflinePhotos } from '@/services/photoStorage'
 import { useI18n } from 'vue-i18n'
 import type { ScoutingRecord } from '@/types'
@@ -54,6 +55,7 @@ const connStore = useConnectionStore()
 const navStore = useNavigationStore()
 const inboxStore = useInboxStore()
 const pitStore = usePitScoutStore()
+const scheduleStore = useScheduleStore()
 const { t } = useI18n()
 
 const showRenameModal = ref(false)
@@ -81,14 +83,14 @@ const headerRef = ref<HTMLElement | null>(null)
 const tabBarRef = ref<HTMLElement | null>(null)
 const contentRef = ref<HTMLElement | null>(null)
 
-const eventId = computed(() => (route.params.eventId as string) || '')
+const eventId = computed(() => eventStore.currentEvent?.id || (route.params.eventId as string) || '')
 
 // Compute event synchronously from currentEvent or loaded events for smooth view-transitions
 const event = computed(() => {
   if (eventStore.currentEvent?.id === eventId.value) {
     return eventStore.currentEvent
   }
-  return eventStore.events.find((e) => e.id === eventId.value) || null
+  return eventStore.events.find((e) => e.id === eventId.value) || eventStore.currentEvent || null
 })
 
 const isHost = computed(() => {
@@ -166,12 +168,14 @@ onMounted(async () => {
     state.loading = false
   }
 
-  // Load records and tags
+  // Load records, tags, schedule and pit data
   const evt = event.value
   if (evt) {
     await Promise.all([
       recordStore.fetchRecords(eventId.value, evt.ftcYear, evt.ftcEventCode),
-      recordStore.fetchTags(eventId.value)
+      recordStore.fetchTags(eventId.value),
+      scheduleStore.loadSchedule(eventId.value),
+      pitStore.fetchPitData(eventId.value)
     ])
   }
 

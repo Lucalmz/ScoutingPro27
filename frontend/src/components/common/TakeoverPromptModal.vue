@@ -104,6 +104,9 @@ function handleDecision(permit: boolean) {
   padding: 1.75rem;
   box-shadow: 0 16px 40px rgba(0, 0, 0, 0.8), 0 0 24px rgba(57, 255, 20, 0.08);
   color: var(--foreground, #f1f5f9);
+  max-height: 90vh;
+  overflow-y: auto;
+  box-sizing: border-box;
 }
 
 .modal-header {
@@ -189,38 +192,47 @@ function handleDecision(permit: boolean) {
   line-height: 1.45;
 }
 
+.modal-actions,
 .button-row {
   display: flex;
   gap: 0.75rem;
+  margin-top: 1.25rem;
 }
 
 .btn {
   flex: 1;
   padding: 0.65rem 1rem;
-  border-radius: 6px;
+  border-radius: 8px;
   font-size: 0.9rem;
   font-weight: 600;
   cursor: pointer;
   border: none;
   transition: all 0.2s;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
 }
 
+.btn-secondary,
 .btn-deny {
   background: var(--muted, #1a1a1a);
   border: 1px solid var(--border, #262626);
   color: var(--foreground, #f1f5f9);
 }
 
+.btn-secondary:hover,
 .btn-deny:hover {
   background: var(--surface-hover, #141414);
 }
 
+.btn-primary,
 .btn-permit {
   background: var(--primary, #39ff14);
   color: var(--primary-foreground, #000000);
   box-shadow: var(--glow-primary);
 }
 
+.btn-primary:hover,
 .btn-permit:hover {
   filter: brightness(1.1);
   box-shadow: var(--glow-primary-hover);
@@ -228,5 +240,23 @@ function handleDecision(permit: boolean) {
 
 .icon {
   font-family: 'Material Icons', sans-serif;
+}
+
+@media (max-width: 480px) {
+  .modal-overlay {
+    padding: 0.75rem;
+  }
+  .modal-card {
+    padding: 1.25rem 1rem;
+    max-height: 94vh;
+  }
+  .modal-actions,
+  .button-row {
+    flex-direction: column;
+    gap: 0.5rem;
+  }
+  .btn {
+    width: 100%;
+  }
 }
 </style>

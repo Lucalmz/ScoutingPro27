@@ -126,26 +126,36 @@ export async function deletePhoto(key: string, eventId: string): Promise<void> {
   }
 }
 
+let isFlushingPhotos = false
+
 /**
  * 手机端离线待上传照片批量回传 (Flush Queue)
  */
 export async function flushOfflinePhotos(eventId: string): Promise<number> {
   if (isDesktopHost()) return 0
-
-  const pending = await getPendingMobilePhotos(eventId)
-  if (!pending || pending.length === 0) return 0
-
-  console.log(`[photoStorage] Flushing ${pending.length} offline photos for event ${eventId}...`)
-  let successCount = 0
-
-  for (const item of pending) {
-    const ok = await uploadPhotoViaRtcOrHttp(item.eventId, item.key, item.dataUrl)
-    if (ok) {
-      successCount++
-    }
+  if (isFlushingPhotos) {
+    console.log('[photoStorage] Photo flush already in progress, skipping concurrent run')
+    return 0
   }
+  isFlushingPhotos = true
+  try {
+    const pending = await getPendingMobilePhotos(eventId)
+    if (!pending || pending.length === 0) return 0
 
-  return successCount
+    console.log(`[photoStorage] Flushing ${pending.length} offline photos for event ${eventId}...`)
+    let successCount = 0
+
+    for (const item of pending) {
+      const ok = await uploadPhotoViaRtcOrHttp(item.eventId, item.key, item.dataUrl)
+      if (ok) {
+        successCount++
+      }
+    }
+
+    return successCount
+  } finally {
+    isFlushingPhotos = false
+  }
 }
 
 // 手机端自动注册网络恢复事件监听器

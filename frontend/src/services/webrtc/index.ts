@@ -270,6 +270,7 @@ export function createWebRtcService(callbacks: WebRtcCallbacks): WebRtcService {
   const rawHandleChannelMessage = createChannelMessageHandler({
     isHostMode: () => isHostMode,
     currentInviteCode: () => currentInviteCode,
+    getCurrentEventId: () => currentEventMetadata?.id || '',
     getHostSessionId: () => hostSessionId,
     getCurrentHostSessionId: () => currentHostSessionId,
     setCurrentHostSessionId: (id: string) => {

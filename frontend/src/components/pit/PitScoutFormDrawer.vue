@@ -296,7 +296,7 @@ function compressImageToWebP(file: File): Promise<string> {
     img.onload = () => {
       URL.revokeObjectURL(objectUrl)
       const canvas = document.createElement('canvas')
-      const MAX_DIM = 1280
+      const MAX_DIM = 1024
       let width = img.width
       let height = img.height
 
@@ -318,7 +318,7 @@ function compressImageToWebP(file: File): Promise<string> {
       if (!ctx) return reject(new Error('No canvas context'))
 
       ctx.drawImage(img, 0, 0, width, height)
-      const webpData = canvas.toDataURL('image/webp', 0.75)
+      const webpData = canvas.toDataURL('image/webp', 0.70)
       resolve(webpData)
     }
     img.onerror = (err) => {

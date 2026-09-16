@@ -481,7 +481,8 @@
     "target_password_placeholder": "请输入主账号密码验证所有权",
     "btn_merging": "验证并合并中...",
     "btn_confirm_merge": "验证密码并合并账号",
-    "btn_exit": "离开赛事 / 返回大厅"
+    "btn_exit": "离开赛事 / 返回大厅",
+    "takeover_success": "会话接管成功！已恢复同步协作"
   },
   "takeover": {
     "title": "新设备请求接管身份",

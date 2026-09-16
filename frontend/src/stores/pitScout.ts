@@ -313,13 +313,7 @@ export const usePitScoutStore = defineStore('pitScout', () => {
           type: 'PIT_SCOUT_BATCH_SYNC',
           records: pending
         })
-        if (!httpSuccess) {
-          for (const rec of pending) {
-            rec.syncStatus = 'SYNCED'
-          }
-          saveToLocalStorage(eid)
-        }
-        console.log(`[PitScoutStore] Successfully broadcasted ${pending.length} pit records via DataChannel`)
+        console.log(`[PitScoutStore] Broadcasted ${pending.length} pit records via DataChannel, awaiting Host ACK`)
       }
     } catch (e) {
       console.warn('[PitScoutStore] WebRTC DataChannel batch broadcast failed:', e)
@@ -487,6 +481,36 @@ export const usePitScoutStore = defineStore('pitScout', () => {
     }
   }
 
+  function markSynced(teamNumbers: number[]) {
+    if (!Array.isArray(teamNumbers) || teamNumbers.length === 0) return
+    const set = new Set(teamNumbers)
+    let changed = false
+    for (const r of records.value) {
+      if (set.has(r.teamNumber) && r.syncStatus !== 'SYNCED') {
+        r.syncStatus = 'SYNCED'
+        changed = true
+      }
+    }
+    if (changed && currentEventId.value) {
+      saveToLocalStorage(currentEventId.value)
+    }
+  }
+
+  function migrateEventId(oldId: string, newId: string) {
+    if (!oldId || !newId || oldId === newId) return
+    currentEventId.value = newId
+    let changed = false
+    for (const r of records.value) {
+      if (r.eventId === oldId) {
+        r.eventId = newId
+        changed = true
+      }
+    }
+    if (changed) {
+      saveToLocalStorage(newId)
+    }
+  }
+
   return {
     currentEventId,
     records,
@@ -509,6 +533,8 @@ export const usePitScoutStore = defineStore('pitScout', () => {
     applyFullSync,
     syncFtcRoster,
     applyOfficialRosterSync,
-    migrateScoutId
+    migrateScoutId,
+    markSynced,
+    migrateEventId
   }
 })

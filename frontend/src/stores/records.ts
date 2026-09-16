@@ -52,7 +52,11 @@ export const useRecordStore = defineStore('records', () => {
     } catch (e) {
       console.error(`Failed to save ${key} to localStorage (Quota exceeded?)`, e)
       error.value = 'Local storage quota exceeded. Please clear some space.'
-      useToastStore().showToast(i18n.global.t('toast.storage_quota_exceeded'), 'error')
+      if (typeof window !== 'undefined') {
+        try {
+          useToastStore().showToast(i18n.global.t('toast.storage_quota_exceeded'), 'error')
+        } catch {}
+      }
     }
   }
 
@@ -600,10 +604,34 @@ export const useRecordStore = defineStore('records', () => {
       }
       return r
     })
+
     for (const key of coordsToReassess) {
       const [evId, level, matchStr, teamStr] = key.split(':')
       reassessConflicts(Number(matchStr), Number(teamStr), level, evId)
     }
+    if (changed) {
+      flushStorage()
+    }
+  }
+
+  function migrateEventId(oldId: string, newId: string) {
+    if (!oldId || !newId || oldId === newId) return
+    currentEventId.value = newId
+    let changed = false
+    records.value = records.value.map((r) => {
+      if (r.eventId === oldId) {
+        changed = true
+        return { ...r, eventId: newId }
+      }
+      return r
+    })
+    teamTags.value = teamTags.value.map((t) => {
+      if (t.eventId === oldId) {
+        changed = true
+        return { ...t, eventId: newId }
+      }
+      return t
+    })
     if (changed) {
       flushStorage()
     }
@@ -637,6 +665,7 @@ export const useRecordStore = defineStore('records', () => {
     markSynced,
     updateRecord,
     migrateScoutId,
+    migrateEventId,
     banTeam,
     unbanTeam,
     fetchTags,

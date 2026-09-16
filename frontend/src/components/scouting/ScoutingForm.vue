@@ -515,17 +515,25 @@ async function handleSubmit() {
     const matchNum = parseInt(matchNumber.value)
     const teamNum = parseInt(team.teamNumber)
     const curLevel = (currentTournamentLevel.value || 'QUALIFICATION').toUpperCase()
-    const existing = recordStore.activeRecords.find(r => {
-      if (r.matchNumber !== matchNum || r.teamNumber !== teamNum || r.scoutId !== props.scoutId) return false
-      if (props.editRecord && r.id === props.editRecord.id) return false
-      return getRecordTournamentLevel(r) === curLevel
-    })
-    if (existing) {
-      hapticWarning()
-      submitStatus.value = 'error'
-      submitErrorMsg.value = t('toast.conflict_error', { match: matchNum, team: teamNum })
-      setTimeout(() => { submitStatus.value = 'none' }, 4000)
-      return
+    const isEditingOriginalMatchAndTeam =
+      props.editRecord &&
+      props.editRecord.matchNumber === matchNum &&
+      props.editRecord.teamNumber === teamNum &&
+      getRecordTournamentLevel(props.editRecord) === curLevel
+
+    if (!isEditingOriginalMatchAndTeam) {
+      const existing = recordStore.activeRecords.find(r => {
+        if (r.matchNumber !== matchNum || r.teamNumber !== teamNum || r.scoutId !== props.scoutId) return false
+        if (props.editRecord && r.id === props.editRecord.id) return false
+        return getRecordTournamentLevel(r) === curLevel
+      })
+      if (existing) {
+        hapticWarning()
+        submitStatus.value = 'error'
+        submitErrorMsg.value = t('toast.conflict_error', { match: matchNum, team: teamNum })
+        setTimeout(() => { submitStatus.value = 'none' }, 4000)
+        return
+      }
     }
   }
 

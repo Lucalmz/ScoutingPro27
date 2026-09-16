@@ -40,10 +40,6 @@ export const useUserStore = defineStore('user', () => {
       const u = await apiLogin({ username: usernameInput, password: passwordInput })
       user.value = u
       localStorage.setItem('scoutingpro-user', JSON.stringify(u))
-
-      if (u.legacyAliasNotice) {
-        useToastStore().showToast(u.legacyAliasNotice, 'info')
-      }
       return true
     } catch (e: any) {
       if (isStandalonePwaMode() || e?.name === 'TypeError' || e?.message?.includes('Failed to fetch') || e?.status === 404) {

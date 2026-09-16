@@ -36,6 +36,7 @@ export interface ChannelMessageHandlerContext {
   setHostSeqCounter: (n: number) => void
   closeClient: () => void
   setStatus: (s: ConnectionStatus) => void
+  getCurrentEventId?: () => string
   getUsername?: () => string
   getUserId?: () => string
   handleMergeAccountResponse?: (msg: any) => void
@@ -524,6 +525,17 @@ export function createChannelMessageHandler(ctx: ChannelMessageHandlerContext) {
                 c.sender.enqueueSend(JSON.stringify(msg))
               }
             })
+            // 回传确认回执给发送方 Client
+            if (senderId && msg.record.teamNumber) {
+              ctx.sendMessage(
+                {
+                  type: 'PIT_SCOUT_ACK',
+                  teamNumbers: [msg.record.teamNumber],
+                  authCode: currentInviteCode
+                },
+                senderId
+              )
+            }
           }
         }
         break
@@ -539,7 +551,29 @@ export function createChannelMessageHandler(ctx: ChannelMessageHandlerContext) {
                 c.sender.enqueueSend(JSON.stringify(msg))
               }
             })
+            // 回传批量确认回执给发送方 Client
+            if (senderId) {
+              const teamNumbers = msg.records
+                .map((r: any) => r?.teamNumber)
+                .filter((n: any) => typeof n === 'number')
+              if (teamNumbers.length > 0) {
+                ctx.sendMessage(
+                  {
+                    type: 'PIT_SCOUT_ACK',
+                    teamNumbers,
+                    authCode: currentInviteCode
+                  },
+                  senderId
+                )
+              }
+            }
           }
+        }
+        break
+
+      case 'PIT_SCOUT_ACK':
+        if (!isHostMode && Array.isArray(msg.teamNumbers)) {
+          callbacks.onPitScoutAckReceived?.(msg.teamNumbers)
         }
         break
 
@@ -678,6 +712,11 @@ export function createChannelMessageHandler(ctx: ChannelMessageHandlerContext) {
         callbacks.onTakeoverPrompt?.(msg.requesterUsername, msg.timeoutSeconds)
         break
 
+      case 'TAKEOVER_SUCCESS':
+        console.log('[WebRTC] Session takeover was successful!')
+        callbacks.onTakeoverSuccess?.()
+        break
+
       case 'SESSION_KICKED':
         console.warn(`[WebRTC] Session kicked by host. Reason: ${msg.reason}`)
         callbacks.onSessionKicked?.(msg.reason)
@@ -806,7 +845,7 @@ export function createChannelMessageHandler(ctx: ChannelMessageHandlerContext) {
             throw new Error('Invalid credentials')
           }
 
-          const currentEventId = ctx.currentInviteCode()
+          const currentEventId = ctx.getCurrentEventId?.() || ctx.currentInviteCode()
           if (callbacks.onIdentityMigration && currentEventId && sourceUserId) {
             await callbacks.onIdentityMigration(currentEventId, sourceUserId, authRes.id, authRes.username)
           }

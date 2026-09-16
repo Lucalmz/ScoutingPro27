@@ -81,6 +81,8 @@ export class SignalingChannel {
         'ASSIGNMENT_UPDATE',
         'PIT_SCOUT_UPDATE',
         'PIT_SCOUT_FULL_SYNC',
+        'PIT_SCOUT_BATCH_SYNC',
+        'PIT_SCOUT_ACK',
         'REQUEST_PIT_SYNC',
         'OFFICIAL_ROSTER_SYNC',
         'CUSTOM_FIELDS_FULL_SYNC',

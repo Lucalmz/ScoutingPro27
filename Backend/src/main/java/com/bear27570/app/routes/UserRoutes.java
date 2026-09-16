@@ -16,6 +16,7 @@ import org.jdbi.v3.core.Jdbi;
 import org.mindrot.jbcrypt.BCrypt;
 
 import java.util.HashMap;
+import java.util.List;
 import java.util.Map;
 import java.util.UUID;
 
@@ -129,12 +130,13 @@ public class UserRoutes {
                 return;
             }
             try {
+                String trimmedInputName = username.trim();
                 User user = jdbi.inTransaction(handle -> {
                     UserDao dao = handle.attach(UserDao.class);
-                    User registered = dao.findRegisteredByUsername(username.trim());
-                    if (registered != null && registered.getPassword() != null &&
-                        BCrypt.checkpw(password, registered.getPassword())) {
-                        return registered;
+                    User u = dao.findRegisteredByUsername(trimmedInputName);
+                    if (u != null && u.getPassword() != null && !u.getPassword().isBlank() &&
+                        BCrypt.checkpw(password, u.getPassword())) {
+                        return u;
                     }
                     throw new RuntimeException("Invalid credentials");
                 });

@@ -3,7 +3,9 @@ package com.bear27570.app.routes;
 import com.bear27570.app.dao.EventDao;
 import com.bear27570.app.dao.RecordDao;
 import com.bear27570.app.dao.UserDao;
+import com.bear27570.app.db.UserDeterministicIdMigrator;
 import com.bear27570.app.model.ScoutingRecord;
+import com.bear27570.app.model.User;
 import com.bear27570.app.util.DbUtil;
 import com.google.gson.Gson;
 import com.google.gson.reflect.TypeToken;
@@ -238,9 +240,15 @@ public class RecordRoutes {
                             """, newScoutId, newScoutName, eventId, oldScoutId);
 
                             // Update event memberships and tags if present
-                            handle.execute("DELETE FROM event_users WHERE event_id = ? AND user_id = ?", eventId, newScoutId);
-                            handle.execute("UPDATE event_users SET user_id = ? WHERE event_id = ? AND user_id = ?", newScoutId, eventId, oldScoutId);
+                            handle.execute("DELETE FROM event_users WHERE event_id = ? AND user_id = ?", eventId, oldScoutId);
+                            handle.execute("MERGE INTO event_users (event_id, user_id) KEY(event_id, user_id) VALUES (?, ?)", eventId, newScoutId);
                             handle.execute("UPDATE team_tags SET created_by = ? WHERE event_id = ? AND created_by = ?", newScoutId, eventId, oldScoutId);
+
+                            // If oldScoutId exists as a user in users table, cascade-merge all foreign keys and delete row
+                            User oldUser = userDao.findById(oldScoutId);
+                            if (oldUser != null && !oldScoutId.equals(newScoutId)) {
+                                UserDeterministicIdMigrator.mergeUserInto(handle, oldScoutId, newScoutId, newScoutName);
+                            }
                         });
                     });
                 }

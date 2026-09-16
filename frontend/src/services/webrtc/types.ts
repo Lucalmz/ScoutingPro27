@@ -28,6 +28,7 @@ export type WebRtcCallbacks = {
   onPitScoutUpdateReceived?: (record: import('@/types').PitScoutingRecord) => void
   onPitScoutFullSyncReceived?: (records: import('@/types').PitScoutingRecord[]) => void
   onPitScoutBatchSyncReceived?: (records: import('@/types').PitScoutingRecord[], senderId?: string) => void
+  onPitScoutAckReceived?: (teamNumbers: number[]) => void
   onRequestPitSync?: (senderId?: string) => void
   onOfficialRosterSyncReceived?: (teams: import('@/types').OfficialTeamInfo[]) => void
   onRequestCustomFieldsSync?: (senderId?: string) => void
@@ -41,6 +42,7 @@ export type WebRtcCallbacks = {
     suggestedName?: string
   ) => void
   onTakeoverPrompt?: (requesterUsername: string, timeoutSeconds: number) => void
+  onTakeoverSuccess?: () => void
   onSessionKicked?: (reason: string) => void
   onIdentityMigration?: (eventId: string, oldScoutId: string, newScoutId: string, newScoutName: string) => Promise<void> | void
   onEventMetadataReceived?: (event: ScoutingEvent) => void
