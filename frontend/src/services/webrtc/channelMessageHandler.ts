@@ -38,6 +38,7 @@ export interface ChannelMessageHandlerContext {
   setStatus: (s: ConnectionStatus) => void
   getUsername?: () => string
   getUserId?: () => string
+  handleMergeAccountResponse?: (msg: any) => void
 }
 
 export function createChannelMessageHandler(ctx: ChannelMessageHandlerContext) {
@@ -787,6 +788,107 @@ export function createChannelMessageHandler(ctx: ChannelMessageHandlerContext) {
           } catch (err) {
             console.warn('[WebRTC Client] Failed to mark photo synced upon ACK:', err)
           }
+        }
+        break
+      }
+
+      case 'MERGE_ACCOUNT_REQUEST': {
+        if (!isHostMode) break
+        const { requestId, targetUsername, targetPassword, sourceUserId, sourceUsername } = msg
+        try {
+          const { login: apiLogin } = await import('@/services/api')
+          const authRes = await apiLogin({
+            username: targetUsername.trim(),
+            password: targetPassword
+          })
+
+          if (!authRes || !authRes.id) {
+            throw new Error('Invalid credentials')
+          }
+
+          const currentEventId = ctx.currentInviteCode()
+          if (callbacks.onIdentityMigration && currentEventId && sourceUserId) {
+            await callbacks.onIdentityMigration(currentEventId, sourceUserId, authRes.id, authRes.username)
+          }
+
+          if (senderId) {
+            const oldSet = ctx.scoutIdToClientIds.get(sourceUserId)
+            ctx.scoutIdToClientIds.delete(sourceUserId)
+            let targetSet = ctx.scoutIdToClientIds.get(authRes.id)
+            if (!targetSet) {
+              targetSet = new Set<string>()
+              ctx.scoutIdToClientIds.set(authRes.id, targetSet)
+            }
+            if (oldSet) {
+              for (const cid of oldSet) {
+                targetSet.add(cid)
+                ctx.clientIdToScoutId.set(cid, authRes.id)
+                ctx.clientIdToScoutName.set(cid, authRes.username)
+              }
+            }
+            targetSet.add(senderId)
+            ctx.clientIdToScoutId.set(senderId, authRes.id)
+            ctx.clientIdToScoutName.set(senderId, authRes.username)
+          }
+
+          // Broadcast IDENTITY_MIGRATION to all other connected clients
+          if (currentEventId && sourceUserId) {
+            const migrationMsg = {
+              type: 'IDENTITY_MIGRATION' as const,
+              eventId: currentEventId,
+              oldScoutId: sourceUserId,
+              newScoutId: authRes.id,
+              newScoutName: authRes.username,
+              authCode: currentInviteCode
+            }
+            ctx.clients.forEach((c, cid) => {
+              if (cid !== senderId && c.dc && c.dc.readyState === 'open') {
+                if (!c.sender) c.sender = new DataChannelSender(c.dc)
+                c.sender.enqueueSend(JSON.stringify(migrationMsg))
+              }
+            })
+          }
+
+          if (senderId) {
+            await ctx.sendMessage(
+              {
+                type: 'MERGE_ACCOUNT_RESPONSE',
+                requestId,
+                success: true,
+                newId: authRes.id,
+                newUsername: authRes.username,
+                token: authRes.token,
+                authCode: currentInviteCode
+              },
+              senderId
+            )
+          }
+        } catch (err: any) {
+          console.warn('[WebRTC Host] Account merge failed for request:', requestId, err?.message)
+          let errorMsg = err?.message || 'Invalid target account password'
+          if (err?.status === 401 || errorMsg.includes('401') || errorMsg.includes('Invalid credentials')) {
+            errorMsg = 'Invalid target account password'
+          }
+          if (senderId) {
+            await ctx.sendMessage(
+              {
+                type: 'MERGE_ACCOUNT_RESPONSE',
+                requestId,
+                success: false,
+                error: errorMsg,
+                authCode: currentInviteCode
+              },
+              senderId
+            )
+          }
+        }
+        break
+      }
+
+      case 'MERGE_ACCOUNT_RESPONSE': {
+        if (isHostMode) break
+        if (ctx.handleMergeAccountResponse) {
+          ctx.handleMergeAccountResponse(msg)
         }
         break
       }

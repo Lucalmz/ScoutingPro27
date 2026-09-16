@@ -211,6 +211,8 @@ export type WebRtcMessage =
   | WebRtcOfficialRosterSync
   | WebRtcPitPhotoUpload
   | WebRtcPitPhotoAck
+  | WebRtcMergeAccountRequest
+  | WebRtcMergeAccountResponse
 
 export interface WebRtcPitPhotoUpload {
   type: 'PIT_PHOTO_UPLOAD'
@@ -337,6 +339,27 @@ export interface WebRtcTakeoverDecision {
 export interface WebRtcSessionKicked {
   type: 'SESSION_KICKED'
   reason: string
+  authCode?: string
+}
+
+export interface WebRtcMergeAccountRequest {
+  type: 'MERGE_ACCOUNT_REQUEST'
+  requestId: string
+  targetUsername: string
+  targetPassword: string
+  sourceUserId: string
+  sourceUsername: string
+  authCode?: string
+}
+
+export interface WebRtcMergeAccountResponse {
+  type: 'MERGE_ACCOUNT_RESPONSE'
+  requestId: string
+  success: boolean
+  newId?: string
+  newUsername?: string
+  token?: string
+  error?: string
   authCode?: string
 }
 

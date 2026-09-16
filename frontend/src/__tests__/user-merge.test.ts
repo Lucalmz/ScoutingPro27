@@ -134,4 +134,82 @@ describe('User Store - mergeAccount (Approach 2: Account Merging)', () => {
     expect(userStore.userId).toBe(phoneUserId)
     expect(userStore.username).toBe('Alice-Phone')
   })
+
+  it('delegates to connStore.rtcService.requestAccountMerge when running as client', async () => {
+    const userStore = useUserStore()
+    const recordStore = useRecordStore()
+    const { useConnectionStore } = await import('@/stores/connection')
+    const connStore = useConnectionStore()
+
+    const phoneUserId = 'user_phone_uuid_111'
+    userStore.user = {
+      id: phoneUserId,
+      username: 'Alice-Phone',
+      token: 'token_phone_123'
+    }
+
+    const mockRequestAccountMerge = vi.fn().mockResolvedValue({
+      success: true,
+      newId: 'user_host_999',
+      newUsername: 'Alice-Main',
+      token: 'token_host_jwt_789'
+    })
+
+    connStore.rtcService = {
+      isHostMode: vi.fn(() => false),
+      requestAccountMerge: mockRequestAccountMerge,
+      sendIdentityMigration: vi.fn()
+    } as any
+
+    const res = await userStore.mergeAccount('Alice-Main', 'CorrectPassword123')
+    expect(mockRequestAccountMerge).toHaveBeenCalledWith(
+      'Alice-Main',
+      'CorrectPassword123',
+      phoneUserId,
+      'Alice-Phone'
+    )
+    expect(res.success).toBe(true)
+    expect(res.newId).toBe('user_host_999')
+    expect(userStore.userId).toBe('user_host_999')
+    expect(userStore.username).toBe('Alice-Main')
+    expect(userStore.token).toBe('token_host_jwt_789')
+
+    const stored = JSON.parse(localStorage.getItem('scoutingpro-user') || '{}')
+    expect(stored.id).toBe('user_host_999')
+    expect(stored.token).toBe('token_host_jwt_789')
+  })
+
+  it('handles client-side WebRTC merge failure without corrupting localStorage or userStore', async () => {
+    const userStore = useUserStore()
+    const { useConnectionStore } = await import('@/stores/connection')
+    const connStore = useConnectionStore()
+
+    const phoneUserId = 'user_phone_uuid_111'
+    userStore.user = {
+      id: phoneUserId,
+      username: 'Alice-Phone',
+      token: 'token_phone_123'
+    }
+    localStorage.setItem('scoutingpro-user', JSON.stringify(userStore.user))
+
+    const mockRequestAccountMerge = vi.fn().mockResolvedValue({
+      success: false,
+      error: 'Invalid target account password'
+    })
+
+    connStore.rtcService = {
+      isHostMode: vi.fn(() => false),
+      requestAccountMerge: mockRequestAccountMerge
+    } as any
+
+    const res = await userStore.mergeAccount('Alice-Main', 'WrongPassword123')
+    expect(res.success).toBe(false)
+    expect(res.error).toBe('Invalid target account password')
+
+    // Preserved unchanged
+    expect(userStore.userId).toBe(phoneUserId)
+    expect(userStore.username).toBe('Alice-Phone')
+    const stored = JSON.parse(localStorage.getItem('scoutingpro-user') || '{}')
+    expect(stored.id).toBe(phoneUserId)
+  })
 })

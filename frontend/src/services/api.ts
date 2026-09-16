@@ -61,6 +61,10 @@ function handleStaticHostFallback<T>(method: string, path: string, body?: unknow
       token: 'pwa-' + Date.now().toString(36)
     } as unknown as T)
   }
+  // 4b. Merge user -> static cloud host cannot perform direct database merge; reject so callers fail gracefully
+  if (path.startsWith('/users/merge') || path.startsWith('/user/merge')) {
+    return Promise.reject(new Error('Static cloud host does not support direct HTTP account merge; must merge via WebRTC host'))
+  }
   // 5. Events list
   if (path.startsWith('/events') && method === 'GET') {
     return Promise.resolve([] as unknown as T)

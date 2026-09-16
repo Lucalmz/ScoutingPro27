@@ -212,6 +212,61 @@ export function createWebRtcService(callbacks: WebRtcCallbacks): WebRtcService {
     stampHostSeq
   } = dispatcher
 
+  const pendingMergeRequests = new Map<
+    string,
+    {
+      resolve: (res: { success: boolean; newId?: string; newUsername?: string; token?: string; error?: string }) => void
+      reject: (err: any) => void
+      timer: any
+    }
+  >()
+
+  function requestAccountMerge(
+    targetUsername: string,
+    targetPassword: string,
+    sourceUserId: string,
+    sourceUsername: string
+  ): Promise<{ success: boolean; newId?: string; newUsername?: string; token?: string; error?: string }> {
+    return new Promise((resolve, reject) => {
+      const requestId = `merge-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`
+      const timer = setTimeout(() => {
+        pendingMergeRequests.delete(requestId)
+        resolve({ success: false, error: 'Merge request timed out (15s)' })
+      }, 15000)
+
+      pendingMergeRequests.set(requestId, { resolve, reject, timer })
+
+      sendMessage({
+        type: 'MERGE_ACCOUNT_REQUEST',
+        requestId,
+        targetUsername,
+        targetPassword,
+        sourceUserId,
+        sourceUsername,
+        authCode: currentInviteCode
+      }).catch((err) => {
+        clearTimeout(timer)
+        pendingMergeRequests.delete(requestId)
+        resolve({ success: false, error: err?.message || 'Failed to send merge request' })
+      })
+    })
+  }
+
+  function handleMergeAccountResponse(msg: any) {
+    const pending = pendingMergeRequests.get(msg.requestId)
+    if (pending) {
+      clearTimeout(pending.timer)
+      pendingMergeRequests.delete(msg.requestId)
+      pending.resolve({
+        success: Boolean(msg.success),
+        newId: msg.newId,
+        newUsername: msg.newUsername,
+        token: msg.token,
+        error: msg.error
+      })
+    }
+  }
+
   const rawHandleChannelMessage = createChannelMessageHandler({
     isHostMode: () => isHostMode,
     currentInviteCode: () => currentInviteCode,
@@ -220,6 +275,7 @@ export function createWebRtcService(callbacks: WebRtcCallbacks): WebRtcService {
     setCurrentHostSessionId: (id: string) => {
       currentHostSessionId = id
     },
+    handleMergeAccountResponse,
     callbacks,
     clients,
     stagedClients,
@@ -912,6 +968,12 @@ export function createWebRtcService(callbacks: WebRtcCallbacks): WebRtcService {
     peerMgr.hostIceRestartAttempts.clear()
     clientForceRelay = false
 
+    for (const [, req] of pendingMergeRequests) {
+      clearTimeout(req.timer)
+      req.resolve({ success: false, error: 'Disconnected before merge completed' })
+    }
+    pendingMergeRequests.clear()
+
     signaling?.close()
     signaling = null
     setStatus('offline')
@@ -945,6 +1007,8 @@ export function createWebRtcService(callbacks: WebRtcCallbacks): WebRtcService {
     getStatus: () => status,
     getTransportInfo: () => peerMgr.currentTransportInfo,
     getDataChannel: () => (isHostMode ? clients.values().next().value?.dc || null : clientDc),
+    isHostMode: () => isHostMode,
+    requestAccountMerge,
     updateCallbacks: (newCallbacks: Partial<WebRtcCallbacks>) => {
       Object.assign(callbacks, newCallbacks)
     }

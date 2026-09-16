@@ -209,11 +209,39 @@ export const useUserStore = defineStore('user', () => {
     error.value = null
 
     try {
-      const { mergeUser: apiMergeUser } = await import('@/services/api')
-      const res = await apiMergeUser({
-        targetUsername: targetUsername.trim(),
-        targetPassword
-      })
+      const { useConnectionStore } = await import('@/stores/connection')
+      const { useEventStore } = await import('@/stores/events')
+      const connStore = useConnectionStore()
+      const eventStore = useEventStore()
+
+      let res: { id: string; username: string; token?: string }
+
+      if (connStore.rtcService && !connStore.rtcService.isHostMode()) {
+        const mergeResult = await connStore.rtcService.requestAccountMerge(
+          targetUsername.trim(),
+          targetPassword,
+          oldId,
+          currentUsername
+        )
+        if (!mergeResult.success || !mergeResult.newId) {
+          throw new Error(mergeResult.error || 'Failed to merge account via Host')
+        }
+        res = {
+          id: mergeResult.newId,
+          username: mergeResult.newUsername || targetUsername.trim(),
+          token: mergeResult.token
+        }
+      } else {
+        const { mergeUser: apiMergeUser } = await import('@/services/api')
+        const apiRes = await apiMergeUser({
+          targetUsername: targetUsername.trim(),
+          targetPassword
+        })
+        if (!apiRes || !apiRes.id) {
+          throw new Error('Invalid response from merge API')
+        }
+        res = apiRes
+      }
 
       const targetId = res.id
       const targetName = res.username
@@ -237,10 +265,6 @@ export const useUserStore = defineStore('user', () => {
       usePitScoutStore().migrateScoutId(oldId, targetId, targetName)
 
       // Broadcast identity migration via WebRTC if connected
-      const { useConnectionStore } = await import('@/stores/connection')
-      const { useEventStore } = await import('@/stores/events')
-      const connStore = useConnectionStore()
-      const eventStore = useEventStore()
       const currentEventId = eventStore.currentEvent?.id
       if (currentEventId && connStore.rtcService) {
         connStore.rtcService.sendIdentityMigration(currentEventId, oldId, targetId, targetName)

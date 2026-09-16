@@ -98,5 +98,12 @@ export interface WebRtcService {
   getStatus: () => ConnectionStatus
   getTransportInfo: () => ConnectionTransportInfo | null
   getDataChannel: () => RTCDataChannel | null
+  isHostMode: () => boolean
+  requestAccountMerge: (
+    targetUsername: string,
+    targetPassword: string,
+    sourceUserId: string,
+    sourceUsername: string
+  ) => Promise<{ success: boolean; newId?: string; newUsername?: string; token?: string; error?: string }>
   updateCallbacks?: (callbacks: Partial<WebRtcCallbacks>) => void
 }

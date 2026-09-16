@@ -3,6 +3,7 @@ import { ref, computed, watch } from 'vue'
 import { listEvents, createEvent, joinEvent, syncExternalEvent, isStaticCloudHost } from '@/services/api'
 import { isDesktopHost } from '@/services/photoStorage'
 import { useUserStore } from '@/stores/user'
+import { useConnectionStore } from '@/stores/connection'
 import type { ScoutingEvent } from '@/types'
 
 export const useEventStore = defineStore('events', () => {
@@ -56,6 +57,13 @@ export const useEventStore = defineStore('events', () => {
   )
 
   const isHost = computed(() => {
+    const conn = useConnectionStore()
+    if (conn.rtcService && typeof conn.rtcService.isHostMode === 'function') {
+      return conn.rtcService.isHostMode()
+    }
+    if (!isDesktopHost()) {
+      return false
+    }
     return currentEvent.value?.hostId === userStore.userId
   })
 

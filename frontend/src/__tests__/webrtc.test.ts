@@ -34,6 +34,14 @@ vi.mock('mqtt', () => {
 
 vi.mock('../services/api', () => ({
   syncRecords: vi.fn().mockResolvedValue(undefined),
+  login: vi.fn().mockImplementation(async ({ username, password }: any) => {
+    if (password === 'CorrectPassword123') {
+      return { id: 'user_target_id', username, token: 'target_jwt_token' }
+    }
+    const err: any = new Error('Invalid credentials')
+    err.status = 401
+    throw err
+  }),
   createWebRtcTicket: vi.fn().mockImplementation(async (eventId: string, ecdhPublicKey: string) => {
     return { ticket: `ticket_for_${ecdhPublicKey.slice(0, 10)}`, expiresIn: 180 }
   }),
@@ -2438,6 +2446,196 @@ describe('WebRTC Pit Scouting & Batch Sync Protocol', () => {
       hostSessionId: 'active-host-session-12345',
       hostDeviceId: 'dev_host_1'
     })
+
+    hostService.disconnect()
+  })
+})
+
+describe('WebRTC Client SAS Verification Gating & In-Band Account Merge', () => {
+  let mockMqttClient: any
+
+  beforeEach(async () => {
+    (globalThis as any).__TEST_ALLOW_UNSIGNED_SIGNALING__ = true
+    await clearSecurityStoreForTesting()
+    localStorage.clear()
+    mockMqttClient = {
+      on: vi.fn(),
+      subscribe: vi.fn(),
+      publish: vi.fn(),
+      connected: true,
+      unsubscribe: vi.fn(),
+      end: vi.fn()
+    }
+    vi.mocked(mqtt.connect).mockReturnValue(mockMqttClient)
+
+    global.RTCPeerConnection = vi.fn().mockImplementation(() => {
+      let channelMessageHandler: any
+      const mockDc = {
+        readyState: 'open',
+        send: vi.fn(),
+        close: vi.fn(),
+        set onmessage(fn: any) { channelMessageHandler = fn },
+        get onmessage() { return channelMessageHandler }
+      }
+      return {
+        createDataChannel: vi.fn().mockReturnValue(mockDc),
+        createOffer: vi.fn().mockResolvedValue({ type: 'offer', sdp: 'offer-sdp' }),
+        createAnswer: vi.fn().mockResolvedValue({ type: 'answer', sdp: 'answer-sdp' }),
+        setLocalDescription: vi.fn().mockResolvedValue(undefined),
+        setRemoteDescription: vi.fn().mockResolvedValue(undefined),
+        addIceCandidate: vi.fn().mockResolvedValue(undefined),
+        restartIce: vi.fn(),
+        close: vi.fn(),
+        connectionState: 'connected',
+        iceConnectionState: 'connected',
+        set ondatachannel(fn: any) {
+          setTimeout(() => fn({ channel: mockDc }), 10)
+        }
+      }
+    }) as any
+  })
+
+  afterEach(() => {
+    vi.clearAllMocks()
+  })
+
+  it('Client receives host_hello from first-seen Host: gates with PENDING_VERIFICATION and triggers onSasVerificationRequired', async () => {
+    const callbacks = {
+      onStatusChange: vi.fn(),
+      onSasVerificationRequired: vi.fn(),
+      onSasVerified: vi.fn(),
+      onSasRejected: vi.fn()
+    }
+    const clientService = createWebRtcService(callbacks)
+    await clientService.join('sas-client-test', 'ClientUser', 'user_client_1')
+
+    const onMessage = mockMqttClient.on.mock.calls.find((c: any) => c[0] === 'message')?.[1]
+
+    const hostKeys = await generateEcdhKeyPair()
+    const hostPubHex = await exportEcdhPublicKey(hostKeys.publicKey)
+
+    // Host sends host_hello with ECDH public key
+    onMessage('topic', new TextEncoder().encode(JSON.stringify({
+      type: 'host_hello',
+      sender: 'host-peer-id',
+      hostSessionId: 'host-session-123',
+      deviceId: 'host-device-456',
+      ecdhPublicKey: hostPubHex
+    })))
+
+    await new Promise(r => setTimeout(r, 60))
+
+    // Client MUST NOT auto-approve; it MUST require SAS verification
+    expect(callbacks.onSasVerificationRequired).toHaveBeenCalledWith(
+      expect.objectContaining({ peerId: 'host', username: 'Host' }),
+      expect.any(String)
+    )
+    expect(clientService.getSasState('host')).toBe('PENDING_VERIFICATION')
+
+    // Confirm SAS manually
+    clientService.confirmSas('host')
+    expect(clientService.getSasState('host')).toBe('VERIFIED')
+    expect(callbacks.onSasVerified).toHaveBeenCalledWith('host')
+
+    clientService.disconnect()
+  })
+
+  it('Host handles MERGE_ACCOUNT_REQUEST from client and responds with MERGE_ACCOUNT_RESPONSE', async () => {
+    const callbacks = {
+      onStatusChange: vi.fn(),
+      onIdentityMigration: vi.fn()
+    }
+    const hostService = createWebRtcService(callbacks)
+    await hostService.host('merge-test-code', undefined, 'HostAdmin', 'user_host_admin')
+
+    let hostChannelHandler: any
+    let sentOverDc: any[] = []
+    const mockDc = {
+      readyState: 'open',
+      send: vi.fn((data) => sentOverDc.push(JSON.parse(data))),
+      close: vi.fn(),
+      set onmessage(fn: any) { hostChannelHandler = fn },
+      get onmessage() { return hostChannelHandler }
+    }
+
+    global.RTCPeerConnection = vi.fn().mockImplementation(() => ({
+      createOffer: vi.fn().mockResolvedValue({ type: 'offer', sdp: 'sdp' }),
+      createAnswer: vi.fn().mockResolvedValue({ type: 'answer', sdp: 'sdp' }),
+      setLocalDescription: vi.fn().mockResolvedValue(undefined),
+      setRemoteDescription: vi.fn().mockResolvedValue(undefined),
+      addIceCandidate: vi.fn().mockResolvedValue(undefined),
+      close: vi.fn(),
+      connectionState: 'connected',
+      iceConnectionState: 'connected',
+      set ondatachannel(fn: any) {
+        setTimeout(() => fn({ channel: mockDc }), 10)
+      }
+    })) as any
+
+    const clientKeys = await generateEcdhKeyPair()
+    const clientPubHex = await exportEcdhPublicKey(clientKeys.publicKey)
+
+    const onMessage = mockMqttClient.on.mock.calls.find((c: any) => c[0] === 'message')?.[1]
+
+    // Simulate client connecting
+    onMessage('topic', new TextEncoder().encode(JSON.stringify({
+      sender: 'client_peer_merge',
+      offer: { type: 'offer', sdp: 'offer-sdp', ticket: 'ticket_for_' + clientPubHex.slice(0, 10) },
+      ecdhPublicKey: clientPubHex,
+      deviceId: 'dev_client_phone',
+      clientSessionId: 'sess-client-phone'
+    })))
+
+    await new Promise(r => setTimeout(r, 60))
+
+    // 1. Send MERGE_ACCOUNT_REQUEST with correct password
+    await hostChannelHandler({
+      data: JSON.stringify({
+        type: 'MERGE_ACCOUNT_REQUEST',
+        requestId: 'req-merge-1',
+        targetUsername: 'HostAdmin',
+        targetPassword: 'CorrectPassword123',
+        sourceUserId: 'user_phone_temp',
+        sourceUsername: 'PhoneScout',
+        authCode: 'merge-test-code'
+      })
+    })
+
+    await new Promise(r => setTimeout(r, 60))
+
+    expect(callbacks.onIdentityMigration).toHaveBeenCalledWith(
+      'merge-test-code',
+      'user_phone_temp',
+      'user_target_id',
+      'HostAdmin'
+    )
+
+    const mergeResp = sentOverDc.find(m => m.type === 'MERGE_ACCOUNT_RESPONSE' && m.requestId === 'req-merge-1')
+    expect(mergeResp).toBeDefined()
+    expect(mergeResp.success).toBe(true)
+    expect(mergeResp.newId).toBe('user_target_id')
+    expect(mergeResp.token).toBe('target_jwt_token')
+
+    // 2. Send MERGE_ACCOUNT_REQUEST with wrong password
+    sentOverDc = []
+    await hostChannelHandler({
+      data: JSON.stringify({
+        type: 'MERGE_ACCOUNT_REQUEST',
+        requestId: 'req-merge-2',
+        targetUsername: 'HostAdmin',
+        targetPassword: 'WrongPassword!',
+        sourceUserId: 'user_phone_temp',
+        sourceUsername: 'PhoneScout',
+        authCode: 'merge-test-code'
+      })
+    })
+
+    await new Promise(r => setTimeout(r, 60))
+
+    const failResp = sentOverDc.find(m => m.type === 'MERGE_ACCOUNT_RESPONSE' && m.requestId === 'req-merge-2')
+    expect(failResp).toBeDefined()
+    expect(failResp.success).toBe(false)
+    expect(failResp.error).toContain('Invalid')
 
     hostService.disconnect()
   })

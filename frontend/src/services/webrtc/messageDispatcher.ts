@@ -57,7 +57,9 @@ export function createMessageDispatcher(ctx: MessageDispatcherContext) {
     const isControlMsg =
       msg.type === 'SESSION_CONFLICT' ||
       msg.type === 'SESSION_KICKED' ||
-      msg.type === 'TAKEOVER_PROMPT'
+      msg.type === 'TAKEOVER_PROMPT' ||
+      msg.type === 'MERGE_ACCOUNT_REQUEST' ||
+      msg.type === 'MERGE_ACCOUNT_RESPONSE'
 
     if (ctx.isHostMode()) {
       if (targetId) {

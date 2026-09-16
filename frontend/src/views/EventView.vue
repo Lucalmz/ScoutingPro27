@@ -92,7 +92,7 @@ const event = computed(() => {
 })
 
 const isHost = computed(() => {
-  return Boolean(event.value?.hostId && userStore.userId && event.value.hostId === userStore.userId) || eventStore.isHost
+  return eventStore.isHost
 })
 
 const state = reactive({

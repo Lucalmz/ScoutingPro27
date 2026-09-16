@@ -224,6 +224,9 @@ export function createClientSession(ctx: ClientSessionContext) {
 
   async function evaluateAndApplyClientTrust(hostPubKey: string, hostDeviceId?: string) {
     const sas = ctx.sas
+    if (sas.clientSasState === 'PENDING_VERIFICATION' && sas.clientHostEcdhPubHex === hostPubKey) {
+      return
+    }
     sas.clientHostEcdhPubHex = hostPubKey
     sas.clientHostDeviceId = hostDeviceId || 'host_device_default'
     const localEcdhPubHex = ctx.getLocalEcdhPubHex()
@@ -261,30 +264,28 @@ export function createClientSession(ctx: ClientSessionContext) {
       }
       ctx.callbacks.onSasVerified?.('host')
     } else if (trustEval.status === 'TOFU_FIRST_SEEN') {
-      console.log(`[WebRTC Client Security TOFU] Establishing baseline trust for Host device ${sas.clientHostDeviceId}.`)
-      await savePeerTrustRecord({
-        eventId: currentInviteCode || 'default_event',
-        userId: 'host',
-        username: 'Host',
-        deviceId: sas.clientHostDeviceId,
-        publicKeyHex: hostPubKey,
-        firstSeenAt: Date.now(),
-        lastSeenAt: Date.now(),
-        trustedAt: Date.now(),
-        trustLevel: 'TOFU_TRUSTED'
-      })
-      sas.clientSasState = 'VERIFIED'
-      const pendingOut = [...sas.clientPendingOutgoing]
-      sas.clientPendingOutgoing = []
-      for (const item of pendingOut) {
-        ctx.sendMessage(item.msg, item.targetId)
+      console.warn(`[WebRTC Client Security TOFU] First-seen Host device ${sas.clientHostDeviceId} requires manual SAS verification.`)
+      sas.clientSasState = 'PENDING_VERIFICATION'
+      if (sas.sasTimeoutTimers.has('host')) {
+        clearTimeout(sas.sasTimeoutTimers.get('host'))
       }
-      const pendingIn = [...sas.clientPendingIncoming]
-      sas.clientPendingIncoming = []
-      for (const item of pendingIn) {
-        ctx.handleChannelMessage(item.ev, item.senderId)
-      }
-      ctx.callbacks.onSasVerified?.('host')
+      sas.sasTimeoutTimers.set(
+        'host',
+        setTimeout(() => {
+          if (sas.clientSasState === 'PENDING_VERIFICATION') {
+            ctx.rejectSas('host', 'SAS verification timeout (60s)')
+          }
+        }, 60000)
+      )
+
+      ctx.callbacks.onSasVerificationRequired?.(
+        {
+          peerId: 'host',
+          username: 'Host',
+          ecdhPublicKey: hostPubKey
+        },
+        sas.clientSecurityFingerprint
+      )
     } else if (trustEval.status === 'KEY_ROTATION_ALERT') {
       if (trustEval.level === 'CRITICAL') {
         console.error(`[WebRTC Client Security ALERT] ${trustEval.message}`)
@@ -473,21 +474,24 @@ export function createClientSession(ctx: ClientSessionContext) {
       }
     } else if (data.type === 'sas_challenge') {
       console.warn('[WebRTC Client Security] Host issued SAS security challenge. Code:', data.fingerprint)
+      if (sas.clientSasState === 'VERIFIED') {
+        console.log('[WebRTC Client Security] Host issued SAS challenge but client is already verified; ignoring.')
+        return
+      }
       sas.clientSasState = 'PENDING_VERIFICATION'
       sas.clientSecurityFingerprint = data.fingerprint
       clearReconnectTimer()
 
-      if (sas.sasTimeoutTimers.has('host')) {
-        clearTimeout(sas.sasTimeoutTimers.get('host'))
+      if (!sas.sasTimeoutTimers.has('host')) {
+        sas.sasTimeoutTimers.set(
+          'host',
+          setTimeout(() => {
+            if (sas.clientSasState === 'PENDING_VERIFICATION') {
+              ctx.rejectSas('host', 'SAS verification timeout (60s)')
+            }
+          }, 60000)
+        )
       }
-      sas.sasTimeoutTimers.set(
-        'host',
-        setTimeout(() => {
-          if (sas.clientSasState === 'PENDING_VERIFICATION') {
-            ctx.rejectSas('host', 'SAS verification timeout (60s)')
-          }
-        }, 60000)
-      )
 
       ctx.callbacks.onSasVerificationRequired?.(
         {
