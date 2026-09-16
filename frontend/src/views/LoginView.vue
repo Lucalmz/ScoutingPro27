@@ -7,6 +7,7 @@ import { useToastStore } from '@/stores/toast'
 import { checkUserExists } from '@/services/api'
 import { useI18n } from 'vue-i18n'
 import { switchLanguage } from '@/i18n'
+import QrScannerModal from '@/components/common/QrScannerModal.vue'
 
 const router = useRouter()
 const route = useRoute()
@@ -21,12 +22,15 @@ const confirmPassword = ref('')
 const isNewUser = ref<boolean | null>(null)
 const checkingUser = ref(false)
 const submitted = ref(false)
+const showQrScannerModal = ref(false)
+const scannedInviteCode = ref('')
 
 watch(username, () => {
   isNewUser.value = null
 })
 
-const pendingInviteCode = computed(() => {
+const effectiveInviteCode = computed(() => {
+  if (scannedInviteCode.value) return scannedInviteCode.value
   const q = route.query.join || route.query.code
   return typeof q === 'string' ? q.trim().toUpperCase() : ''
 })
@@ -34,9 +38,9 @@ const pendingInviteCode = computed(() => {
 onMounted(async () => {
   userStore.restoreFromCache()
   if (userStore.isLoggedIn) {
-    if (pendingInviteCode.value) {
+    if (effectiveInviteCode.value) {
       try {
-        const evt = await eventStore.join(pendingInviteCode.value, 'Joined Event')
+        const evt = await eventStore.join(effectiveInviteCode.value, 'Joined Event')
         if (evt) {
           router.replace(`/event/${evt.id}`)
           return
@@ -48,6 +52,23 @@ onMounted(async () => {
     router.replace('/dashboard')
   }
 })
+
+async function handleQrScanned(code: string) {
+  scannedInviteCode.value = code
+  toastStore.showToast(t('qr_scanner.scan_success'), 'success')
+  if (userStore.isLoggedIn) {
+    try {
+      const evt = await eventStore.join(code, 'Joined Event')
+      if (evt) {
+        router.push(`/event/${evt.id}`)
+        return
+      }
+    } catch (e) {
+      console.warn('[LoginView] Failed to auto-join after scan:', e)
+    }
+    router.push('/dashboard')
+  }
+}
 
 function toggleLang() {
   const newLang = locale.value === 'en' ? 'zh' : 'en'
@@ -111,9 +132,9 @@ async function handleLogin() {
   submitted.value = false
   if (ok) {
     toastStore.showToast(t('toast.welcome_back', { name: uname }), 'success')
-    if (pendingInviteCode.value) {
+    if (effectiveInviteCode.value) {
       try {
-        const evt = await eventStore.join(pendingInviteCode.value, 'Joined Event')
+        const evt = await eventStore.join(effectiveInviteCode.value, 'Joined Event')
         if (evt) {
           router.push(`/event/${evt.id}`)
           return
@@ -143,12 +164,15 @@ async function handleLogin() {
         <p class="powered-by">developed by 27570 B.E.A.R.</p>
       </div>
 
-      <div v-if="pendingInviteCode" class="invite-banner">
+      <div v-if="effectiveInviteCode" class="invite-banner">
         <span class="material-icons invite-icon">group_add</span>
         <div class="invite-info">
           <span class="invite-title">{{ t('login.joining_with_code') }}</span>
-          <span class="invite-code-text">{{ pendingInviteCode }}</span>
+          <span class="invite-code-text">{{ effectiveInviteCode }}</span>
         </div>
+        <button type="button" class="btn-rescan" @click="showQrScannerModal = true" :title="t('login.rescan_qr_code')">
+          <span class="material-icons">qr_code_scanner</span>
+        </button>
       </div>
 
       <form @submit.prevent="handleLogin">
@@ -189,10 +213,20 @@ async function handleLogin() {
 
         <button type="submit" :disabled="!!(submitted || checkingUser || !username.trim() || !password.trim() || (isNewUser && !confirmPassword.trim()))">
           <span v-if="submitted || checkingUser" class="spinner"></span>
-          {{ checkingUser ? t('login.checking_user') : (submitted ? t('login.signing_in') : (pendingInviteCode ? (isNewUser ? t('login.register_join') : t('login.login_join')) : (isNewUser ? t('login.register_start') : t('login.start_scouting')))) }}
+          {{ checkingUser ? t('login.checking_user') : (submitted ? t('login.signing_in') : (effectiveInviteCode ? (isNewUser ? t('login.register_join') : t('login.login_join')) : (isNewUser ? t('login.register_start') : t('login.start_scouting')))) }}
         </button>
       </form>
+
+      <div class="login-alt-actions">
+        <button type="button" class="btn-scan-login" @click="showQrScannerModal = true">
+          <span class="material-icons">qr_code_scanner</span>
+          {{ effectiveInviteCode ? t('login.rescan_qr_code') : t('login.scan_qr_join') }}
+        </button>
+      </div>
     </div>
+
+    <!-- Mobile QR Scanner Modal -->
+    <QrScannerModal v-model="showQrScannerModal" @scan="handleQrScanned" />
   </div>
 </template>
 
@@ -278,6 +312,60 @@ async function handleLogin() {
   font-weight: 700;
   color: var(--foreground);
   letter-spacing: 0.5px;
+}
+
+.btn-rescan {
+  margin-left: auto;
+  background: transparent;
+  border: 1px solid rgba(57, 255, 20, 0.4);
+  color: var(--primary);
+  width: 36px;
+  height: 36px;
+  border-radius: 8px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  transition: all 0.2s;
+  padding: 0;
+  flex-shrink: 0;
+}
+
+.btn-rescan:hover {
+  background: rgba(57, 255, 20, 0.15);
+  border-color: var(--primary);
+}
+
+.login-alt-actions {
+  margin-top: 14px;
+  text-align: center;
+}
+
+.btn-scan-login {
+  background: transparent;
+  border: 1px solid var(--border);
+  color: var(--muted-foreground);
+  padding: 10px 16px;
+  border-radius: 10px;
+  width: 100%;
+  font-size: 14px;
+  font-weight: 500;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  cursor: pointer;
+  transition: all 0.2s;
+}
+
+.btn-scan-login:hover {
+  border-color: var(--primary);
+  color: var(--primary);
+  background: rgba(57, 255, 20, 0.06);
+}
+
+.btn-scan-login .material-icons {
+  font-size: 20px;
 }
 
 @keyframes login-card-enter {

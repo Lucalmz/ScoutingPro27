@@ -34,38 +34,9 @@ describe('MobileQrModal.vue', () => {
       writable: true,
       configurable: true
     })
-
-    // Mock fetch
-    global.fetch = vi.fn().mockImplementation(async (url: string, options?: any) => {
-      if (url === '/api/system/network-info') {
-        return {
-          ok: true,
-          json: async () => ({
-            primaryIp: '192.168.1.100',
-            allIps: ['192.168.1.100'],
-            primaryIpv6: '2409:8a00:1852:6040:66d6:9aff:fecf:fe9',
-            allIpv6s: ['2409:8a00:1852:6040:66d6:9aff:fecf:fe9'],
-            port: 8080,
-            firewallCommand: 'netsh advfirewall firewall add rule name="ScoutingPro27 Inbound (8080)" dir=in action=allow protocol=TCP localport=8080 profile=any'
-          })
-        } as Response
-      }
-      if (url === '/api/system/open-firewall-cmd') {
-        return {
-          ok: true,
-          json: async () => ({
-            success: true,
-            command: 'netsh advfirewall firewall add rule ...',
-            port: 8080,
-            os: 'windows'
-          })
-        } as Response
-      }
-      return { ok: false } as Response
-    })
   })
 
-  it('renders modal when modelValue is true and switches to ipv6 mode', async () => {
+  it('renders streamlined modal with invite code and QR canvas, without LAN/firewall cards', async () => {
     const wrapper = mount(MobileQrModal, {
       props: {
         modelValue: true,
@@ -79,103 +50,77 @@ describe('MobileQrModal.vue', () => {
     const dialog = document.body.querySelector('.qr-modal-dialog')
     expect(dialog).toBeTruthy()
 
-    // Mode buttons: cloud, lan, ipv6
-    const modeBtns = document.body.querySelectorAll('.mode-tab-btn')
-    expect(modeBtns.length).toBe(3)
-    ;(modeBtns[2] as HTMLButtonElement).click() // switch to IPv6
+    // Invite code badge is rendered
+    const codeValue = document.body.querySelector('.code-value')
+    expect(codeValue?.textContent).toBe('TEST12')
 
-    await wrapper.vm.$nextTick()
-    await new Promise((r) => setTimeout(r, 20))
+    // QR canvas container is rendered
+    const canvasContainer = document.body.querySelector('.qr-canvas-container')
+    expect(canvasContainer).toBeTruthy()
 
-    // Firewall helper card must be visible
-    const fwCard = document.body.querySelector('.firewall-helper-card')
-    expect(fwCard).toBeTruthy()
-    expect(fwCard?.textContent).toContain('netsh advfirewall firewall add rule')
-
-    // Click run CMD button
-    const runBtn = fwCard?.querySelector('.btn-run-cmd') as HTMLButtonElement
-    expect(runBtn).toBeTruthy()
-    runBtn.click()
-
-    await wrapper.vm.$nextTick()
-    await new Promise((r) => setTimeout(r, 20))
-
-    expect(global.fetch).toHaveBeenCalledWith('/api/system/open-firewall-cmd', { method: 'POST' })
-    expect(navigator.clipboard.writeText).toHaveBeenCalledWith(
-      expect.stringContaining('netsh advfirewall firewall add rule')
-    )
-
-    // Click copy command button
-    const copyCmdBtn = fwCard?.querySelector('.btn-copy-cmd') as HTMLButtonElement
-    expect(copyCmdBtn).toBeTruthy()
-    copyCmdBtn.click()
-
-    expect(navigator.clipboard.writeText).toHaveBeenCalled()
-  })
-
-  it('renders fw-allowed badge when firewall is already allowed in ipv6 mode', async () => {
-    global.fetch = vi.fn().mockImplementation(async (url: string) => {
-      if (url === '/api/system/network-info') {
-        return {
-          ok: true,
-          json: async () => ({
-            primaryIp: '192.168.1.100',
-            allIps: ['192.168.1.100'],
-            primaryIpv6: '2409:8a00:1852:6040:66d6:9aff:fecf:fe9',
-            allIpv6s: ['2409:8a00:1852:6040:66d6:9aff:fecf:fe9'],
-            port: 8080,
-            firewallAllowed: true,
-            firewallCommand: 'netsh advfirewall firewall add rule ...'
-          })
-        } as Response
-      }
-      return { ok: false } as Response
-    })
-
-    const wrapper = mount(MobileQrModal, {
-      props: {
-        modelValue: true,
-        inviteCode: 'TEST99'
-      }
-    })
-
-    await wrapper.vm.$nextTick()
-    await new Promise((r) => setTimeout(r, 20))
-
-    const modeBtns = document.body.querySelectorAll('.mode-tab-btn')
-    ;(modeBtns[2] as HTMLButtonElement).click()
-    await wrapper.vm.$nextTick()
-    await new Promise((r) => setTimeout(r, 20))
-
-    const allowedBadge = document.body.querySelector('.fw-status-badge.fw-allowed')
-    expect(allowedBadge).toBeTruthy()
-
-    const runBtn = document.body.querySelector('.btn-run-cmd') as HTMLButtonElement
-    expect(runBtn.disabled).toBe(true)
-  })
-
-  it('renders cloud mode by default with PWA badge and configurable URL', async () => {
-    const wrapper = mount(MobileQrModal, {
-      props: {
-        modelValue: true,
-        inviteCode: 'CLOUD88'
-      }
-    })
-
-    await wrapper.vm.$nextTick()
-    await new Promise((r) => setTimeout(r, 20))
-
-    // Cloud status badge should be visible by default
-    const cloudBadge = document.body.querySelector('.cloud-status-badge')
-    expect(cloudBadge).toBeTruthy()
-    expect(cloudBadge?.textContent).toContain('qr_modal.cloud_pwa_badge')
-
-    // Join URL should point to cloud PWA by default
+    // URL input is rendered and contains join link
     const urlInput = document.body.querySelector('.url-input') as HTMLInputElement
     expect(urlInput).toBeTruthy()
-    expect(urlInput.value).toContain('https://lucalmz.github.io/ScoutingPro27/#/?join=CLOUD88')
+    expect(urlInput.value).toContain('https://lucalmz.github.io/ScoutingPro27/#/?join=TEST12')
 
-    // Open cloud URL editor
+    // Verify LAN mode tabs, firewall cards, and 502 diagnostics are completely removed
+    expect(document.body.querySelector('.mode-tab-btn')).toBeNull()
+    expect(document.body.querySelector('.firewall-helper-card')).toBeNull()
+    expect(document.body.querySelector('.troubleshoot-502-card')).toBeNull()
+    expect(document.body.querySelector('.macos-troubleshoot-card')).toBeNull()
+  })
+
+  it('copies invite code when clicking the code badge bar', async () => {
+    const wrapper = mount(MobileQrModal, {
+      props: {
+        modelValue: true,
+        inviteCode: 'JOIN99'
+      }
+    })
+
+    await wrapper.vm.$nextTick()
+    await new Promise((r) => setTimeout(r, 20))
+
+    const codeBadge = document.body.querySelector('.code-badge-bar') as HTMLElement
+    expect(codeBadge).toBeTruthy()
+    codeBadge.click()
+
+    await wrapper.vm.$nextTick()
+    expect(navigator.clipboard.writeText).toHaveBeenCalledWith('JOIN99')
+  })
+
+  it('copies join URL when clicking the copy link button', async () => {
+    const wrapper = mount(MobileQrModal, {
+      props: {
+        modelValue: true,
+        inviteCode: 'URL456'
+      }
+    })
+
+    await wrapper.vm.$nextTick()
+    await new Promise((r) => setTimeout(r, 20))
+
+    const copyBtn = document.body.querySelector('.btn-copy') as HTMLButtonElement
+    expect(copyBtn).toBeTruthy()
+    copyBtn.click()
+
+    await wrapper.vm.$nextTick()
+    expect(navigator.clipboard.writeText).toHaveBeenCalledWith(
+      expect.stringContaining('https://lucalmz.github.io/ScoutingPro27/#/?join=URL456')
+    )
+  })
+
+  it('allows customizing cloud PWA domain', async () => {
+    const wrapper = mount(MobileQrModal, {
+      props: {
+        modelValue: true,
+        inviteCode: 'CUST77'
+      }
+    })
+
+    await wrapper.vm.$nextTick()
+    await new Promise((r) => setTimeout(r, 20))
+
     const editBtn = document.body.querySelector('.btn-edit-cloud-url') as HTMLButtonElement
     expect(editBtn).toBeTruthy()
     editBtn.click()
@@ -190,111 +135,23 @@ describe('MobileQrModal.vue', () => {
     saveBtn.click()
 
     await wrapper.vm.$nextTick()
-    expect(urlInput.value).toContain('https://custom-team.pages.dev/#/?join=CLOUD88')
+    const urlInput = document.body.querySelector('.url-input') as HTMLInputElement
+    expect(urlInput.value).toContain('https://custom-team.pages.dev/#/?join=CUST77')
   })
 
-  it('renders 502 troubleshooting card and allows switching to macOS tab', async () => {
-    global.fetch = vi.fn().mockImplementation(async (url: string) => {
-      if (url === '/api/system/network-info') {
-        return {
-          ok: true,
-          json: async () => ({
-            primaryIp: '192.168.137.1',
-            allIps: ['192.168.137.1', '172.20.10.2'],
-            primaryIpv6: null,
-            allIpv6s: [],
-            port: 8080,
-            os: 'windows',
-            isWindows: true,
-            isMac: false,
-            firewallAllowed: false,
-            firewallCommand: 'netsh advfirewall firewall add rule ...',
-            macFirewallCommand: 'sudo /usr/libexec/ApplicationFirewall/socketfilterfw --setglobalstate off'
-          })
-        } as Response
-      }
-      return { ok: false } as Response
-    })
-
+  it('emits update:modelValue false when closing', async () => {
     const wrapper = mount(MobileQrModal, {
       props: {
         modelValue: true,
-        inviteCode: 'TEST502'
+        inviteCode: 'TEST12'
       }
     })
 
     await wrapper.vm.$nextTick()
-    await new Promise((r) => setTimeout(r, 20))
+    const closeBtn = document.body.querySelector('.close-btn') as HTMLButtonElement
+    expect(closeBtn).toBeTruthy()
+    closeBtn.click()
 
-    // 502 troubleshooting card must be visible
-    const card502 = document.body.querySelector('.troubleshoot-502-card')
-    expect(card502).toBeTruthy()
-    expect(card502?.textContent).toContain('qr_modal.troubleshoot_502_banner_title')
-
-    // Hotspot card must be visible
-    const hotspotCard = document.body.querySelector('.hotspot-card')
-    expect(hotspotCard).toBeTruthy()
-
-    // Switch to macOS tab
-    const osBtns = document.body.querySelectorAll('.os-tab-btn')
-    expect(osBtns.length).toBe(2)
-    ;(osBtns[1] as HTMLButtonElement).click()
-
-    await wrapper.vm.$nextTick()
-    await new Promise((r) => setTimeout(r, 20))
-
-    // macOS troubleshooting card should be visible
-    const macCard = document.body.querySelector('.macos-troubleshoot-card')
-    expect(macCard).toBeTruthy()
-    expect(macCard?.textContent).toContain('qr_modal.macos_local_network_title')
-
-    // macOS command card should be visible and copyable
-    const macCmdCard = document.body.querySelector('.macos-cmd-card')
-    expect(macCmdCard).toBeTruthy()
-    expect(macCmdCard?.textContent).toContain('socketfilterfw')
-
-    const macCopyBtn = macCmdCard?.querySelector('.btn-copy-cmd') as HTMLButtonElement
-    expect(macCopyBtn).toBeTruthy()
-    macCopyBtn.click()
-
-    expect(navigator.clipboard.writeText).toHaveBeenCalledWith(
-      expect.stringContaining('socketfilterfw')
-    )
-  })
-
-  it('auto-detects macOS when backend returns isMac: true', async () => {
-    global.fetch = vi.fn().mockImplementation(async (url: string) => {
-      if (url === '/api/system/network-info') {
-        return {
-          ok: true,
-          json: async () => ({
-            primaryIp: '172.20.10.3',
-            allIps: ['172.20.10.3'],
-            primaryIpv6: null,
-            allIpv6s: [],
-            port: 8080,
-            os: 'macos',
-            isWindows: false,
-            isMac: true,
-            macFirewallCommand: 'sudo /usr/libexec/ApplicationFirewall/socketfilterfw --setglobalstate off'
-          })
-        } as Response
-      }
-      return { ok: false } as Response
-    })
-
-    const wrapper = mount(MobileQrModal, {
-      props: {
-        modelValue: true,
-        inviteCode: 'MAC123'
-      }
-    })
-
-    await wrapper.vm.$nextTick()
-    await new Promise((r) => setTimeout(r, 20))
-
-    // Automatically selects macOS tab
-    const macCard = document.body.querySelector('.macos-troubleshoot-card')
-    expect(macCard).toBeTruthy()
+    expect(wrapper.emitted('update:modelValue')?.[0]).toEqual([false])
   })
 })

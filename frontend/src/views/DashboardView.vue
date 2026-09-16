@@ -11,6 +11,7 @@ import { isDesktopHost } from '@/services/photoStorage'
 import { hapticLight } from '@/utils/haptics'
 import { transitionState } from '@/utils/transitionState'
 import RenameModal from '@/components/common/RenameModal.vue'
+import QrScannerModal from '@/components/common/QrScannerModal.vue'
 
 const { t } = useI18n()
 const toastStore = useToastStore()
@@ -22,12 +23,20 @@ const inboxStore = useInboxStore()
 const showCreateModal = ref(false)
 const showJoinModal = ref(false)
 const showRenameModal = ref(false)
+const showQrScannerModal = ref(false)
 const eventFileInputRef = ref<HTMLInputElement | null>(null)
 const newEventName = ref('')
 const inviteCode = ref('')
 const creating = ref(false)
 const joining = ref(false)
 const enteringEventId = ref<string | null>(null)
+
+async function handleQrScanned(code: string) {
+  if (!code) return
+  inviteCode.value = code
+  showJoinModal.value = false
+  await handleJoin()
+}
 
 async function onEventFileSelected(e: Event) {
   const file = (e.target as HTMLInputElement).files?.[0]
@@ -218,6 +227,10 @@ function handleOpenRenameModal() {
         <button class="action-btn" :class="{ primary: !isDesktopHost(), secondary: isDesktopHost() }" @click="showJoinModal = true">
           {{ t('dashboard.join_event') }}
         </button>
+        <button class="action-btn scan-btn" :class="{ primary: !isDesktopHost(), secondary: isDesktopHost() }" @click="showQrScannerModal = true">
+          <span class="material-icons" style="font-size: 18px; margin-right: 4px; vertical-align: text-bottom;">qr_code_scanner</span>
+          {{ t('dashboard.scan_to_join') }}
+        </button>
         <button v-if="isDesktopHost()" class="action-btn secondary" @click="eventFileInputRef?.click()">
           <span class="material-icons" style="font-size: 18px; margin-right: 4px; vertical-align: text-bottom;">file_download</span>
           {{ t('offline_sync.import_event_btn') }}
@@ -304,14 +317,19 @@ function handleOpenRenameModal() {
         <div class="modal-card">
           <h3>{{ t('dashboard.modal_join_title') }}</h3>
           <label>{{ t('dashboard.modal_join_code') }}</label>
-          <input
-            v-model="inviteCode"
-            type="text"
-            :placeholder="t('dashboard.modal_join_placeholder')"
-            :disabled="joining"
-            @keyup.enter="handleJoin"
-            style="text-transform: uppercase;"
-          />
+          <div class="join-input-group">
+            <input
+              v-model="inviteCode"
+              type="text"
+              :placeholder="t('dashboard.modal_join_placeholder')"
+              :disabled="joining"
+              @keyup.enter="handleJoin"
+              style="text-transform: uppercase;"
+            />
+            <button type="button" class="btn-scan-input" @click="showQrScannerModal = true" :title="t('dashboard.scan_qr_btn')">
+              <span class="material-icons">qr_code_scanner</span>
+            </button>
+          </div>
           <div class="modal-actions">
             <button class="btn-cancel" @click="showJoinModal = false">{{ t('dashboard.btn_cancel') }}</button>
             <button class="btn-confirm" :disabled="joining || !inviteCode.trim()" @click="handleJoin">
@@ -324,6 +342,9 @@ function handleOpenRenameModal() {
 
     <!-- Rename User Modal -->
     <RenameModal v-model:visible="showRenameModal" />
+
+    <!-- Mobile QR Scanner Modal -->
+    <QrScannerModal v-model="showQrScannerModal" @scan="handleQrScanned" />
   </div>
 </template>
 
