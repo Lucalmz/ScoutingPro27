@@ -7,6 +7,8 @@ import { useToastStore } from '@/stores/toast'
 import { checkUserExists } from '@/services/api'
 import { useI18n } from 'vue-i18n'
 import { switchLanguage } from '@/i18n'
+import { isDesktopHost } from '@/services/photoStorage'
+import { useIsMobile } from '@/composables/useIsMobile'
 import QrScannerModal from '@/components/common/QrScannerModal.vue'
 
 const router = useRouter()
@@ -15,6 +17,8 @@ const userStore = useUserStore()
 const eventStore = useEventStore()
 const toastStore = useToastStore()
 const { t, locale } = useI18n()
+const { isMobile } = useIsMobile()
+const isMobileClient = computed(() => isMobile.value && !isDesktopHost())
 
 const username = ref('')
 const password = ref('')
@@ -170,7 +174,7 @@ async function handleLogin() {
           <span class="invite-title">{{ t('login.joining_with_code') }}</span>
           <span class="invite-code-text">{{ effectiveInviteCode }}</span>
         </div>
-        <button type="button" class="btn-rescan" @click="showQrScannerModal = true" :title="t('login.rescan_qr_code')">
+        <button v-if="isMobileClient" type="button" class="btn-rescan" @click="showQrScannerModal = true" :title="t('login.rescan_qr_code')">
           <span class="material-icons">qr_code_scanner</span>
         </button>
       </div>
@@ -217,7 +221,7 @@ async function handleLogin() {
         </button>
       </form>
 
-      <div class="login-alt-actions">
+      <div v-if="isMobileClient" class="login-alt-actions">
         <button type="button" class="btn-scan-login" @click="showQrScannerModal = true">
           <span class="material-icons">qr_code_scanner</span>
           {{ effectiveInviteCode ? t('login.rescan_qr_code') : t('login.scan_qr_join') }}
@@ -226,7 +230,7 @@ async function handleLogin() {
     </div>
 
     <!-- Mobile QR Scanner Modal -->
-    <QrScannerModal v-model="showQrScannerModal" @scan="handleQrScanned" />
+    <QrScannerModal v-if="isMobileClient" v-model="showQrScannerModal" @scan="handleQrScanned" />
   </div>
 </template>
 

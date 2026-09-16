@@ -65,4 +65,34 @@ describe('useIsMobile composable', () => {
     await wrapper.vm.$nextTick()
     expect(wrapper.text()).toBe('true')
   })
+
+  it('identifies mobile user agents via isMobileDevice', async () => {
+    const { isMobileDevice } = await import('../composables/useIsMobile')
+    const originalUserAgent = navigator.userAgent
+
+    try {
+      Object.defineProperty(navigator, 'userAgent', {
+        value: 'Mozilla/5.0 (iPhone; CPU iPhone OS 16_0 like Mac OS X) AppleWebKit/605.1.15',
+        configurable: true
+      })
+      expect(isMobileDevice()).toBe(true)
+
+      Object.defineProperty(navigator, 'userAgent', {
+        value: 'Mozilla/5.0 (Linux; Android 13; SM-S901B) AppleWebKit/537.36',
+        configurable: true
+      })
+      expect(isMobileDevice()).toBe(true)
+
+      Object.defineProperty(navigator, 'userAgent', {
+        value: 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
+        configurable: true
+      })
+      expect(isMobileDevice()).toBe(false)
+    } finally {
+      Object.defineProperty(navigator, 'userAgent', {
+        value: originalUserAgent,
+        configurable: true
+      })
+    }
+  })
 })

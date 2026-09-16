@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref, onMounted, nextTick } from 'vue'
+import { ref, computed, onMounted, nextTick } from 'vue'
 import { useRouter } from 'vue-router'
 import { useI18n } from 'vue-i18n'
 import { useUserStore } from '@/stores/user'
@@ -8,6 +8,7 @@ import { parseEventPackage } from '@/utils/offlineSync'
 import { useToastStore } from '@/stores/toast'
 import { useInboxStore } from '@/stores/inbox'
 import { isDesktopHost } from '@/services/photoStorage'
+import { useIsMobile } from '@/composables/useIsMobile'
 import { hapticLight } from '@/utils/haptics'
 import { transitionState } from '@/utils/transitionState'
 import RenameModal from '@/components/common/RenameModal.vue'
@@ -19,6 +20,8 @@ const router = useRouter()
 const userStore = useUserStore()
 const eventStore = useEventStore()
 const inboxStore = useInboxStore()
+const { isMobile } = useIsMobile()
+const isMobileClient = computed(() => isMobile.value && !isDesktopHost())
 
 const showCreateModal = ref(false)
 const showJoinModal = ref(false)
@@ -227,7 +230,7 @@ function handleOpenRenameModal() {
         <button class="action-btn" :class="{ primary: !isDesktopHost(), secondary: isDesktopHost() }" @click="showJoinModal = true">
           {{ t('dashboard.join_event') }}
         </button>
-        <button class="action-btn scan-btn" :class="{ primary: !isDesktopHost(), secondary: isDesktopHost() }" @click="showQrScannerModal = true">
+        <button v-if="isMobileClient" class="action-btn scan-btn" :class="{ primary: !isDesktopHost(), secondary: isDesktopHost() }" @click="showQrScannerModal = true">
           <span class="material-icons" style="font-size: 18px; margin-right: 4px; vertical-align: text-bottom;">qr_code_scanner</span>
           {{ t('dashboard.scan_to_join') }}
         </button>
@@ -326,7 +329,7 @@ function handleOpenRenameModal() {
               @keyup.enter="handleJoin"
               style="text-transform: uppercase;"
             />
-            <button type="button" class="btn-scan-input" @click="showQrScannerModal = true" :title="t('dashboard.scan_qr_btn')">
+            <button v-if="isMobileClient" type="button" class="btn-scan-input" @click="showQrScannerModal = true" :title="t('dashboard.scan_qr_btn')">
               <span class="material-icons">qr_code_scanner</span>
             </button>
           </div>
@@ -344,7 +347,7 @@ function handleOpenRenameModal() {
     <RenameModal v-model:visible="showRenameModal" />
 
     <!-- Mobile QR Scanner Modal -->
-    <QrScannerModal v-model="showQrScannerModal" @scan="handleQrScanned" />
+    <QrScannerModal v-if="isMobileClient" v-model="showQrScannerModal" @scan="handleQrScanned" />
   </div>
 </template>
 
