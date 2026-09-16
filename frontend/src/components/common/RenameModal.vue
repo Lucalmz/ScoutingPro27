@@ -181,7 +181,7 @@ async function handleSave() {
 
         <!-- Username Field with View Transition Target -->
         <div class="form-group">
-          <label class="form-label">{{ t('user.nickname_label') || '用户名 / 昵称' }}</label>
+          <label class="form-label">{{ t('user.nickname_label') }}</label>
           <div class="input-wrapper" :style="{ viewTransitionName: isTransitioning && visible ? 'user-profile-box' : 'none' }">
             <span class="material-icons field-icon">person</span>
             <input
@@ -189,7 +189,7 @@ async function handleSave() {
               type="text"
               class="form-input with-icon"
               :class="{ 'text-transparent': isTransitioning }"
-              :placeholder="t('user.nickname_placeholder') || '请输入用户名 (1-30 个字符)'"
+              :placeholder="t('user.nickname_placeholder')"
               maxlength="30"
               :disabled="saving"
               @keydown.enter="handleSave"
@@ -207,7 +207,7 @@ async function handleSave() {
           <div class="accordion-header" @click="changePassword = !changePassword">
             <div class="accordion-header-left">
               <span class="material-icons lock-icon">lock</span>
-              <span class="accordion-title">{{ t('user.change_password_toggle') || '修改密码' }}</span>
+              <span class="accordion-title">{{ t('user.change_password_toggle') }}</span>
             </div>
             <span class="material-icons chevron-icon" :class="{ rotated: changePassword }">expand_more</span>
           </div>
@@ -216,42 +216,42 @@ async function handleSave() {
             <div class="accordion-inner-content">
               <div class="accordion-body">
                 <div class="form-group">
-                  <label class="form-label">{{ t('user.old_password_label') || '原密码' }}</label>
+                  <label class="form-label">{{ t('user.old_password_label') }}</label>
                   <div class="input-wrapper">
                     <span class="material-icons field-icon">vpn_key</span>
                     <input
                       v-model="oldPassword"
                       type="password"
                       class="form-input with-icon"
-                      :placeholder="t('user.old_password_placeholder') || '请输入原密码以验证身份'"
+                      :placeholder="t('user.old_password_placeholder')"
                       :disabled="saving"
                     />
                   </div>
                 </div>
 
                 <div class="form-group">
-                  <label class="form-label">{{ t('user.new_password_label') || '新密码' }}</label>
+                  <label class="form-label">{{ t('user.new_password_label') }}</label>
                   <div class="input-wrapper">
                     <span class="material-icons field-icon">lock_reset</span>
                     <input
                       v-model="newPassword"
                       type="password"
                       class="form-input with-icon"
-                      :placeholder="t('user.new_password_placeholder') || '请输入新密码'"
+                      :placeholder="t('user.new_password_placeholder')"
                       :disabled="saving"
                     />
                   </div>
                 </div>
 
                 <div class="form-group">
-                  <label class="form-label">{{ t('user.confirm_password_label') || '确认新密码' }}</label>
+                  <label class="form-label">{{ t('user.confirm_password_label') }}</label>
                   <div class="input-wrapper">
                     <span class="material-icons field-icon">check_circle</span>
                     <input
                       v-model="confirmPassword"
                       type="password"
                       class="form-input with-icon"
-                      :placeholder="t('user.confirm_password_placeholder') || '请再次输入新密码'"
+                      :placeholder="t('user.confirm_password_placeholder')"
                       :disabled="saving"
                       @keydown.enter="handleSave"
                     />
@@ -264,11 +264,11 @@ async function handleSave() {
 
         <div class="modal-actions">
           <button class="btn btn-secondary" :disabled="saving" @click="handleClose">
-            {{ t('common.cancel') || t('user.btn_cancel') || '取消' }}
+            {{ t('common.cancel') }}
           </button>
           <button class="btn btn-primary" :disabled="saving || !newUsername.trim()" @click="handleSave">
             <span v-if="saving" class="material-icons spinning" style="font-size: 16px; margin-right: 4px;">sync</span>
-            {{ saving ? (t('user.btn_saving') || '保存中...') : (t('user.btn_save') || '保存修改') }}
+            {{ saving ? t('user.btn_saving') : t('user.btn_save') }}
           </button>
         </div>
       </div>

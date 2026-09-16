@@ -738,6 +738,52 @@ export function createChannelMessageHandler(ctx: ChannelMessageHandlerContext) {
           callbacks.onEventMetadataReceived?.(msg.event)
         }
         break
+
+      case 'PIT_PHOTO_UPLOAD': {
+        if (isHostMode && msg.eventId && msg.key && msg.dataUrl) {
+          try {
+            const { uploadPitPhoto } = await import('@/services/api')
+            await uploadPitPhoto(msg.eventId, msg.key, msg.dataUrl)
+            console.log(`[WebRTC Host] Successfully saved pit photo ${msg.key} for event ${msg.eventId}`)
+            await ctx.sendMessage(
+              {
+                type: 'PIT_PHOTO_ACK',
+                eventId: msg.eventId,
+                key: msg.key,
+                success: true,
+                authCode: currentInviteCode
+              },
+              senderId
+            )
+          } catch (err) {
+            console.error(`[WebRTC Host] Failed to save pit photo ${msg.key}:`, err)
+            await ctx.sendMessage(
+              {
+                type: 'PIT_PHOTO_ACK',
+                eventId: msg.eventId,
+                key: msg.key,
+                success: false,
+                authCode: currentInviteCode
+              },
+              senderId
+            )
+          }
+        }
+        break
+      }
+
+      case 'PIT_PHOTO_ACK': {
+        if (!isHostMode && msg.key && msg.success) {
+          try {
+            const { markMobilePhotoSynced } = await import('@/services/mobilePhotoCache')
+            await markMobilePhotoSynced(msg.key)
+            console.log(`[WebRTC Client] Pit photo ${msg.key} acknowledged and marked synced`)
+          } catch (err) {
+            console.warn('[WebRTC Client] Failed to mark photo synced upon ACK:', err)
+          }
+        }
+        break
+      }
     }
   }
 }

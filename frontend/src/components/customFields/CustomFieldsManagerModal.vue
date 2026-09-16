@@ -127,7 +127,7 @@ function removeOption(idx: number) {
 async function handleSaveField() {
   const name = formName.value.trim()
   if (!name) {
-    toast.showToast('请输入字段名称', 'error')
+    toast.showToast(t('custom_fields.err_name_required'), 'error')
     return
   }
 
@@ -157,15 +157,15 @@ async function handleSaveField() {
 
     if (editingId.value) {
       await store.updateField(props.eventId, editingId.value, payload)
-      toast.showToast('字段修改成功', 'success')
+      toast.showToast(t('custom_fields.toast_edit_success'), 'success')
     } else {
       await store.createField(props.eventId, payload)
-      toast.showToast('字段创建成功', 'success')
+      toast.showToast(t('custom_fields.toast_create_success'), 'success')
     }
     hapticSuccess()
     isEditing.value = false
   } catch (err: any) {
-    toast.showError(err, '保存失败')
+    toast.showError(err, t('custom_fields.toast_save_failed'))
   } finally {
     isSaving.value = false
   }
@@ -173,32 +173,32 @@ async function handleSaveField() {
 
 async function handleDeleteField(f: CustomFieldDefinition) {
   const ok = await showConfirm({
-    title: '删除字段确认',
-    message: `确定要删除自定义字段【${f.name}】吗？删除后该字段不再出现在表单中。`,
-    confirmText: '确定删除',
-    cancelText: '取消',
+    title: t('custom_fields.delete_title'),
+    message: t('custom_fields.delete_confirm_msg', { name: f.name }),
+    confirmText: t('custom_fields.btn_delete_confirm'),
+    cancelText: t('common.cancel'),
     type: 'danger'
   })
   if (!ok) return
 
   try {
     await store.deleteField(props.eventId, f.id)
-    toast.showToast(`字段【${f.name}】已删除`, 'info')
+    toast.showToast(t('custom_fields.toast_deleted', { name: f.name }), 'info')
     hapticLight()
   } catch (e: any) {
-    toast.showError(e, '删除失败')
+    toast.showError(e, t('custom_fields.toast_delete_failed'))
   }
 }
 
 function handleToggleActive(f: CustomFieldDefinition) {
   store.toggleFieldActive(props.eventId, f.id).catch((err) => {
-    toast.showError(err, '切换状态失败')
+    toast.showError(err, t('custom_fields.toast_toggle_failed'))
   })
 }
 
 function handleMove(f: CustomFieldDefinition, dir: 'up' | 'down') {
   store.moveFieldOrder(props.eventId, f.id, dir, activeTab.value).catch((err) => {
-    toast.showError(err, '排序调整失败')
+    toast.showError(err, t('custom_fields.toast_reorder_failed'))
   })
 }
 
@@ -214,7 +214,7 @@ function closeModal() {
       <div class="cf-modal-header">
         <div class="header-left">
           <span class="material-icons header-icon">tune</span>
-          <h3>自定义字段构建器</h3>
+          <h3>{{ t('custom_fields.builder_title') }}</h3>
         </div>
         <button class="btn-close" @click="closeModal">
           <span class="material-icons">close</span>
@@ -230,7 +230,7 @@ function closeModal() {
           @click="activeTab = 'MATCH'; isEditing = false;"
         >
           <span class="material-icons">sports_score</span>
-          比赛侦察字段 (Match)
+          {{ t('custom_fields.tab_match') }}
         </button>
         <button
           type="button"
@@ -239,7 +239,7 @@ function closeModal() {
           @click="activeTab = 'PIT'; isEditing = false;"
         >
           <span class="material-icons">engineering</span>
-          展位侦察字段 (Pit)
+          {{ t('custom_fields.tab_pit') }}
         </button>
       </div>
 
@@ -249,18 +249,18 @@ function closeModal() {
         <div v-if="!isEditing" class="fields-list-view">
           <div class="list-action-bar">
             <span class="list-summary">
-              已配置 {{ targetFields.length }} 个字段
+              {{ t('custom_fields.configured_count', { count: targetFields.length }) }}
             </span>
             <button class="btn-create-field" @click="openCreateDrawer">
               <span class="material-icons">add</span>
-              新建字段
+              {{ t('custom_fields.btn_create') }}
             </button>
           </div>
 
           <div v-if="targetFields.length === 0" class="cf-empty-state">
             <span class="material-icons empty-icon">layers_clear</span>
-            <p>当前分类暂无自定义字段</p>
-            <span class="empty-hint">点击右上角【新建字段】，自由为赛队打造专属考察指标</span>
+            <p>{{ t('custom_fields.empty_state_title') }}</p>
+            <span class="empty-hint">{{ t('custom_fields.empty_state_hint') }}</span>
           </div>
 
           <div v-else class="cf-cards-grid">
@@ -273,13 +273,13 @@ function closeModal() {
               <div class="cf-card-left">
                 <div class="cf-card-title-row">
                   <span class="cf-card-title">{{ f.name }}</span>
-                  <span class="cf-badge-phase">{{ f.phase }}</span>
-                  <span class="cf-badge-type">{{ f.fieldType }}</span>
+                  <span class="cf-badge-phase">{{ t(`custom_fields.badge_phase_${f.phase}`) || f.phase }}</span>
+                  <span class="cf-badge-type">{{ t(`custom_fields.badge_type_${f.fieldType}`) || f.fieldType }}</span>
                   <span v-if="f.unit" class="cf-badge-unit">{{ f.unit }}</span>
                 </div>
                 <div class="cf-card-sub">
                   <code>{{ f.fieldKey }}</code>
-                  <span v-if="f.required" class="required-text">必填</span>
+                  <span v-if="f.required" class="required-text">{{ t('custom_fields.badge_required') }}</span>
                 </div>
               </div>
 
@@ -289,7 +289,7 @@ function closeModal() {
                   <button
                     class="btn-icon"
                     :disabled="idx === 0"
-                    title="上移"
+                    :title="t('custom_fields.order_up')"
                     @click="handleMove(f, 'up')"
                   >
                     <span class="material-icons">keyboard_arrow_up</span>
@@ -297,7 +297,7 @@ function closeModal() {
                   <button
                     class="btn-icon"
                     :disabled="idx === targetFields.length - 1"
-                    title="下移"
+                    :title="t('custom_fields.order_down')"
                     @click="handleMove(f, 'down')"
                   >
                     <span class="material-icons">keyboard_arrow_down</span>
@@ -305,7 +305,7 @@ function closeModal() {
                 </div>
 
                 <!-- 激活/停用 Switch -->
-                <label class="switch-toggle" :title="f.isActive ? '已激活' : '已停用'">
+                <label class="switch-toggle" :title="f.isActive ? t('custom_fields.active_status') : t('custom_fields.inactive_status')">
                   <input
                     type="checkbox"
                     :checked="f.isActive"
@@ -315,12 +315,12 @@ function closeModal() {
                 </label>
 
                 <!-- 编辑 -->
-                <button class="btn-icon edit-btn" title="编辑" @click="openEditDrawer(f)">
+                <button class="btn-icon edit-btn" :title="t('common.edit')" @click="openEditDrawer(f)">
                   <span class="material-icons">edit</span>
                 </button>
 
                 <!-- 删除 -->
-                <button class="btn-icon del-btn" title="删除" @click="handleDeleteField(f)">
+                <button class="btn-icon del-btn" :title="t('common.delete')" @click="handleDeleteField(f)">
                   <span class="material-icons">delete</span>
                 </button>
               </div>
@@ -331,56 +331,56 @@ function closeModal() {
         <!-- 字段构建抽屉 / 表单 -->
         <div v-else class="field-builder-form">
           <div class="builder-header">
-            <h4>{{ editingId ? '编辑字段' : '新建自定义字段' }}</h4>
+            <h4>{{ editingId ? t('custom_fields.modal_edit_title') : t('custom_fields.modal_create_title') }}</h4>
             <button class="btn-back" @click="cancelDrawer">
               <span class="material-icons">arrow_back</span>
-              返回列表
+              {{ t('custom_fields.btn_back_list') }}
             </button>
           </div>
 
           <div class="form-grid">
             <!-- 字段名称 -->
             <div class="form-group full-width">
-              <label>字段名称 <span class="required">*</span></label>
+              <label>{{ t('custom_fields.field_name') }} <span class="required">*</span></label>
               <input
                 v-model="formName"
                 type="text"
-                placeholder="例如：飞手抗压、取球路线、卡球次数"
+                :placeholder="t('custom_fields.field_name_placeholder')"
                 maxlength="50"
               />
             </div>
 
             <!-- 数据标识 Key -->
             <div class="form-group">
-              <label>存储标识 Key (小写英文/下划线)</label>
+              <label>{{ t('custom_fields.field_key_desc') }}</label>
               <input
                 v-model="formKey"
                 type="text"
-                placeholder="例如：driver_pressure (留空自动生成)"
+                :placeholder="t('custom_fields.field_key_placeholder')"
               />
             </div>
 
             <!-- 挂载阶段 -->
             <div class="form-group">
-              <label>挂载阶段</label>
+              <label>{{ t('custom_fields.field_phase') }}</label>
               <select v-model="formPhase">
                 <template v-if="activeTab === 'MATCH'">
-                  <option value="auto">自动阶段 (Auto)</option>
-                  <option value="teleop">手控阶段 (TeleOp)</option>
-                  <option value="endgame">残局阶段 (Endgame)</option>
-                  <option value="overall">综合总结 (Overall)</option>
+                  <option value="auto">{{ t('custom_fields.phase_auto') }}</option>
+                  <option value="teleop">{{ t('custom_fields.phase_teleop') }}</option>
+                  <option value="endgame">{{ t('custom_fields.phase_endgame') }}</option>
+                  <option value="overall">{{ t('custom_fields.phase_overall') }}</option>
                 </template>
                 <template v-else>
-                  <option value="hardware">硬件构型 (Hardware)</option>
-                  <option value="strategy">战术自述 (Strategy)</option>
-                  <option value="overall">综合总结 (Overall)</option>
+                  <option value="hardware">{{ t('custom_fields.phase_hardware') }}</option>
+                  <option value="strategy">{{ t('custom_fields.phase_strategy') }}</option>
+                  <option value="overall">{{ t('custom_fields.phase_pit_overall') }}</option>
                 </template>
               </select>
             </div>
 
             <!-- 控件类型选择 -->
             <div class="form-group full-width">
-              <label>控件类型</label>
+              <label>{{ t('custom_fields.field_type') }}</label>
               <div class="types-selector-grid">
                 <button
                   type="button"
@@ -389,8 +389,8 @@ function closeModal() {
                   @click="formType = 'boolean'"
                 >
                   <span class="material-icons">toggle_on</span>
-                  <span class="choice-title">开关 (BOOLEAN)</span>
-                  <span class="choice-desc">二选一卡片</span>
+                  <span class="choice-title">{{ t('custom_fields.type_boolean') }}</span>
+                  <span class="choice-desc">{{ t('custom_fields.type_boolean_desc') }}</span>
                 </button>
 
                 <button
@@ -400,8 +400,8 @@ function closeModal() {
                   @click="formType = 'number'"
                 >
                   <span class="material-icons">pin</span>
-                  <span class="choice-title">数值 (NUMBER)</span>
-                  <span class="choice-desc">带加减步进与单位</span>
+                  <span class="choice-title">{{ t('custom_fields.type_number') }}</span>
+                  <span class="choice-desc">{{ t('custom_fields.type_number_desc') }}</span>
                 </button>
 
                 <button
@@ -411,8 +411,8 @@ function closeModal() {
                   @click="formType = 'level'"
                 >
                   <span class="material-icons">stars</span>
-                  <span class="choice-title">评级 (LEVEL)</span>
-                  <span class="choice-desc">1~5档直选刻度</span>
+                  <span class="choice-title">{{ t('custom_fields.type_level') }}</span>
+                  <span class="choice-desc">{{ t('custom_fields.type_level_desc') }}</span>
                 </button>
 
                 <button
@@ -422,8 +422,8 @@ function closeModal() {
                   @click="formType = 'select'"
                 >
                   <span class="material-icons">radio_button_checked</span>
-                  <span class="choice-title">单选胶囊 (SELECT)</span>
-                  <span class="choice-desc">自定义彩色选项</span>
+                  <span class="choice-title">{{ t('custom_fields.type_select') }}</span>
+                  <span class="choice-desc">{{ t('custom_fields.type_select_desc') }}</span>
                 </button>
 
                 <button
@@ -433,8 +433,8 @@ function closeModal() {
                   @click="formType = 'multi_select'"
                 >
                   <span class="material-icons">checklist</span>
-                  <span class="choice-title">多选标签 (MULTI)</span>
-                  <span class="choice-desc">流式多选标签</span>
+                  <span class="choice-title">{{ t('custom_fields.type_multi_select') }}</span>
+                  <span class="choice-desc">{{ t('custom_fields.type_multi_select_desc') }}</span>
                 </button>
 
                 <button
@@ -444,8 +444,8 @@ function closeModal() {
                   @click="formType = 'text'"
                 >
                   <span class="material-icons">notes</span>
-                  <span class="choice-title">文本备注 (TEXT)</span>
-                  <span class="choice-desc">多行自适应输入</span>
+                  <span class="choice-title">{{ t('custom_fields.type_text') }}</span>
+                  <span class="choice-desc">{{ t('custom_fields.type_text_desc') }}</span>
                 </button>
               </div>
             </div>
@@ -453,35 +453,35 @@ function closeModal() {
             <!-- NUMBER 专属配置 -->
             <template v-if="formType === 'number'">
               <div class="form-group">
-                <label>自定义计量单位 (用户手打)</label>
+                <label>{{ t('custom_fields.unit_label') }}</label>
                 <input
                   v-model="formUnit"
                   type="text"
-                  placeholder="如：次、秒、分、%"
+                  :placeholder="t('custom_fields.unit_placeholder')"
                 />
               </div>
               <div class="form-group">
-                <label>最小值 (Min)</label>
-                <input v-model.number="formMin" type="number" placeholder="默认 0" />
+                <label>{{ t('custom_fields.min_val') }}</label>
+                <input v-model.number="formMin" type="number" :placeholder="t('custom_fields.min_placeholder')" />
               </div>
               <div class="form-group">
-                <label>最大值 (Max)</label>
-                <input v-model.number="formMax" type="number" placeholder="无上限" />
+                <label>{{ t('custom_fields.max_val') }}</label>
+                <input v-model.number="formMax" type="number" :placeholder="t('custom_fields.max_placeholder')" />
               </div>
               <div class="form-group">
-                <label>步长 (Step)</label>
-                <input v-model.number="formStep" type="number" placeholder="默认 1" />
+                <label>{{ t('custom_fields.step_val') }}</label>
+                <input v-model.number="formStep" type="number" :placeholder="t('custom_fields.step_placeholder')" />
               </div>
             </template>
 
             <!-- LEVEL 专属配置 -->
             <template v-if="formType === 'level'">
               <div class="form-group">
-                <label>档位总数</label>
+                <label>{{ t('custom_fields.level_count_label') }}</label>
                 <select v-model.number="formLevelCount">
-                  <option :value="3">3 档 (基础/中等/顶尖)</option>
-                  <option :value="5">5 档 (推荐: 1极弱至5顶尖)</option>
-                  <option :value="7">7 档 (高精度微调)</option>
+                  <option :value="3">{{ t('custom_fields.level_3_desc') }}</option>
+                  <option :value="5">{{ t('custom_fields.level_5_desc') }}</option>
+                  <option :value="7">{{ t('custom_fields.level_7_desc') }}</option>
                 </select>
               </div>
             </template>
@@ -489,13 +489,13 @@ function closeModal() {
             <!-- SELECT / MULTI_SELECT 专属配置 -->
             <template v-if="formType === 'select' || formType === 'multi_select'">
               <div class="form-group full-width">
-                <label>自定义选项列表 (由您完全手打创建)</label>
+                <label>{{ t('custom_fields.options_section_title') }}</label>
                 
                 <div class="option-add-row">
                   <input
                     v-model="newOptionLabel"
                     type="text"
-                    placeholder="输入新选项名称，如：外圈..."
+                    :placeholder="t('custom_fields.option_input_placeholder')"
                     @keyup.enter="addOption"
                   />
                   <div class="color-picker-chips">
@@ -509,7 +509,7 @@ function closeModal() {
                   </div>
                   <button type="button" class="btn-add-opt" @click="addOption">
                     <span class="material-icons">add</span>
-                    添加
+                    {{ t('custom_fields.btn_add_opt') }}
                   </button>
                 </div>
 
@@ -533,7 +533,7 @@ function closeModal() {
             <div class="form-group full-width">
               <label class="checkbox-label">
                 <input v-model="formRequired" type="checkbox" />
-                <span>此字段为必填项 (提交前必须录入)</span>
+                <span>{{ t('custom_fields.required_hint') }}</span>
               </label>
             </div>
           </div>
@@ -541,10 +541,10 @@ function closeModal() {
           <!-- 保存与取消 -->
           <div class="builder-actions">
             <button class="btn-cancel" :disabled="isSaving" @click="cancelDrawer">
-              取消
+              {{ t('common.cancel') }}
             </button>
             <button class="btn-save" :disabled="isSaving" @click="handleSaveField">
-              {{ isSaving ? '保存中...' : (editingId ? '保存修改' : '立即创建') }}
+              {{ isSaving ? t('common.saving') : (editingId ? t('custom_fields.btn_save_edit') : t('custom_fields.btn_save_create')) }}
             </button>
           </div>
         </div>

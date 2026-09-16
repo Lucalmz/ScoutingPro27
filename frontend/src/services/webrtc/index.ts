@@ -402,6 +402,7 @@ export function createWebRtcService(callbacks: WebRtcCallbacks): WebRtcService {
         type: 'host_heartbeat',
         hostSessionId,
         deviceId: localDeviceId,
+        ecdhPublicKey: localEcdhPubHex,
         timestamp: Date.now()
       })
     }
@@ -411,6 +412,7 @@ export function createWebRtcService(callbacks: WebRtcCallbacks): WebRtcService {
           type: 'host_heartbeat',
           hostSessionId,
           deviceId: localDeviceId,
+          ecdhPublicKey: localEcdhPubHex,
           timestamp: Date.now()
         })
       }
@@ -630,6 +632,7 @@ export function createWebRtcService(callbacks: WebRtcCallbacks): WebRtcService {
                 type: 'host_heartbeat',
                 hostSessionId,
                 deviceId: localDeviceId,
+                ecdhPublicKey: localEcdhPubHex,
                 timestamp: Date.now()
               })
               return
@@ -759,11 +762,17 @@ export function createWebRtcService(callbacks: WebRtcCallbacks): WebRtcService {
     clientSession.resetReconnectAttempts()
     setStatus('connecting')
 
-    if (!signaling) {
+    if (!signaling || !signaling.isConnected()) {
+      if (signaling) {
+        try { signaling.close() } catch (_) {}
+      }
       signaling = new SignalingChannel(currentInviteCode)
       await signaling.initTopic()
       signaling.connect({
         onConnect: async () => {
+          if (localEcdhPubHex) {
+            signaling!.send({ type: 'client_hello', ecdhPublicKey: localEcdhPubHex, deviceId: localDeviceId })
+          }
           if (clientPc && clientPc.connectionState === 'connected' && clientDc && clientDc.readyState === 'open') {
             return
           }
@@ -779,6 +788,9 @@ export function createWebRtcService(callbacks: WebRtcCallbacks): WebRtcService {
         }
       })
     } else {
+      if (localEcdhPubHex) {
+        signaling.send({ type: 'client_hello', ecdhPublicKey: localEcdhPubHex, deviceId: localDeviceId })
+      }
       await clientSession.setupClientConnection()
     }
     return true
@@ -786,7 +798,11 @@ export function createWebRtcService(callbacks: WebRtcCallbacks): WebRtcService {
 
   const selfHealing = setupSelfHealing({
     getStatus: () => status,
-    reconnectNow
+    reconnectNow,
+    isHealthy: () => {
+      if (isHostMode) return true
+      return Boolean(clientDc && clientDc.readyState === 'open' && clientPc && clientPc.connectionState === 'connected')
+    }
   })
 
   function setEventMetadata(meta: ScoutingEvent) {

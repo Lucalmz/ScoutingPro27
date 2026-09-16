@@ -11,6 +11,7 @@ import { hapticLight, hapticMedium, hapticSuccess } from '@/utils/haptics'
 import { useBumpAnimation } from '@/composables/useBumpAnimation'
 import { useConfirm } from '@/composables/useConfirm'
 import type { PitScoutingRecord } from '@/types'
+import { LAUNCHER_PRESETS, FLOWER_PRESETS, type PresetOption } from '@/constants/pitScoutPresets'
 import './PitScoutFormDrawer.css'
 
 const props = defineProps<{
@@ -23,7 +24,17 @@ const emit = defineEmits<{
   (e: 'saved', record: PitScoutingRecord): void
 }>()
 
-const { t } = useI18n()
+let t = (key: string, values?: any): string => key
+let localeRef: any = null
+
+try {
+  const i18n = useI18n()
+  t = i18n.t
+  localeRef = i18n.locale
+} catch {
+  // Fallback for tests mounted without i18n
+}
+
 const pitStore = usePitScoutStore()
 const userStore = useUserStore()
 const toastStore = useToastStore()
@@ -36,16 +47,50 @@ const team = computed(() => {
 })
 
 // Form State (BIOBUZZ 2026-2027)
+const isZh = computed(() => {
+  const loc = (localeRef && (localeRef.value || localeRef)) || 'zh'
+  return String(loc).startsWith('zh')
+})
+
+const defaultLauncher = computed(() => (isZh.value ? '差速双飞轮' : 'Dual Flywheel'))
+const defaultFlower = computed(() => (isZh.value ? '垂直级联高抬升' : 'Vertical Cascading Lift'))
+
 const drivetrainType = ref<'mecanum' | 'tank' | 'swerve' | 'other'>('mecanum')
 const weightLbs = ref<number>(38.0)
 const ballCompatibility = ref<'universal' | 'sorting' | 'pollen_only'>('universal')
-const launcherType = ref<string>('差速双飞轮')
-const flowerMechanism = ref<string>('垂直级联高抬升')
+const launcherType = ref<string>(defaultLauncher.value)
+const flowerMechanism = ref<string>(defaultFlower.value)
+
+watch(isZh, (zh) => {
+  const curLauncher = LAUNCHER_PRESETS.find((p) => isLauncherActive(p))
+  if (curLauncher) {
+    launcherType.value = zh ? curLauncher.zh : curLauncher.en
+  }
+  const curFlower = FLOWER_PRESETS.find((p) => isFlowerActive(p))
+  if (curFlower) {
+    flowerMechanism.value = zh ? curFlower.zh : curFlower.en
+  }
+})
 const hasColorSensor = ref<boolean>(true)
 const odometryType = ref<string>('two_wheel')
 
-const LAUNCHER_PRESETS = ['差速双飞轮', '单飞轮抛射', '曲面滑轨', '弹簧敲击']
-const FLOWER_PRESETS = ['垂直级联高抬升', '底部滑槽', '仰角抛射', '无']
+function isLauncherActive(preset: PresetOption): boolean {
+  const val = (launcherType.value || '').trim()
+  return val === preset.zh || val === preset.en || val === preset.key || val.toLowerCase() === preset.en.toLowerCase()
+}
+
+function selectLauncherPreset(preset: PresetOption) {
+  launcherType.value = isZh.value ? preset.zh : preset.en
+}
+
+function isFlowerActive(preset: PresetOption): boolean {
+  const val = (flowerMechanism.value || '').trim()
+  return val === preset.zh || val === preset.en || val === preset.key || val.toLowerCase() === preset.en.toLowerCase()
+}
+
+function selectFlowerPreset(preset: PresetOption) {
+  flowerMechanism.value = isZh.value ? preset.zh : preset.en
+}
 
 // 核心量化自述能力
 const claimedAutoStrategy = ref<string>('')
@@ -100,8 +145,8 @@ async function reloadFormData(num: number | null) {
     drivetrainType.value = 'mecanum'
     weightLbs.value = 38.0
     ballCompatibility.value = 'universal'
-    launcherType.value = '差速双飞轮'
-    flowerMechanism.value = '垂直级联高抬升'
+    launcherType.value = defaultLauncher.value
+    flowerMechanism.value = defaultFlower.value
     hasColorSensor.value = true
     odometryType.value = 'two_wheel'
 
@@ -456,7 +501,7 @@ function handleSave() {
                 @click="hasColorSensor = true"
               >
                 <span class="material-icons" style="font-size: 16px; margin-right: 4px; vertical-align: text-bottom;">check_circle</span>
-                具备 (Equipped)
+                {{ t('pit_scout.drawer.color_sensor_equipped') }}
               </button>
               <button
                 type="button"
@@ -465,7 +510,7 @@ function handleSave() {
                 @click="hasColorSensor = false"
               >
                 <span class="material-icons" style="font-size: 16px; margin-right: 4px; vertical-align: text-bottom;">cancel</span>
-                无 (None)
+                {{ t('pit_scout.drawer.color_sensor_none') }}
               </button>
             </div>
           </div>
@@ -481,13 +526,13 @@ function handleSave() {
             <div class="quick-chips-wrap">
               <button
                 v-for="chip in LAUNCHER_PRESETS"
-                :key="chip"
+                :key="chip.key"
                 type="button"
                 class="quick-chip-btn"
-                :class="{ 'is-active': launcherType === chip }"
-                @click="launcherType = chip"
+                :class="{ 'is-active': isLauncherActive(chip) }"
+                @click="selectLauncherPreset(chip)"
               >
-                {{ chip }}
+                {{ t('pit_scout.launcher_presets.' + chip.key) }}
               </button>
             </div>
           </div>
@@ -503,13 +548,13 @@ function handleSave() {
             <div class="quick-chips-wrap">
               <button
                 v-for="chip in FLOWER_PRESETS"
-                :key="chip"
+                :key="chip.key"
                 type="button"
                 class="quick-chip-btn"
-                :class="{ 'is-active': flowerMechanism === chip }"
-                @click="flowerMechanism = chip"
+                :class="{ 'is-active': isFlowerActive(chip) }"
+                @click="selectFlowerPreset(chip)"
               >
-                {{ chip }}
+                {{ t('pit_scout.flower_presets.' + chip.key) }}
               </button>
             </div>
           </div>
@@ -715,7 +760,7 @@ function handleSave() {
 
         <!-- Pit Overall Custom Fields -->
         <div v-if="customFieldsStore.getActiveFields(pitStore.currentEventId || '', 'PIT', 'overall').length > 0" class="form-section">
-          <h4 class="section-title">综合自定义指标 (Overall)</h4>
+          <h4 class="section-title">{{ t('pit_scout.drawer.sec_custom_overall') }}</h4>
           <DynamicFieldsRenderer
             :definitions="customFieldsStore.getActiveFields(pitStore.currentEventId || '', 'PIT', 'overall')"
             v-model="customFields"

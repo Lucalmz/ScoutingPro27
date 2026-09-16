@@ -209,6 +209,25 @@ export type WebRtcMessage =
   | WebRtcPitScoutBatchSync
   | WebRtcRequestPitSync
   | WebRtcOfficialRosterSync
+  | WebRtcPitPhotoUpload
+  | WebRtcPitPhotoAck
+
+export interface WebRtcPitPhotoUpload {
+  type: 'PIT_PHOTO_UPLOAD'
+  eventId: string
+  key: string
+  dataUrl: string
+  authCode?: string
+  senderId?: string
+}
+
+export interface WebRtcPitPhotoAck {
+  type: 'PIT_PHOTO_ACK'
+  eventId: string
+  key: string
+  success: boolean
+  authCode?: string
+}
 
 export interface WebRtcRequestScheduleSync {
   type: 'REQUEST_SCHEDULE_SYNC'

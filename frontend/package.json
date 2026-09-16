@@ -8,6 +8,7 @@
     "build": "run-p type-check \"build-only {@}\" --",
     "preview": "vite preview",
     "build-only": "vite build",
+    "build:pwa": "vite build --outDir dist-pwa",
     "type-check": "vue-tsc --build",
     "test": "vitest run",
     "test:e2e": "node e2e/multi-client.test.js",
@@ -44,6 +45,7 @@
     "puppeteer": "^25.5.0",
     "typescript": "~6.0.0",
     "vite": "^8.1.5",
+    "vite-plugin-pwa": "^1.3.0",
     "vite-plugin-vue-devtools": "^8.1.5",
     "vitest": "^2.1.9",
     "vue-tsc": "^3.3.7"

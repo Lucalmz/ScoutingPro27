@@ -1,7 +1,24 @@
 <script setup lang="ts">
 import { computed } from 'vue'
+import { useI18n } from 'vue-i18n'
 import type { CustomFieldDefinition } from '@/types'
 import { hapticSelection, hapticMedium, hapticLight } from '@/utils/haptics'
+
+let t = (key: string, values?: any): string => {
+  if (key === 'custom_fields.renderer.bool_on') return '已开启 / 是'
+  if (key === 'custom_fields.renderer.bool_off') return '未开启 / 否'
+  if (key === 'custom_fields.renderer.level_low') return '弱'
+  if (key === 'custom_fields.renderer.level_high') return '顶'
+  if (key === 'custom_fields.renderer.placeholder' && values?.name) return `请输入${values.name}...`
+  return key
+}
+
+try {
+  const i18n = useI18n()
+  t = i18n.t
+} catch {
+  // Fallback for isolated unit tests mounted without i18n plugin
+}
 
 const props = defineProps<{
   definitions: CustomFieldDefinition[]
@@ -146,7 +163,7 @@ function onTextInput(field: CustomFieldDefinition, event: Event) {
             {{ !!getValue(field.fieldKey, field.defaultVal === 'true') ? 'check_circle' : 'radio_button_unchecked' }}
           </span>
           <span class="indicator-label">
-            {{ !!getValue(field.fieldKey, field.defaultVal === 'true') ? '已开启 / 是' : '未开启 / 否' }}
+            {{ !!getValue(field.fieldKey, field.defaultVal === 'true') ? t('custom_fields.renderer.bool_on') : t('custom_fields.renderer.bool_off') }}
           </span>
         </div>
       </div>
@@ -199,7 +216,7 @@ function onTextInput(field: CustomFieldDefinition, event: Event) {
           >
             <span class="tick-num">{{ lvl }}</span>
             <span class="tick-label">
-              {{ lvl === 1 ? '弱' : (lvl === Math.round(field.maxVal || 5) ? '顶' : '') }}
+              {{ lvl === 1 ? t('custom_fields.renderer.level_low') : (lvl === Math.round(field.maxVal || 5) ? t('custom_fields.renderer.level_high') : '') }}
             </span>
           </button>
         </div>
@@ -248,7 +265,7 @@ function onTextInput(field: CustomFieldDefinition, event: Event) {
         <textarea
           class="dynamic-textarea"
           rows="2"
-          :placeholder="`请输入${field.name}...`"
+          :placeholder="t('custom_fields.renderer.placeholder', { name: field.name })"
           :value="getValue(field.fieldKey, field.defaultVal || '')"
           @input="onTextInput(field, $event)"
         ></textarea>

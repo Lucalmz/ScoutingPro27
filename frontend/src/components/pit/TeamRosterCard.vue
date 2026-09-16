@@ -4,6 +4,7 @@ import { useI18n } from 'vue-i18n'
 import type { UnifiedTeamItem } from '@/types'
 import { getPhotoUrl } from '@/services/photoStorage'
 import PitStatusIndicator from './PitStatusIndicator.vue'
+import { LAUNCHER_PRESETS } from '@/constants/pitScoutPresets'
 
 const props = defineProps<{
   team: UnifiedTeamItem
@@ -43,7 +44,15 @@ const ballCompatibilityText = computed(() => {
 })
 
 const launcherText = computed(() => {
-  return props.team.pitRecord?.launcherType || ''
+  const raw = props.team.pitRecord?.launcherType
+  if (!raw) return ''
+  const preset = LAUNCHER_PRESETS.find(
+    (p) => p.zh === raw || p.en === raw || p.key === raw || p.en.toLowerCase() === raw.toLowerCase()
+  )
+  if (preset) {
+    return t(`pit_scout.launcher_presets.${preset.key}`)
+  }
+  return raw
 })
 
 const bragLabel = computed(() => {
@@ -111,7 +120,7 @@ const bragLabel = computed(() => {
       <div class="quant-item">
         <span class="quant-label">{{ t('pit_scout.claimed_auto') }}</span>
         <span class="quant-value">
-          {{ team.pitRecord.claimedAutoScore }}分
+          {{ team.pitRecord.claimedAutoScore }} {{ t('pit_scout.drawer.unit_pts') }}
         </span>
       </div>
       <div class="quant-item">

@@ -512,7 +512,7 @@ defineExpose({
           </div>
           <div class="pad-stat-row">
             <span class="pad-step-badge">+1</span>
-            <span class="pad-current-count">{{ currentCycleMissed }} 丢</span>
+            <span class="pad-current-count">{{ t('scouting.balls_missed', { count: currentCycleMissed }) }}</span>
           </div>
         </button>
 
@@ -529,7 +529,7 @@ defineExpose({
           </div>
           <div class="pad-stat-row">
             <span class="pad-step-badge">+1</span>
-            <span class="pad-current-count">{{ currentCycleBalls }} 进</span>
+            <span class="pad-current-count">{{ t('scouting.balls_in', { count: currentCycleBalls }) }}</span>
           </div>
         </button>
       </div>
@@ -621,7 +621,7 @@ defineExpose({
           <div class="cycle-row-left">
             <span class="cycle-row-badge cycle-badge-index">{{ t('scouting.cycle_num', { num: cIdx + 1 }) }}</span>
             <span class="cycle-row-stat-text">
-              {{ count }} 进 / {{ missedCycles[cIdx] ?? 0 }} 丢
+              {{ t('scouting.balls_summary', { inCount: count, missCount: missedCycles[cIdx] ?? 0 }) }}
             </span>
             <span
               class="cycle-row-acc-pill"

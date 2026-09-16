@@ -191,7 +191,7 @@ async function handleConfirmCsvImport() {
                 </span>
                 <div class="ftc-meta">
                   <div class="meta-title">
-                    {{ event?.ftcEventCode ? `FTC 赛事: ${event.ftcEventCode} (${event.ftcYear || 2026})` : t('schedule.ftc_unbound_notice') }}
+                    {{ event?.ftcEventCode ? t('schedule.ftc_bound_title', { code: event.ftcEventCode, year: event.ftcYear || 2026 }) : t('schedule.ftc_unbound_notice') }}
                   </div>
                   <div class="meta-desc">
                     {{ event?.ftcEventCode ? t('schedule.ftc_bound_desc') : t('schedule.ftc_unbound_desc') }}

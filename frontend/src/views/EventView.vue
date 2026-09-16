@@ -126,12 +126,26 @@ onMounted(async () => {
     return
   }
 
+  eventStore.restoreFromCache()
   try {
     state.loading = true
     let evt = eventStore.events.find((e) => e.id === eventId.value)
+    if (!evt && eventStore.currentEvent?.id === eventId.value) {
+      evt = eventStore.currentEvent
+    }
     if (!evt) {
       await eventStore.fetchEvents(userStore.userId)
       evt = eventStore.events.find((e) => e.id === eventId.value)
+    }
+    if (!evt && eventId.value.startsWith('evt-')) {
+      const code = eventId.value.replace(/^evt-/, '')
+      evt = {
+        id: eventId.value,
+        name: `Event ${code}`,
+        inviteCode: code,
+        hostId: 'remote-host'
+      }
+      eventStore.events.push(evt)
     }
 
     if (evt) {

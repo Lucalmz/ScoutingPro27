@@ -4,6 +4,7 @@ import { probePublicConnectivity } from './connectivity'
 export interface SelfHealingOptions {
   getStatus: () => ConnectionStatus
   reconnectNow: () => Promise<boolean>
+  isHealthy?: () => boolean
 }
 
 export function setupSelfHealing(options: SelfHealingOptions): { dispose: () => void } {
@@ -21,8 +22,9 @@ export function setupSelfHealing(options: SelfHealingOptions): { dispose: () => 
   const handleVisibilityChange = async () => {
     if (typeof document !== 'undefined' && document.visibilityState === 'visible') {
       const status = options.getStatus()
-      if (status === 'long_offline' || status === 'offline' || status === 'unstable') {
-        console.log('[WebRTC Self-Healing] App became visible and connection is inactive; checking connectivity...')
+      const healthy = options.isHealthy ? options.isHealthy() : status === 'connected'
+      if (!healthy || status === 'long_offline' || status === 'offline' || status === 'unstable') {
+        console.log('[WebRTC Self-Healing] App became visible and connection is inactive or unhealthy; checking connectivity...')
         const canReach = await probePublicConnectivity(2000)
         if (canReach) {
           await options.reconnectNow()

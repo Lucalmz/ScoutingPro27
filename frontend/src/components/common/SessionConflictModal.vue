@@ -158,10 +158,10 @@ function handleTakeover() {
           <!-- Option 1: Different Person (Rename) -->
           <div class="option-block">
             <h4 class="option-title">
-              {{ t('conflict.option_duplicate_rename_title') || '两位不同成员：修改昵称' }}
+              {{ t('conflict.option_duplicate_rename_title') }}
             </h4>
             <p class="option-hint">
-              {{ t('conflict.option_duplicate_rename_hint') || '如果您是不同成员恰好重名，请修改昵称以区分比赛打分数据：' }}
+              {{ t('conflict.option_duplicate_rename_hint') }}
             </p>
             <div class="input-row">
               <input
@@ -178,7 +178,7 @@ function handleTakeover() {
                 :disabled="!newNickname.trim() || renaming || merging"
                 @click="handleRename"
               >
-                {{ renaming ? (t('user.btn_saving') || '保存中...') : (t('conflict.btn_confirm_rename') || '确认改名并进入') }}
+                {{ renaming ? t('user.btn_saving') : t('conflict.btn_confirm_rename') }}
               </button>
             </div>
           </div>
@@ -190,10 +190,10 @@ function handleTakeover() {
           <!-- Option 2: Same Person (Merge into Primary Account) -->
           <div class="option-block merge-block">
             <h4 class="option-title">
-              {{ t('conflict.option_duplicate_merge_title') || '同一位成员：合并至已有主账号' }}
+              {{ t('conflict.option_duplicate_merge_title') }}
             </h4>
             <p class="option-hint">
-              {{ t('conflict.option_duplicate_merge_hint') || '如果这是您在其他设备上的已有主账号，请输入该账号密码验证所有权并合并本机数据：' }}
+              {{ t('conflict.option_duplicate_merge_hint') }}
             </p>
 
             <div v-if="mergeErrorMsg" class="alert-banner error compact">
@@ -206,7 +206,7 @@ function handleTakeover() {
                 v-model="targetPassword"
                 type="password"
                 class="form-input"
-                :placeholder="t('conflict.target_password_placeholder') || '请输入主账号密码验证所有权'"
+                :placeholder="t('conflict.target_password_placeholder')"
                 :disabled="renaming || merging"
                 @keydown.enter="handleMergeAccount"
               />
@@ -216,7 +216,7 @@ function handleTakeover() {
                 @click="handleMergeAccount"
               >
                 <span v-if="merging" class="spinner-small" style="margin-right: 4px;"></span>
-                {{ merging ? (t('conflict.btn_merging') || '正在验证并合并...') : (t('conflict.btn_confirm_merge') || '验证密码并合并') }}
+                {{ merging ? t('conflict.btn_merging') : t('conflict.btn_confirm_merge') }}
               </button>
             </div>
           </div>

@@ -256,9 +256,9 @@ const teamPitCustomSpecs = computed(() => {
     if (val !== undefined && val !== null && val !== '') {
       let displayValue = String(val)
       if (f.fieldType === 'boolean') {
-        displayValue = (val === true || val === 'true') ? '是' : '否'
+        displayValue = (val === true || val === 'true') ? t('custom_fields.renderer.bool_yes') : t('custom_fields.renderer.bool_no')
       } else if (f.fieldType === 'level') {
-        displayValue = `${val} 档`
+        displayValue = `${val} ${t('custom_fields.renderer.level_unit')}`
       } else if (f.fieldType === 'select') {
         const opt = f.options?.find(o => o.value === val || o.label === val)
         displayValue = opt ? opt.label : String(val)
@@ -293,7 +293,7 @@ function getMatchCustomBadges(match: ScoutingRecord) {
         displayValue = isTrue ? '✓' : '✕'
         color = isTrue ? 'green' : 'gray'
       } else if (f.fieldType === 'level') {
-        displayValue = `${val} 档`
+        displayValue = `${val} ${t('custom_fields.renderer.level_unit')}`
         color = val >= 4 ? 'green' : val >= 2 ? 'blue' : 'orange'
       } else if (f.fieldType === 'number') {
         displayValue = `${val}${f.unit ? ' ' + f.unit : ''}`
@@ -486,7 +486,7 @@ async function saveComment(match: ScoutingRecord) {
             <span class="material-icons" style="font-size: 18px; color: var(--primary, #39ff14);">tune</span>
             {{ t('custom_fields.team_metrics_title') }}
           </h3>
-          <span class="metrics-count-badge">{{ teamMatchCustomMetrics.length }} 项指标</span>
+          <span class="metrics-count-badge">{{ t('custom_fields.renderer.metric_count', { count: teamMatchCustomMetrics.length }) }}</span>
         </div>
 
         <div class="custom-metrics-grid">
@@ -497,7 +497,7 @@ async function saveComment(match: ScoutingRecord) {
           >
             <div class="metric-header">
               <span class="metric-name">{{ metric.definition.name }}</span>
-              <span class="metric-phase-tag">{{ metric.definition.phase }}</span>
+              <span class="metric-phase-tag">{{ t(`custom_fields.badge_phase_${metric.definition.phase}`) || metric.definition.phase }}</span>
             </div>
 
             <!-- Number / Level metric display -->
@@ -513,7 +513,7 @@ async function saveComment(match: ScoutingRecord) {
                 <span v-if="metric.definition.unit" class="stat-unit">{{ metric.definition.unit }}</span>
               </div>
               <div class="stat-col">
-                <span class="stat-label">场次</span>
+                <span class="stat-label">{{ t('custom_fields.renderer.matches_label') }}</span>
                 <span class="stat-value count">{{ metric.totalCount }}</span>
               </div>
             </div>
@@ -529,7 +529,7 @@ async function saveComment(match: ScoutingRecord) {
                   <div class="rate-progress-track">
                     <div class="rate-progress-fill" :style="{ width: `${metric.rate || 0}%` }"></div>
                   </div>
-                  <span class="stat-detail">已记录 {{ metric.trueCount }} / {{ metric.totalCount }} 场</span>
+                  <span class="stat-detail">{{ t('custom_fields.renderer.match_records_count', { recorded: metric.trueCount, total: metric.totalCount }) }}</span>
                 </div>
               </div>
             </div>
@@ -542,7 +542,7 @@ async function saveComment(match: ScoutingRecord) {
                 class="dist-item"
               >
                 <span class="dist-label-badge" :class="`color-${opt.color || 'blue'}`">{{ opt.label }}</span>
-                <span class="dist-count">{{ opt.count }}次 ({{ opt.percentage.toFixed(0) }}%)</span>
+                <span class="dist-count">{{ t('custom_fields.renderer.times_count', { count: opt.count, percent: opt.percentage.toFixed(0) }) }}</span>
               </div>
             </div>
 
@@ -557,7 +557,7 @@ async function saveComment(match: ScoutingRecord) {
                 <span class="text-content">{{ entry.text }}</span>
               </div>
               <span v-if="(metric.textEntries?.length || 0) > 3" class="more-text-hint">
-                +{{ (metric.textEntries?.length || 0) - 3 }} 条更多记录
+                {{ t('custom_fields.renderer.more_records', { count: (metric.textEntries?.length || 0) - 3 }) }}
               </span>
             </div>
           </div>

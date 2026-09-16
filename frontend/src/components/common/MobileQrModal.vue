@@ -17,8 +17,32 @@ const toastStore = useToastStore()
 const { t } = useI18n()
 
 const loading = ref(false)
-const mode = ref<'lan' | 'ipv6'>('lan')
+const mode = ref<'cloud' | 'lan' | 'ipv6'>('cloud')
 const activeTroubleshootTab = ref<'windows' | 'macos'>('windows')
+const cloudBaseUrl = ref(
+  typeof localStorage !== 'undefined'
+    ? localStorage.getItem('sp27-cloud-pwa-url') || 'https://lucalmz.github.io/ScoutingPro27'
+    : 'https://lucalmz.github.io/ScoutingPro27'
+)
+const isEditingCloudUrl = ref(false)
+const cloudUrlInput = ref(cloudBaseUrl.value)
+
+function saveCloudUrl() {
+  let val = cloudUrlInput.value.trim()
+  if (!val) {
+    val = 'https://lucalmz.github.io/ScoutingPro27'
+  }
+  val = val.replace(/\/+$/, '').replace(/\/#.*$/, '')
+  cloudBaseUrl.value = val
+  cloudUrlInput.value = val
+  if (typeof localStorage !== 'undefined') {
+    localStorage.setItem('sp27-cloud-pwa-url', val)
+  }
+  isEditingCloudUrl.value = false
+  toastStore.showToast(t('qr_modal.cloud_url_saved'), 'success')
+  renderQrCode()
+}
+
 const networkInfo = ref<{
   os?: string
   isWindows?: boolean
@@ -46,6 +70,10 @@ const hasIpv6 = computed(() => {
 })
 
 const joinUrl = computed(() => {
+  if (mode.value === 'cloud') {
+    const base = cloudBaseUrl.value.replace(/\/+$/, '').replace(/\/#.*$/, '')
+    return `${base}/#/?join=${props.inviteCode}`
+  }
   const port = networkInfo.value?.port || (typeof window !== 'undefined' ? window.location.port || '8080' : '8080')
   if (mode.value === 'ipv6') {
     const rawIp6 = selectedIpv6.value || networkInfo.value?.primaryIpv6 || (networkInfo.value?.allIpv6s && networkInfo.value.allIpv6s[0]) || ''
@@ -112,7 +140,7 @@ watch(
   { immediate: true }
 )
 
-watch([selectedIp, selectedIpv6, mode], async () => {
+watch([selectedIp, selectedIpv6, mode, cloudBaseUrl], async () => {
   await nextTick()
   renderQrCode()
 })
@@ -256,8 +284,17 @@ function close() {
 
         <!-- 主体 -->
         <div class="qr-modal-body">
-          <!-- 模式切换：局域网 Wi-Fi 模式 vs 公网 IPv6 远程直连 -->
+          <!-- 模式切换：云端托管 PWA vs 局域网 Wi-Fi 模式 vs 公网 IPv6 远程直连 -->
           <div class="network-mode-tabs">
+            <button
+              type="button"
+              class="mode-tab-btn"
+              :class="{ active: mode === 'cloud' }"
+              @click="mode = 'cloud'"
+            >
+              <span class="material-icons">cloud_queue</span>
+              <span>{{ t('qr_modal.mode_cloud') }}</span>
+            </button>
             <button
               type="button"
               class="mode-tab-btn"
@@ -279,13 +316,25 @@ function close() {
           </div>
 
           <p class="subtitle">
-            {{ mode === 'ipv6' ? t('qr_modal.troubleshoot_ipv6_desc') : t('qr_modal.subtitle') }}
+            {{
+              mode === 'cloud'
+                ? t('qr_modal.cloud_open_hint')
+                : mode === 'ipv6'
+                  ? t('qr_modal.troubleshoot_ipv6_desc')
+                  : t('qr_modal.subtitle')
+            }}
           </p>
 
           <!-- 邀请码高亮框 -->
           <div class="code-badge-bar">
             <span class="code-label">{{ t('qr_modal.invite_code_label') }}</span>
             <span class="code-value">{{ inviteCode }}</span>
+          </div>
+
+          <!-- Cloud 模式状态徽章 -->
+          <div v-if="mode === 'cloud'" class="cloud-status-badge">
+            <span class="material-icons badge-icon">verified</span>
+            <span>{{ t('qr_modal.cloud_pwa_badge') }}</span>
           </div>
 
           <!-- IPv6 模式状态徽章 -->
@@ -304,12 +353,42 @@ function close() {
           </div>
 
           <!-- 二维码展示区 -->
-          <div v-if="mode === 'lan' || hasIpv6" class="qr-canvas-container">
-            <div v-if="loading" class="qr-loading-placeholder">
+          <div v-if="mode === 'cloud' || mode === 'lan' || hasIpv6" class="qr-canvas-container">
+            <div v-if="loading && mode !== 'cloud'" class="qr-loading-placeholder">
               <span class="material-icons spinning">refresh</span>
               <span>{{ t('qr_modal.detecting_ip') }}</span>
             </div>
-            <canvas ref="qrCanvasRef" :style="{ display: loading ? 'none' : 'block' }"></canvas>
+            <canvas ref="qrCanvasRef" :style="{ display: (loading && mode !== 'cloud') ? 'none' : 'block' }"></canvas>
+          </div>
+
+          <!-- 云端 PWA 部署地址配置 -->
+          <div v-if="mode === 'cloud'" class="cloud-url-config-row">
+            <div class="cloud-url-header">
+              <span class="cloud-url-title">{{ t('qr_modal.cloud_url_label') }}</span>
+              <button
+                type="button"
+                class="btn-edit-cloud-url"
+                @click="isEditingCloudUrl = !isEditingCloudUrl"
+              >
+                <span class="material-icons">{{ isEditingCloudUrl ? 'close' : 'edit' }}</span>
+                <span>{{ isEditingCloudUrl ? t('common.cancel', '取消') : t('qr_modal.cloud_url_config_btn') }}</span>
+              </button>
+            </div>
+            <div v-if="isEditingCloudUrl" class="cloud-url-editor">
+              <input
+                v-model="cloudUrlInput"
+                type="text"
+                class="cloud-url-input"
+                placeholder="https://your-team.github.io/ScoutingPro27"
+              />
+              <button type="button" class="btn-save-cloud-url" @click="saveCloudUrl">
+                <span class="material-icons">check</span>
+                <span>{{ t('common.save', '保存') }}</span>
+              </button>
+            </div>
+            <p v-if="isEditingCloudUrl" class="cloud-url-hint">
+              {{ t('qr_modal.cloud_url_hint') }}
+            </p>
           </div>
 
           <!-- 局域网 IPv4 切换下拉框 -->
@@ -345,11 +424,11 @@ function close() {
           </div>
 
           <!-- 链接一键复制 -->
-          <div v-if="mode === 'lan' || hasIpv6" class="url-copy-box">
+          <div v-if="mode === 'cloud' || mode === 'lan' || hasIpv6" class="url-copy-box">
             <input readonly :value="joinUrl" class="url-input" />
             <button class="btn-copy" @click="copyUrl">
               <span class="material-icons">{{ copied ? 'check' : 'content_copy' }}</span>
-              {{ copied ? t('qr_modal.copied') : t('qr_modal.copy_url') }}
+              {{ copied ? t('qr_modal.copied') : (mode === 'cloud' ? t('qr_modal.cloud_copy_link') : t('qr_modal.copy_url')) }}
             </button>
           </div>
 
@@ -401,6 +480,10 @@ function close() {
                   <span>{{ t('qr_modal.troubleshoot_502_banner_title') }}</span>
                 </div>
                 <ul class="troubleshoot-502-list">
+                  <li class="troubleshoot-502-item pwa-solution-item">
+                    <span class="material-icons star-icon">stars</span>
+                    <strong>{{ t('qr_modal.troubleshoot_502_pwa_solution') }}</strong>
+                  </li>
                   <li class="troubleshoot-502-item">{{ t('qr_modal.troubleshoot_502_cause_cellular') }}</li>
                   <li class="troubleshoot-502-item">{{ t('qr_modal.troubleshoot_502_cause_ap') }}</li>
                   <li class="troubleshoot-502-item">{{ t('qr_modal.troubleshoot_502_cause_ip') }}</li>
@@ -686,6 +769,112 @@ function close() {
   font-weight: 700;
   color: var(--primary);
   letter-spacing: 1px;
+}
+
+.cloud-status-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  background: rgba(59, 130, 246, 0.12);
+  border: 1px solid rgba(59, 130, 246, 0.35);
+  border-radius: 20px;
+  padding: 4px 14px;
+  font-size: 11.5px;
+  color: #60a5fa;
+  font-weight: 500;
+}
+
+.cloud-status-badge .badge-icon {
+  font-size: 16px;
+  color: #60a5fa;
+}
+
+.cloud-url-config-row {
+  width: 100%;
+  background: var(--background);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  padding: 8px 12px;
+  box-sizing: border-box;
+  text-align: left;
+}
+
+.cloud-url-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  width: 100%;
+}
+
+.cloud-url-title {
+  font-size: 12px;
+  color: var(--muted-foreground);
+  font-weight: 500;
+}
+
+.btn-edit-cloud-url {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  background: transparent;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  color: var(--foreground);
+  font-size: 11px;
+  padding: 3px 8px;
+  cursor: pointer;
+  transition: all 0.2s;
+}
+
+.btn-edit-cloud-url:hover {
+  background: var(--muted);
+}
+
+.btn-edit-cloud-url .material-icons {
+  font-size: 13px;
+}
+
+.cloud-url-editor {
+  display: flex;
+  gap: 6px;
+  margin-top: 8px;
+  width: 100%;
+}
+
+.cloud-url-input {
+  flex: 1;
+  background: var(--card);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 5px 8px;
+  font-size: 11.5px;
+  color: var(--foreground);
+  font-family: monospace;
+}
+
+.btn-save-cloud-url {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  background: var(--primary);
+  color: #ffffff;
+  border: none;
+  border-radius: 6px;
+  padding: 5px 10px;
+  font-size: 11.5px;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.btn-save-cloud-url .material-icons {
+  font-size: 14px;
+}
+
+.cloud-url-hint {
+  margin: 6px 0 0;
+  font-size: 11px;
+  color: var(--muted-foreground);
+  line-height: 1.4;
 }
 
 .ipv6-status-badge {
@@ -1027,6 +1216,19 @@ function close() {
   font-size: 11px;
   color: var(--muted-foreground);
   line-height: 1.45;
+}
+
+.troubleshoot-502-item.pwa-solution-item {
+  color: #60a5fa;
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.troubleshoot-502-item.pwa-solution-item .star-icon {
+  font-size: 15px;
+  color: #60a5fa;
+  flex-shrink: 0;
 }
 
 .hotspot-card {

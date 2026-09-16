@@ -277,9 +277,12 @@ export function useEventWebRtcBridge({
           const synced = await syncExternalEvent(eventMeta)
           if (synced) {
             eventStore.currentEvent = synced
+          } else {
+            eventStore.currentEvent = eventMeta
           }
         } catch (e) {
           console.warn('[EventView] Failed to sync external event metadata:', e)
+          eventStore.currentEvent = eventMeta
         }
       },
 
@@ -302,7 +305,7 @@ export function useEventWebRtcBridge({
 
       onSasRejected: (peerId, reason) => {
         connStore.clearPendingSas()
-        toastStore.showError(`检测到安全码不匹配或已切断连接: ${reason || ''}`)
+        toastStore.showError(t('event.sas_rejected_toast', { reason: reason || '' }))
       },
 
       onIceStalled: (isStalled) => {
@@ -311,7 +314,7 @@ export function useEventWebRtcBridge({
 
       onHostStandby: (info) => {
         connStore.setStandbyHost(true, info)
-        toastStore.showToast('检测到当前赛事已有活跃主机，本机已自动进入【备用监控模式】', 'info')
+        toastStore.showToast(t('event.standby_host_toast'), 'info')
       },
 
       onHostPromoted: () => {

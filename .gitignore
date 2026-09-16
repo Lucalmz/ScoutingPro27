@@ -8,6 +8,9 @@ run.log
 
 Backend/jcef-bundle/
 Backend/src/main/resources/jcef-bundle.zip
+Backend/app_data.lock.db
+*.lock.db
 frontend/dist/
+frontend/dist-pwa/
 frontend/node_modules/
 .agents/

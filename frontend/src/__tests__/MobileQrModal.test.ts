@@ -79,10 +79,10 @@ describe('MobileQrModal.vue', () => {
     const dialog = document.body.querySelector('.qr-modal-dialog')
     expect(dialog).toBeTruthy()
 
-    // Switch to IPv6 mode
+    // Mode buttons: cloud, lan, ipv6
     const modeBtns = document.body.querySelectorAll('.mode-tab-btn')
-    expect(modeBtns.length).toBe(2)
-    ;(modeBtns[1] as HTMLButtonElement).click()
+    expect(modeBtns.length).toBe(3)
+    ;(modeBtns[2] as HTMLButtonElement).click() // switch to IPv6
 
     await wrapper.vm.$nextTick()
     await new Promise((r) => setTimeout(r, 20))
@@ -113,7 +113,7 @@ describe('MobileQrModal.vue', () => {
     expect(navigator.clipboard.writeText).toHaveBeenCalled()
   })
 
-  it('renders fw-allowed badge when firewall is already allowed', async () => {
+  it('renders fw-allowed badge when firewall is already allowed in ipv6 mode', async () => {
     global.fetch = vi.fn().mockImplementation(async (url: string) => {
       if (url === '/api/system/network-info') {
         return {
@@ -143,7 +143,7 @@ describe('MobileQrModal.vue', () => {
     await new Promise((r) => setTimeout(r, 20))
 
     const modeBtns = document.body.querySelectorAll('.mode-tab-btn')
-    ;(modeBtns[1] as HTMLButtonElement).click()
+    ;(modeBtns[2] as HTMLButtonElement).click()
     await wrapper.vm.$nextTick()
     await new Promise((r) => setTimeout(r, 20))
 
@@ -152,6 +152,45 @@ describe('MobileQrModal.vue', () => {
 
     const runBtn = document.body.querySelector('.btn-run-cmd') as HTMLButtonElement
     expect(runBtn.disabled).toBe(true)
+  })
+
+  it('renders cloud mode by default with PWA badge and configurable URL', async () => {
+    const wrapper = mount(MobileQrModal, {
+      props: {
+        modelValue: true,
+        inviteCode: 'CLOUD88'
+      }
+    })
+
+    await wrapper.vm.$nextTick()
+    await new Promise((r) => setTimeout(r, 20))
+
+    // Cloud status badge should be visible by default
+    const cloudBadge = document.body.querySelector('.cloud-status-badge')
+    expect(cloudBadge).toBeTruthy()
+    expect(cloudBadge?.textContent).toContain('qr_modal.cloud_pwa_badge')
+
+    // Join URL should point to cloud PWA by default
+    const urlInput = document.body.querySelector('.url-input') as HTMLInputElement
+    expect(urlInput).toBeTruthy()
+    expect(urlInput.value).toContain('https://lucalmz.github.io/ScoutingPro27/#/?join=CLOUD88')
+
+    // Open cloud URL editor
+    const editBtn = document.body.querySelector('.btn-edit-cloud-url') as HTMLButtonElement
+    expect(editBtn).toBeTruthy()
+    editBtn.click()
+
+    await wrapper.vm.$nextTick()
+    const cloudInput = document.body.querySelector('.cloud-url-input') as HTMLInputElement
+    expect(cloudInput).toBeTruthy()
+    cloudInput.value = 'https://custom-team.pages.dev'
+    cloudInput.dispatchEvent(new Event('input'))
+
+    const saveBtn = document.body.querySelector('.btn-save-cloud-url') as HTMLButtonElement
+    saveBtn.click()
+
+    await wrapper.vm.$nextTick()
+    expect(urlInput.value).toContain('https://custom-team.pages.dev/#/?join=CLOUD88')
   })
 
   it('renders 502 troubleshooting card and allows switching to macOS tab', async () => {

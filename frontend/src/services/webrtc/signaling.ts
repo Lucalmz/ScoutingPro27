@@ -176,6 +176,10 @@ export class SignalingChannel {
     }
   }
 
+  isConnected(): boolean {
+    return Boolean(this.client && (this.client as any).connected)
+  }
+
   close(): void {
     if (this.client) {
       this.client.unsubscribe(this.topic)

@@ -364,7 +364,7 @@ async function applyImport() {
               <input
                 type="text"
                 v-model="hostSpecificTarget"
-                placeholder="例如: Alice, Bob"
+                :placeholder="t('offline_sync.scout_names_placeholder')"
                 class="text-input"
               />
             </div>

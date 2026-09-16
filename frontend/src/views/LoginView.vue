@@ -65,8 +65,9 @@ async function handleUsernameBlur() {
     const res = await checkUserExists(uname)
     isNewUser.value = !res.exists
   } catch (e) {
-    console.error(e)
-    isNewUser.value = null
+    console.warn('[LoginView] User check deferred or offline:', e)
+    // On standalone PWA / offline client, allow proceeding as existing user
+    isNewUser.value = false
   } finally {
     checkingUser.value = false
   }

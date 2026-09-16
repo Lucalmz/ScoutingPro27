@@ -291,17 +291,17 @@ async function sendDirectMessage(scoutId: string, scoutName?: string) {
 
       <div class="settings-form">
         <div class="form-group">
-          <label>FTC Season (Year)</label>
+          <label>{{ t('event.ftc_season_year') }}</label>
           <input type="number" v-model="settingsYear" :disabled="isSavingSettings" />
         </div>
         <div class="form-group">
-          <label>Event Code (FTC 比赛代码)</label>
-          <input type="text" v-model="settingsCode" placeholder="例如: USUTSAS1" :disabled="isSavingSettings" />
+          <label>{{ t('event.ftc_event_code_label') }}</label>
+          <input type="text" v-model="settingsCode" :placeholder="t('event.ftc_event_code_placeholder')" :disabled="isSavingSettings" />
           <small class="form-hint">{{ t('event.ftc_binding_hint') }}</small>
         </div>
         <button class="btn-primary" @click="saveEventSettings" :disabled="isSavingSettings" style="display: flex; align-items: center; justify-content: center; gap: 6px;">
           <span class="material-icons" style="font-size: 18px;">{{ event?.ftcEventCode ? 'sync' : 'link' }}</span>
-          {{ isSavingSettings ? 'Saving...' : (event?.ftcEventCode ? t('event.btn_update_sync') : t('event.btn_bind_sync')) }}
+          {{ isSavingSettings ? t('common.saving') : (event?.ftcEventCode ? t('event.btn_update_sync') : t('event.btn_bind_sync')) }}
         </button>
       </div>
     </div>
@@ -325,7 +325,7 @@ async function sendDirectMessage(scoutId: string, scoutName?: string) {
     </div>
 
     <div class="settings-panel">
-      <h2>{{ t('custom_fields.panel_title') || '自定义考察指标' }}</h2>
+      <h2>{{ t('custom_fields.panel_title') }}</h2>
       <div class="settings-form" style="flex-direction: row; gap: 16px; flex-wrap: wrap;">
         <button
           class="btn-primary"
@@ -333,7 +333,7 @@ async function sendDirectMessage(scoutId: string, scoutName?: string) {
           style="margin-top: 0; background: rgba(57, 255, 20, 0.12); border: 1px solid var(--primary); color: var(--primary);"
         >
           <span class="material-icons" style="font-size: 18px; vertical-align: text-bottom; margin-right: 4px;">tune</span>
-          {{ t('custom_fields.btn_manage') || '自定义字段配置' }}
+          {{ t('custom_fields.btn_manage') }}
         </button>
       </div>
     </div>

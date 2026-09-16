@@ -49,7 +49,18 @@ public class NetworkUtil {
                name.contains("teredo") ||
                name.contains("isatap") ||
                name.contains("6to4") ||
-               name.contains("pseudo");
+               name.contains("pseudo") ||
+               name.contains("meta") ||
+               name.contains("wintun") ||
+               name.contains("sing-tun") ||
+               name.contains("clash") ||
+               name.contains("wireguard") ||
+               name.contains("tailscale") ||
+               name.contains("zerotier") ||
+               name.contains("openvpn") ||
+               name.contains("tap-") ||
+               name.contains("tap0") ||
+               name.contains("tun0");
     }
 
     /**

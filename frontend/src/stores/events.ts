@@ -1,5 +1,5 @@
 import { defineStore } from 'pinia'
-import { ref, computed } from 'vue'
+import { ref, computed, watch } from 'vue'
 import { listEvents, createEvent, joinEvent, syncExternalEvent } from '@/services/api'
 import { useUserStore } from '@/stores/user'
 import type { ScoutingEvent } from '@/types'
@@ -11,6 +11,48 @@ export const useEventStore = defineStore('events', () => {
   const error = ref<string | null>(null)
   
   const userStore = useUserStore()
+
+  function restoreFromCache() {
+    if (typeof localStorage === 'undefined') return
+    try {
+      const rawEvents = localStorage.getItem('scoutingpro_events')
+      if (rawEvents && events.value.length === 0) {
+        events.value = JSON.parse(rawEvents)
+      }
+      const rawCurrent = localStorage.getItem('scoutingpro_current_event')
+      if (rawCurrent && !currentEvent.value) {
+        currentEvent.value = JSON.parse(rawCurrent)
+      }
+    } catch {}
+  }
+
+  watch(
+    events,
+    (evts) => {
+      if (typeof localStorage !== 'undefined') {
+        try {
+          localStorage.setItem('scoutingpro_events', JSON.stringify(evts))
+        } catch {}
+      }
+    },
+    { deep: true }
+  )
+
+  watch(
+    currentEvent,
+    (cur) => {
+      if (typeof localStorage !== 'undefined') {
+        try {
+          if (cur) {
+            localStorage.setItem('scoutingpro_current_event', JSON.stringify(cur))
+          } else {
+            localStorage.removeItem('scoutingpro_current_event')
+          }
+        } catch {}
+      }
+    },
+    { deep: true }
+  )
 
   const isHost = computed(() => {
     return currentEvent.value?.hostId === userStore.userId
@@ -70,8 +112,21 @@ export const useEventStore = defineStore('events', () => {
       currentEvent.value = evt
       return evt
     } catch (e: any) {
-      error.value = e.message ?? 'Failed to join event'
-      return null
+      // In standalone PWA / client mode without local backend API:
+      const pwaEvt: ScoutingEvent = {
+        id: 'evt-' + inviteCode.trim().toUpperCase(),
+        name: eventName || `Event ${inviteCode.trim().toUpperCase()}`,
+        inviteCode: inviteCode.trim().toUpperCase(),
+        hostId: 'remote-host'
+      }
+      const existingIdx = events.value.findIndex(e => e.inviteCode === pwaEvt.inviteCode)
+      if (existingIdx >= 0) {
+        events.value[existingIdx] = pwaEvt
+      } else {
+        events.value.push(pwaEvt)
+      }
+      currentEvent.value = pwaEvt
+      return pwaEvt
     } finally {
       loading.value = false
     }
@@ -134,6 +189,7 @@ export const useEventStore = defineStore('events', () => {
     setCurrentEvent,
     updateFtcConfig,
     clearError,
+    restoreFromCache,
   }
 })
 

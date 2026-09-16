@@ -63,6 +63,7 @@ onMounted(async () => {
     router.replace('/')
     return
   }
+  eventStore.restoreFromCache()
   await eventStore.fetchEvents(userStore.userId)
 })
 

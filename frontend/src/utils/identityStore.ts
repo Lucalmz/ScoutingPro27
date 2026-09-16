@@ -237,6 +237,51 @@ export async function getPeerTrustRecord(
 }
 
 /**
+ * 2b. Find trusted peer record by (eventId, deviceId) across all users
+ */
+export async function findPeerTrustRecordByDevice(
+  eventId: string,
+  deviceId: string
+): Promise<PeerTrustRecord | null> {
+  if (!deviceId) return null
+
+  // Check memory
+  for (const record of memTrustedPeers.values()) {
+    if (record.eventId === eventId && record.deviceId === deviceId) {
+      return record
+    }
+  }
+
+  const db = await openDb()
+  if (!db) return null
+
+  return new Promise((resolve) => {
+    try {
+      const tx = db.transaction(STORE_PEERS, 'readonly')
+      const store = tx.objectStore(STORE_PEERS)
+      const req = store.openCursor()
+      req.onsuccess = (e: any) => {
+        const cursor = e.target.result
+        if (cursor) {
+          const val = cursor.value as PeerTrustRecord
+          if (val && val.eventId === eventId && val.deviceId === deviceId) {
+            memTrustedPeers.set(`${val.eventId}:${val.userId}:${val.deviceId}`, val)
+            resolve(val)
+            return
+          }
+          cursor.continue()
+        } else {
+          resolve(null)
+        }
+      }
+      req.onerror = () => resolve(null)
+    } catch {
+      resolve(null)
+    }
+  })
+}
+
+/**
  * 3. List all trusted devices for a user in a given event
  */
 export async function listUserTrustedDevices(
@@ -325,7 +370,10 @@ export async function evaluatePeerKeyTrust(params: {
     }
   }
 
-  const existingRecord = await getPeerTrustRecord(eventId, userId, deviceId)
+  let existingRecord = await getPeerTrustRecord(eventId, userId, deviceId)
+  if (!existingRecord && deviceId) {
+    existingRecord = await findPeerTrustRecordByDevice(eventId, deviceId)
+  }
 
   // Case 1: Same device, public key matches historical record
   if (existingRecord) {

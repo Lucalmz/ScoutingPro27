@@ -375,7 +375,7 @@ function viewTeamDetails(teamNumber: number) {
                   @change="toggleCustomCol(f.fieldKey)"
                 />
                 <span class="opt-name">{{ f.name }}</span>
-                <span class="opt-tag">{{ f.fieldType === 'boolean' ? '%' : (f.unit || '数值') }}</span>
+                <span class="opt-tag">{{ f.fieldType === 'boolean' ? '%' : (f.unit || t('custom_fields.renderer.numeric_unit')) }}</span>
               </label>
             </div>
           </div>

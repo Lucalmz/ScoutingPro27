@@ -19,6 +19,32 @@ export function isDesktopHost(): boolean {
   return host === 'localhost' || host === '127.0.0.1' || host === '::1'
 }
 
+async function uploadPhotoViaRtcOrHttp(eventId: string, key: string, dataUrl: string): Promise<boolean> {
+  try {
+    await uploadPitPhoto(eventId, key, dataUrl)
+    await markMobilePhotoSynced(key)
+    return true
+  } catch (httpErr) {
+    // HTTP API 失败（如 502 Bad Gateway 或蜂窝网络拦截），无缝回退 WebRTC DataChannel 直传
+    try {
+      const { useConnectionStore } = await import('@/stores/connection')
+      const connStore = useConnectionStore()
+      if (connStore.status === 'connected' && connStore.rtcService) {
+        await connStore.rtcService.sendMessage({
+          type: 'PIT_PHOTO_UPLOAD',
+          eventId,
+          key,
+          dataUrl
+        })
+        return true
+      }
+    } catch (rtcErr) {
+      console.warn('[photoStorage] WebRTC fallback upload failed:', rtcErr)
+    }
+    return false
+  }
+}
+
 /**
  * 保存展位照片
  * 电脑端：100% 物理绝缘 IndexedDB，直接通过已鉴权 API 上传至电脑磁盘；
@@ -39,12 +65,26 @@ export async function savePhoto(key: string, dataUrl: string, eventId: string): 
   // 手机端：写入专属离线安全缓冲区
   await saveMobileCachedPhoto(key, dataUrl, eventId, 'PENDING')
 
-  // 若当前连网，触发静默后台上传
+  // 若当前连网，即刻触发静默后台上传（失败时回退 WebRTC）
   if (typeof navigator !== 'undefined' && navigator.onLine !== false) {
     uploadPitPhoto(eventId, key, dataUrl)
       .then(() => markMobilePhotoSynced(key))
-      .catch((err) => {
-        console.warn('[photoStorage Mobile] Background upload deferred:', err)
+      .catch(async (err) => {
+        console.warn('[photoStorage Mobile] HTTP upload deferred, trying WebRTC fallback:', err)
+        try {
+          const { useConnectionStore } = await import('@/stores/connection')
+          const connStore = useConnectionStore()
+          if (connStore.status === 'connected' && connStore.rtcService) {
+            await connStore.rtcService.sendMessage({
+              type: 'PIT_PHOTO_UPLOAD',
+              eventId,
+              key,
+              dataUrl
+            })
+          }
+        } catch (rtcErr) {
+          console.warn('[photoStorage Mobile] WebRTC fallback failed:', rtcErr)
+        }
       })
   }
 
@@ -99,12 +139,9 @@ export async function flushOfflinePhotos(eventId: string): Promise<number> {
   let successCount = 0
 
   for (const item of pending) {
-    try {
-      await uploadPitPhoto(item.eventId, item.key, item.dataUrl)
-      await markMobilePhotoSynced(item.key)
+    const ok = await uploadPhotoViaRtcOrHttp(item.eventId, item.key, item.dataUrl)
+    if (ok) {
       successCount++
-    } catch (err) {
-      console.warn(`[photoStorage] Failed to flush photo ${item.key}:`, err)
     }
   }
 

@@ -97,7 +97,7 @@ function handleSelectMatch(matchNumber: number, tournamentLevel?: string) {
                 </div>
                 <div class="match-title">
                   <span class="match-code">{{ matchPrefix(item.tournamentLevel) }}{{ item.matchNumber }}</span>
-                  <span class="diff-highlight">最大差额 ±{{ item.maxDiff }} 分 ({{ (item.maxRatio * 100).toFixed(0) }}%)</span>
+                  <span class="diff-highlight">{{ t('audit.max_diff_highlight', { diff: item.maxDiff, percent: (item.maxRatio * 100).toFixed(0) }) }}</span>
                 </div>
                 <button class="btn-locate" @click="handleSelectMatch(item.matchNumber, item.tournamentLevel)">
                   <span class="material-icons">search</span>
@@ -112,7 +112,7 @@ function handleSelectMatch(matchNumber: number, tournamentLevel?: string) {
                   <div class="alliance-header">
                     <span class="alliance-name red">{{ t('schedule.red_alliance') }}</span>
                     <span v-if="item.red" class="diff-badge" :class="item.red.signedDiff >= 0 ? 'higher' : 'lower'">
-                      {{ item.red.signedDiff >= 0 ? `+${item.red.signedDiff}` : item.red.signedDiff }} 分
+                      {{ item.red.signedDiff >= 0 ? `+${item.red.signedDiff}` : item.red.signedDiff }} {{ t('pit_scout.drawer.unit_pts') }}
                     </span>
                   </div>
 
@@ -131,7 +131,7 @@ function handleSelectMatch(matchNumber: number, tournamentLevel?: string) {
                     <div v-for="s in item.red.scouts" :key="`${item.matchNumber}_${s.teamNumber}`" class="scout-chip">
                       <span class="team-tag">#{{ s.teamNumber }}</span>
                       <span class="scout-person">{{ s.scoutName }}:</span>
-                      <span class="scout-score">{{ s.score }}分</span>
+                      <span class="scout-score">{{ s.score }} {{ t('pit_scout.drawer.unit_pts') }}</span>
                     </div>
                   </div>
                   <div v-else class="no-scout-hint">{{ t('audit.no_scout_records') }}</div>
@@ -142,7 +142,7 @@ function handleSelectMatch(matchNumber: number, tournamentLevel?: string) {
                   <div class="alliance-header">
                     <span class="alliance-name blue">{{ t('schedule.blue_alliance') }}</span>
                     <span v-if="item.blue" class="diff-badge" :class="item.blue.signedDiff >= 0 ? 'higher' : 'lower'">
-                      {{ item.blue.signedDiff >= 0 ? `+${item.blue.signedDiff}` : item.blue.signedDiff }} 分
+                      {{ item.blue.signedDiff >= 0 ? `+${item.blue.signedDiff}` : item.blue.signedDiff }} {{ t('pit_scout.drawer.unit_pts') }}
                     </span>
                   </div>
 
@@ -161,7 +161,7 @@ function handleSelectMatch(matchNumber: number, tournamentLevel?: string) {
                     <div v-for="s in item.blue.scouts" :key="`${item.matchNumber}_${s.teamNumber}`" class="scout-chip">
                       <span class="team-tag">#{{ s.teamNumber }}</span>
                       <span class="scout-person">{{ s.scoutName }}:</span>
-                      <span class="scout-score">{{ s.score }}分</span>
+                      <span class="scout-score">{{ s.score }} {{ t('pit_scout.drawer.unit_pts') }}</span>
                     </div>
                   </div>
                   <div v-else class="no-scout-hint">{{ t('audit.no_scout_records') }}</div>
