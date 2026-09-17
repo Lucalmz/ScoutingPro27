@@ -53,6 +53,7 @@ export interface ClientSessionContext {
   confirmSas?: (peerId?: string) => void
   getUsername?: () => string
   getUserId?: () => string
+  isStandbyHost?: () => boolean
   callbacks: WebRtcCallbacks
 }
 
@@ -241,7 +242,12 @@ export function createClientSession(ctx: ClientSessionContext) {
     }
   }
 
-  async function evaluateAndApplyClientTrust(hostPubKey: string, hostDeviceId?: string) {
+  async function evaluateAndApplyClientTrust(
+    hostPubKey: string,
+    hostDeviceId?: string,
+    hostUsername?: string,
+    hostUserId?: string
+  ) {
     const sas = ctx.sas
     if (sas.clientSasState === 'PENDING_VERIFICATION' && sas.clientHostEcdhPubHex === hostPubKey) {
       return
@@ -255,21 +261,41 @@ export function createClientSession(ctx: ClientSessionContext) {
     sas.clientSecurityFingerprint = await computeSecurityFingerprint(localEcdhPubHex, hostPubKey, currentInviteCode)
     console.log(`[WebRTC Client Security] Computed SAS Fingerprint: ${sas.clientSecurityFingerprint}`)
 
+    const effectiveHostUsername = hostUsername || 'Host'
+    const effectiveHostUserId = hostUserId || 'host'
+
     const isFlapping = Boolean(
       sas.clientHostEcdhPubHex && sas.clientHostEcdhPubHex !== hostPubKey && sas.clientSasState === 'VERIFIED'
     )
 
     const trustEval = await evaluatePeerKeyTrust({
       eventId: currentInviteCode || 'default_event',
-      userId: 'host',
-      username: 'Host',
+      userId: effectiveHostUserId,
+      username: effectiveHostUsername,
       deviceId: sas.clientHostDeviceId,
       publicKeyHex: hostPubKey,
       isInSessionFlapping: isFlapping
     })
 
-    if (trustEval.status === 'TRUSTED_MATCH') {
-      console.log(`[WebRTC Client Security TOFU] Trusted Host match: ${sas.clientHostDeviceId}. Auto-approving SAS.`)
+    const isStandbyHost = Boolean(ctx.isStandbyHost?.())
+
+    if (trustEval.status === 'TRUSTED_MATCH' || (trustEval.status === 'TOFU_FIRST_SEEN' && isStandbyHost)) {
+      console.log(
+        `[WebRTC Client Security TOFU] ${isStandbyHost ? 'Standby Host auto-approving' : 'Trusted Host match'}: ${sas.clientHostDeviceId}. Auto-approving SAS.`
+      )
+      if (trustEval.status === 'TOFU_FIRST_SEEN') {
+        await savePeerTrustRecord({
+          eventId: currentInviteCode || 'default_event',
+          userId: effectiveHostUserId,
+          username: effectiveHostUsername,
+          deviceId: sas.clientHostDeviceId,
+          publicKeyHex: hostPubKey,
+          firstSeenAt: Date.now(),
+          lastSeenAt: Date.now(),
+          trustedAt: Date.now(),
+          trustLevel: 'TOFU_TRUSTED'
+        })
+      }
       sas.clientSasState = 'VERIFIED'
       const pendingOut = [...sas.clientPendingOutgoing]
       sas.clientPendingOutgoing = []
@@ -300,12 +326,13 @@ export function createClientSession(ctx: ClientSessionContext) {
       ctx.callbacks.onSasVerificationRequired?.(
         {
           peerId: 'host',
-          username: 'Host',
+          username: effectiveHostUsername,
           ecdhPublicKey: hostPubKey
         },
         sas.clientSecurityFingerprint
       )
     } else if (trustEval.status === 'KEY_ROTATION_ALERT') {
+      // 仅在已建立信任的设备发生公钥异常变动时，才挂起并弹出安全核验
       if (trustEval.level === 'CRITICAL') {
         console.error(`[WebRTC Client Security ALERT] ${trustEval.message}`)
         ctx.rejectSas('host', trustEval.message)
@@ -327,7 +354,7 @@ export function createClientSession(ctx: ClientSessionContext) {
         ctx.callbacks.onSasVerificationRequired?.(
           {
             peerId: 'host',
-            username: 'Host',
+            username: effectiveHostUsername,
             ecdhPublicKey: hostPubKey
           },
           sas.clientSecurityFingerprint
@@ -357,7 +384,7 @@ export function createClientSession(ctx: ClientSessionContext) {
         try {
           const hostPub = await importEcdhPublicKey(data.ecdhPublicKey)
           sas.clientSharedAesKey = await deriveSharedAesKey(localEcdhKeyPair.privateKey, hostPub)
-          await evaluateAndApplyClientTrust(data.ecdhPublicKey, data.deviceId)
+          await evaluateAndApplyClientTrust(data.ecdhPublicKey, data.deviceId, data.username, data.userId)
         } catch (e) {
           console.warn('[WebRTC Client] Failed to derive shared AES key or evaluate trust from host_hello:', e)
         }
@@ -425,7 +452,7 @@ export function createClientSession(ctx: ClientSessionContext) {
           } catch {}
         }
         if (data.ecdhPublicKey) {
-          await evaluateAndApplyClientTrust(data.ecdhPublicKey, data.deviceId)
+          await evaluateAndApplyClientTrust(data.ecdhPublicKey, data.deviceId, data.username, data.userId)
         }
 
         let answerData = data.answer

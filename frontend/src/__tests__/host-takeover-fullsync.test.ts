@@ -401,4 +401,187 @@ describe('Host Takeover Full-Sync & Handoff Protocol (主机接管全量对齐�
     expect(ackMsg).toBeDefined()
     expect(ackMsg.msg.stampedRecords[0].hostSeq).toBe(51) // Strictly greater than 50!
   })
+
+  it('compareHostAuthority enforces strict total order across epoch, sessionId, and deviceId', async () => {
+    const { compareHostAuthority } = await import('@/services/webrtc')
+
+    // 1. Higher epoch always wins
+    expect(compareHostAuthority(5, 'dev-a', 'host-1', 4, 'dev-z', 'host-9')).toBeGreaterThan(0)
+    expect(compareHostAuthority(2, 'dev-z', 'host-9', 3, 'dev-a', 'host-1')).toBeLessThan(0)
+
+    // 2. Equal epoch: sessionId breaks tie (smaller/older session ID wins)
+    expect(compareHostAuthority(3, 'dev-z', 'host-1', 3, 'dev-a', 'host-9')).toBeGreaterThan(0)
+    expect(compareHostAuthority(3, 'dev-a', 'host-9', 3, 'dev-z', 'host-1')).toBeLessThan(0)
+
+    // 3. Equal epoch and sessionId: deviceId breaks tie (smaller device ID wins)
+    expect(compareHostAuthority(3, 'dev-a', 'host-1', 3, 'dev-z', 'host-1')).toBeGreaterThan(0)
+    expect(compareHostAuthority(3, 'dev-z', 'host-1', 3, 'dev-a', 'host-1')).toBeLessThan(0)
+    expect(compareHostAuthority(3, 'dev-a', 'host-1', 3, 'dev-a', 'host-1')).toBe(0)
+  })
+
+  it('stale host_heartbeat with lower epoch NEVER demotes a higher-epoch active host', async () => {
+    const onHostDemoted = vi.fn()
+    const service = createWebRtcService({
+      onStatusChange: vi.fn(),
+      onRecordsReceived: vi.fn().mockResolvedValue([]),
+      onAckReceived: vi.fn(),
+      onRequestSync: vi.fn(),
+      onHostDemoted
+    })
+
+    await service.host('room-stale-hb')
+    await new Promise(r => setTimeout(r, 70))
+    // Promote local host to epoch 3
+    await service.takeoverHost()
+    await service.takeoverHost() // localEpoch is now at least 3
+
+    expect(service.isStandbyHost()).toBe(false)
+
+    // Stale heartbeat from old host with epoch: 1 arrives over MQTT broker
+    if (messageHandler) {
+      const staleHeartbeat = JSON.stringify({
+        type: 'host_heartbeat',
+        hostSessionId: 'host-old-timestamp-1111111',
+        deviceId: 'device-zzz',
+        hostEpoch: 1,
+        sender: 'old-host-client'
+      })
+      await messageHandler('scoutingpro/signal/room-stale-hb', Buffer.from(staleHeartbeat))
+    }
+
+    // Active host MUST NOT demote!
+    expect(onHostDemoted).not.toHaveBeenCalled()
+    expect(service.isStandbyHost()).toBe(false)
+
+    service.disconnect()
+  })
+
+  it('Standby host auto-approves host_hello and bypasses onSasVerificationRequired popup', async () => {
+    const onSasVerificationRequired = vi.fn()
+    const onSasVerified = vi.fn()
+    const service = createWebRtcService({
+      onStatusChange: vi.fn(),
+      onRecordsReceived: vi.fn().mockResolvedValue([]),
+      onAckReceived: vi.fn(),
+      onRequestSync: vi.fn(),
+      onSasVerificationRequired,
+      onSasVerified
+    })
+
+    // Start as host with active probe
+    await service.host('room-standby-no-sas')
+    const onMessage = mockMqttClient.on.mock.calls.find((c: any) => c[0] === 'message')?.[1]
+    expect(onMessage).toBeDefined()
+
+    // During probe, active host heartbeat arrives -> enters standby
+    onMessage(
+      'topic',
+      new TextEncoder().encode(
+        JSON.stringify({
+          type: 'host_heartbeat',
+          hostSessionId: 'active-main-host-session',
+          deviceId: 'dev_active_main',
+          hostEpoch: 1
+        })
+      )
+    )
+    await new Promise((r) => setTimeout(r, 70))
+    expect(service.isStandbyHost()).toBe(true)
+
+    // Now active host sends host_hello with ECDH public key
+    const { generateEcdhKeyPair, exportEcdhPublicKey } = await import('@/utils/crypto')
+    const hostKeys = await generateEcdhKeyPair()
+    const hostPubHex = await exportEcdhPublicKey(hostKeys.publicKey)
+
+    onMessage(
+      'topic',
+      new TextEncoder().encode(
+        JSON.stringify({
+          type: 'host_hello',
+          hostSessionId: 'active-main-host-session',
+          deviceId: 'dev_active_main',
+          ecdhPublicKey: hostPubHex,
+          hostEpoch: 1,
+          username: 'MainHost',
+          userId: 'host_user_1'
+        })
+      )
+    )
+    await new Promise((r) => setTimeout(r, 70))
+
+    // Standby Host MUST NOT pop up SAS verification modal!
+    expect(onSasVerificationRequired).not.toHaveBeenCalled()
+    // It should auto-approve and mark verified
+    expect(onSasVerified).toHaveBeenCalledWith('host')
+    expect(service.getSasState('host')).toBe('VERIFIED')
+
+    service.disconnect()
+  })
+
+  it('Concurrent takeovers with identical epoch break tie deterministically without split-brain or double-standby', async () => {
+    const onHostDemoted1 = vi.fn()
+    const service1 = createWebRtcService({
+      onStatusChange: vi.fn(),
+      onRecordsReceived: vi.fn().mockResolvedValue([]),
+      onAckReceived: vi.fn(),
+      onRequestSync: vi.fn(),
+      onHostDemoted: onHostDemoted1
+    })
+
+    await service1.host('room-concurrent-takeover')
+    await new Promise((r) => setTimeout(r, 70))
+
+    // Host 1 promotes to epoch 2
+    await service1.takeoverHost()
+    expect(service1.isStandbyHost()).toBe(false)
+
+    // Host 2 also initiated takeover with identical epoch 2 but different sessionId
+    // Suppose Host 2 has a newer (larger) session ID: 'host-999999999-peer'
+    // Under our rule: smaller/older session ID wins, so Host 1 wins and stays Active Host!
+    if (messageHandler) {
+      await messageHandler(
+        'scoutingpro/signal/room-concurrent-takeover',
+        Buffer.from(
+          JSON.stringify({
+            type: 'host_takeover',
+            newHostSessionId: 'host-999999999-peer',
+            deviceId: 'dev_host2',
+            hostEpoch: 2,
+            sender: 'peer-host2'
+          })
+        )
+      )
+    }
+    await new Promise((r) => setTimeout(r, 70))
+
+    // Host 1 did not demote because its session was earlier!
+    expect(onHostDemoted1).not.toHaveBeenCalled()
+    expect(service1.isStandbyHost()).toBe(false)
+
+    // Now test the opposite: incoming takeover has an older/smaller session ID: 'host-000000000-winner'
+    if (messageHandler) {
+      await messageHandler(
+        'scoutingpro/signal/room-concurrent-takeover',
+        Buffer.from(
+          JSON.stringify({
+            type: 'host_takeover',
+            newHostSessionId: 'host-000000000-winner',
+            deviceId: 'dev_host_winner',
+            hostEpoch: 2,
+            sender: 'peer-winner'
+          })
+        )
+      )
+    }
+    await new Promise((r) => setTimeout(r, 70))
+
+    // Host 1 gracefully demotes to standby!
+    expect(onHostDemoted1).toHaveBeenCalledWith({
+      hostSessionId: 'host-000000000-winner',
+      hostDeviceId: 'dev_host_winner'
+    })
+    expect(service1.isStandbyHost()).toBe(true)
+
+    service1.disconnect()
+  })
 })

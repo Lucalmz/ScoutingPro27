@@ -40,6 +40,14 @@ export const useToastStore = defineStore('toast', () => {
       icon = optionsOrDuration.icon
     }
 
+    // 防止同内容同类型 Toast 在短时间内大量堆叠刷屏 (Deduplication for active toasts)
+    const isDuplicate = toasts.value.some(
+      (t) => t.message === message && t.type === type && (t.detail || '') === (detail || '')
+    )
+    if (isDuplicate) {
+      return
+    }
+
     toasts.value.push({ id, message, type, detail, icon })
     setTimeout(() => {
       toasts.value = toasts.value.filter(t => t.id !== id)

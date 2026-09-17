@@ -336,6 +336,10 @@ export function useEventWebRtcBridge({
       },
 
       onSasVerificationRequired: (peer, fingerprint) => {
+        // 次主机（Standby Host）为后台镜像，绝不向次主机弹窗核验主机的幽灵账户
+        if (connStore.isStandbyHost && peer.peerId === 'host') {
+          return
+        }
         connStore.setPendingSas({
           peerId: peer.peerId,
           username: peer.username,
@@ -351,7 +355,7 @@ export function useEventWebRtcBridge({
 
       onSasRejected: (peerId?: string, reason?: string) => {
         connStore.clearPendingSas(peerId)
-        toastStore.showError(t('event.sas_rejected_toast', { reason: reason || '' }))
+        toastStore.showToast(t('event.sas_rejected_toast', { reason: reason || '' }), 'warning')
       },
 
       onIceStalled: (isStalled) => {

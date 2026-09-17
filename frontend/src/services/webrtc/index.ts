@@ -31,6 +31,34 @@ export * from './sdpUtil'
 export * from './messageDispatcher'
 export * from './selfHealing'
 
+/**
+ * 确定性全序主机权威比较器 (Deterministic Total-Order Host Authority Comparator)
+ * 返回值:
+ *   > 0: A 的权威高于 B (A 胜出保持/当选主机，B 必须降级从机)
+ *   < 0: B 的权威高于 A (B 胜出，A 必须降级从机)
+ *   = 0: 同一会话
+ */
+export function compareHostAuthority(
+  epochA: number,
+  deviceIdA: string,
+  sessionIdA: string,
+  epochB: number,
+  deviceIdB: string,
+  sessionIdB: string
+): number {
+  // 1. 任期号优先：高任期号绝对压制低任期号
+  if (epochA !== epochB) {
+    return epochA - epochB
+  }
+  // 2. 仲裁第一平局项：SessionId 字典序 (更小更早创设的先占会话权威更高)
+  const sessionCmp = sessionIdB.localeCompare(sessionIdA)
+  if (sessionCmp !== 0) {
+    return sessionCmp
+  }
+  // 3. 仲裁第二平局项：设备 ID 字典序
+  return deviceIdB.localeCompare(deviceIdA)
+}
+
 export function createWebRtcService(callbacks: WebRtcCallbacks): WebRtcService {
   let isHostMode = false
   let isExplicitlyClosed = false
@@ -49,6 +77,8 @@ export function createWebRtcService(callbacks: WebRtcCallbacks): WebRtcService {
   let isProbing = false
   let probeTimer: any = null
   let hostHeartbeatTimer: any = null
+  let standbyWatchdogTimer: any = null
+  let lastActiveHostHeartbeat = 0
   let activeHostSessionId = ''
   let activeHostDeviceId = ''
 
@@ -538,28 +568,29 @@ export function createWebRtcService(callbacks: WebRtcCallbacks): WebRtcService {
     confirmSas,
     getUsername: () => currentUsername,
     getUserId: () => currentUserId,
+    isStandbyHost: () => isStandbyHostMode,
     callbacks
   })
 
   function startHostHeartbeat() {
     stopHostHeartbeat()
+    const payload = {
+      type: 'host_heartbeat',
+      hostSessionId,
+      deviceId: localDeviceId,
+      ecdhPublicKey: localEcdhPubHex,
+      timestamp: Date.now(),
+      hostEpoch: localEpoch,
+      username: currentUsername || localUserName || 'Host',
+      userId: currentUserId || localUserId || 'host'
+    }
     if (isHostMode && signaling) {
-      signaling.send({
-        type: 'host_heartbeat',
-        hostSessionId,
-        deviceId: localDeviceId,
-        ecdhPublicKey: localEcdhPubHex,
-        timestamp: Date.now(),
-        hostEpoch: localEpoch
-      })
+      signaling.send(payload)
     }
     hostHeartbeatTimer = setInterval(() => {
       if (isHostMode && signaling) {
         signaling.send({
-          type: 'host_heartbeat',
-          hostSessionId,
-          deviceId: localDeviceId,
-          ecdhPublicKey: localEcdhPubHex,
+          ...payload,
           timestamp: Date.now(),
           hostEpoch: localEpoch
         })
@@ -574,9 +605,30 @@ export function createWebRtcService(callbacks: WebRtcCallbacks): WebRtcService {
     }
   }
 
+  function startStandbyWatchdog() {
+    lastActiveHostHeartbeat = Date.now()
+    if (!standbyWatchdogTimer) {
+      standbyWatchdogTimer = setInterval(() => {
+        if (isStandbyHostMode && lastActiveHostHeartbeat > 0 && Date.now() - lastActiveHostHeartbeat > 8000) {
+          console.warn('[WebRTC Standby Host] Active host heartbeat missing for >8s, notifying active host left')
+          callbacks.onActiveHostLeft?.()
+        }
+      }, 3000)
+    }
+  }
+
+  function stopStandbyWatchdog() {
+    if (standbyWatchdogTimer) {
+      clearInterval(standbyWatchdogTimer)
+      standbyWatchdogTimer = null
+    }
+    lastActiveHostHeartbeat = 0
+  }
+
   async function enterStandbyMode(existingHostSessionId: string, existingDeviceId?: string) {
     console.log(`[WebRTC Host] Entering standby mode. Existing active host: ${existingHostSessionId}`)
     stopHostHeartbeat()
+    startStandbyWatchdog()
     if (probeTimer) {
       clearTimeout(probeTimer)
       probeTimer = null
@@ -601,6 +653,7 @@ export function createWebRtcService(callbacks: WebRtcCallbacks): WebRtcService {
   async function demoteToStandby(newHostSessionId: string, newDeviceId?: string) {
     console.log(`[WebRTC Host] Demoted to Standby by new host: ${newHostSessionId}`)
     stopHostHeartbeat()
+    startStandbyWatchdog()
     isHostMode = false
     isStandbyHostMode = true
     activeHostSessionId = newHostSessionId
@@ -639,9 +692,11 @@ export function createWebRtcService(callbacks: WebRtcCallbacks): WebRtcService {
 
   async function takeoverHost(): Promise<void> {
     console.log('[WebRTC Host] Standby device initiating takeover to become Active Host!')
+    stopStandbyWatchdog()
     const newHostSessionId = `host-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`
     hostSessionId = newHostSessionId
-    setLocalEpoch(localEpoch + 1)
+    const nextEpoch = localEpoch + 1
+    setLocalEpoch(nextEpoch)
     startTakeoverReconciliation(2000)
 
     await signaling?.send({
@@ -649,7 +704,9 @@ export function createWebRtcService(callbacks: WebRtcCallbacks): WebRtcService {
       oldHostSessionId: activeHostSessionId,
       newHostSessionId,
       deviceId: localDeviceId,
-      hostEpoch: localEpoch
+      hostEpoch: nextEpoch,
+      username: currentUsername || localUserName || 'Host',
+      userId: currentUserId || localUserId || 'host'
     })
 
     if (clientDc) {
@@ -676,7 +733,9 @@ export function createWebRtcService(callbacks: WebRtcCallbacks): WebRtcService {
       hostSessionId: newHostSessionId,
       ecdhPublicKey: localEcdhPubHex,
       deviceId: localDeviceId,
-      hostEpoch: localEpoch
+      hostEpoch: nextEpoch,
+      username: currentUsername || localUserName || 'Host',
+      userId: currentUserId || localUserId || 'host'
     })
     startHostHeartbeat()
     callbacks.onHostPromoted?.()
@@ -763,36 +822,60 @@ export function createWebRtcService(callbacks: WebRtcCallbacks): WebRtcService {
       }
 
       if (data.type === 'host_heartbeat' || data.type === 'host_hello') {
-        if (data.hostEpoch) {
-          setLocalEpoch(Math.max(localEpoch, Number(data.hostEpoch)))
-        }
-        if (data.hostSessionId && data.hostSessionId !== hostSessionId) {
-          if (data.deviceId && data.deviceId === localDeviceId) {
+        const hasIncomingEpoch = data.hostEpoch !== undefined && data.hostEpoch !== null
+        const incomingEpoch = hasIncomingEpoch ? Number(data.hostEpoch) : localEpoch
+        const incomingDeviceId = String(data.deviceId ?? '')
+        const incomingSessionId = String(data.hostSessionId ?? '')
+
+        if (incomingSessionId && incomingSessionId !== hostSessionId) {
+          if (incomingDeviceId && incomingDeviceId === localDeviceId) {
             return
           }
           if (isStandbyHostMode) {
-            activeHostSessionId = data.hostSessionId
-            activeHostDeviceId = data.deviceId || ''
+            activeHostSessionId = incomingSessionId
+            activeHostDeviceId = incomingDeviceId
+            if (hasIncomingEpoch) {
+              setLocalEpoch(Math.max(localEpoch, incomingEpoch))
+            }
+            lastActiveHostHeartbeat = Date.now()
+            if (data.type === 'host_hello') {
+              await clientSession.handleClientSignalingMessage(data)
+            }
             return
           }
           if (isHostMode) {
-            // Deterministic tie-breaker: lexicographically larger sessionId yields to smaller (secondary: deviceId)
-            console.warn(`[WebRTC Host] Split-brain collision detected with another host: ${data.hostSessionId} vs local ${hostSessionId}`)
-            const idComp = hostSessionId.localeCompare(data.hostSessionId)
-            const shouldYield = idComp > 0 || (idComp === 0 && localDeviceId.localeCompare(data.deviceId || '') > 0)
-            if (shouldYield) {
-              console.log(`[WebRTC Host] Local host session yields to winning host: ${data.hostSessionId}`)
-              await demoteToStandby(data.hostSessionId, data.deviceId)
+            // 使用严格全序比较器判定胜负，杜绝低 Epoch 旧心跳错误降级新任期主机！
+            const cmp = compareHostAuthority(
+              localEpoch,
+              localDeviceId,
+              hostSessionId,
+              incomingEpoch,
+              incomingDeviceId,
+              incomingSessionId
+            )
+            if (cmp < 0) {
+              console.log(
+                `[WebRTC Host] Local host session yields to higher-authority host: ${incomingSessionId} (epoch ${incomingEpoch} vs local ${localEpoch})`
+              )
+              if (hasIncomingEpoch) {
+                setLocalEpoch(incomingEpoch)
+              }
+              await demoteToStandby(incomingSessionId, incomingDeviceId)
               return
-            } else {
-              // Local host wins; re-broadcast heartbeat to notify other host to yield
+            } else if (cmp > 0) {
+              // 本地主机权威更高，压制低权威对端并重发心跳通知其降级
+              console.warn(
+                `[WebRTC Host] Suppressed lower-authority heartbeat/hello (epoch: ${incomingEpoch} vs local ${localEpoch}, sender: ${incomingSessionId})`
+              )
               await signaling?.send({
                 type: 'host_heartbeat',
                 hostSessionId,
                 deviceId: localDeviceId,
                 ecdhPublicKey: localEcdhPubHex,
                 timestamp: Date.now(),
-                hostEpoch: localEpoch
+                hostEpoch: localEpoch,
+                username: currentUsername || localUserName || 'Host',
+                userId: currentUserId || localUserId || 'host'
               })
               return
             }
@@ -808,33 +891,51 @@ export function createWebRtcService(callbacks: WebRtcCallbacks): WebRtcService {
         const hasIncomingEpoch = data.hostEpoch !== undefined && data.hostEpoch !== null
         const incomingEpoch = Number(data.hostEpoch ?? 0)
         const incomingDeviceId = String(data.deviceId ?? '')
+        const incomingSessionId = String(data.newHostSessionId ?? '')
 
         if (isHostMode && data.sender !== signaling?.clientId) {
-          const incomingWins =
-            !hasIncomingEpoch ||
-            incomingEpoch > localEpoch ||
-            (incomingEpoch === localEpoch && incomingDeviceId > localDeviceId)
+          const cmp = compareHostAuthority(
+            localEpoch,
+            localDeviceId,
+            hostSessionId,
+            incomingEpoch,
+            incomingDeviceId,
+            incomingSessionId
+          )
+
+          const incomingWins = !hasIncomingEpoch || cmp < 0
 
           if (incomingWins) {
+            console.log(
+              `[WebRTC Host] Yielding to higher-authority takeover: ${incomingSessionId} (epoch ${incomingEpoch} vs local ${localEpoch})`
+            )
             setLocalEpoch(Math.max(localEpoch, incomingEpoch))
-            await demoteToStandby(data.newHostSessionId, data.deviceId)
+            await demoteToStandby(incomingSessionId, incomingDeviceId)
             return
           } else {
             console.warn(
-              `[WebRTC Host] Suppressed lower-priority takeover (epoch: ${incomingEpoch} vs ${localEpoch}, deviceId: ${incomingDeviceId} vs ${localDeviceId})`
+              `[WebRTC Host] Suppressed lower-authority takeover (epoch: ${incomingEpoch} vs local ${localEpoch}, deviceId: ${incomingDeviceId} vs ${localDeviceId})`
             )
             signaling?.send({
               type: 'host_hello',
               hostSessionId,
               ecdhPublicKey: localEcdhPubHex,
               deviceId: localDeviceId,
-              hostEpoch: localEpoch
+              hostEpoch: localEpoch,
+              username: currentUsername || localUserName || 'Host',
+              userId: currentUserId || localUserId || 'host'
             })
             return
           }
         } else {
-          setLocalEpoch(Math.max(localEpoch, incomingEpoch))
+          activeHostSessionId = incomingSessionId
+          activeHostDeviceId = incomingDeviceId
+          if (hasIncomingEpoch) {
+            setLocalEpoch(Math.max(localEpoch, incomingEpoch))
+          }
+          lastActiveHostHeartbeat = Date.now()
         }
+        return
       }
 
       if (data.type === 'HOST_LEAVING') {
@@ -1007,6 +1108,7 @@ export function createWebRtcService(callbacks: WebRtcCallbacks): WebRtcService {
     }
     isProbing = false
     stopHostHeartbeat()
+    stopStandbyWatchdog()
     isStandbyHostMode = false
 
     if (isHostMode) {

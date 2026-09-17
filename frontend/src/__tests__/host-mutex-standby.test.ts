@@ -34,6 +34,7 @@ vi.mock('@/services/api', async () => {
 
 describe('Host Mutex, Standby Mode & Takeover (双主机互斥与接管)', () => {
   beforeEach(() => {
+    localStorage.clear()
     setActivePinia(createPinia());
     (globalThis as any).__TEST_ALLOW_UNSIGNED_SIGNALING__ = true;
     (globalThis as any).__TEST_PROBE_MS__ = 50; // Fast probe for unit test

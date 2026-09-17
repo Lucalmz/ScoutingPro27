@@ -85,13 +85,17 @@ export function formatUserFriendlyError(
     }
   }
 
-  // 2. 超时异常
-  if (
+  // 2. 超时异常 (仅限真正 API/HTTP 请求的超时，不误伤 WebRTC/SAS 等应用内非 HTTP 消息)
+  const isApiRequest = Boolean(error instanceof ApiError || path.startsWith('/api') || status === 408 || status === 504)
+  const isApiTimeout =
+    status === 408 ||
+    status === 504 ||
     lowerMsg.includes('localapitimeouterror') ||
-    lowerMsg.includes('aborterror') ||
-    lowerMsg.includes('timeout') ||
-    lowerMsg.includes('挂起超过')
-  ) {
+    lowerMsg.includes('挂起超过') ||
+    lowerMsg.includes('gateway timeout') ||
+    (isApiRequest && (lowerMsg.includes('timeout') || lowerMsg.includes('timed out') || lowerMsg.includes('timedout') || lowerMsg.includes('aborterror')))
+
+  if (isApiTimeout) {
     return {
       message: t('errors.request_timeout') || '服务响应超时，请检查后台运行状态或稍后重试',
       detail

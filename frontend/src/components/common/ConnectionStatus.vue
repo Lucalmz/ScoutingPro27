@@ -1,11 +1,15 @@
 <script setup lang="ts">
 import { computed } from 'vue'
 import { useConnectionStore } from '@/stores/connection'
+import { useEventStore } from '@/stores/events'
 import { useI18n } from 'vue-i18n'
 import { hapticLight } from '@/utils/haptics'
 
 const conn = useConnectionStore()
+const eventStore = useEventStore()
 const { t } = useI18n()
+
+const isHost = computed(() => Boolean(eventStore.isHost && !conn.isStandbyHost))
 
 async function handleReconnect() {
   hapticLight()
@@ -68,9 +72,9 @@ const transportTooltip = computed(() => {
       <span class="status-label">{{ t('connection.' + (conn.status === 'waiting' ? 'host_online' : conn.status)) }}</span>
     </div>
 
-    <!-- Active Transport Badge (IPv6 / LAN / NAT / Relay) -->
+    <!-- Active Transport Badge (IPv6 / LAN / NAT / Relay) - 仅限从机/客户端 (1对1链路) 显示 -->
     <div
-      v-if="conn.isConnected && conn.transportInfo && conn.transportInfo.type !== 'unknown'"
+      v-if="!isHost && conn.isConnected && conn.transportInfo && conn.transportInfo.type !== 'unknown'"
       class="transport-badge"
       :class="conn.transportInfo.type"
       :title="transportTooltip"
@@ -82,9 +86,9 @@ const transportTooltip = computed(() => {
       </span>
     </div>
 
-    <!-- SAS Security Fingerprint Badge -->
+    <!-- SAS Security Fingerprint Badge - 仅限从机/客户端 (1对1链路) 显示 -->
     <div
-      v-if="conn.isConnected && conn.transportInfo?.securityFingerprint"
+      v-if="!isHost && conn.isConnected && conn.transportInfo?.securityFingerprint"
       class="fingerprint-badge"
       :title="t('connection.sas_tooltip', { code: conn.transportInfo.securityFingerprint })"
     >
