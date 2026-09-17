@@ -44,16 +44,40 @@ export class PeerConnectionManager {
       if (typeof peer.getStats !== 'function') return
       const stats = await peer.getStats()
       let activePair: any = null
+
+      // 1. W3C 规范首选：查找 RTCTransportStats 的 selectedCandidatePairId
+      let selectedPairId: string | null = null
       stats.forEach((report: any) => {
-        if (
-          report.type === 'candidate-pair' &&
-          (report.state === 'succeeded' || report.nominated === true || report.selected === true)
-        ) {
-          if (!activePair || report.nominated || report.state === 'succeeded') {
-            activePair = report
-          }
+        if (report.type === 'transport' && report.selectedCandidatePairId) {
+          selectedPairId = report.selectedCandidatePairId
         }
       })
+
+      if (selectedPairId && stats.has(selectedPairId)) {
+        activePair = stats.get(selectedPairId)
+      } else {
+        // 2. 备选：严格评分选优，杜绝普通 succeeded 候选对覆盖已被协议选中的 nominated/selected 候选对
+        let bestPair: any = null
+        let bestScore = -1
+        stats.forEach((report: any) => {
+          if (report.type === 'candidate-pair') {
+            let score = 0
+            if (report.selected === true) {
+              score = 3
+            } else if (report.nominated === true && report.state === 'succeeded') {
+              score = 2
+            } else if (report.state === 'succeeded') {
+              score = 1
+            }
+
+            if (score > bestScore) {
+              bestScore = score
+              bestPair = report
+            }
+          }
+        })
+        activePair = bestPair
+      }
       if (activePair) {
         const local = stats.get(activePair.localCandidateId) as any
         const remote = stats.get(activePair.remoteCandidateId) as any

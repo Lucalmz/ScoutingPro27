@@ -74,7 +74,7 @@ export async function probePublicConnectivity(timeoutMs = 2500, bypassThrottle =
 
 export const STUN_SERVERS: RTCConfiguration = {
   iceServers: [
-    // 1. Cloudflare Anycast STUN（中国大陆内外通用、极低延迟，支持 IPv4/IPv6 双栈）
+    // 1. Cloudflare Anycast STUN（全球 Anycast、低延迟双栈）
     {
       urls: ['stun:stun.cloudflare.com:3478', 'stun:stun.cloudflare.com:53']
     },
@@ -82,7 +82,15 @@ export const STUN_SERVERS: RTCConfiguration = {
     {
       urls: ['stun:stun.l.google.com:19302', 'stun:stun1.l.google.com:19302']
     },
-    // 3. Metered STUN
+    // 3. 国内主流 Anycast STUN（腾讯、小米、哔哩哔哩，全网极低延迟、零丢包、支持 IPv4/IPv6 双栈）
+    {
+      urls: [
+        'stun:stun.qq.com:3478',
+        'stun:stun.miwifi.com:3478',
+        'stun:stun.chat.bilibili.com:3478'
+      ]
+    },
+    // 4. Metered STUN
     {
       urls: 'stun:stun.relay.metered.ca:80'
     },

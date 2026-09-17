@@ -367,73 +367,30 @@ export function createHostSignalingHandler(ctx: HostSessionContext) {
               ctx.handleChannelMessage(item.ev, item.senderId)
             }
           } else if (trustEval.status === 'TOFU_FIRST_SEEN') {
-            if (isTicketVerified) {
-              log.info(`[TOFU] Establishing baseline trust for ticket-verified device ${clientDeviceId} (${effectiveUsername})`)
-              await savePeerTrustRecord({
-                eventId: currentInviteCode || 'default_event',
-                userId: effectiveUserId,
-                username: effectiveUsername,
-                deviceId: clientDeviceId,
-                publicKeyHex: data.ecdhPublicKey,
-                firstSeenAt: Date.now(),
-                lastSeenAt: Date.now(),
-                trustedAt: Date.now(),
-                trustLevel: 'TOFU_TRUSTED'
-              })
-              sas.clientSasStates.set(sender, 'VERIFIED')
-              ctx.callbacks.onClientConnected?.(effectiveUserId, effectiveUsername)
+            log.info(`[TOFU] Establishing baseline trust for device ${clientDeviceId} (${effectiveUsername}) [ticketVerified: ${isTicketVerified}]. Auto-approving SAS.`)
+            await savePeerTrustRecord({
+              eventId: currentInviteCode || 'default_event',
+              userId: effectiveUserId,
+              username: effectiveUsername,
+              deviceId: clientDeviceId,
+              publicKeyHex: data.ecdhPublicKey,
+              firstSeenAt: Date.now(),
+              lastSeenAt: Date.now(),
+              trustedAt: Date.now(),
+              trustLevel: 'TOFU_TRUSTED'
+            })
+            sas.clientSasStates.set(sender, 'VERIFIED')
+            ctx.callbacks.onClientConnected?.(effectiveUserId, effectiveUsername)
 
-              const pendingOut = sas.hostPendingOutgoing.get(sender) || []
-              sas.hostPendingOutgoing.delete(sender)
-              for (const item of pendingOut) {
-                ctx.sendMessage(item.msg, item.targetId)
-              }
-              const pendingIn = sas.hostPendingIncoming.get(sender) || []
-              sas.hostPendingIncoming.delete(sender)
-              for (const item of pendingIn) {
-                ctx.handleChannelMessage(item.ev, item.senderId)
-              }
-            } else if (sas.clientSasStates.get(sender) === 'VERIFIED') {
-              log.info(`[TOFU] Peer ${sender} already verified in past session. Preserving VERIFIED status.`)
-              const pendingOut = sas.hostPendingOutgoing.get(sender) || []
-              sas.hostPendingOutgoing.delete(sender)
-              for (const item of pendingOut) {
-                ctx.sendMessage(item.msg, item.targetId)
-              }
-              const pendingIn = sas.hostPendingIncoming.get(sender) || []
-              sas.hostPendingIncoming.delete(sender)
-              for (const item of pendingIn) {
-                ctx.handleChannelMessage(item.ev, item.senderId)
-              }
-            } else {
-              // Unverified ticket (cross-machine peer): require manual SAS verification
-              log.warn(`[TOFU] First-seen unverified peer ${sender} (${effectiveUsername}) requires manual SAS verification.`)
-              const isAlreadyPending = sas.sasTimeoutTimers.has(sender)
-              sas.clientSasStates.set(sender, 'PENDING_VERIFICATION')
-              const fingerprint = sas.clientFingerprints.get(sender)
-              if (fingerprint) {
-                if (!isAlreadyPending) {
-                  sas.clientSasStates.set(sender, 'PENDING_VERIFICATION')
-                  ctx.callbacks.onSasVerificationRequired?.(
-                    {
-                      peerId: sender,
-                      username: effectiveUsername,
-                      ecdhPublicKey: data.ecdhPublicKey
-                    },
-                    fingerprint
-                  )
-                }
-
-                signaling.send(
-                  {
-                    type: 'sas_challenge',
-                    fingerprint,
-                    hostSessionId,
-                    username: ctx.getUsername?.() || 'Host'
-                  },
-                  sender
-                )
-              }
+            const pendingOut = sas.hostPendingOutgoing.get(sender) || []
+            sas.hostPendingOutgoing.delete(sender)
+            for (const item of pendingOut) {
+              ctx.sendMessage(item.msg, item.targetId)
+            }
+            const pendingIn = sas.hostPendingIncoming.get(sender) || []
+            sas.hostPendingIncoming.delete(sender)
+            for (const item of pendingIn) {
+              ctx.handleChannelMessage(item.ev, item.senderId)
             }
           } else if (trustEval.status === 'KEY_ROTATION_ALERT') {
             if (trustEval.level === 'CRITICAL') {

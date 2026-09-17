@@ -2114,17 +2114,9 @@ describe('WebRTC Security Hardening & SAS Gating (v2)', () => {
     onMessage('topic', new TextEncoder().encode(JSON.stringify(foreignOffer)))
     await new Promise(r => setTimeout(r, 60))
 
-    // Scheme B: Offer was NOT dropped! It fell back to SAS verification modal
-    expect(callbacks.onSasVerificationRequired).toHaveBeenCalledWith(
-      expect.objectContaining({ peerId: 'peer_charlie_laptop' }),
-      expect.any(String)
-    )
-    expect(service.getSasState('peer_charlie_laptop')).toBe('PENDING_VERIFICATION')
-
-    // Host confirms SAS
-    service.confirmSas('peer_charlie_laptop')
+    // Scheme B: Cross-machine peer establishes baseline trust via TOFU without spamming popup modal
+    expect(callbacks.onSasVerificationRequired).not.toHaveBeenCalled()
     expect(service.getSasState('peer_charlie_laptop')).toBe('VERIFIED')
-    expect(callbacks.onSasVerified).toHaveBeenCalledWith('peer_charlie_laptop')
 
     // Now test reconnection from same device & key: TOFU recognizes it as TRUSTED_MATCH
     callbacks.onSasVerificationRequired.mockClear()
@@ -2181,7 +2173,7 @@ describe('WebRTC Security Hardening & SAS Gating (v2)', () => {
     }
 
     onMessage('topic', new TextEncoder().encode(JSON.stringify(tamperedOffer)))
-    await new Promise(r => setTimeout(r, 60))
+    await new Promise(r => setTimeout(r, 200))
 
     // Must be completely rejected: no SAS prompt, state is REJECTED
     expect(callbacks.onSasVerificationRequired).not.toHaveBeenCalled()
