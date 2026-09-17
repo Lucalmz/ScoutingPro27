@@ -40,6 +40,10 @@ const effectiveInviteCode = computed(() => {
 })
 
 onMounted(async () => {
+  const b = route.query.b || route.query.broker
+  if (b && typeof sessionStorage !== 'undefined') {
+    sessionStorage.setItem('sp27-active-broker', String(b))
+  }
   userStore.restoreFromCache()
   if (userStore.isLoggedIn) {
     if (effectiveInviteCode.value) {

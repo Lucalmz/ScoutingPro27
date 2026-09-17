@@ -39,6 +39,10 @@ function extractInviteCode(raw: string): string {
   try {
     const url = new URL(trimmed, window.location.href)
     const joinParam = url.searchParams.get('join') || url.searchParams.get('code')
+    const brokerParam = url.searchParams.get('b') || url.searchParams.get('broker')
+    if (brokerParam && typeof sessionStorage !== 'undefined') {
+      sessionStorage.setItem('sp27-active-broker', brokerParam)
+    }
     if (joinParam) return joinParam.trim().toUpperCase()
 
     // Also check hash param e.g. #/?join=CODE
@@ -46,6 +50,10 @@ function extractInviteCode(raw: string): string {
       const hashQuery = url.hash.split('?')[1]
       if (hashQuery) {
         const hashParams = new URLSearchParams(hashQuery)
+        const hashBroker = hashParams.get('b') || hashParams.get('broker')
+        if (hashBroker && typeof sessionStorage !== 'undefined') {
+          sessionStorage.setItem('sp27-active-broker', hashBroker)
+        }
         const code = hashParams.get('join') || hashParams.get('code')
         if (code) return code.trim().toUpperCase()
       }

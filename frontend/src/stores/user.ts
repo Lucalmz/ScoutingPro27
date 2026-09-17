@@ -296,9 +296,54 @@ export const useUserStore = defineStore('user', () => {
     }
   }
 
-  function logout() {
+  async function logout() {
     user.value = null
-    localStorage.removeItem('scoutingpro-user')
+    try {
+      localStorage.removeItem('scoutingpro-user')
+    } catch {}
+
+    // 1. Disconnect WebRTC and reset connection store
+    try {
+      const { useConnectionStore } = await import('@/stores/connection')
+      const connStore = useConnectionStore()
+      connStore.rtcService?.disconnect()
+      connStore.rtcService = null
+      connStore.status = 'offline'
+      connStore.clearConnectedScouts()
+      connStore.clearPendingSas()
+      connStore.clearSessionConflict()
+      connStore.clearTakeoverPrompt()
+    } catch (e) {
+      console.warn('[userStore] Error disconnecting WebRTC on logout:', e)
+    }
+
+    // 2. Clear Pinia stores in-memory state and localStorage caches
+    try {
+      const [{ useRecordStore }, { useEventStore }, { useInboxStore }, { usePitScoutStore }, { useScheduleStore }] =
+        await Promise.all([
+          import('@/stores/records'),
+          import('@/stores/events'),
+          import('@/stores/inbox'),
+          import('@/stores/pitScout'),
+          import('@/stores/schedule')
+        ])
+
+      useRecordStore().clearRecords()
+      useEventStore().clearAllLocalCache()
+      useInboxStore().clearAllMessages()
+      usePitScoutStore().clearLocalCache()
+      useScheduleStore().clearSelection()
+    } catch (e) {
+      console.warn('[userStore] Error clearing stores on logout:', e)
+    }
+
+    // 3. Clear offline photos in IndexedDB
+    try {
+      const { clearAllMobileCachedPhotos } = await import('@/services/mobilePhotoCache')
+      await clearAllMobileCachedPhotos()
+    } catch (e) {
+      console.warn('[userStore] Error clearing offline photo cache on logout:', e)
+    }
   }
 
   // Handle automatic logout on 401

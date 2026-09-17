@@ -108,6 +108,7 @@ export const useInboxStore = defineStore('inbox', () => {
 
   function clearAllMessages() {
     messages.value = []
+    outbox.value = []
   }
 
   async function sendDirectMessage(

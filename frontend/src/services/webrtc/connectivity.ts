@@ -82,6 +82,13 @@ export const STUN_SERVERS: RTCConfiguration = {
     {
       urls: ['stun:stun.l.google.com:19302', 'stun:stun1.l.google.com:19302']
     },
+    // 3. 直连 IPv6 Anycast STUN（免 DNS 解析，彻底绕过国内 ISP DNS 缺失 AAAA 记录的问题）
+    {
+      urls: [
+        'stun:[2606:4700:49::]:3478',
+        'stun:[2001:4860:4864:5:8000::1]:19302'
+      ]
+    },
     // 3. 国内主流 Anycast STUN（腾讯、小米、哔哩哔哩，全网极低延迟、零丢包、支持 IPv4/IPv6 双栈）
     {
       urls: [

@@ -1,9 +1,10 @@
 <script setup lang="ts">
-import { ref, computed, watch, nextTick } from 'vue'
+import { ref, computed, watch, nextTick, onMounted } from 'vue'
 import QRCode from 'qrcode'
 import { useToastStore } from '@/stores/toast'
 import { useI18n } from 'vue-i18n'
 import { hapticLight, hapticSuccess } from '@/utils/haptics'
+import { getNetworkInfo } from '@/services/api'
 
 const props = defineProps<{
   modelValue: boolean
@@ -24,6 +25,12 @@ const cloudBaseUrl = ref(
 )
 const isEditingCloudUrl = ref(false)
 const cloudUrlInput = ref(cloudBaseUrl.value)
+const qrChannelMode = ref<'cloud' | 'lan'>('cloud')
+const networkInfo = ref<{ primaryIp: string; joinBaseUrl: string } | null>(null)
+
+onMounted(async () => {
+  networkInfo.value = await getNetworkInfo()
+})
 
 function saveCloudUrl() {
   let val = cloudUrlInput.value.trim()
@@ -46,8 +53,11 @@ const copied = ref(false)
 const copiedCode = ref(false)
 
 const joinUrl = computed(() => {
+  if (qrChannelMode.value === 'lan' && networkInfo.value?.joinBaseUrl) {
+    return `${networkInfo.value.joinBaseUrl}/#/?join=${props.inviteCode}&b=lan`
+  }
   const base = cloudBaseUrl.value.replace(/\/+$/, '').replace(/\/#.*$/, '')
-  return `${base}/#/?join=${props.inviteCode}`
+  return `${base}/#/?join=${props.inviteCode}&b=emqx`
 })
 
 async function renderQrCode() {
@@ -77,7 +87,7 @@ watch(
   { immediate: true }
 )
 
-watch([cloudBaseUrl, () => props.inviteCode], async () => {
+watch([cloudBaseUrl, qrChannelMode, () => props.inviteCode], async () => {
   await nextTick()
   renderQrCode()
 })
@@ -137,6 +147,28 @@ function close() {
           <p class="subtitle">
             {{ t('qr_modal.subtitle_simple') }}
           </p>
+
+          <!-- 赛场离线热点 / 公网云端 信道一键切换 -->
+          <div v-if="networkInfo?.joinBaseUrl" class="channel-pill-bar">
+            <button
+              type="button"
+              class="channel-pill-item"
+              :class="{ active: qrChannelMode === 'cloud' }"
+              @click="qrChannelMode = 'cloud'"
+            >
+              <span class="material-icons pill-icon">cloud</span>
+              <span>{{ t('qr_modal.channel_cloud', '公网云端') }}</span>
+            </button>
+            <button
+              type="button"
+              class="channel-pill-item"
+              :class="{ active: qrChannelMode === 'lan' }"
+              @click="qrChannelMode = 'lan'"
+            >
+              <span class="material-icons pill-icon">wifi_tethering</span>
+              <span>{{ t('qr_modal.channel_lan', '赛场内网/热点 (纯离线)') }}</span>
+            </button>
+          </div>
 
           <!-- 邀请码高亮大磁贴 -->
           <div class="code-badge-bar" @click="copyInviteCode" :title="t('qr_modal.click_copy_code')">
@@ -303,6 +335,46 @@ function close() {
   line-height: 1.5;
   color: #9ca3af;
   text-align: center;
+}
+
+.channel-pill-bar {
+  display: flex;
+  background: rgba(255, 255, 255, 0.05);
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  border-radius: 12px;
+  padding: 4px;
+  gap: 4px;
+}
+
+.channel-pill-item {
+  flex: 1;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  padding: 8px 10px;
+  font-size: 12px;
+  font-weight: 500;
+  border-radius: 8px;
+  border: 1px solid transparent;
+  background: transparent;
+  color: #9ca3af;
+  cursor: pointer;
+  transition: all 0.2s ease;
+}
+
+.channel-pill-item:hover {
+  color: #e5e7eb;
+}
+
+.channel-pill-item.active {
+  background: rgba(59, 130, 246, 0.2);
+  color: #60a5fa;
+  border-color: rgba(59, 130, 246, 0.35);
+}
+
+.pill-icon {
+  font-size: 16px;
 }
 
 /* 邀请码大磁贴 */

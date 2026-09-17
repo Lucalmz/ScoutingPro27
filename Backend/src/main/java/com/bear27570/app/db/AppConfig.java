@@ -158,7 +158,7 @@ public class AppConfig {
             return envDb;
         }
         File dbFile = resolveAppDbFile();
-        return "jdbc:h2:" + dbFile.getAbsolutePath().replace('\\', '/') + ";AUTO_SERVER=TRUE";
+        return "jdbc:h2:" + dbFile.getAbsolutePath().replace('\\', '/') + ";AUTO_SERVER=TRUE;LOCK_TIMEOUT=15000;AUTO_RECONNECT=TRUE";
     }
 
     /**

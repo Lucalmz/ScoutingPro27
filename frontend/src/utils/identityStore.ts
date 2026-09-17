@@ -55,6 +55,13 @@ export type TrustEvaluationResult =
       reason: string
       message: string
     }
+  | {
+      status: 'MULTI_USER_DEVICE_SWITCH'
+      existingRecord: PeerTrustRecord
+      requestedUserId: string
+      requestedUsername: string
+      message: string
+    }
 
 const DB_NAME = 'scoutingpro_security_v1'
 const STORE_DEVICE = 'device_identity'
@@ -245,15 +252,18 @@ export async function findPeerTrustRecordByDevice(
 ): Promise<PeerTrustRecord | null> {
   if (!deviceId) return null
 
-  // Check memory
+  // Check memory for the most recently seen record for this device
+  let latestRecord: PeerTrustRecord | null = null
   for (const record of memTrustedPeers.values()) {
     if (record.eventId === eventId && record.deviceId === deviceId) {
-      return record
+      if (!latestRecord || (record.lastSeenAt || 0) > (latestRecord.lastSeenAt || 0)) {
+        latestRecord = record
+      }
     }
   }
 
   const db = await openDb()
-  if (!db) return null
+  if (!db) return latestRecord
 
   return new Promise((resolve) => {
     try {
@@ -265,18 +275,21 @@ export async function findPeerTrustRecordByDevice(
         if (cursor) {
           const val = cursor.value as PeerTrustRecord
           if (val && val.eventId === eventId && val.deviceId === deviceId) {
-            memTrustedPeers.set(`${val.eventId}:${val.userId}:${val.deviceId}`, val)
-            resolve(val)
-            return
+            if (!latestRecord || (val.lastSeenAt || 0) > (latestRecord.lastSeenAt || 0)) {
+              latestRecord = val
+            }
           }
           cursor.continue()
         } else {
-          resolve(null)
+          if (latestRecord) {
+            memTrustedPeers.set(`${latestRecord.eventId}:${latestRecord.userId}:${latestRecord.deviceId}`, latestRecord)
+          }
+          resolve(latestRecord)
         }
       }
-      req.onerror = () => resolve(null)
+      req.onerror = () => resolve(latestRecord)
     } catch {
-      resolve(null)
+      resolve(latestRecord)
     }
   })
 }
@@ -371,11 +384,25 @@ export async function evaluatePeerKeyTrust(params: {
   }
 
   let existingRecord = await getPeerTrustRecord(eventId, userId, deviceId)
-  if (!existingRecord && deviceId) {
-    existingRecord = await findPeerTrustRecordByDevice(eventId, deviceId)
+  let latestDeviceRecord: PeerTrustRecord | null = null
+  if (deviceId) {
+    latestDeviceRecord = await findPeerTrustRecordByDevice(eventId, deviceId)
   }
 
-  // Case 1: Same device, public key matches historical record
+  // Case 1: Same device historically bound to a DIFFERENT user, or device was last used by someone else!
+  if (latestDeviceRecord && latestDeviceRecord.userId !== userId) {
+    if (!existingRecord || (latestDeviceRecord.lastSeenAt || 0) > (existingRecord.lastSeenAt || 0)) {
+      return {
+        status: 'MULTI_USER_DEVICE_SWITCH',
+        existingRecord: latestDeviceRecord,
+        requestedUserId: userId,
+        requestedUsername: username,
+        message: `检测到设备 [${deviceId}] 曾绑定侦察员 [${latestDeviceRecord.username || latestDeviceRecord.userId}]，当前请求用户为 [${username || userId}]。必须通过安全码核验重新绑定。`
+      }
+    }
+  }
+
+  // Case 2: Historical record for (eventId, userId, deviceId)
   if (existingRecord) {
     if (existingRecord.publicKeyHex.toLowerCase() === publicKeyHex.toLowerCase()) {
       existingRecord.lastSeenAt = Date.now()

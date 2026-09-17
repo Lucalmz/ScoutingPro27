@@ -20,6 +20,10 @@ vi.mock('qrcode', () => ({
   }
 }))
 
+vi.mock('@/services/api', () => ({
+  getNetworkInfo: vi.fn().mockResolvedValue(null)
+}))
+
 describe('MobileQrModal.vue', () => {
   beforeEach(() => {
     document.body.innerHTML = ''
@@ -154,4 +158,38 @@ describe('MobileQrModal.vue', () => {
 
     expect(wrapper.emitted('update:modelValue')?.[0]).toEqual([false])
   })
+
+  it('renders channel pill bar and switches to LAN hotspot mode when networkInfo is available', async () => {
+    const { getNetworkInfo } = await import('@/services/api')
+    vi.mocked(getNetworkInfo).mockResolvedValueOnce({
+      primaryIp: '192.168.137.1',
+      allIps: ['192.168.137.1'],
+      port: 8080,
+      joinBaseUrl: 'http://192.168.137.1:8080'
+    })
+
+    const wrapper = mount(MobileQrModal, {
+      props: {
+        modelValue: true,
+        inviteCode: 'LAN999'
+      }
+    })
+
+    await wrapper.vm.$nextTick()
+    await new Promise((r) => setTimeout(r, 20))
+
+    const pillBar = document.body.querySelector('.channel-pill-bar')
+    expect(pillBar).toBeTruthy()
+
+    const pills = document.body.querySelectorAll('.channel-pill-item')
+    expect(pills.length).toBe(2)
+
+    // Switch to LAN
+    ;(pills[1] as HTMLElement).click()
+    await wrapper.vm.$nextTick()
+
+    const urlInput = document.body.querySelector('.url-input') as HTMLInputElement
+    expect(urlInput.value).toBe('http://192.168.137.1:8080/#/?join=LAN999&b=lan')
+  })
 })
+

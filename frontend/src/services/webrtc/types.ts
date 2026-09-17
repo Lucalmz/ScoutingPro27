@@ -75,9 +75,9 @@ export interface QueuedOfflineMessage {
 }
 
 export interface WebRtcService {
-  host: (inviteCode: string, eventMetadata?: ScoutingEvent, username?: string, userId?: string) => Promise<void>
+  host: (inviteCode: string, metadata?: ScoutingEvent, hostUsername?: string, hostUserId?: string, preferredBroker?: string) => Promise<void>
   setEventMetadata: (meta: ScoutingEvent) => void
-  join: (inviteCode: string, username?: string, userId?: string) => Promise<void>
+  join: (inviteCode: string, username?: string, userId?: string, preferredBroker?: string) => Promise<void>
   requestSync: (
     sinceVersion?: number,
     authCode?: string,

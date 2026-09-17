@@ -46,6 +46,7 @@ export interface ChannelMessageHandlerContext {
   isTakeoverReconciling?: () => boolean
   waitForTakeoverReconciliation?: () => Promise<void>
   finishTakeoverReconciliation?: (reason?: string) => void
+  onPongReceived?: (timestamp: number) => void
 }
 
 export function createChannelMessageHandler(ctx: ChannelMessageHandlerContext) {
@@ -73,6 +74,18 @@ export function createChannelMessageHandler(ctx: ChannelMessageHandlerContext) {
     const callbacks = ctx.callbacks
 
     switch (msg.type) {
+      case 'PING' as any: {
+        if (isHostMode) {
+          await ctx.sendMessage({ type: 'PONG' as any, timestamp: (msg as any).timestamp }, senderId)
+        }
+        return
+      }
+      case 'PONG' as any: {
+        if (!isHostMode && ctx.onPongReceived) {
+          ctx.onPongReceived((msg as any).timestamp)
+        }
+        return
+      }
       case 'REQUEST_SYNC':
         if (isHostMode && senderId) {
           const senderUserId = msg.senderUserId

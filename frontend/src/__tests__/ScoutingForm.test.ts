@@ -263,4 +263,48 @@ describe('ScoutingForm', () => {
       expect(team.autoBalls).toBe(0)
     })
   })
+
+  describe('Draft Autosave and Restore', () => {
+    it('restores draft data from localStorage on mount if present', async () => {
+      const draftPayload = {
+        matchNumber: '42',
+        allianceColor: 'blue',
+        currentTournamentLevel: 'PLAYOFF',
+        scoutMode: 'single',
+        teamsData: [{
+          teamNumber: '9999',
+          autoLeave: true,
+          autoBalls: 2,
+          autoCycles: [2],
+          autoMissedCycles: [],
+          autoPark: true,
+          teleopCycles: [3, 4],
+          teleopMissedCycles: [],
+          flowerPlaced: true,
+          flowerBottomBonus: false,
+          teleopPark: true,
+          isBroken: false,
+          notes: 'Restored from draft after screen sleep',
+          customFields: {}
+        }],
+        savedAt: Date.now()
+      }
+      localStorage.setItem('sp27_active_draft_event-1', JSON.stringify(draftPayload))
+
+      const wrapper = mount(ScoutingForm, { props: defaultProps })
+      await wrapper.vm.$nextTick()
+
+      expect(wrapper.vm.isDraftRestored).toBe(true)
+      expect(wrapper.vm.matchNumber).toBe('42')
+      expect(wrapper.vm.allianceColor).toBe('blue')
+      expect(wrapper.vm.teamsData[0].teamNumber).toBe('9999')
+      expect(wrapper.vm.teamsData[0].notes).toBe('Restored from draft after screen sleep')
+
+      // Clear draft
+      wrapper.vm.clearDraft()
+      expect(wrapper.vm.isDraftRestored).toBe(false)
+      expect(localStorage.getItem('sp27_active_draft_event-1')).toBeNull()
+    })
+  })
 })
+

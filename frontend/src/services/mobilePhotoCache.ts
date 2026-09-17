@@ -185,3 +185,23 @@ export async function deleteMobileCachedPhoto(key: string): Promise<void> {
     }
   })
 }
+
+export async function clearAllMobileCachedPhotos(): Promise<void> {
+  memoryCache.clear()
+
+  const db = await getDb()
+  if (!db) return
+
+  return new Promise((resolve) => {
+    try {
+      const tx = db.transaction(STORE_NAME, 'readwrite')
+      const store = tx.objectStore(STORE_NAME)
+      const req = store.clear()
+      req.onsuccess = () => resolve()
+      req.onerror = () => resolve()
+    } catch {
+      resolve()
+    }
+  })
+}
+

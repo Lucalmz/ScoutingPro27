@@ -223,14 +223,15 @@ export function createHostSignalingHandler(ctx: HostSessionContext) {
               sas.clientFingerprints.set(sender, fingerprint)
               log.info(`Computed SAS Fingerprint for ${sender}: ${fingerprint}`)
 
-              const storageKey = `scoutingpro_verified_sas_${currentInviteCode}_${data.ecdhPublicKey}`
+              const candidateUserId = data.userId || 'unknown'
+              const storageKey = `scoutingpro_verified_sas_${currentInviteCode}_${candidateUserId}_${data.ecdhPublicKey}`
               let storedSas: string | null = null
               try {
                 storedSas = localStorage.getItem(storageKey)
               } catch {}
 
               if (storedSas && storedSas === fingerprint) {
-                log.info(`Peer ${sender} already verified in past session. Auto-approving SAS.`)
+                log.info(`Peer ${sender} (${candidateUserId}) already verified in past session. Auto-approving SAS.`)
                 sas.clientSasStates.set(sender, 'VERIFIED')
               } else {
                 sas.clientSasStates.set(sender, 'PENDING_VERIFICATION')
@@ -334,8 +335,14 @@ export function createHostSignalingHandler(ctx: HostSessionContext) {
           const clientDeviceId = offerData?.deviceId || data.deviceId || 'device_default'
           sas.clientDeviceIds.set(sender, clientDeviceId)
           const isTicketVerified = Boolean(verifiedUser)
-          const effectiveUserId = verifiedUser?.userId || (clientDeviceId !== 'device_default' ? clientDeviceId : `dev_pub_${data.ecdhPublicKey.slice(0, 16)}`)
+          const effectiveUserId = verifiedUser?.userId || offerData?.userId || data.userId || (clientDeviceId !== 'device_default' ? clientDeviceId : `dev_pub_${data.ecdhPublicKey.slice(0, 16)}`)
           const effectiveUsername = verifiedUser?.username || offerData?.username || data.username || sender
+
+          sas.clientVerifiedIdentities.set(sender, {
+            userId: effectiveUserId,
+            username: effectiveUsername,
+            ecdhPublicKey: data.ecdhPublicKey
+          })
 
           const isFlapping =
             clients.has(sender) &&
@@ -391,6 +398,33 @@ export function createHostSignalingHandler(ctx: HostSessionContext) {
             sas.hostPendingIncoming.delete(sender)
             for (const item of pendingIn) {
               ctx.handleChannelMessage(item.ev, item.senderId)
+            }
+          } else if (trustEval.status === 'MULTI_USER_DEVICE_SWITCH') {
+            log.warn(`[WebRTC Host Security ALERT] ${trustEval.message}`)
+            const isAlreadyPending = sas.sasTimeoutTimers.has(sender)
+            sas.clientSasStates.set(sender, 'PENDING_VERIFICATION')
+            const fingerprint = sas.clientFingerprints.get(sender)
+            if (fingerprint) {
+              if (!isAlreadyPending) {
+                ctx.callbacks.onSasVerificationRequired?.(
+                  {
+                    peerId: sender,
+                    username: effectiveUsername,
+                    ecdhPublicKey: data.ecdhPublicKey
+                  },
+                  fingerprint
+                )
+              }
+
+              signaling.send(
+                {
+                  type: 'sas_challenge',
+                  fingerprint,
+                  hostSessionId,
+                  username: ctx.getUsername?.() || 'Host'
+                },
+                sender
+              )
             }
           } else if (trustEval.status === 'KEY_ROTATION_ALERT') {
             if (trustEval.level === 'CRITICAL') {

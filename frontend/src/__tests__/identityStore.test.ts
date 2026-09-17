@@ -140,4 +140,75 @@ describe('identityStore - Persistent Device Identity & TOFU Engine', () => {
       expect(resultCritical.reason).toBe('IN_SESSION_FLAPPING')
     }
   })
+
+  it('Guarantee 5: Multi-User Device Switch Detection', async () => {
+    const keyPair = await generateEcdhKeyPair()
+    const pubHex = await exportEcdhPublicKey(keyPair.publicKey)
+    const sharedDeviceId = 'dev_shared_mobile'
+
+    // Step 1: Alice logs in on shared mobile and establishes baseline trust
+    await savePeerTrustRecord({
+      eventId: 'evt_2026',
+      userId: 'user_alice',
+      username: 'Alice',
+      deviceId: sharedDeviceId,
+      publicKeyHex: pubHex,
+      firstSeenAt: 1000,
+      lastSeenAt: 1000,
+      trustedAt: 1000,
+      trustLevel: 'TOFU_TRUSTED'
+    })
+
+    // Step 2: Bob logs in on the exact same device and public key
+    const bobEval = await evaluatePeerKeyTrust({
+      eventId: 'evt_2026',
+      userId: 'user_bob',
+      username: 'Bob',
+      deviceId: sharedDeviceId,
+      publicKeyHex: pubHex
+    })
+
+    // MUST NOT return TRUSTED_MATCH; must require explicit verification
+    expect(bobEval.status).toBe('MULTI_USER_DEVICE_SWITCH')
+    if (bobEval.status === 'MULTI_USER_DEVICE_SWITCH') {
+      expect(bobEval.requestedUserId).toBe('user_bob')
+      expect(bobEval.existingRecord.userId).toBe('user_alice')
+    }
+
+    // Step 3: Bob completes verification and is recorded at t=2000
+    await savePeerTrustRecord({
+      eventId: 'evt_2026',
+      userId: 'user_bob',
+      username: 'Bob',
+      deviceId: sharedDeviceId,
+      publicKeyHex: pubHex,
+      firstSeenAt: 2000,
+      lastSeenAt: 2000,
+      trustedAt: 2000,
+      trustLevel: 'MANUAL_VERIFIED'
+    })
+
+    // Bob reconnecting immediately is trusted
+    const bobReconnect = await evaluatePeerKeyTrust({
+      eventId: 'evt_2026',
+      userId: 'user_bob',
+      username: 'Bob',
+      deviceId: sharedDeviceId,
+      publicKeyHex: pubHex
+    })
+    expect(bobReconnect.status).toBe('TRUSTED_MATCH')
+
+    // Step 4: Alice logs back in on the shared device.
+    // Even though Alice had an old record from t=1000, the device was last used by Bob at t=2000.
+    // Therefore Alice must also trigger MULTI_USER_DEVICE_SWITCH!
+    const aliceReturnEval = await evaluatePeerKeyTrust({
+      eventId: 'evt_2026',
+      userId: 'user_alice',
+      username: 'Alice',
+      deviceId: sharedDeviceId,
+      publicKeyHex: pubHex
+    })
+    expect(aliceReturnEval.status).toBe('MULTI_USER_DEVICE_SWITCH')
+  })
 })
+

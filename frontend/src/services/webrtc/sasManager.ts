@@ -41,16 +41,18 @@ export class SasSecurityManager {
     if (isHostMode) {
       const sas = this.clientFingerprints.get(peerId)
       const pubHex = this.clientEcdhPubHexes.get(peerId)
+      const identity = this.clientVerifiedIdentities.get(peerId)
+      const effectiveUserId = identity?.userId || peerId
+      const effectiveUsername = identity?.username || peerId
+      const devId = this.clientDeviceIds.get(peerId) || 'device_default'
       if (pubHex && sas) {
         try {
-          localStorage.setItem(`scoutingpro_verified_sas_${currentInviteCode}_${pubHex}`, sas)
+          localStorage.setItem(`scoutingpro_verified_sas_${currentInviteCode}_${effectiveUserId}_${pubHex}`, sas)
         } catch {}
-        const identity = this.clientVerifiedIdentities.get(peerId)
-        const devId = this.clientDeviceIds.get(peerId) || 'device_default'
         savePeerTrustRecord({
           eventId: currentInviteCode || 'default_event',
-          userId: identity?.userId || peerId,
-          username: identity?.username || peerId,
+          userId: effectiveUserId,
+          username: effectiveUsername,
           deviceId: devId,
           publicKeyHex: pubHex,
           firstSeenAt: Date.now(),
@@ -62,8 +64,7 @@ export class SasSecurityManager {
       this.clientSasStates.set(peerId, 'VERIFIED')
       console.log(`[WebRTC Host Security] SAS confirmed for peer ${peerId}. Flushing gated queues.`)
       callbacks.onSasVerified?.(peerId)
-      const identity = this.clientVerifiedIdentities.get(peerId)
-      callbacks.onClientConnected?.(identity?.userId || peerId, identity?.username || peerId)
+      callbacks.onClientConnected?.(effectiveUserId, effectiveUsername)
 
       // Flush outgoing
       const pendingOut = this.hostPendingOutgoing.get(peerId) || []

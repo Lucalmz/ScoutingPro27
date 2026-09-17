@@ -511,6 +511,14 @@ export const usePitScoutStore = defineStore('pitScout', () => {
     }
   }
 
+  function clearLocalCache() {
+    records.value = []
+    officialTeams.value = []
+    currentEventId.value = null
+    searchQuery.value = ''
+    error.value = null
+  }
+
   return {
     currentEventId,
     records,
@@ -536,6 +544,7 @@ export const usePitScoutStore = defineStore('pitScout', () => {
     applyOfficialRosterSync,
     migrateScoutId,
     markSynced,
-    migrateEventId
+    migrateEventId,
+    clearLocalCache
   }
 })

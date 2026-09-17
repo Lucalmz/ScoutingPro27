@@ -215,6 +215,20 @@ export type WebRtcMessage =
   | WebRtcMergeAccountResponse
   | WebRtcHostHandoffBatch
   | WebRtcHostHandoffAck
+  | WebRtcPing
+  | WebRtcPong
+
+export interface WebRtcPing {
+  type: 'PING'
+  timestamp: number
+  authCode?: string
+}
+
+export interface WebRtcPong {
+  type: 'PONG'
+  timestamp: number
+  authCode?: string
+}
 
 export interface WebRtcPitPhotoUpload {
   type: 'PIT_PHOTO_UPLOAD'

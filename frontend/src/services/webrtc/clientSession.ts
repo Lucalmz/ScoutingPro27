@@ -535,11 +535,51 @@ export function createClientSession(ctx: ClientSessionContext) {
     }
   }
 
+  const pendingPings = new Map<number, (ok: boolean) => void>()
+
+  function handlePong(timestamp: number) {
+    if (pendingPings.has(timestamp)) {
+      const resolve = pendingPings.get(timestamp)
+      pendingPings.delete(timestamp)
+      resolve?.(true)
+    }
+  }
+
+  async function pingHost(timeoutMs = 800): Promise<boolean> {
+    const dc = ctx.getClientDc()
+    const pc = ctx.getClientPc()
+    if (!dc || dc.readyState !== 'open' || !pc || pc.connectionState !== 'connected') {
+      return false
+    }
+    const ts = Date.now()
+    return new Promise((resolve) => {
+      const timer = setTimeout(() => {
+        pendingPings.delete(ts)
+        resolve(false)
+      }, timeoutMs)
+
+      pendingPings.set(ts, (ok) => {
+        clearTimeout(timer)
+        resolve(ok)
+      })
+
+      try {
+        ctx.sendMessage({ type: 'PING' as any, timestamp: ts })
+      } catch {
+        clearTimeout(timer)
+        pendingPings.delete(ts)
+        resolve(false)
+      }
+    })
+  }
+
   return {
     setupClientConnection,
     handleClientSignalingMessage,
     triggerClientReconnect,
     clearReconnectTimer,
-    resetReconnectAttempts
+    resetReconnectAttempts,
+    pingHost,
+    handlePong
   }
 }

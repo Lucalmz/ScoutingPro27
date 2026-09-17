@@ -45,7 +45,7 @@ export class PeerConnectionManager {
       const stats = await peer.getStats()
       let activePair: any = null
 
-      // 1. W3C 规范首选：查找 RTCTransportStats 的 selectedCandidatePairId
+      // 1. 尝试直接从 transport report 读取 selectedCandidatePairId
       let selectedPairId: string | null = null
       stats.forEach((report: any) => {
         if (report.type === 'transport' && report.selectedCandidatePairId) {
@@ -53,31 +53,41 @@ export class PeerConnectionManager {
         }
       })
 
-      if (selectedPairId && stats.has(selectedPairId)) {
-        activePair = stats.get(selectedPairId)
-      } else {
-        // 2. 备选：严格评分选优，杜绝普通 succeeded 候选对覆盖已被协议选中的 nominated/selected 候选对
-        let bestPair: any = null
-        let bestScore = -1
-        stats.forEach((report: any) => {
-          if (report.type === 'candidate-pair') {
-            let score = 0
-            if (report.selected === true) {
-              score = 3
-            } else if (report.nominated === true && report.state === 'succeeded') {
-              score = 2
-            } else if (report.state === 'succeeded') {
-              score = 1
-            }
+      // 2. 综合评估所有 candidate-pair，结合 selected、nominated、bytesSent/Received 与链路类型评分选优
+      let bestPair: any = null
+      let bestScore = -1
+      stats.forEach((report: any) => {
+        if (report.type === 'candidate-pair') {
+          const local = stats.get(report.localCandidateId) as any
+          const remote = stats.get(report.remoteCandidateId) as any
+          const localIp = local?.address || local?.ip || ''
+          const remoteIp = remote?.address || remote?.ip || ''
+          const localType = (local?.candidateType || '').toLowerCase()
+          const remoteType = (remote?.candidateType || '').toLowerCase()
+          const totalBytes = (report.bytesSent || 0) + (report.bytesReceived || 0)
 
-            if (score > bestScore) {
-              bestScore = score
-              bestPair = report
-            }
+          let score = 0
+          if (report.id === selectedPairId) score += 100000
+          if (report.selected === true) score += 100000
+          if (report.nominated === true) score += 50000
+          if (report.state === 'succeeded') score += 20000
+          if (totalBytes > 0) score += 10000 + Math.min(totalBytes, 5000)
+
+          // 链路类型客观打分：IPv6直连 > 局域网直连 > 公网NAT直连 > Relay中继
+          const tType = classifyCandidatePair(localType, remoteType, localIp, remoteIp)
+          if (tType === 'ipv6_p2p') score += 400
+          else if (tType === 'lan_p2p') score += 300
+          else if (tType === 'nat_p2p') score += 200
+          else if (tType === 'relay') score += 100
+
+          if (score > bestScore) {
+            bestScore = score
+            bestPair = report
           }
-        })
-        activePair = bestPair
-      }
+        }
+      })
+
+      activePair = bestPair || (selectedPairId && stats.has(selectedPairId) ? stats.get(selectedPairId) : null)
       if (activePair) {
         const local = stats.get(activePair.localCandidateId) as any
         const remote = stats.get(activePair.remoteCandidateId) as any

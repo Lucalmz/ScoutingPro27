@@ -210,6 +210,14 @@ watch(isOpen, async (val) => {
             </span>
           </div>
 
+          <!-- Relay Notice Banner -->
+          <div v-if="conn.transportInfo?.type === 'relay'" class="diag-relay-notice">
+            <span class="material-icons relay-notice-icon">info</span>
+            <span class="relay-notice-text">
+              当前通过 TURN 中继中转。若两端均具备公网 IPv6 环境，系统将自动优先采用 IPv6 P2P 直连。
+            </span>
+          </div>
+
           <!-- Log Controls & Filters -->
           <div class="diag-toolbar">
             <div class="filter-group">
@@ -529,6 +537,27 @@ watch(isOpen, async (val) => {
 
 .detail-text {
   white-space: nowrap;
+}
+
+/* Relay notice banner */
+.diag-relay-notice {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 20px;
+  background: rgba(245, 158, 11, 0.12);
+  border-bottom: 1px solid rgba(245, 158, 11, 0.25);
+  font-size: 0.78rem;
+  color: #fbbf24;
+}
+
+.relay-notice-icon {
+  font-size: 16px;
+  flex-shrink: 0;
+}
+
+.relay-notice-text {
+  line-height: 1.4;
 }
 
 /* Toolbar */

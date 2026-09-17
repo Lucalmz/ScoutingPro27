@@ -410,7 +410,8 @@ export function createWebRtcService(callbacks: WebRtcCallbacks): WebRtcService {
     waitForTakeoverReconciliation,
     finishTakeoverReconciliation,
     getUsername: () => currentUsername,
-    getUserId: () => currentUserId
+    getUserId: () => currentUserId,
+    onPongReceived: (ts: number) => clientSession.handlePong(ts)
   })
 
   async function handleChannelMessage(ev: MessageEvent, senderId?: string): Promise<void> {
@@ -796,7 +797,16 @@ export function createWebRtcService(callbacks: WebRtcCallbacks): WebRtcService {
   // =====================================================
   // Host: create room & wait for client offer
   // =====================================================
-  async function host(inviteCode: string, eventMetadata?: ScoutingEvent, username?: string, userId?: string): Promise<void> {
+  function resolveTargetSignalingEndpoint(preferredBroker?: string): string | undefined {
+    const activeTarget = preferredBroker || (typeof sessionStorage !== 'undefined' ? sessionStorage.getItem('sp27-active-broker') : null) || undefined
+    if (activeTarget === 'lan' && typeof window !== 'undefined') {
+      const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:'
+      return `${protocol}//${window.location.host}/ws/signal`
+    }
+    return activeTarget
+  }
+
+  async function host(inviteCode: string, eventMetadata?: ScoutingEvent, username?: string, userId?: string, preferredBroker?: string): Promise<void> {
     isHostMode = true
     isStandbyHostMode = false
     isProbing = true
@@ -829,7 +839,7 @@ export function createWebRtcService(callbacks: WebRtcCallbacks): WebRtcService {
       }
     }
 
-    signaling = new SignalingChannel(inviteCode)
+    signaling = new SignalingChannel(inviteCode, resolveTargetSignalingEndpoint(preferredBroker))
     await signaling.initTopic()
 
     const onHostSignalingMessage = async (data: any) => {
@@ -1039,7 +1049,7 @@ export function createWebRtcService(callbacks: WebRtcCallbacks): WebRtcService {
   // =====================================================
   // Client: join a room via invite code
   // =====================================================
-  async function join(inviteCode: string, username?: string, userId?: string): Promise<void> {
+  async function join(inviteCode: string, username?: string, userId?: string, preferredBroker?: string): Promise<void> {
     isHostMode = false
     isExplicitlyClosed = false
     currentInviteCode = inviteCode
@@ -1065,7 +1075,7 @@ export function createWebRtcService(callbacks: WebRtcCallbacks): WebRtcService {
       }
     }
 
-    signaling = new SignalingChannel(inviteCode)
+    signaling = new SignalingChannel(inviteCode, resolveTargetSignalingEndpoint(preferredBroker))
     await signaling.initTopic()
 
     signaling.connect({
@@ -1109,7 +1119,7 @@ export function createWebRtcService(callbacks: WebRtcCallbacks): WebRtcService {
       if (signaling) {
         try { signaling.close() } catch (_) {}
       }
-      signaling = new SignalingChannel(currentInviteCode)
+      signaling = new SignalingChannel(currentInviteCode, resolveTargetSignalingEndpoint())
       await signaling.initTopic()
       signaling.connect({
         onConnect: async () => {
@@ -1145,6 +1155,10 @@ export function createWebRtcService(callbacks: WebRtcCallbacks): WebRtcService {
     isHealthy: () => {
       if (isHostMode) return true
       return Boolean(clientDc && clientDc.readyState === 'open' && clientPc && clientPc.connectionState === 'connected')
+    },
+    pingPeer: async () => {
+      if (isHostMode) return true
+      return await clientSession.pingHost(800)
     }
   })
 

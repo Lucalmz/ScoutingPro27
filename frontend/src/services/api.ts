@@ -509,3 +509,20 @@ export function deleteCustomField(eventId: string, id: string): Promise<{ succes
   return request<{ success: boolean; id: string }>('DELETE', `/events/${encodeURIComponent(eventId)}/custom-fields/${encodeURIComponent(id)}`)
 }
 
+export async function getNetworkInfo(): Promise<{
+  primaryIp: string
+  allIps: string[]
+  port: number
+  joinBaseUrl: string
+  joinBaseUrlIpv6?: string
+  firewallAllowed?: boolean
+} | null> {
+  if (isStaticCloudHost()) return null
+  try {
+    return await request('GET', '/system/network-info')
+  } catch {
+    return null
+  }
+}
+
+

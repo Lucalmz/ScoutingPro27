@@ -194,9 +194,10 @@ public class Main {
             String dbPassword = "";
 
             if (splash != null) splash.updateProgress(10, "Preparing database...");
-            System.out.println("执行数据库迁移...");
+            System.out.println("初始化 HikariCP 数据库连接池并执行迁移...");
+            javax.sql.DataSource dataSource = JdbiConfig.getOrCreateDataSource(dbUrl, dbUser, dbPassword);
             Flyway flyway = Flyway.configure()
-                    .dataSource(dbUrl, dbUser, dbPassword)
+                    .dataSource(dataSource)
                     .locations("classpath:db")
                     .cleanDisabled(false)
                     .load();
@@ -205,7 +206,7 @@ public class Main {
 
             if (splash != null) splash.updateProgress(35, "Connecting to database...");
             System.out.println("连接 JDBI...");
-            Jdbi jdbi = JdbiConfig.create(dbUrl, dbUser, dbPassword);
+            Jdbi jdbi = JdbiConfig.create(dataSource);
 
             // ==========================================
             // 端口配置：默认 8080（标准防火墙规则端口），可通过 --port=N 或 DEV_PORT 自定义
@@ -233,6 +234,7 @@ public class Main {
                 try {
                     apiRoutes.shutdown();
                     app.stop();
+                    JdbiConfig.closeDataSources();
                 } catch (Throwable ignored) {}
             }, "app-shutdown-hook"));
 

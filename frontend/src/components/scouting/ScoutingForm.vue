@@ -21,6 +21,8 @@ import { useCustomFieldsStore } from '@/stores/customFields'
 import { isAssignmentCompleted, getRecordTournamentLevel } from '@/utils/tournament'
 import { useBumpAnimation } from '@/composables/useBumpAnimation'
 import { formatUserFriendlyError } from '@/utils/errorHelper'
+import { useScreenWakeLock } from '@/utils/wakeLock'
+import { onMounted } from 'vue'
 
 const { t, te } = useI18n()
 
@@ -116,6 +118,77 @@ function createEmptyTeam(): TeamScoutData {
 }
 
 const teamsData = ref<TeamScoutData[]>([createEmptyTeam()])
+
+// 1. 移动端打分期间常亮保活，防止意外息屏导致记分中断
+useScreenWakeLock()
+
+// 2. 表单草稿自动保存与息屏杀后台恢复机制
+const draftKey = computed(() => `sp27_active_draft_${props.eventId}`)
+const isDraftRestored = ref(false)
+let draftDebounceTimer: any = null
+
+function saveDraft() {
+  if (props.editRecord || props.assignedTask) return
+  if (typeof localStorage === 'undefined') return
+  clearTimeout(draftDebounceTimer)
+  draftDebounceTimer = setTimeout(() => {
+    try {
+      const activeTeams = scoutMode.value === 'single' ? teamsData.value.slice(0, 1) : teamsData.value
+      const hasData = activeTeams.some(t => t.teamNumber || t.autoCycles.length > 0 || t.teleopCycles.length > 0 || t.notes)
+      if (!hasData) {
+        localStorage.removeItem(draftKey.value)
+        return
+      }
+      const draftPayload = {
+        matchNumber: matchNumber.value,
+        allianceColor: allianceColor.value,
+        currentTournamentLevel: currentTournamentLevel.value,
+        scoutMode: scoutMode.value,
+        teamsData: teamsData.value,
+        savedAt: Date.now()
+      }
+      localStorage.setItem(draftKey.value, JSON.stringify(draftPayload))
+    } catch {}
+  }, 400)
+}
+
+function restoreDraft() {
+  if (props.editRecord || props.assignedTask) return
+  if (typeof localStorage === 'undefined') return
+  try {
+    const raw = localStorage.getItem(draftKey.value)
+    if (!raw) return
+    const parsed = JSON.parse(raw)
+    if (parsed && Array.isArray(parsed.teamsData) && parsed.teamsData.length > 0) {
+      matchNumber.value = parsed.matchNumber || '1'
+      allianceColor.value = parsed.allianceColor || 'none'
+      currentTournamentLevel.value = parsed.currentTournamentLevel || 'QUALIFICATION'
+      scoutMode.value = parsed.scoutMode || 'single'
+      teamsData.value = parsed.teamsData
+      isDraftRestored.value = true
+    }
+  } catch {}
+}
+
+function clearDraft() {
+  clearTimeout(draftDebounceTimer)
+  if (typeof localStorage !== 'undefined') {
+    localStorage.removeItem(draftKey.value)
+  }
+  isDraftRestored.value = false
+}
+
+onMounted(() => {
+  restoreDraft()
+})
+
+watch(
+  [matchNumber, allianceColor, currentTournamentLevel, scoutMode, teamsData],
+  () => {
+    saveDraft()
+  },
+  { deep: true }
+)
 
 const { bump, getBumpClass, clearBump } = useBumpAnimation()
 
@@ -602,6 +675,7 @@ async function handleSubmit() {
 
     submitStatus.value = 'success'
     hapticSuccess()
+    clearDraft()
     if (!props.editRecord) {
       matchNumber.value = String(parseInt(matchNumber.value) + 1)
     }
@@ -651,6 +725,18 @@ const recordStore = useRecordStore()
   <div :class="wrapperClass">
     <form class="scouting-form" @submit.prevent="handleSubmit">
       
+      <!-- Draft Restored Banner -->
+      <div v-if="isDraftRestored" class="assigned-task-banner draft-restored-banner" style="border-color: rgba(59, 130, 246, 0.4); background: rgba(59, 130, 246, 0.1);">
+        <div class="task-info">
+          <span class="material-icons task-icon" style="color: #60a5fa;">restore_page</span>
+          <span>{{ t('scouting.draft_restored', '已从息屏防丢草稿自动恢复') }}</span>
+        </div>
+        <button type="button" class="btn-load-task" @click="clearDraft">
+          <span class="material-icons">close</span>
+          <span>{{ t('common.dismiss', '忽略') }}</span>
+        </button>
+      </div>
+
       <!-- Assigned Task Banner -->
       <div v-if="nextPendingAssignment" class="assigned-task-banner">
         <div class="task-info">

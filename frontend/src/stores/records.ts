@@ -637,6 +637,21 @@ export const useRecordStore = defineStore('records', () => {
     }
   }
 
+  function clearRecords() {
+    records.value = []
+    officialMatches.value = []
+    bannedTeams.value = []
+    teamTags.value = []
+    currentEventId.value = null
+    error.value = null
+    try {
+      localStorage.removeItem('scoutingpro_records')
+      localStorage.removeItem('scoutingpro_officialMatches')
+      localStorage.removeItem('scoutingpro_bannedTeams')
+      localStorage.removeItem('scoutingpro_tags')
+    } catch {}
+  }
+
   const getTagsForTeam = (teamNumber: number, eventId?: string): TeamTagItem[] => {
     const eid = eventId || currentEventId.value
     return teamTags.value.filter(t => t.teamNumber === teamNumber && (!eid || t.eventId === eid))
@@ -675,5 +690,6 @@ export const useRecordStore = defineStore('records', () => {
     applyTagsFullSync,
     getTagsForTeam,
     purgeExpiredTombstones,
+    clearRecords
   }
 })
