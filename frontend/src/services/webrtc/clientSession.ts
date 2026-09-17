@@ -13,11 +13,10 @@ import { evaluatePeerKeyTrust, savePeerTrustRecord } from '@/utils/identityStore
 import type { WebRtcCallbacks } from './types'
 import {
   optimizeCandidatePriority,
-  optimizeSdpCandidates,
-  sortCandidatesPreferIpv6
+  optimizeSdpCandidates
 } from './connectivity'
 import type { SignalingChannel } from './signaling'
-import { toSessionDescription, toIceCandidate } from './sdpUtil'
+import { toSessionDescription, toIceCandidate, normalizePendingCandidates } from './sdpUtil'
 import type { SasSecurityManager } from './sasManager'
 import type { PeerConnectionManager } from './peerManager'
 import { createLogger } from '@/utils/logger'
@@ -47,6 +46,8 @@ export interface ClientSessionContext {
   setClientPendingCandidates: (cands: any[]) => void
   getClientForceRelay: () => boolean
   setClientForceRelay: (force: boolean) => void
+  /** DataChannel 成功打开时回调：用于归还中继兜底预算并解除 relay-only 锁定 */
+  onRelayFallbackRecovered?: () => void
   isExplicitlyClosed: () => boolean
   getStatus: () => string
   setStatus: (s: any) => void
@@ -153,13 +154,19 @@ export function createClientSession(ctx: ClientSessionContext) {
       isRebuilding = false
     }
 
+    const useRelayOnly = forceRelay || ctx.getClientForceRelay()
     const pc = ctx.peerMgr.createPeerConnection(
       undefined,
       triggerClientReconnect,
-      ctx.getClientForceRelay(),
+      useRelayOnly,
       ctx.getClientHostSenderId()
     )
     ctx.setClientPc(pc)
+    // 一次性闩锁：本次重建用完后立即解除，避免后续任意原因触发的重建
+    // （收到 host_hello、host_takeover、自愈重连等）继续被钉在 relay-only 上。
+    if (ctx.getClientForceRelay()) {
+      ctx.setClientForceRelay(false)
+    }
 
     const dc = pc.createDataChannel('scoutingpro-data')
     ctx.setClientDc(dc)
@@ -178,6 +185,10 @@ export function createClientSession(ctx: ClientSessionContext) {
       ctx.setStatus('connected')
       reconnectAttempts = 0
       clearReconnectTimer()
+      // 链路已恢复：解除任何残留的 relay-only 锁定并归还中继兜底预算，
+      // 使下一次网络抖动仍有机会先尝试 IPv6/局域网直连。
+      ctx.setClientForceRelay(false)
+      ctx.onRelayFallbackRecovered?.()
     }
     dc.onclose = () => {
       log.warn(`DataChannel 'scoutingpro-data' CLOSED. isRebuilding=${isRebuilding}, sasState=${ctx.sas.clientSasState}`)
@@ -451,22 +462,15 @@ export function createClientSession(ctx: ClientSessionContext) {
 
         await clientPc.setRemoteDescription(toSessionDescription(answerData))
         log.info('Applied remote Host Answer to client PeerConnection.')
-        const sortedPending = sortCandidatesPreferIpv6(ctx.getClientPendingCandidates())
-        for (const c of sortedPending) {
+        const pendingKey = sas.clientSharedAesKey
+        const orderedPending = await normalizePendingCandidates(
+          ctx.getClientPendingCandidates(),
+          pendingKey
+            ? async (payload: any) => JSON.parse(await decryptSignalingData(pendingKey, payload))
+            : undefined
+        )
+        for (const candidateObj of orderedPending) {
           try {
-            let candidateObj: any = c
-            if (candidateObj && candidateObj.ciphertext && sas.clientSharedAesKey) {
-              try {
-                const decStr = await decryptSignalingData(sas.clientSharedAesKey, candidateObj)
-                candidateObj = JSON.parse(decStr)
-              } catch (err) {
-                log.warn('Error decrypting pending candidate:', err)
-                continue
-              }
-            }
-            if (candidateObj && candidateObj.candidate) {
-              candidateObj.candidate = optimizeCandidatePriority(candidateObj.candidate)
-            }
             await clientPc.addIceCandidate(toIceCandidate(candidateObj))
           } catch (candidateErr) {
             log.warn('Failed to add pending candidate:', candidateErr)

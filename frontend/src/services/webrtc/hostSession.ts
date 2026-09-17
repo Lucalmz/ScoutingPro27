@@ -14,11 +14,10 @@ import { evaluatePeerKeyTrust, savePeerTrustRecord } from '@/utils/identityStore
 import type { ClientEntry, WebRtcCallbacks } from './types'
 import {
   optimizeCandidatePriority,
-  optimizeSdpCandidates,
-  sortCandidatesPreferIpv6
+  optimizeSdpCandidates
 } from './connectivity'
 import type { SignalingChannel } from './signaling'
-import { toSessionDescription, toIceCandidate } from './sdpUtil'
+import { toSessionDescription, toIceCandidate, normalizePendingCandidates } from './sdpUtil'
 import type { SasSecurityManager } from './sasManager'
 import type { PeerConnectionManager } from './peerManager'
 import { createLogger } from '@/utils/logger'
@@ -472,22 +471,15 @@ export function createHostSignalingHandler(ctx: HostSessionContext) {
           sender
         )
 
-        const sortedPending = sortCandidatesPreferIpv6(clientData.pendingCandidates)
-        for (const c of sortedPending) {
+        const pendingKey = sas.clientSharedKeys.get(sender)
+        const orderedPending = await normalizePendingCandidates(
+          clientData.pendingCandidates,
+          pendingKey
+            ? async (payload: any) => JSON.parse(await decryptSignalingData(pendingKey, payload))
+            : undefined
+        )
+        for (const candidateObj of orderedPending) {
           try {
-            let candidateObj: any = c
-            if (candidateObj && candidateObj.ciphertext && sas.clientSharedKeys.has(sender)) {
-              try {
-                const decStr = await decryptSignalingData(sas.clientSharedKeys.get(sender)!, candidateObj)
-                candidateObj = JSON.parse(decStr)
-              } catch (err) {
-                console.warn('[WebRTC Host] Error decrypting pending candidate:', err)
-                continue
-              }
-            }
-            if (candidateObj && candidateObj.candidate) {
-              candidateObj.candidate = optimizeCandidatePriority(candidateObj.candidate)
-            }
             await pc.addIceCandidate(toIceCandidate(candidateObj))
           } catch (err) {
             console.warn('[WebRTC Host] Error adding pending ICE candidate:', err)

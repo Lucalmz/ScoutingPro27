@@ -17,6 +17,17 @@ export interface PeerConnectionFactoryOptions {
   getLocalEcdhPubHex: () => string
   getCurrentHostSessionId: () => string
   getClientSessionId?: () => string
+  /** ICE 重启补发 Offer 时必须带上设备身份，否则 Host 侧 TOFU 绑定会退化成 device_default */
+  getLocalDeviceId?: () => string
+  getUsername?: () => string
+  getUserId?: () => string
+  /**
+   * 动态读取当前 Host 的 signaling clientId。
+   * 客户端首次 join() 时会在收到 host_hello 之前就建好 PeerConnection，
+   * 若把 hostSenderId 固化在闭包里，之后收集到的 ICE 候选（含关键的 IPv6 host 候选）
+   * 会一直被广播到整个房间，而不是定向发给 Host。
+   */
+  getClientHostSenderId?: () => string | undefined
   getClientSharedAesKey: () => CryptoKey | null
   getClientSharedKey: (senderId: string) => CryptoKey | null
   getClientFingerprint: (senderId?: string) => string | undefined
@@ -144,7 +155,10 @@ export class PeerConnectionManager {
     const callbacks = this.options.callbacks
     const config: RTCConfiguration = {
       ...STUN_SERVERS,
-      iceTransportPolicy: forceRelay ? 'relay' : 'all'
+      iceTransportPolicy: forceRelay ? 'relay' : 'all',
+      // 候选池是按 PeerConnection 配置预热的全局资源：强制中继时若沿用池化的
+      // 'all' 策略候选，可能把非 relay 候选泄漏进 relay-only 会话，故此处禁用池化。
+      iceCandidatePoolSize: forceRelay ? 0 : (STUN_SERVERS.iceCandidatePoolSize ?? 0)
     }
     log.info(`Creating RTCPeerConnection (isHost: ${isHost}, targetSender: ${targetSender || 'default'}, forceRelay: ${forceRelay}, icePolicy: ${config.iceTransportPolicy})`)
     const peer = new RTCPeerConnection(config)
@@ -170,7 +184,8 @@ export class PeerConnectionManager {
         )
         const signaling = this.options.getSignaling()
         if (signaling) {
-          const target = isHost ? targetSender : clientHostSenderId
+          // 优先使用实时的 Host senderId；建链早期尚未知悉时才退回构造期快照
+          const target = isHost ? targetSender : (this.options.getClientHostSenderId?.() || clientHostSenderId)
           let candPayload: any = candObj
           try {
             if (isHost && targetSender) {
@@ -197,6 +212,8 @@ export class PeerConnectionManager {
     let iceTimeout: NodeJS.Timeout | null = null
     let checkingWatchdog: NodeJS.Timeout | null = null
     let stallRestartWatchdog: NodeJS.Timeout | null = null
+    let gatheringGrace = 0
+    const MAX_GATHERING_GRACE = 3
 
     const origClose = peer.close.bind(peer)
     peer.close = () => {
@@ -290,6 +307,19 @@ export class PeerConnectionManager {
           stallRestartWatchdog = setTimeout(async () => {
             stallRestartWatchdog = null
             if (peer.iceConnectionState === 'checking') {
+              // ICE 仍在收集候选（多 STUN + 4 个 TURN 的分配、IPv6 STUN 反射查询）时，
+              // 'checking' 并不代表停滞。此时 restartIce() 会重置收集进度、越重启越慢，
+              // 两次耗尽后还会把链路锁死成 relay-only，直接掐掉 IPv6/LAN 直连的可能。
+              // 因此在收集未完成期间只做有限次宽限重排，不计入 restartIce 次数。
+              if ((peer as any).iceGatheringState === 'gathering' && gatheringGrace < MAX_GATHERING_GRACE) {
+                gatheringGrace++
+                log.info(
+                  `[Watchdog] ICE still gathering candidates; deferring stall restart (grace ${gatheringGrace}/${MAX_GATHERING_GRACE}).`
+                )
+                scheduleStallRestart()
+                return
+              }
+
               const currentAttempts = isHost
                 ? targetSender
                   ? this.hostIceRestartAttempts.get(targetSender) || 0
@@ -329,6 +359,12 @@ export class PeerConnectionManager {
                       this.options.getSignaling()?.send({
                         offer: payload,
                         ecdhPublicKey: this.options.getLocalEcdhPubHex(),
+                        // 必须携带设备身份：Host 侧 TOFU 记录以 (eventId,userId,deviceId) 为键，
+                        // 缺失会被降级成 'device_default' + 'dev_pub_*'，写入垃圾信任记录并
+                        // 让同一设备每次 ICE 重启都重新走一遍“首次信任”分支。
+                        deviceId: this.options.getLocalDeviceId?.(),
+                        username: this.options.getUsername?.(),
+                        userId: this.options.getUserId?.(),
                         clientSessionId: this.options.getClientSessionId?.() || `client-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
                         hostSessionId: this.options.getCurrentHostSessionId()
                       })

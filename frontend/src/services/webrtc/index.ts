@@ -98,6 +98,11 @@ export function createWebRtcService(callbacks: WebRtcCallbacks): WebRtcService {
   let clientPendingCandidates: any[] = []
   let clientHostSenderId: string | undefined = undefined
   let clientForceRelay = false
+  // 中继兜底预算：ICE 停滞看门狗触发 relay-only 重建时消耗一次。
+  // 用完后回到 'all' 策略重新尝试 P2P（局域网 / NAT 穿透 / IPv6 直连），
+  // 而不是像旧实现那样把 iceTransportPolicy 永久钉死在 'relay'。
+  let relayFallbackUsed = 0
+  const RELAY_FALLBACK_MAX_ATTEMPTS = 3
 
   // Host mode state
   const clients = new Map<string, ClientEntry>()
@@ -212,11 +217,30 @@ export function createWebRtcService(callbacks: WebRtcCallbacks): WebRtcService {
       setStatus('degraded')
     },
     onClientRebuildRelay: () => {
-      clientSession.setupClientConnection(true)
+      // 中继兜底是一次性降级，不是永久状态。预算耗尽后必须回到 'all' 重新
+      // 尝试 IPv6/局域网/NAT 直连，否则一次 IPv6 黑洞就会让整个会话再也建不出 P2P 信道。
+      if (relayFallbackUsed < RELAY_FALLBACK_MAX_ATTEMPTS) {
+        relayFallbackUsed++
+        clientForceRelay = true
+        log.warn(
+          `Relay-only fallback engaged (attempt ${relayFallbackUsed}/${RELAY_FALLBACK_MAX_ATTEMPTS}).`
+        )
+        clientSession.setupClientConnection(true)
+      } else {
+        clientForceRelay = false
+        log.warn(
+          'Relay fallback budget exhausted; retrying with iceTransportPolicy:"all" to recover direct P2P (IPv6/LAN/NAT).'
+        )
+        clientSession.setupClientConnection(false)
+      }
     },
     getLocalEcdhPubHex: () => localEcdhPubHex,
     getCurrentHostSessionId: () => currentHostSessionId,
     getClientSessionId: () => currentClientSessionId,
+    getLocalDeviceId: () => localDeviceId,
+    getUsername: () => currentUsername || localUserName || '',
+    getUserId: () => currentUserId || localUserId || '',
+    getClientHostSenderId: () => clientHostSenderId,
     getClientSharedAesKey: () => sas.clientSharedAesKey,
     getClientSharedKey: (senderId: string) => sas.clientSharedKeys.get(senderId) || null,
     getClientFingerprint: (senderId?: string) =>
@@ -227,6 +251,9 @@ export function createWebRtcService(callbacks: WebRtcCallbacks): WebRtcService {
       sas.cleanupPeerResources(targetSender)
       hostQueues.delete(targetSender)
       preOfferCandidates.delete(targetSender)
+      // 清理该 peer 的 ICE 重启计数，否则 Map 无界增长，且同一 senderId 复用时
+      // 会带着上一次的计数进来，直接跳过 restartIce 走到中继兜底。
+      peerMgr.hostIceRestartAttempts.delete(targetSender)
       const scoutId = clientIdToScoutId.get(targetSender)
       if (scoutId) {
         const set = scoutIdToClientIds.get(scoutId)
@@ -609,6 +636,11 @@ export function createWebRtcService(callbacks: WebRtcCallbacks): WebRtcService {
     getClientForceRelay: () => clientForceRelay,
     setClientForceRelay: (force) => {
       clientForceRelay = force
+    },
+    onRelayFallbackRecovered: () => {
+      clientForceRelay = false
+      relayFallbackUsed = 0
+      peerMgr.clientIceRestartAttempts = 0
     },
     isExplicitlyClosed: () => isExplicitlyClosed,
     getStatus: () => status,
@@ -1043,6 +1075,10 @@ export function createWebRtcService(callbacks: WebRtcCallbacks): WebRtcService {
     isHostMode = false
     isExplicitlyClosed = false
     currentInviteCode = inviteCode
+    // 每次进房都从 P2P 优先 (iceTransportPolicy:'all') 重新开始，
+    // 不继承上一次链路的中继降级状态——否则 IPv6/局域网直连将永远无法再建立。
+    clientForceRelay = false
+    relayFallbackUsed = 0
     if (username) currentUsername = username
     if (userId) currentUserId = userId
     setStatus('connecting')
@@ -1103,6 +1139,10 @@ export function createWebRtcService(callbacks: WebRtcCallbacks): WebRtcService {
 
     clientSession.clearReconnectTimer()
     clientSession.resetReconnectAttempts()
+    // 显式重连 = 网络环境可能已变化，重新给 P2P（含 IPv6 直连）一次机会
+    clientForceRelay = false
+    relayFallbackUsed = 0
+    peerMgr.clientIceRestartAttempts = 0
     setStatus('connecting')
 
     if (!signaling || !signaling.isConnected()) {
