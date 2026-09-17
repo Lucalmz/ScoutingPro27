@@ -1,4 +1,4 @@
-﻿import { mount } from '@vue/test-utils'
+import { mount } from '@vue/test-utils'
 import { describe, it, expect, vi, beforeEach } from 'vitest'
 import { setActivePinia, createPinia } from 'pinia'
 import SasVerificationModal from '../components/common/SasVerificationModal.vue'
@@ -175,5 +175,35 @@ describe('SasVerificationModal.vue', () => {
       expect(badge.exists()).toBe(true)
       expect(badge.text()).toContain('Queue: 1/2')
     })
+
+    it('does not reject connection on 60s timeout, displays timeout banner and retry button', async () => {
+      vi.useFakeTimers()
+      const connStore = useConnectionStore()
+      const rejectSpy = vi.spyOn(connStore, 'rejectSas').mockImplementation(() => {})
+      const retrySpy = vi.spyOn(connStore, 'retrySas').mockImplementation(async () => {})
+
+      const wrapper = mountModal()
+      expect(wrapper.find('.sas-countdown').text()).toContain('60s')
+
+      // Fast-forward 61 seconds
+      vi.advanceTimersByTime(61000)
+      await wrapper.vm.$nextTick()
+
+      // Ensure rejectSas was NOT called
+      expect(rejectSpy).not.toHaveBeenCalled()
+
+      // Check timeout banner is visible
+      expect(wrapper.find('.sas-timeout-banner').exists()).toBe(true)
+      const retryBtn = wrapper.find('.btn-warning')
+      expect(retryBtn.exists()).toBe(true)
+      expect(retryBtn.text()).toContain('重新发起核验')
+
+      // Trigger retry
+      await retryBtn.trigger('click')
+      expect(retrySpy).toHaveBeenCalledWith('client_scout_1')
+
+      vi.useRealTimers()
+    })
   })
 })
+

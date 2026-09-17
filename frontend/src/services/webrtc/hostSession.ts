@@ -85,6 +85,33 @@ export function createHostSignalingHandler(ctx: HostSessionContext) {
       return
     }
 
+    if (data.type === 'sas_retry') {
+      console.log(`[WebRTC Host Security] Peer ${sender} requested SAS verification retry.`)
+      const fingerprint = sas.clientFingerprints.get(sender)
+      if (fingerprint) {
+        sas.clientSasStates.set(sender, 'PENDING_VERIFICATION')
+        const username = sas.clientVerifiedIdentities.get(sender)?.username || 'Client'
+        ctx.callbacks.onSasVerificationRequired?.(
+          {
+            peerId: sender,
+            username,
+            ecdhPublicKey: sas.clientEcdhPubHexes.get(sender) || ''
+          },
+          fingerprint
+        )
+        signaling.send(
+          {
+            type: 'sas_challenge',
+            fingerprint,
+            hostSessionId,
+            username: ctx.getUsername?.() || 'Host'
+          },
+          sender
+        )
+      }
+      return
+    }
+
     if (data.offer) {
       ctx.enqueueHostTask(sender, async () => {
         const existing = clients.get(sender)
@@ -384,15 +411,7 @@ export function createHostSignalingHandler(ctx: HostSessionContext) {
               const fingerprint = sas.clientFingerprints.get(sender)
               if (fingerprint) {
                 if (!isAlreadyPending) {
-                  sas.sasTimeoutTimers.set(
-                    sender,
-                    setTimeout(() => {
-                      if (sas.clientSasStates.get(sender) === 'PENDING_VERIFICATION') {
-                        ctx.rejectSas(sender, 'SAS verification timeout (60s)')
-                      }
-                    }, 60000)
-                  )
-
+                  sas.clientSasStates.set(sender, 'PENDING_VERIFICATION')
                   ctx.callbacks.onSasVerificationRequired?.(
                     {
                       peerId: sender,
@@ -426,15 +445,6 @@ export function createHostSignalingHandler(ctx: HostSessionContext) {
               const fingerprint = sas.clientFingerprints.get(sender)
               if (fingerprint) {
                 if (!isAlreadyPending) {
-                  sas.sasTimeoutTimers.set(
-                    sender,
-                    setTimeout(() => {
-                      if (sas.clientSasStates.get(sender) === 'PENDING_VERIFICATION') {
-                        ctx.rejectSas(sender, 'SAS verification timeout (60s)')
-                      }
-                    }, 60000)
-                  )
-
                   ctx.callbacks.onSasVerificationRequired?.(
                     {
                       peerId: sender,

@@ -496,6 +496,52 @@ export function createWebRtcService(callbacks: WebRtcCallbacks): WebRtcService {
     )
   }
 
+  async function retrySas(peerId = 'host'): Promise<void> {
+    if (isHostMode) {
+      if (peerId && peerId !== 'host') {
+        const fp = sas.clientFingerprints.get(peerId)
+        if (fp && signaling) {
+          sas.clientSasStates.set(peerId, 'PENDING_VERIFICATION')
+          const username = sas.clientVerifiedIdentities.get(peerId)?.username || clientIdToScoutName.get(peerId) || 'Client'
+          callbacks.onSasVerificationRequired?.(
+            {
+              peerId,
+              username,
+              ecdhPublicKey: sas.clientEcdhPubHexes.get(peerId) || ''
+            },
+            fp
+          )
+          signaling.send(
+            {
+              type: 'sas_challenge',
+              fingerprint: fp,
+              hostSessionId,
+              username: currentUsername || 'Host'
+            },
+            peerId
+          )
+        }
+      }
+    } else {
+      sas.clientSasState = 'PENDING_VERIFICATION'
+      if (!clientPc || clientPc.connectionState !== 'connected' || !clientDc || clientDc.readyState !== 'open') {
+        await reconnectNow()
+      } else if (signaling && signaling.isConnected()) {
+        signaling.send({ type: 'sas_retry', clientSessionId: currentClientSessionId })
+      }
+      if (sas.clientSecurityFingerprint) {
+        callbacks.onSasVerificationRequired?.(
+          {
+            peerId: 'host',
+            username: 'Host',
+            ecdhPublicKey: sas.clientHostEcdhPubHex || ''
+          },
+          sas.clientSecurityFingerprint
+        )
+      }
+    }
+  }
+
   const hostSignalingHandler = createHostSignalingHandler({
     clients,
     stagedClients,
@@ -1036,6 +1082,10 @@ export function createWebRtcService(callbacks: WebRtcCallbacks): WebRtcService {
 
   async function reconnectNow(): Promise<boolean> {
     isExplicitlyClosed = false
+    if (!isHostMode && sas.clientSasState === 'REJECTED') {
+      console.warn('[WebRTC Reconnect] Circuit breaker active: SAS verification was rejected. Suppressing automatic reconnection.')
+      return false
+    }
     if (isHostMode) {
       if (currentInviteCode) {
         await host(currentInviteCode)
@@ -1202,6 +1252,7 @@ export function createWebRtcService(callbacks: WebRtcCallbacks): WebRtcService {
     stampHostSeq,
     confirmSas,
     rejectSas,
+    retrySas,
     getSasState: (peerId?: string) => isHostMode ? (peerId ? sas.clientSasStates.get(peerId) || 'PENDING_VERIFICATION' : 'PENDING_VERIFICATION') : sas.clientSasState,
     getSasFingerprint: (peerId?: string) => isHostMode ? (peerId ? sas.clientFingerprints.get(peerId) : undefined) : sas.clientSecurityFingerprint,
     getStatus: () => status,

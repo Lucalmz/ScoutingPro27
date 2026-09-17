@@ -108,6 +108,7 @@ export interface WebRtcService {
   stampHostSeq: (records: ScoutingRecord[]) => ScoutingRecord[]
   confirmSas: (peerId?: string) => void
   rejectSas: (peerId?: string, reason?: string) => void
+  retrySas: (peerId?: string) => Promise<void>
   getSasState: (peerId?: string) => SasState
   getSasFingerprint: (peerId?: string) => string | undefined
   getStatus: () => ConnectionStatus

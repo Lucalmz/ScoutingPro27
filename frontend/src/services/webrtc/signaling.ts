@@ -144,7 +144,8 @@ export class SignalingChannel {
         'key_exchange',
         'sas_challenge',
         'sas_verified',
-        'sas_rejected'
+        'sas_rejected',
+        'sas_retry'
       ]
       const hasAllowedType = msg.type && ALLOWED_SIGNAL_TYPES.includes(msg.type)
       const hasSdpPayload = msg.offer || msg.answer || msg.candidate || msg.encrypted

@@ -277,11 +277,9 @@ export function createClientSession(ctx: ClientSessionContext) {
       isInSessionFlapping: isFlapping
     })
 
-    const isStandbyHost = Boolean(ctx.isStandbyHost?.())
-
-    if (trustEval.status === 'TRUSTED_MATCH' || (trustEval.status === 'TOFU_FIRST_SEEN' && isStandbyHost)) {
+    if (trustEval.status === 'TRUSTED_MATCH' || trustEval.status === 'TOFU_FIRST_SEEN') {
       console.log(
-        `[WebRTC Client Security TOFU] ${isStandbyHost ? 'Standby Host auto-approving' : 'Trusted Host match'}: ${sas.clientHostDeviceId}. Auto-approving SAS.`
+        `[WebRTC Client Security TOFU] Establishing baseline trust for Host device ${sas.clientHostDeviceId} (${effectiveHostUsername}). Auto-approving SAS.`
       )
       if (trustEval.status === 'TOFU_FIRST_SEEN') {
         await savePeerTrustRecord({
@@ -308,31 +306,8 @@ export function createClientSession(ctx: ClientSessionContext) {
         ctx.handleChannelMessage(item.ev, item.senderId)
       }
       ctx.callbacks.onSasVerified?.('host')
-    } else if (trustEval.status === 'TOFU_FIRST_SEEN') {
-      console.warn(`[WebRTC Client Security TOFU] First-seen Host device ${sas.clientHostDeviceId} requires manual SAS verification.`)
-      sas.clientSasState = 'PENDING_VERIFICATION'
-      if (sas.sasTimeoutTimers.has('host')) {
-        clearTimeout(sas.sasTimeoutTimers.get('host'))
-      }
-      sas.sasTimeoutTimers.set(
-        'host',
-        setTimeout(() => {
-          if (sas.clientSasState === 'PENDING_VERIFICATION') {
-            ctx.rejectSas('host', 'SAS verification timeout (60s)')
-          }
-        }, 60000)
-      )
-
-      ctx.callbacks.onSasVerificationRequired?.(
-        {
-          peerId: 'host',
-          username: effectiveHostUsername,
-          ecdhPublicKey: hostPubKey
-        },
-        sas.clientSecurityFingerprint
-      )
     } else if (trustEval.status === 'KEY_ROTATION_ALERT') {
-      // 仅在已建立信任的设备发生公钥异常变动时，才挂起并弹出安全核验
+      // 仅在已建立信任的设备发生公钥异常变动（中间人攻击/冒名劫持隐患）时，才挂起并弹出安全核验
       if (trustEval.level === 'CRITICAL') {
         console.error(`[WebRTC Client Security ALERT] ${trustEval.message}`)
         ctx.rejectSas('host', trustEval.message)
@@ -341,15 +316,8 @@ export function createClientSession(ctx: ClientSessionContext) {
         sas.clientSasState = 'PENDING_VERIFICATION'
         if (sas.sasTimeoutTimers.has('host')) {
           clearTimeout(sas.sasTimeoutTimers.get('host'))
+          sas.sasTimeoutTimers.delete('host')
         }
-        sas.sasTimeoutTimers.set(
-          'host',
-          setTimeout(() => {
-            if (sas.clientSasState === 'PENDING_VERIFICATION') {
-              ctx.rejectSas('host', 'SAS verification timeout (60s)')
-            }
-          }, 60000)
-        )
 
         ctx.callbacks.onSasVerificationRequired?.(
           {
@@ -527,17 +495,6 @@ export function createClientSession(ctx: ClientSessionContext) {
       sas.clientSasState = 'PENDING_VERIFICATION'
       sas.clientSecurityFingerprint = data.fingerprint
       clearReconnectTimer()
-
-      if (!sas.sasTimeoutTimers.has('host')) {
-        sas.sasTimeoutTimers.set(
-          'host',
-          setTimeout(() => {
-            if (sas.clientSasState === 'PENDING_VERIFICATION') {
-              ctx.rejectSas('host', 'SAS verification timeout (60s)')
-            }
-          }, 60000)
-        )
-      }
 
       ctx.callbacks.onSasVerificationRequired?.(
         {

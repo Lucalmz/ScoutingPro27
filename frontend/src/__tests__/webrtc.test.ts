@@ -2487,9 +2487,10 @@ describe('WebRTC Client SAS Verification Gating & In-Band Account Merge', () => 
         restartIce: vi.fn(),
         close: vi.fn(),
         connectionState: 'connected',
-        iceConnectionState: 'connected',
         set ondatachannel(fn: any) {
-          setTimeout(() => fn({ channel: mockDc }), 10)
+          if (typeof fn === 'function') {
+            setTimeout(() => fn({ channel: mockDc }), 10)
+          }
         }
       }
     }) as any
@@ -2499,7 +2500,7 @@ describe('WebRTC Client SAS Verification Gating & In-Band Account Merge', () => 
     vi.clearAllMocks()
   })
 
-  it('Client receives host_hello from first-seen Host: gates with PENDING_VERIFICATION and triggers onSasVerificationRequired', async () => {
+  it('Client receives host_hello from first-seen Host: auto-approves under TOFU; gates on key rotation alert', async () => {
     const callbacks = {
       onStatusChange: vi.fn(),
       onSasVerificationRequired: vi.fn(),
@@ -2514,7 +2515,7 @@ describe('WebRTC Client SAS Verification Gating & In-Band Account Merge', () => 
     const hostKeys = await generateEcdhKeyPair()
     const hostPubHex = await exportEcdhPublicKey(hostKeys.publicKey)
 
-    // Host sends host_hello with ECDH public key
+    // Host sends host_hello with ECDH public key (first seen)
     onMessage('topic', new TextEncoder().encode(JSON.stringify({
       type: 'host_hello',
       sender: 'host-peer-id',
@@ -2525,7 +2526,26 @@ describe('WebRTC Client SAS Verification Gating & In-Band Account Merge', () => 
 
     await new Promise(r => setTimeout(r, 60))
 
-    // Client MUST NOT auto-approve; it MUST require SAS verification
+    // First seen Host: standard TOFU auto-approves baseline trust
+    expect(clientService.getSasState('host')).toBe('VERIFIED')
+    expect(callbacks.onSasVerified).toHaveBeenCalledWith('host')
+    expect(callbacks.onSasVerificationRequired).not.toHaveBeenCalled()
+
+    // Now simulate unexpected key rotation alert from same host device
+    const rotatedKeys = await generateEcdhKeyPair()
+    const rotatedPubHex = await exportEcdhPublicKey(rotatedKeys.publicKey)
+
+    onMessage('topic', new TextEncoder().encode(JSON.stringify({
+      type: 'host_hello',
+      sender: 'host-peer-id',
+      hostSessionId: 'host-session-124',
+      deviceId: 'host-device-456',
+      ecdhPublicKey: rotatedPubHex
+    })))
+
+    await new Promise(r => setTimeout(r, 60))
+
+    // Rotated key: gates as PENDING_VERIFICATION and triggers onSasVerificationRequired
     expect(callbacks.onSasVerificationRequired).toHaveBeenCalledWith(
       expect.objectContaining({ peerId: 'host', username: 'Host' }),
       expect.any(String)
@@ -2535,7 +2555,33 @@ describe('WebRTC Client SAS Verification Gating & In-Band Account Merge', () => 
     // Confirm SAS manually
     clientService.confirmSas('host')
     expect(clientService.getSasState('host')).toBe('VERIFIED')
-    expect(callbacks.onSasVerified).toHaveBeenCalledWith('host')
+
+    clientService.disconnect()
+  })
+
+  it('Explicit SAS rejection triggers hard circuit breaker; retrySas un-fuses and allows reconnection', async () => {
+    const callbacks = {
+      onStatusChange: vi.fn(),
+      onSasVerificationRequired: vi.fn(),
+      onSasVerified: vi.fn(),
+      onSasRejected: vi.fn()
+    }
+    const clientService = createWebRtcService(callbacks)
+    await clientService.join('sas-breaker-test', 'ClientUser', 'user_client_1')
+
+    // Manually reject SAS (e.g. user taps "不一致")
+    clientService.rejectSas('host', 'Manual user rejection')
+    expect(clientService.getSasState('host')).toBe('REJECTED')
+    expect(clientService.getStatus()).toBe('offline')
+
+    // Verify circuit breaker: automatic reconnect is suppressed
+    const reconnected = await clientService.reconnectNow()
+    expect(reconnected).toBe(false)
+    expect(clientService.getSasState('host')).toBe('REJECTED')
+
+    // User taps "重新发起核验" (retrySas)
+    await clientService.retrySas('host')
+    expect(clientService.getSasState('host')).toBe('PENDING_VERIFICATION')
 
     clientService.disconnect()
   })

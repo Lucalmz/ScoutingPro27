@@ -12,30 +12,38 @@ const { t } = useI18n()
 
 const isHost = computed(() => Boolean(eventStore.isHost || (conn.rtcService as any)?.isHostMode?.()))
 const remainingSeconds = ref(60)
+const isTimedOut = ref(false)
+const isRetrying = ref(false)
 let timer: any = null
 
 const pending = computed(() => conn.pendingSas)
 const queueCount = computed(() => conn.pendingSasQueue.length)
 const isOpen = computed(() => conn.isSasModalOpen && Boolean(conn.pendingSas))
 
+function startTimer() {
+  if (timer) clearInterval(timer)
+  timer = setInterval(() => {
+    if (remainingSeconds.value > 0) {
+      remainingSeconds.value--
+    } else {
+      clearInterval(timer)
+      timer = null
+      isTimedOut.value = true
+    }
+  }, 1000)
+}
+
 watch(pending, (newVal) => {
   if (newVal) {
     remainingSeconds.value = 60
-    if (timer) clearInterval(timer)
-    timer = setInterval(() => {
-      if (remainingSeconds.value > 0) {
-        remainingSeconds.value--
-      } else {
-        clearInterval(timer)
-        timer = null
-        conn.rejectSas(pending.value?.peerId, 'SAS verification timeout (60s)')
-      }
-    }, 1000)
+    isTimedOut.value = false
+    startTimer()
   } else {
     if (timer) {
       clearInterval(timer)
       timer = null
     }
+    isTimedOut.value = false
   }
 }, { immediate: true })
 
@@ -49,6 +57,18 @@ function handleConfirm() {
 
 function handleReject() {
   conn.rejectSas(pending.value?.peerId, 'User manually rejected SAS security code')
+}
+
+async function handleRetry() {
+  isRetrying.value = true
+  try {
+    remainingSeconds.value = 60
+    isTimedOut.value = false
+    startTimer()
+    await conn.retrySas(pending.value?.peerId)
+  } finally {
+    isRetrying.value = false
+  }
 }
 
 function handleDismiss() {
@@ -108,8 +128,20 @@ function handleLeaveEvent() {
                 {{ t('connection.sas_code_prompt', '请当面或通过语音核对以下安全码是否完全一致') }}
               </div>
               <div class="sas-code-display">{{ pending.fingerprint }}</div>
-              <div class="sas-countdown">
-                {{ t('connection.sas_countdown', '超时自动断开') }}: <strong>{{ remainingSeconds }}s</strong>
+
+              <div v-if="isTimedOut" class="sas-timeout-banner">
+                <span class="material-icons timeout-banner-icon">hourglass_empty</span>
+                <div class="timeout-banner-content">
+                  <div class="timeout-banner-title">
+                    {{ t('connection.sas_timed_out_title', '核验等待已超时') }}
+                  </div>
+                  <div class="timeout-banner-desc">
+                    {{ isHost ? t('connection.sas_timed_out_host_desc', '对端可能未完成核对或人员暂时离开。点击【重新发起核验】可刷新安全码，也可直接点击【确认一致】完成接入。') : t('connection.sas_timed_out_client_desc', '主机人员可能暂时离开。点击【重新发起核验】可重新请求核验，也可在确认安全码一致后直接点击【确认一致】。') }}
+                  </div>
+                </div>
+              </div>
+              <div v-else class="sas-countdown">
+                {{ t('connection.sas_countdown', '等待核验') }}: <strong>{{ remainingSeconds }}s</strong>
               </div>
             </div>
           </div>
@@ -119,6 +151,10 @@ function handleLeaveEvent() {
               <button class="btn btn-secondary" @click="handleDismiss">
                 <span class="material-icons">close</span>
                 {{ t('common.dismiss', '忽略') }}
+              </button>
+              <button v-if="isTimedOut" class="btn btn-warning" :disabled="isRetrying" @click="handleRetry">
+                <span class="material-icons">refresh</span>
+                {{ t('connection.sas_btn_retry', '重新发起核验') }}
               </button>
               <button class="btn btn-danger" @click="handleReject">
                 <span class="material-icons">block</span>
@@ -133,6 +169,10 @@ function handleLeaveEvent() {
               <button class="btn btn-secondary" @click="handleLeaveEvent">
                 <span class="material-icons">exit_to_app</span>
                 {{ t('connection.sas_btn_leave', '离开赛事') }}
+              </button>
+              <button v-if="isTimedOut" class="btn btn-warning" :disabled="isRetrying" @click="handleRetry">
+                <span class="material-icons">refresh</span>
+                {{ t('connection.sas_btn_retry', '重新发起核验') }}
               </button>
               <button class="btn btn-danger" @click="handleReject">
                 <span class="material-icons">link_off</span>
@@ -369,6 +409,61 @@ function handleLeaveEvent() {
 
 .btn-danger:hover {
   background: #dc2626;
+}
+
+.btn-warning {
+  background: #f59e0b;
+  color: #000000;
+  font-weight: 700;
+}
+
+.btn-warning:hover:not(:disabled) {
+  background: #d97706;
+  color: #ffffff;
+}
+
+.btn-warning:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+}
+
+.sas-timeout-banner {
+  display: flex;
+  align-items: flex-start;
+  gap: 0.6rem;
+  background: rgba(245, 158, 11, 0.12);
+  border: 1px solid rgba(245, 158, 11, 0.35);
+  border-radius: 8px;
+  padding: 0.65rem 0.85rem;
+  margin-top: 0.35rem;
+  text-align: left;
+  width: 100%;
+  box-sizing: border-box;
+}
+
+.timeout-banner-icon {
+  color: #f59e0b;
+  font-size: 1.3rem;
+  flex-shrink: 0;
+  margin-top: 0.1rem;
+}
+
+.timeout-banner-content {
+  display: flex;
+  flex-direction: column;
+  gap: 0.2rem;
+}
+
+.timeout-banner-title {
+  font-size: 0.85rem;
+  font-weight: 700;
+  color: #fbbf24;
+}
+
+.timeout-banner-desc {
+  font-size: 0.78rem;
+  line-height: 1.4;
+  color: #cbd5e1;
 }
 
 .btn-success {

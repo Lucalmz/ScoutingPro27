@@ -282,6 +282,11 @@ export const useConnectionStore = defineStore('connection', () => {
     clearPendingSas(target)
   }
 
+  async function retrySas(peerId?: string) {
+    const target = peerId || pendingSas.value?.peerId || 'host'
+    await rtcService.value?.retrySas?.(target)
+  }
+
   function disconnect() {
     rtcService.value?.disconnect()
     pendingSasQueue.value = []
@@ -322,6 +327,7 @@ export const useConnectionStore = defineStore('connection', () => {
     setIsIceStalled,
     confirmSas,
     rejectSas,
+    retrySas,
     disconnect,
     requestTakeover,
     respondTakeoverDecision,
