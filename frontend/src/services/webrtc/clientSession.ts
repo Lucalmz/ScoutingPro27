@@ -20,6 +20,9 @@ import type { SignalingChannel } from './signaling'
 import { toSessionDescription, toIceCandidate } from './sdpUtil'
 import type { SasSecurityManager } from './sasManager'
 import type { PeerConnectionManager } from './peerManager'
+import { createLogger } from '@/utils/logger'
+
+const log = createLogger('WebRTC:Client')
 
 export interface ClientSessionContext {
   peerMgr: PeerConnectionManager
@@ -76,18 +79,18 @@ export function createClientSession(ctx: ClientSessionContext) {
   function triggerClientReconnect() {
     if (ctx.isExplicitlyClosed() || ctx.getStatus() === 'long_offline') return
     if (ctx.sas.clientSasState === 'PENDING_VERIFICATION') {
-      console.log('[WebRTC Client] SAS verification pending; pausing auto-reconnect.')
+      log.info('SAS verification pending; pausing auto-reconnect.')
       return
     }
     if (ctx.sas.clientSasState === 'REJECTED') {
-      console.warn('[WebRTC Client] SAS verification rejected; suppressing auto-reconnect.')
+      log.warn('SAS verification rejected; suppressing auto-reconnect.')
       return
     }
 
     clearReconnectTimer()
 
     if (reconnectAttempts >= 6) {
-      console.log('[WebRTC] Max reconnect attempts reached. Moving to long_offline.')
+      log.warn('Max reconnect attempts (6) reached. Moving to long_offline.')
       ctx.setStatus('long_offline')
       return
     }
@@ -95,7 +98,7 @@ export function createClientSession(ctx: ClientSessionContext) {
     const delay = reconnectAttempts === 0 ? 1000 : Math.min(32000, Math.pow(2, reconnectAttempts) * 1000)
     reconnectAttempts++
 
-    console.log(`[WebRTC] Attempting to reconnect in ${delay}ms (Attempt ${reconnectAttempts}/6)...`)
+    log.info(`Scheduling reconnect in ${delay}ms (Attempt ${reconnectAttempts}/6)...`)
     ctx.setStatus('connecting')
 
     reconnectTimer = setTimeout(async () => {
@@ -128,7 +131,9 @@ export function createClientSession(ctx: ClientSessionContext) {
       ctx.setClientForceRelay(true)
     }
     ctx.setClientPendingCandidates([])
-    ctx.setClientSessionId(`client-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`)
+    const newClientSessionId = `client-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`
+    ctx.setClientSessionId(newClientSessionId)
+    log.info(`Initiating setupClientConnection (sessionId: ${newClientSessionId}, forceRelay: ${forceRelay}, hostSenderId: ${ctx.getClientHostSenderId() || 'none'})`)
 
     isRebuilding = true
     try {
@@ -160,17 +165,22 @@ export function createClientSession(ctx: ClientSessionContext) {
     ctx.setClientDc(dc)
 
     const sender = new DataChannelSender(dc, (isCongested) => {
-      if (isCongested) ctx.setStatus('unstable')
+      if (isCongested) {
+        log.warn('DataChannel congestion detected (backpressure high). Switching status to unstable.')
+        ctx.setStatus('unstable')
+      }
     })
     ctx.setClientSender(sender)
 
     dc.onmessage = (e) => ctx.handleChannelMessage(e)
     dc.onopen = () => {
+      log.info(`DataChannel 'scoutingpro-data' OPENED! Client successfully connected to Host.`)
       ctx.setStatus('connected')
       reconnectAttempts = 0
       clearReconnectTimer()
     }
     dc.onclose = () => {
+      log.warn(`DataChannel 'scoutingpro-data' CLOSED. isRebuilding=${isRebuilding}, sasState=${ctx.sas.clientSasState}`)
       ctx.setClientSender(null)
       if (isRebuilding) return
       if (ctx.sas.clientSasState === 'PENDING_VERIFICATION' || ctx.sas.clientSasState === 'REJECTED') {
@@ -189,6 +199,7 @@ export function createClientSession(ctx: ClientSessionContext) {
     try {
       const offer = await pc.createOffer()
       await pc.setLocalDescription(offer)
+      log.info(`Client local offer created (SDP length: ${offer.sdp?.length || 0} bytes)`)
 
       let handshakeTicket: string | undefined = undefined
       if (localEcdhPubHex && currentInviteCode) {
@@ -196,10 +207,10 @@ export function createClientSession(ctx: ClientSessionContext) {
           const ticketRes = await createWebRtcTicket(currentInviteCode, localEcdhPubHex)
           if (ticketRes && ticketRes.ticket) {
             handshakeTicket = ticketRes.ticket
-            console.log('[WebRTC Client Security] Acquired scoped handshake ticket with pkHash binding.')
+            log.info('Acquired scoped handshake ticket with pkHash binding.')
           }
         } catch (ticketErr) {
-          console.warn('[WebRTC Client Security] Failed to obtain handshake ticket:', ticketErr)
+          log.warn('Failed to obtain handshake ticket:', ticketErr)
         }
       }
 
@@ -216,8 +227,9 @@ export function createClientSession(ctx: ClientSessionContext) {
       if (ctx.sas.clientSharedAesKey) {
         try {
           offerPayload = await encryptSignalingData(ctx.sas.clientSharedAesKey, JSON.stringify(rawOffer))
+          log.info('Offer payload encrypted with shared AES key.')
         } catch (err) {
-          console.warn('[WebRTC Client] Failed to encrypt offer, sending plaintext fallback:', err)
+          log.warn('Failed to encrypt offer, sending plaintext fallback:', err)
         }
       }
 
@@ -227,6 +239,7 @@ export function createClientSession(ctx: ClientSessionContext) {
         ctx.setClientSessionId(clientSessionId)
       }
 
+      log.info(`Dispatched Offer to Host via signaling (target: ${ctx.getClientHostSenderId() || 'broadcast'})`)
       signaling?.send({
         offer: offerPayload,
         ecdhPublicKey: localEcdhPubHex,
@@ -235,9 +248,9 @@ export function createClientSession(ctx: ClientSessionContext) {
         hostSessionId: ctx.getCurrentHostSessionId(),
         username: ctx.getUsername?.(),
         userId: ctx.getUserId?.()
-      })
+      }, ctx.getClientHostSenderId())
     } catch (err) {
-      console.error('Error creating offer:', err)
+      log.error('Error creating offer:', err)
       triggerClientReconnect()
     }
   }
@@ -259,7 +272,7 @@ export function createClientSession(ctx: ClientSessionContext) {
     if (!localEcdhPubHex || !currentInviteCode) return
 
     sas.clientSecurityFingerprint = await computeSecurityFingerprint(localEcdhPubHex, hostPubKey, currentInviteCode)
-    console.log(`[WebRTC Client Security] Computed SAS Fingerprint: ${sas.clientSecurityFingerprint}`)
+    log.info(`Computed SAS Fingerprint for Host: ${sas.clientSecurityFingerprint}`)
 
     const effectiveHostUsername = hostUsername || 'Host'
     const effectiveHostUserId = hostUserId || 'host'
@@ -278,8 +291,8 @@ export function createClientSession(ctx: ClientSessionContext) {
     })
 
     if (trustEval.status === 'TRUSTED_MATCH' || trustEval.status === 'TOFU_FIRST_SEEN') {
-      console.log(
-        `[WebRTC Client Security TOFU] Establishing baseline trust for Host device ${sas.clientHostDeviceId} (${effectiveHostUsername}). Auto-approving SAS.`
+      log.info(
+        `Establishing baseline trust for Host device ${sas.clientHostDeviceId} (${effectiveHostUsername}). Auto-approving SAS. Status: ${trustEval.status}`
       )
       if (trustEval.status === 'TOFU_FIRST_SEEN') {
         await savePeerTrustRecord({
@@ -309,10 +322,10 @@ export function createClientSession(ctx: ClientSessionContext) {
     } else if (trustEval.status === 'KEY_ROTATION_ALERT') {
       // 仅在已建立信任的设备发生公钥异常变动（中间人攻击/冒名劫持隐患）时，才挂起并弹出安全核验
       if (trustEval.level === 'CRITICAL') {
-        console.error(`[WebRTC Client Security ALERT] ${trustEval.message}`)
+        log.error(`Security Alert: ${trustEval.message}`)
         ctx.rejectSas('host', trustEval.message)
       } else {
-        console.warn(`[WebRTC Client Security NOTICE] ${trustEval.message}`)
+        log.warn(`Security Notice: ${trustEval.message}. Gating client verification.`)
         sas.clientSasState = 'PENDING_VERIFICATION'
         if (sas.sasTimeoutTimers.has('host')) {
           clearTimeout(sas.sasTimeoutTimers.get('host'))
@@ -337,7 +350,7 @@ export function createClientSession(ctx: ClientSessionContext) {
     const clientPc = ctx.getClientPc()
 
     if (data.type === 'host_hello') {
-      console.log('[WebRTC] Received host_hello, checking session state.')
+      log.info(`Received host_hello: hostSessionId=${data.hostSessionId}, deviceId=${data.deviceId}, sender=${data.sender}`)
       const previousHostSessionId = ctx.getCurrentHostSessionId()
       const isSameHostSession = Boolean(data.hostSessionId && data.hostSessionId === previousHostSessionId)
       const hostSessionChanged = Boolean(
@@ -354,7 +367,7 @@ export function createClientSession(ctx: ClientSessionContext) {
           sas.clientSharedAesKey = await deriveSharedAesKey(localEcdhKeyPair.privateKey, hostPub)
           await evaluateAndApplyClientTrust(data.ecdhPublicKey, data.deviceId, data.username, data.userId)
         } catch (e) {
-          console.warn('[WebRTC Client] Failed to derive shared AES key or evaluate trust from host_hello:', e)
+          log.warn('Failed to derive shared AES key or evaluate trust from host_hello:', e)
         }
       }
       ctx.setClientHostSenderId(data.sender)
@@ -368,14 +381,15 @@ export function createClientSession(ctx: ClientSessionContext) {
         curDc.readyState !== 'closed'
 
       if (!isActivelyConnectingOrOpen || hostSessionChanged) {
+        log.info(`Setting up client connection (isActivelyConnectingOrOpen: ${isActivelyConnectingOrOpen}, hostSessionChanged: ${hostSessionChanged})`)
         clearReconnectTimer()
         reconnectAttempts = 0
         await setupClientConnection()
       } else {
-        console.log('[WebRTC Client] Connection actively negotiating or open with host; preserving peer connection.')
+        log.info('Connection actively negotiating or open with host; preserving existing peer connection.')
       }
     } else if (data.type === 'host_takeover') {
-      console.log('[WebRTC Client] Received host_takeover by new host session:', data.newHostSessionId)
+      log.info(`Received host_takeover by new host session: ${data.newHostSessionId} (from ${data.sender})`)
       if (data.newHostSessionId) {
         ctx.setCurrentHostSessionId(data.newHostSessionId)
       }
@@ -386,7 +400,7 @@ export function createClientSession(ctx: ClientSessionContext) {
       reconnectAttempts = 0
       await setupClientConnection()
     } else if (data.type === 'HOST_LEAVING') {
-      console.log('[WebRTC] Host explicitly left the room.')
+      log.warn(`Host explicitly left the room: hostSessionId=${data.hostSessionId}`)
       clearReconnectTimer()
       const curPc = ctx.getClientPc()
       const curDc = ctx.getClientDc()
@@ -408,6 +422,7 @@ export function createClientSession(ctx: ClientSessionContext) {
       ctx.callbacks.onActiveHostLeft?.()
     } else if (data.answer && clientPc) {
       try {
+        log.info(`Processing Host Answer from ${data.sender || 'Host'}`)
         ctx.setClientHostSenderId(data.sender)
         if (data.hostSessionId) {
           ctx.setCurrentHostSessionId(data.hostSessionId)
@@ -428,12 +443,14 @@ export function createClientSession(ctx: ClientSessionContext) {
           try {
             const decStr = await decryptSignalingData(sas.clientSharedAesKey, data.answer)
             answerData = JSON.parse(decStr)
+            log.info('Decrypted encrypted Answer payload successfully.')
           } catch (err) {
-            console.warn('[WebRTC Client] Error decrypting answer SDP:', err)
+            log.warn('Error decrypting answer SDP:', err)
           }
         }
 
         await clientPc.setRemoteDescription(toSessionDescription(answerData))
+        log.info('Applied remote Host Answer to client PeerConnection.')
         const sortedPending = sortCandidatesPreferIpv6(ctx.getClientPendingCandidates())
         for (const c of sortedPending) {
           try {
@@ -443,7 +460,7 @@ export function createClientSession(ctx: ClientSessionContext) {
                 const decStr = await decryptSignalingData(sas.clientSharedAesKey, candidateObj)
                 candidateObj = JSON.parse(decStr)
               } catch (err) {
-                console.warn('[WebRTC Client] Error decrypting pending candidate:', err)
+                log.warn('Error decrypting pending candidate:', err)
                 continue
               }
             }
@@ -452,12 +469,12 @@ export function createClientSession(ctx: ClientSessionContext) {
             }
             await clientPc.addIceCandidate(toIceCandidate(candidateObj))
           } catch (candidateErr) {
-            console.warn('[WebRTC Client] Failed to add pending candidate:', candidateErr)
+            log.warn('Failed to add pending candidate:', candidateErr)
           }
         }
         ctx.setClientPendingCandidates([])
       } catch (err) {
-        console.error('Error setting remote description:', err)
+        log.error('Error setting remote description for Host Answer:', err)
       }
     } else if (data.candidate && clientPc) {
       const clientHostSenderId = ctx.getClientHostSenderId()
@@ -471,7 +488,7 @@ export function createClientSession(ctx: ClientSessionContext) {
           const decStr = await decryptSignalingData(sas.clientSharedAesKey, data.candidate)
           candidateData = JSON.parse(decStr)
         } catch (err) {
-          console.warn('[WebRTC Client] Error decrypting candidate:', err)
+          log.warn('Error decrypting candidate:', err)
         }
       }
 
@@ -487,9 +504,9 @@ export function createClientSession(ctx: ClientSessionContext) {
         ctx.setClientPendingCandidates(pending)
       }
     } else if (data.type === 'sas_challenge') {
-      console.warn('[WebRTC Client Security] Host issued SAS security challenge. Code:', data.fingerprint)
+      log.warn(`Host issued SAS security challenge. Fingerprint: ${data.fingerprint}`)
       if (sas.clientSasState === 'VERIFIED') {
-        console.log('[WebRTC Client Security] Host issued SAS challenge but client is already verified; ignoring.')
+        log.info('Host issued SAS challenge but client is already verified; ignoring.')
         return
       }
       sas.clientSasState = 'PENDING_VERIFICATION'
@@ -505,7 +522,7 @@ export function createClientSession(ctx: ClientSessionContext) {
         data.fingerprint
       )
     } else if (data.type === 'sas_verified') {
-      console.log('[WebRTC Client Security] Host verified SAS code.')
+      log.info('Host verified SAS code. Client trust active.')
       if (sas.clientSasState === 'PENDING_VERIFICATION') {
         if (ctx.confirmSas) {
           ctx.confirmSas('host')
@@ -514,8 +531,7 @@ export function createClientSession(ctx: ClientSessionContext) {
         }
       }
     } else if (data.type === 'sas_rejected') {
-      console.warn('[WebRTC Client Security] Host rejected SAS verification:', data.reason)
-      ctx.rejectSas('host', data.reason || 'Rejected by host')
+      log.warn(`Host rejected SAS verification. Reason: ${data.reason}`)
     }
   }
 

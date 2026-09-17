@@ -298,7 +298,27 @@
     "sas_pending_badge": "待核验 ({count})",
     "sas_pending_badge_tooltip": "有新节点等待安全核验，点击打开核验窗口",
     "ice_stalled": "线路探测中...",
-    "ice_stalled_tooltip": "链路连接检测中，正在自动尝试重试或备用通道..."
+    "ice_stalled_tooltip": "链路连接检测中，正在自动尝试重试或备用通道...",
+    "diagnostics_btn": "诊断",
+    "diagnostics_tooltip": "查看实时 WebRTC 链路与信令诊断日志",
+    "view_diagnostics": "查看连接诊断与日志",
+    "transport": "传输拓扑",
+    "sas_state": "安全核验 (SAS)"
+  },
+  "diagnostics": {
+    "modal_title": "WebRTC 连接与链路诊断",
+    "buffer_count": "已缓存 {count} 条诊断事件 (上限 {max})",
+    "filter_all": "全部",
+    "all_modules": "所有模块",
+    "search_placeholder": "搜索日志内容...",
+    "autoscroll": "自动滚动到底部",
+    "autoscroll_short": "自动滚动",
+    "no_logs_found": "暂无符合条件的诊断日志",
+    "view_payload": "查看详情",
+    "hide_payload": "收起数据",
+    "clear_logs": "清空",
+    "copy_report": "复制完整诊断报告",
+    "copied_to_clipboard": "已复制报告！"
   },
   "toast": {
     "require_login": "请输入用户名和密码",

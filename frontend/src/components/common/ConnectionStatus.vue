@@ -129,6 +129,17 @@ const transportTooltip = computed(() => {
       <span class="material-icons pending-icon">shield</span>
       <span>{{ t('connection.sas_pending_badge', { count: conn.pendingSasQueue.length }) }}</span>
     </button>
+
+    <!-- Diagnostics Button -->
+    <button
+      type="button"
+      class="diagnostics-btn"
+      :title="t('connection.diagnostics_tooltip', '查看实时 WebRTC 链路与信令诊断日志')"
+      @click="conn.openDiagnosticsModal"
+    >
+      <span class="material-icons diag-icon">terminal</span>
+      <span class="diag-text">{{ t('connection.diagnostics_btn', '诊断') }}</span>
+    </button>
   </div>
 </template>
 
@@ -391,6 +402,32 @@ const transportTooltip = computed(() => {
 
 .fingerprint-icon {
   font-size: 13px;
+}
+
+.diagnostics-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 5px 10px;
+  background: rgba(15, 23, 42, 0.6);
+  border: 1px solid rgba(255, 255, 255, 0.14);
+  border-radius: 8px;
+  color: #94a3b8;
+  font-size: 12px;
+  font-weight: 500;
+  cursor: pointer;
+  transition: all 0.2s ease;
+}
+
+.diagnostics-btn:hover {
+  background: rgba(30, 41, 59, 0.9);
+  border-color: rgba(56, 189, 248, 0.45);
+  color: #38bdf8;
+  box-shadow: 0 0 10px rgba(56, 189, 248, 0.15);
+}
+
+.diag-icon {
+  font-size: 15px;
 }
 </style>
 

@@ -1,5 +1,8 @@
 import type { ConnectionStatus } from '@/types'
 import { probePublicConnectivity } from './connectivity'
+import { createLogger } from '@/utils/logger'
+
+const log = createLogger('WebRTC:SelfHealing')
 
 export interface SelfHealingOptions {
   getStatus: () => ConnectionStatus
@@ -9,13 +12,13 @@ export interface SelfHealingOptions {
 
 export function setupSelfHealing(options: SelfHealingOptions): { dispose: () => void } {
   const handleOnline = async () => {
-    console.log('[WebRTC Self-Healing] Device came online, probing public connectivity...')
+    log.info('Device network came online, probing public connectivity...')
     const canReachPublic = await probePublicConnectivity(2500)
     if (canReachPublic) {
-      console.log('[WebRTC Self-Healing] Public connectivity confirmed, reconnecting immediately.')
+      log.info('Public connectivity confirmed, reconnecting immediately.')
       await options.reconnectNow()
     } else {
-      console.warn('[WebRTC Self-Healing] Public connectivity probe failed; remaining in offline state.')
+      log.warn('Public connectivity probe failed; remaining in offline state.')
     }
   }
 
@@ -24,9 +27,10 @@ export function setupSelfHealing(options: SelfHealingOptions): { dispose: () => 
       const status = options.getStatus()
       const healthy = options.isHealthy ? options.isHealthy() : status === 'connected'
       if (!healthy || status === 'long_offline' || status === 'offline' || status === 'unstable') {
-        console.log('[WebRTC Self-Healing] App became visible and connection is inactive or unhealthy; checking connectivity...')
+        log.info('App became visible and connection is inactive or unhealthy; checking connectivity...')
         const canReach = await probePublicConnectivity(2000)
         if (canReach) {
+          log.info('Connectivity probe passed after visibility change, triggering reconnectNow.')
           await options.reconnectNow()
         }
       }

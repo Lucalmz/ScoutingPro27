@@ -298,7 +298,27 @@
     "sas_pending_badge": "Pending SAS ({count})",
     "sas_pending_badge_tooltip": "New node is awaiting SAS verification, click to open verification modal",
     "ice_stalled": "Probing link...",
-    "ice_stalled_tooltip": "Link connection check in progress, retrying or switching to fallback..."
+    "ice_stalled_tooltip": "Link connection check in progress, retrying or switching to fallback...",
+    "diagnostics_btn": "Diagnostics",
+    "diagnostics_tooltip": "View real-time WebRTC connection and signaling diagnostic logs",
+    "view_diagnostics": "View Connection Diagnostics & Logs",
+    "transport": "Transport",
+    "sas_state": "Security Verification (SAS)"
+  },
+  "diagnostics": {
+    "modal_title": "WebRTC Connection & Link Diagnostics",
+    "buffer_count": "{count} events buffered (max {max})",
+    "filter_all": "All",
+    "all_modules": "All Modules",
+    "search_placeholder": "Search log contents...",
+    "autoscroll": "Auto-scroll to bottom",
+    "autoscroll_short": "Auto Scroll",
+    "no_logs_found": "No diagnostic logs matching criteria",
+    "view_payload": "Details",
+    "hide_payload": "Hide",
+    "clear_logs": "Clear",
+    "copy_report": "Copy Diagnostic Report",
+    "copied_to_clipboard": "Report Copied!"
   },
   "toast": {
     "require_login": "Username and password required",

@@ -11,6 +11,9 @@ import { getActivePinia } from 'pinia'
 import { useUserStore } from '@/stores/user'
 import type { WebRtcCallbacks, ClientEntry } from './types'
 import type { OfflineMessageManager } from './offlineQueue'
+import { createLogger } from '@/utils/logger'
+
+const log = createLogger('WebRTC:Data')
 
 export interface ChannelMessageHandlerContext {
   isHostMode: () => boolean
@@ -51,17 +54,20 @@ export function createChannelMessageHandler(ctx: ChannelMessageHandlerContext) {
   return async function handleChannelMessage(ev: MessageEvent, senderId?: string): Promise<void> {
     const msg = safeJsonParse<WebRtcMessage>(ev.data)
     if (!msg) {
-      console.warn('[WebRTC] Ignored invalid or malformed data-channel message payload')
+      log.warn('Ignored invalid or malformed data-channel message payload')
       return
     }
 
     const currentInviteCode = ctx.currentInviteCode()
     if (msg.authCode && msg.authCode !== currentInviteCode) {
-      console.warn('[WebRTC] Auth code mismatch, ignoring message')
+      log.warn(`Auth code mismatch for message ${msg.type}, ignoring message`, {
+        expected: currentInviteCode,
+        received: msg.authCode
+      })
       return
     }
 
-    console.log(`[WebRTC] Received message ${msg.type} from ${senderId || 'unknown'}`)
+    log.info(`Received message ${msg.type} from ${senderId || 'unknown'}`)
 
     const isHostMode = ctx.isHostMode()
     const callbacks = ctx.callbacks
@@ -259,7 +265,7 @@ export function createChannelMessageHandler(ctx: ChannelMessageHandlerContext) {
         if (isHostMode) {
           return ctx.enqueueHostTask(senderId || 'default', async () => {
             if (ctx.isTakeoverReconciling?.()) {
-              console.log(`[WebRTC Host] Takeover reconciliation active; awaiting handoff completion before processing SYNC_DATA from ${senderId}`)
+              log.info(`Takeover reconciliation active; awaiting handoff completion before processing SYNC_DATA from ${senderId}`)
               await ctx.waitForTakeoverReconciliation?.()
             }
             const expectedScoutId = senderId ? ctx.clientIdToScoutId.get(senderId) : undefined
@@ -271,9 +277,7 @@ export function createChannelMessageHandler(ctx: ChannelMessageHandlerContext) {
             for (const r of msg.records) {
               if (!r || typeof r !== 'object' || !r.id) continue
               if (!expectedScoutId || r.scoutId !== expectedScoutId) {
-                console.error(
-                  `[WebRTC Host Security] Dropped forged record ${r.id}: claimed scoutId="${r.scoutId}" does not match peer authenticated scoutId="${expectedScoutId}"`
-                )
+                log.error(`Dropped forged record ${r.id}: claimed scoutId="${r.scoutId}" does not match peer authenticated scoutId="${expectedScoutId}"`)
                 forgedRecordIds.push(r.id)
               } else {
                 legitimateRecords.push(r)

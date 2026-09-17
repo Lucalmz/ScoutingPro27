@@ -29,6 +29,15 @@ export const useConnectionStore = defineStore('connection', () => {
 
   const pendingSasQueue = ref<PendingSasItem[]>([])
   const isSasModalOpen = ref(false)
+  const isDiagnosticsModalOpen = ref(false)
+
+  function openDiagnosticsModal() {
+    isDiagnosticsModalOpen.value = true
+  }
+
+  function closeDiagnosticsModal() {
+    isDiagnosticsModalOpen.value = false
+  }
 
   const pendingSas = computed<PendingSasItem | null>({
     get: () => pendingSasQueue.value[0] || null,
@@ -308,6 +317,9 @@ export const useConnectionStore = defineStore('connection', () => {
     isSasModalOpen,
     openSasModal,
     closeSasModal,
+    isDiagnosticsModalOpen,
+    openDiagnosticsModal,
+    closeDiagnosticsModal,
     isConnected,
     isOffline,
     isLongOffline,

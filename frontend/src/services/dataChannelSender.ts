@@ -3,6 +3,10 @@
 // and Fail-Fast Congestion Circuit Breaker for WebRTC DataChannel
 // ============================================================
 
+import { createLogger } from '@/utils/logger'
+
+const log = createLogger('WebRTC:Sender')
+
 export class BackpressureTimeoutError extends Error {
   constructor(msg: string) {
     super(msg)
@@ -58,16 +62,18 @@ export class DataChannelSender {
         task.resolve()
         this.onCongestion?.(false)
       } catch (err) {
-        console.error('[DataChannelSender] Send task failed:', err)
+        log.error('Send task failed:', err)
         task.reject(err)
 
         if (err instanceof BackpressureTimeoutError) {
+          log.warn('Backpressure timeout reached. Signaling congestion and aborting remaining queued tasks.')
           this.onCongestion?.(true)
           this.failFastRemaining(new Error('Queue aborted due to network congestion'))
           break
         }
 
         if (this.dc.readyState === 'closed' || this.dc.readyState === 'closing') {
+          log.warn(`Queue aborted: DataChannel is ${this.dc.readyState}`)
           this.failFastRemaining(new Error(`Queue aborted: DataChannel is ${this.dc.readyState}`))
           break
         }
@@ -90,6 +96,7 @@ export class DataChannelSender {
     }
 
     if (this.dc.bufferedAmount > this.BUFFER_HIGH_WATERMARK) {
+      log.warn(`DataChannel buffer exceeded high watermark (${this.dc.bufferedAmount} bytes > ${this.BUFFER_HIGH_WATERMARK}). Pausing sender for backpressure relief.`)
       this.onCongestion?.(true)
       await new Promise<void>((resolve, reject) => {
         let finished = false

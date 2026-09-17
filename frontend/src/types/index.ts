@@ -540,6 +540,7 @@ export interface ConnectionTransportInfo {
   protocol: string
   rttMs: number | null
   securityFingerprint?: string
+  selectedCandidatePair?: string
 }
 
 

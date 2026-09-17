@@ -8,6 +8,9 @@ import {
   NonceLruCache,
   sha256Hex
 } from '@/utils/crypto'
+import { createLogger } from '@/utils/logger'
+
+const log = createLogger('WebRTC:Signaling')
 
 /**
  * MQTT-based signaling channel for WebRTC SDP/ICE exchange.
@@ -31,10 +34,11 @@ export class SignalingChannel {
     try {
       this.hmacKey = await deriveHmacKey(this.room)
     } catch (e) {
-      console.warn('[Signaling] Failed to derive HMAC key:', e)
+      log.warn('[Signaling] Failed to derive HMAC key:', e)
     }
     const hashHex = await sha256Hex(this.room + '-scoutingpro27')
     this.topic = `scoutingpro27/signal/${hashHex}`
+    log.info(`Initialized signaling topic for room [${this.room}]: ${this.topic}`)
   }
 
   connect(callbacks: {
@@ -43,6 +47,7 @@ export class SignalingChannel {
     onError?: (err?: Error) => void
   }): void {
     this.messageCallback = callbacks.onMessage
+    log.info(`Connecting to MQTT broker wss://broker.emqx.io:8084/mqtt as ${this.clientId}...`)
     this.client = mqtt.connect('wss://broker.emqx.io:8084/mqtt', {
       clientId: this.clientId,
       clean: true,
@@ -50,22 +55,34 @@ export class SignalingChannel {
     })
 
     this.client.on('connect', () => {
-      this.client!.subscribe(this.topic)
+      log.info(`MQTT connected successfully. Subscribing to ${this.topic}...`)
+      this.client!.subscribe(this.topic, (err) => {
+        if (err) {
+          log.error(`Failed to subscribe to topic ${this.topic}:`, err)
+        } else {
+          log.info(`Subscribed to topic ${this.topic}. Ready for WebRTC handshakes.`)
+        }
+      })
       callbacks.onConnect?.()
     })
 
     this.client.on('error', (err) => {
+      log.error(`MQTT client error:`, err)
       callbacks.onError?.(err)
     })
 
     this.client.on('offline', () => {
+      log.warn(`MQTT client entered offline state`)
       callbacks.onError?.()
     })
 
     this.client.on('message', async (_topic: string, payload: Uint8Array) => {
       const decoded = new TextDecoder().decode(payload)
       const msg = safeJsonParse<any>(decoded)
-      if (!msg) return
+      if (!msg) {
+        log.warn(`Received unparseable message (${payload.length} bytes) on topic`)
+        return
+      }
 
       // 硬隔离安全拦截：MQTT 信道严禁出现任何业务数据指令，防范旁路注入
       const BUSINESS_TYPES = [
@@ -90,7 +107,7 @@ export class SignalingChannel {
         'REQUEST_CUSTOM_FIELDS_SYNC'
       ]
       if (BUSINESS_TYPES.includes(msg.type)) {
-        console.warn(`[Security] Dropped illegal business payload '${msg.type}' over public MQTT signaling channel.`)
+        log.warn(`[Security] Dropped illegal business payload '${msg.type}' over public MQTT signaling channel. (sender: ${msg.sender})`)
         return
       }
 
@@ -103,7 +120,7 @@ export class SignalingChannel {
       if (msg.timestamp && msg.nonce) {
         const fresh = this.nonceCache.verifyAndAdd(msg.nonce, msg.timestamp)
         if (!fresh) {
-          console.warn('[Security] Dropped signaling message: invalid timestamp or replayed nonce.')
+          log.warn(`[Security] Dropped signaling message from ${msg.sender}: invalid timestamp (${msg.timestamp}) or replayed nonce (${msg.nonce}).`)
           return
         }
       }
@@ -118,13 +135,13 @@ export class SignalingChannel {
           ) {
             // legacy unit test fixtures bypass
           } else {
-            console.warn('[Security] Dropped signaling message: missing mandatory HMAC signature.')
+            log.warn(`[Security] Dropped signaling message from ${msg.sender}: missing mandatory HMAC signature (type: ${msg.type || 'unknown'}).`)
             return
           }
         } else {
           const valid = await verifySignalingPayload(this.hmacKey, msg, msg.signature)
           if (!valid) {
-            console.warn('[Security] Dropped signaling message: invalid HMAC signature.')
+            log.warn(`[Security] Dropped signaling message from ${msg.sender}: invalid HMAC signature (type: ${msg.type || 'unknown'}).`)
             return
           }
         }
@@ -150,9 +167,19 @@ export class SignalingChannel {
       const hasAllowedType = msg.type && ALLOWED_SIGNAL_TYPES.includes(msg.type)
       const hasSdpPayload = msg.offer || msg.answer || msg.candidate || msg.encrypted
       if (!hasAllowedType && !hasSdpPayload) {
-        console.warn(`[Security] Dropped unknown signaling message structure.`)
+        log.warn(`[Security] Dropped unknown signaling message structure from ${msg.sender}: type=${msg.type}, keys=${Object.keys(msg).join(',')}`)
         return
       }
+
+      const signalDesc = msg.type || (msg.offer ? 'offer' : msg.answer ? 'answer' : msg.candidate ? 'candidate' : 'sdp')
+      log.info(`<- Received signaling [${signalDesc}] from ${msg.sender}${msg.target ? ' (target: ' + msg.target + ')' : ''}`, {
+        type: msg.type,
+        sender: msg.sender,
+        target: msg.target,
+        hostSessionId: msg.hostSessionId,
+        deviceId: msg.deviceId,
+        hasCandidate: Boolean(msg.candidate)
+      })
 
       await this.messageCallback?.(msg)
     })
@@ -173,12 +200,20 @@ export class SignalingChannel {
         try {
           envelope.signature = await signSignalingPayload(this.hmacKey, envelope)
         } catch (e) {
-          console.warn('[Signaling] Failed to sign payload:', e)
+          log.warn('[Signaling] Failed to sign payload:', e)
         }
       }
+      const signalDesc = (data as any)?.type || ((data as any)?.offer ? 'offer' : (data as any)?.answer ? 'answer' : (data as any)?.candidate ? 'candidate' : 'sdp')
+      log.info(`-> Sending signaling [${signalDesc}] to ${target || 'room broadcast'}`, {
+        type: (data as any)?.type,
+        target: target || 'broadcast',
+        sender: this.clientId
+      })
       if (this.client && typeof this.client.publish === 'function') {
         this.client.publish(this.topic, JSON.stringify(envelope))
       }
+    } else {
+      log.warn('Attempted to send signaling message while MQTT client is not connected')
     }
   }
 
@@ -188,6 +223,7 @@ export class SignalingChannel {
 
   close(): void {
     if (this.client) {
+      log.info(`Closing signaling channel on topic ${this.topic}...`)
       this.client.unsubscribe(this.topic)
       this.client.end()
       this.client = null

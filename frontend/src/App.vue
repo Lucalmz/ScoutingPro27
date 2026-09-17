@@ -3,6 +3,7 @@ import { watch } from 'vue'
 import ToastProvider from '@/components/ToastProvider.vue'
 import ConfirmModal from '@/components/common/ConfirmModal.vue'
 import InboxWidget from '@/components/common/InboxWidget.vue'
+import ConnectionDiagnosticsModal from '@/components/common/ConnectionDiagnosticsModal.vue'
 import { useInboxStore } from '@/stores/inbox'
 import { useToastStore } from '@/stores/toast'
 
@@ -24,6 +25,7 @@ watch(() => inboxStore.messages.length, (newLen, oldLen) => {
 <template>
   <ToastProvider />
   <ConfirmModal />
+  <ConnectionDiagnosticsModal />
   <div class="router-view-container">
     <router-view v-slot="{ Component, route }">
       <transition 

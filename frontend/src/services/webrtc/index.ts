@@ -22,6 +22,9 @@ import { createHostSignalingHandler } from './hostSession'
 import { createClientSession } from './clientSession'
 import { createMessageDispatcher } from './messageDispatcher'
 import { setupSelfHealing } from './selfHealing'
+import { createLogger } from '@/utils/logger'
+
+const log = createLogger('WebRTC:Service')
 
 export * from './types'
 export * from './connectivity'
@@ -432,7 +435,7 @@ export function createWebRtcService(callbacks: WebRtcCallbacks): WebRtcService {
     } catch {}
 
     if (peerSas === 'PENDING_VERIFICATION' && !isControlMsg) {
-      console.log(`[WebRTC Security Gating] Buffering incoming message from ${senderId || 'host'} (SAS pending verification).`)
+      log.info(`Buffering incoming message from ${senderId || 'host'} (SAS pending verification)`)
       if (isHostMode && senderId) {
         const q = sas.hostPendingIncoming.get(senderId) || []
         q.push({ ev, senderId })
@@ -444,7 +447,7 @@ export function createWebRtcService(callbacks: WebRtcCallbacks): WebRtcService {
     }
 
     if (peerSas === 'REJECTED') {
-      console.warn(`[WebRTC Security Gating] Discarding message from rejected peer ${senderId || 'host'}.`)
+      log.warn(`Discarding message from rejected peer ${senderId || 'host'}`)
       return
     }
 
@@ -452,6 +455,7 @@ export function createWebRtcService(callbacks: WebRtcCallbacks): WebRtcService {
   }
 
   function confirmSas(peerId = 'host'): void {
+    log.info(`Confirming SAS verification for peer ${peerId}`)
     sas.confirmSas(peerId, isHostMode, currentInviteCode, callbacks, sendMessage, handleChannelMessage)
     if (isHostMode && peerId && peerId !== 'host') {
       signaling?.send({ type: 'sas_verified', hostSessionId }, peerId)
@@ -461,6 +465,7 @@ export function createWebRtcService(callbacks: WebRtcCallbacks): WebRtcService {
   }
 
   function rejectSas(peerId = 'host', reason = 'Security code verification rejected'): void {
+    log.warn(`Rejecting SAS verification for peer ${peerId}. Reason: ${reason}`)
     if (isHostMode && peerId && peerId !== 'host') {
       signaling?.send({ type: 'sas_rejected', reason, hostSessionId }, peerId)
     } else if (!isHostMode) {
@@ -656,7 +661,7 @@ export function createWebRtcService(callbacks: WebRtcCallbacks): WebRtcService {
     if (!standbyWatchdogTimer) {
       standbyWatchdogTimer = setInterval(() => {
         if (isStandbyHostMode && lastActiveHostHeartbeat > 0 && Date.now() - lastActiveHostHeartbeat > 8000) {
-          console.warn('[WebRTC Standby Host] Active host heartbeat missing for >8s, notifying active host left')
+          log.warn('[Standby Watchdog] Active host heartbeat missing for >8s, notifying active host left')
           callbacks.onActiveHostLeft?.()
         }
       }, 3000)
@@ -672,7 +677,7 @@ export function createWebRtcService(callbacks: WebRtcCallbacks): WebRtcService {
   }
 
   async function enterStandbyMode(existingHostSessionId: string, existingDeviceId?: string) {
-    console.log(`[WebRTC Host] Entering standby mode. Existing active host: ${existingHostSessionId}`)
+    log.info(`Entering standby mode. Existing active host: ${existingHostSessionId}`)
     stopHostHeartbeat()
     startStandbyWatchdog()
     if (probeTimer) {
@@ -697,7 +702,7 @@ export function createWebRtcService(callbacks: WebRtcCallbacks): WebRtcService {
   }
 
   async function demoteToStandby(newHostSessionId: string, newDeviceId?: string) {
-    console.log(`[WebRTC Host] Demoted to Standby by new host: ${newHostSessionId}`)
+    log.info(`Demoted to Standby by new host: ${newHostSessionId}`)
     stopHostHeartbeat()
     startStandbyWatchdog()
     isHostMode = false
@@ -737,7 +742,7 @@ export function createWebRtcService(callbacks: WebRtcCallbacks): WebRtcService {
   }
 
   async function takeoverHost(): Promise<void> {
-    console.log('[WebRTC Host] Standby device initiating takeover to become Active Host!')
+    log.info('Standby device initiating takeover to become Active Host!')
     stopStandbyWatchdog()
     const newHostSessionId = `host-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`
     hostSessionId = newHostSessionId
@@ -811,14 +816,14 @@ export function createWebRtcService(callbacks: WebRtcCallbacks): WebRtcService {
       localEcdhKeyPair = localDeviceIdentity.keyPair
       localEcdhPubHex = localDeviceIdentity.publicKeyHex
       localDeviceId = localDeviceIdentity.deviceId
-      console.log(`[WebRTC Host] Using persistent device identity: ${localDeviceId}`)
+      log.info(`Using persistent device identity: ${localDeviceId}`)
     } catch (e) {
-      console.warn('[WebRTC Host] Ephemeral ECDH generation fallback:', e)
+      log.warn('Ephemeral ECDH generation fallback:', e)
       try {
         localEcdhKeyPair = await generateEcdhKeyPair()
         localEcdhPubHex = localEcdhKeyPair ? await exportEcdhPublicKey(localEcdhKeyPair.publicKey) : ''
       } catch (err) {
-        console.warn('[WebRTC Host] ECDH unavailable in insecure context:', err)
+        log.warn('ECDH unavailable in insecure context:', err)
         localEcdhKeyPair = null
         localEcdhPubHex = ''
       }
@@ -853,10 +858,10 @@ export function createWebRtcService(callbacks: WebRtcCallbacks): WebRtcService {
         ) {
           // Stale messages from own device's prior session must NOT trigger standby demotion
           if (data.deviceId && data.deviceId === localDeviceId) {
-            console.log(`[WebRTC Host] Ignoring stale host message from same device during probe: ${data.hostSessionId}`)
+            log.info(`Ignoring stale host message from same device during probe: ${data.hostSessionId}`)
             return
           }
-          console.log(`[WebRTC Host] Discovered existing host during probe: ${data.hostSessionId} (${data.sender})`)
+          log.info(`Discovered existing host during probe: ${data.hostSessionId} (sender: ${data.sender})`)
           if (probeTimer) {
             clearTimeout(probeTimer)
             probeTimer = null
@@ -900,8 +905,8 @@ export function createWebRtcService(callbacks: WebRtcCallbacks): WebRtcService {
               incomingSessionId
             )
             if (cmp < 0) {
-              console.log(
-                `[WebRTC Host] Local host session yields to higher-authority host: ${incomingSessionId} (epoch ${incomingEpoch} vs local ${localEpoch})`
+              log.info(
+                `Local host session yields to higher-authority host: ${incomingSessionId} (epoch ${incomingEpoch} vs local ${localEpoch})`
               )
               if (hasIncomingEpoch) {
                 setLocalEpoch(incomingEpoch)
@@ -910,8 +915,8 @@ export function createWebRtcService(callbacks: WebRtcCallbacks): WebRtcService {
               return
             } else if (cmp > 0) {
               // 本地主机权威更高，压制低权威对端并重发心跳通知其降级
-              console.warn(
-                `[WebRTC Host] Suppressed lower-authority heartbeat/hello (epoch: ${incomingEpoch} vs local ${localEpoch}, sender: ${incomingSessionId})`
+              log.warn(
+                `Suppressed lower-authority heartbeat/hello (epoch: ${incomingEpoch} vs local ${localEpoch}, sender: ${incomingSessionId})`
               )
               await signaling?.send({
                 type: 'host_heartbeat',
@@ -952,15 +957,15 @@ export function createWebRtcService(callbacks: WebRtcCallbacks): WebRtcService {
           const incomingWins = !hasIncomingEpoch || cmp < 0
 
           if (incomingWins) {
-            console.log(
-              `[WebRTC Host] Yielding to higher-authority takeover: ${incomingSessionId} (epoch ${incomingEpoch} vs local ${localEpoch})`
+            log.info(
+              `Yielding to higher-authority takeover: ${incomingSessionId} (epoch ${incomingEpoch} vs local ${localEpoch})`
             )
             setLocalEpoch(Math.max(localEpoch, incomingEpoch))
             await demoteToStandby(incomingSessionId, incomingDeviceId)
             return
           } else {
-            console.warn(
-              `[WebRTC Host] Suppressed lower-authority takeover (epoch: ${incomingEpoch} vs local ${localEpoch}, deviceId: ${incomingDeviceId} vs ${localDeviceId})`
+            log.warn(
+              `Suppressed lower-authority takeover (epoch: ${incomingEpoch} vs local ${localEpoch}, deviceId: ${incomingDeviceId} vs ${localDeviceId})`
             )
             signaling?.send({
               type: 'host_hello',
@@ -1083,7 +1088,7 @@ export function createWebRtcService(callbacks: WebRtcCallbacks): WebRtcService {
   async function reconnectNow(): Promise<boolean> {
     isExplicitlyClosed = false
     if (!isHostMode && sas.clientSasState === 'REJECTED') {
-      console.warn('[WebRTC Reconnect] Circuit breaker active: SAS verification was rejected. Suppressing automatic reconnection.')
+      log.warn('Circuit breaker active: SAS verification was rejected. Suppressing automatic reconnection.')
       return false
     }
     if (isHostMode) {

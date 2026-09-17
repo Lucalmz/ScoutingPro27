@@ -3,6 +3,9 @@ import { encryptSignalingData } from '@/utils/crypto'
 import { STUN_SERVERS, isIpv6Address, optimizeCandidatePriority, optimizeSdpCandidates, classifyCandidatePair } from './connectivity'
 import type { SignalingChannel } from './signaling'
 import type { WebRtcCallbacks } from './types'
+import { createLogger } from '@/utils/logger'
+
+const log = createLogger('WebRTC:Peer')
 
 export interface PeerConnectionFactoryOptions {
   getSignaling: () => SignalingChannel | null
@@ -79,16 +82,18 @@ export class PeerConnectionManager {
           remoteAddress: remoteIp || 'unknown',
           protocol,
           rttMs,
-          securityFingerprint: fingerprint || undefined
+          securityFingerprint: fingerprint || undefined,
+          selectedCandidatePair: `${localIp || 'unknown'} (${localType || 'unknown'}) <-> ${remoteIp || 'unknown'} (${remoteType || 'unknown'}) [${protocol}]`
         }
         this.currentTransportInfo = info
-        console.log(
-          `[WebRTC] Active Transport: ${info.type} (${info.protocol}, RTT: ${info.rttMs}ms, SAS: ${info.securityFingerprint}) Local: ${info.localAddress}(${info.localCandidateType}) <-> Remote: ${info.remoteAddress}(${info.remoteCandidateType})`
+        log.info(
+          `Active Transport: ${info.type} (${info.protocol}, RTT: ${info.rttMs}ms, SAS: ${info.securityFingerprint}) ${info.localAddress}(${info.localCandidateType}) <-> ${info.remoteAddress}(${info.remoteCandidateType})`,
+          info
         )
         this.options.callbacks.onTransportInfoChanged?.(info)
       }
     } catch (e) {
-      console.warn('[WebRTC] Failed to inspect stats for transport info:', e)
+      log.warn('Failed to inspect stats for transport info:', e)
     }
   }
 
@@ -117,6 +122,7 @@ export class PeerConnectionManager {
       ...STUN_SERVERS,
       iceTransportPolicy: forceRelay ? 'relay' : 'all'
     }
+    log.info(`Creating RTCPeerConnection (isHost: ${isHost}, targetSender: ${targetSender || 'default'}, forceRelay: ${forceRelay}, icePolicy: ${config.iceTransportPolicy})`)
     const peer = new RTCPeerConnection(config)
 
     peer.onicecandidate = async (ev) => {
@@ -132,10 +138,11 @@ export class PeerConnectionManager {
         if (candObj.candidate) {
           candObj.candidate = optimizeCandidatePriority(candObj.candidate)
         }
-        console.log(
-          `[WebRTC] ICE Candidate: type=${ev.candidate.type}, protocol=${ev.candidate.protocol}, address=${ev.candidate.address}, isIPv6=${isIpv6Address(
+        log.info(
+          `Generated ICE Candidate: type=${ev.candidate.type}, protocol=${ev.candidate.protocol}, address=${ev.candidate.address}, isIPv6=${isIpv6Address(
             ev.candidate.address || ''
-          )}`
+          )}`,
+          { candidate: candObj.candidate }
         )
         const signaling = this.options.getSignaling()
         if (signaling) {
@@ -154,12 +161,12 @@ export class PeerConnectionManager {
               }
             }
           } catch (err) {
-            console.warn('[WebRTC] Failed to encrypt candidate, sending plaintext fallback:', err)
+            log.warn('Failed to encrypt candidate, sending plaintext fallback:', err)
           }
           signaling.send({ candidate: candPayload }, target)
         }
       } else {
-        console.log(`[WebRTC] ICE Gathering Complete (null candidate)`)
+        log.info(`ICE Gathering Complete (null candidate received)`)
       }
     }
 
@@ -185,7 +192,7 @@ export class PeerConnectionManager {
     }
 
     peer.onconnectionstatechange = () => {
-      console.log(`[WebRTC] Connection state changed: ${peer.connectionState}`)
+      log.info(`PeerConnection state changed: ${peer.connectionState} (targetSender: ${targetSender || 'host'})`)
       if (['disconnected', 'failed', 'closed'].includes(peer.connectionState)) {
         if (iceTimeout) {
           clearTimeout(iceTimeout)
@@ -240,15 +247,15 @@ export class PeerConnectionManager {
     }
 
     peer.oniceconnectionstatechange = async () => {
-      console.log(`[WebRTC] ICE Connection state: ${peer.iceConnectionState}`)
+      log.info(`ICE Connection state changed: ${peer.iceConnectionState} (targetSender: ${targetSender || 'host'})`)
 
       if (peer.iceConnectionState === 'checking') {
         if (!checkingWatchdog) {
           checkingWatchdog = setTimeout(() => {
             checkingWatchdog = null
             if (peer.iceConnectionState === 'checking') {
-              console.warn(
-                '[WebRTC Watchdog] ICE check taking longer than 3500ms (possible IPv6 blackhole / middlebox UDP drop).'
+              log.warn(
+                '[Watchdog] ICE check taking longer than 3500ms (possible IPv6 blackhole / middlebox UDP drop).'
               )
               callbacks.onIceStalled?.(true)
             }
@@ -272,8 +279,8 @@ export class PeerConnectionManager {
                 } else {
                   this.clientIceRestartAttempts = nextAttempts
                 }
-                console.warn(
-                  `[WebRTC Watchdog] ICE checking stalled at 5500ms. Triggering restartIce (Attempt ${nextAttempts}/2)`
+                log.warn(
+                  `[Watchdog] ICE checking stalled at 5500ms. Triggering restartIce (Attempt ${nextAttempts}/2, target: ${targetSender || 'host'})`
                 )
                 try {
                   if (typeof (peer as any).restartIce === 'function') {
@@ -304,15 +311,15 @@ export class PeerConnectionManager {
                     }
                   }
                 } catch (restartErr) {
-                  console.warn('[WebRTC Watchdog] Failed to restart ICE:', restartErr)
+                  log.error('[Watchdog] Failed to restart ICE:', restartErr)
                 }
                 // 递归重试调度：若网络持续停滞在 checking，确保自动调度下一轮检查直至达到上限
                 if (peer.iceConnectionState === 'checking') {
                   scheduleStallRestart()
                 }
               } else {
-                console.warn(
-                  '[WebRTC Watchdog] Max restartIce attempts (2) exceeded. Actively triggering relay-only fallback with iceTransportPolicy: "relay".'
+                log.warn(
+                  '[Watchdog] Max restartIce attempts (2) exceeded. Actively triggering relay-only fallback with iceTransportPolicy: "relay".'
                 )
                 callbacks.onIceStalled?.(true)
                 if (checkingWatchdog) {
