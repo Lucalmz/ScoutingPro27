@@ -11,6 +11,7 @@
     "build:pwa": "vite build --outDir dist-pwa",
     "type-check": "vue-tsc --build",
     "test": "vitest run",
+    "purge:diagnostics": "node scripts/purge-diagnostics.mjs",
     "test:e2e": "node e2e/multi-client.test.js",
     "test:e2e:ui": "cross-env SHOW_UI=1 node e2e/multi-client.test.js",
     "test:e2e:motion": "node e2e/motion-and-sheet.e2e.js",

@@ -3,6 +3,7 @@ import { ref, computed } from 'vue'
 import type { ConnectionStatus, ScoutingRecord, ConnectionTransportInfo } from '@/types'
 import type { WebRtcService } from '@/services/webrtc'
 import { probePublicConnectivity } from '@/services/webrtc'
+import { ENABLE_DIAGNOSTICS } from '@/config/features'
 
 export const useConnectionStore = defineStore('connection', () => {
   const status = ref<ConnectionStatus>('offline')
@@ -29,14 +30,23 @@ export const useConnectionStore = defineStore('connection', () => {
 
   const pendingSasQueue = ref<PendingSasItem[]>([])
   const isSasModalOpen = ref(false)
+  const isDiagnosticsEnabled = ref(ENABLE_DIAGNOSTICS)
   const isDiagnosticsModalOpen = ref(false)
 
   function openDiagnosticsModal() {
+    if (!isDiagnosticsEnabled.value) return
     isDiagnosticsModalOpen.value = true
   }
 
   function closeDiagnosticsModal() {
     isDiagnosticsModalOpen.value = false
+  }
+
+  function setDiagnosticsEnabled(val: boolean) {
+    isDiagnosticsEnabled.value = val
+    if (!val) {
+      isDiagnosticsModalOpen.value = false
+    }
   }
 
   const pendingSas = computed<PendingSasItem | null>({
@@ -317,9 +327,11 @@ export const useConnectionStore = defineStore('connection', () => {
     isSasModalOpen,
     openSasModal,
     closeSasModal,
+    isDiagnosticsEnabled,
     isDiagnosticsModalOpen,
     openDiagnosticsModal,
     closeDiagnosticsModal,
+    setDiagnosticsEnabled,
     isConnected,
     isOffline,
     isLongOffline,

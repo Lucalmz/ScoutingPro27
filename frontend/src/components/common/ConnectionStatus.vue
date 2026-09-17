@@ -130,8 +130,9 @@ const transportTooltip = computed(() => {
       <span>{{ t('connection.sas_pending_badge', { count: conn.pendingSasQueue.length }) }}</span>
     </button>
 
-    <!-- Diagnostics Button -->
+    <!-- Diagnostics Button (Feature-Flagged) -->
     <button
+      v-if="conn.isDiagnosticsEnabled"
       type="button"
       class="diagnostics-btn"
       :title="t('connection.diagnostics_tooltip', '查看实时 WebRTC 链路与信令诊断日志')"

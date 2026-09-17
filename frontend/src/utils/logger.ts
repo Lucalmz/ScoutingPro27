@@ -1,4 +1,5 @@
 import { ref } from 'vue'
+import { ENABLE_DIAGNOSTICS } from '@/config/features'
 
 export type LogLevel = 'debug' | 'info' | 'warn' | 'error'
 
@@ -63,21 +64,24 @@ function safeClone(obj: any): any {
 
 export function addLogEntry(level: LogLevel, tag: string, message: string, details?: any): LogEntry {
   const now = new Date()
-  const cloned = safeClone(details)
-  const entry: LogEntry = {
+  let entry: LogEntry = {
     id: ++logCounter,
     time: formatTime(now),
     isoTime: now.toISOString(),
     level,
     tag,
-    message,
-    details: cloned,
-    data: cloned
+    message
   }
 
-  diagnosticLogs.value.push(entry)
-  if (diagnosticLogs.value.length > MAX_LOG_ENTRIES) {
-    diagnosticLogs.value.splice(0, diagnosticLogs.value.length - MAX_LOG_ENTRIES)
+  if (ENABLE_DIAGNOSTICS) {
+    const cloned = safeClone(details)
+    entry.details = cloned
+    entry.data = cloned
+
+    diagnosticLogs.value.push(entry)
+    if (diagnosticLogs.value.length > MAX_LOG_ENTRIES) {
+      diagnosticLogs.value.splice(0, diagnosticLogs.value.length - MAX_LOG_ENTRIES)
+    }
   }
 
   // Console output formatting with colors (DevTools in browser) or clean output (Node / Tests)

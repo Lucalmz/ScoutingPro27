@@ -127,8 +127,9 @@ function openDiagnostics() {
               </button>
             </div>
 
-            <!-- Diagnostics in HUD -->
+            <!-- Diagnostics in HUD (Feature-Flagged) -->
             <button
+              v-if="connStore.isDiagnosticsEnabled"
               type="button"
               class="btn-hud-diagnostics"
               @click="openDiagnostics"

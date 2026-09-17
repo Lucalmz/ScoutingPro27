@@ -1,11 +1,15 @@
 <script setup lang="ts">
-import { watch } from 'vue'
+import { watch, defineAsyncComponent } from 'vue'
 import ToastProvider from '@/components/ToastProvider.vue'
 import ConfirmModal from '@/components/common/ConfirmModal.vue'
 import InboxWidget from '@/components/common/InboxWidget.vue'
-import ConnectionDiagnosticsModal from '@/components/common/ConnectionDiagnosticsModal.vue'
+import { ENABLE_DIAGNOSTICS } from '@/config/features'
 import { useInboxStore } from '@/stores/inbox'
 import { useToastStore } from '@/stores/toast'
+
+const ConnectionDiagnosticsModal = ENABLE_DIAGNOSTICS
+  ? defineAsyncComponent(() => import('@/components/common/ConnectionDiagnosticsModal.vue'))
+  : null
 
 const inboxStore = useInboxStore()
 const toastStore = useToastStore()
@@ -25,7 +29,7 @@ watch(() => inboxStore.messages.length, (newLen, oldLen) => {
 <template>
   <ToastProvider />
   <ConfirmModal />
-  <ConnectionDiagnosticsModal />
+  <component :is="ConnectionDiagnosticsModal" v-if="ENABLE_DIAGNOSTICS && ConnectionDiagnosticsModal" />
   <div class="router-view-container">
     <router-view v-slot="{ Component, route }">
       <transition 
