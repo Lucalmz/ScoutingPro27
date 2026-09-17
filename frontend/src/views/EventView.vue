@@ -83,14 +83,14 @@ const headerRef = ref<HTMLElement | null>(null)
 const tabBarRef = ref<HTMLElement | null>(null)
 const contentRef = ref<HTMLElement | null>(null)
 
-const eventId = computed(() => eventStore.currentEvent?.id || (route.params.eventId as string) || '')
+const eventId = computed(() => (route.params.eventId as string) || '')
 
 // Compute event synchronously from currentEvent or loaded events for smooth view-transitions
 const event = computed(() => {
   if (eventStore.currentEvent?.id === eventId.value) {
     return eventStore.currentEvent
   }
-  return eventStore.events.find((e) => e.id === eventId.value) || eventStore.currentEvent || null
+  return eventStore.events.find((e) => e.id === eventId.value) || null
 })
 
 const isHost = computed(() => {
@@ -227,12 +227,27 @@ onBeforeRouteLeave((to) => {
   } else {
     navigatingToTeamDetail = false
     cleanupWebRTC()
+    if (to.name !== 'team-detail') {
+      eventStore.setCurrentEvent(null)
+    }
   }
 })
 
 onBeforeRouteUpdate((to, from) => {
   if (to.params.eventId !== from.params.eventId) {
+    const isPlaceholderPromotion = Boolean(
+      eventStore.currentEvent &&
+      eventStore.currentEvent.id === to.params.eventId &&
+      typeof from.params.eventId === 'string' &&
+      eventStore.currentEvent.inviteCode &&
+      from.params.eventId.toUpperCase() === `EVT-${eventStore.currentEvent.inviteCode.toUpperCase()}`
+    )
+    if (isPlaceholderPromotion) {
+      console.log('[EventView] Skipping WebRTC cleanup during placeholder promotion')
+      return
+    }
     cleanupWebRTC()
+    eventStore.setCurrentEvent(null)
   }
 })
 
@@ -245,6 +260,7 @@ function handleEditRecord(record: any) {
 
 async function goBack() {
   cleanupWebRTC()
+  eventStore.setCurrentEvent(null)
   if (event.value) {
     transitionState.startSharedTransition(`event-card-${event.value.id}`)
   }
@@ -315,6 +331,14 @@ async function handleTakeoverHost() {
           <div class="event-meta-row" v-if="event">
             <span class="event-code">
               {{ t('event.code') }}: <strong>{{ event.inviteCode }}</strong>
+              <button
+                type="button"
+                class="btn-inline-qr"
+                @click="showMobileQrModal = true"
+                :title="t('event.mobile_qr_title')"
+              >
+                <span class="material-icons" style="font-size: 15px; vertical-align: middle;">qr_code_2</span>
+              </button>
               - {{ eventStore.isHost ? t('event.host') : t('event.client') }}
             </span>
             <span v-if="event.ftcEventCode" class="badge-ftc-bound" :title="t('event.ftc_bound_desc', { count: recordStore.officialMatches.length })">
@@ -386,9 +410,9 @@ async function handleTakeoverHost() {
           {{ t('event.standby_banner_desc') }}
         </span>
       </div>
-      <button class="btn-takeover-host" @click="handleTakeoverHost">
+      <button class="btn-takeover-host" :disabled="connStore.isTakingOver" @click="handleTakeoverHost">
         <span class="material-icons" style="font-size: 16px; margin-right: 4px;">offline_bolt</span>
-        {{ t('event.takeover_as_host') }}
+        {{ connStore.isTakingOver ? t('event.taking_over') : t('event.takeover_as_host') }}
       </button>
     </div>
 
@@ -469,7 +493,7 @@ async function handleTakeoverHost() {
     <RenameModal v-model:visible="showRenameModal" :event-id="event?.id" />
     <OfflineSyncModal v-model:visible="showOfflineSyncModal" :event-id="event?.id" />
     <MobileQrModal
-      v-if="isHost && event"
+      v-if="event"
       v-model="showMobileQrModal"
       :invite-code="event.inviteCode"
     />

@@ -11,7 +11,7 @@ import { usePitScoutStore } from '@/stores/pitScout'
 import { useCustomFieldsStore } from '@/stores/customFields'
 import { createWebRtcService, type WebRtcCallbacks } from '@/services/webrtc'
 import { syncRecords, syncPitRecordsBatch, savePitRecord } from '@/services/api'
-import { flushOfflinePhotos } from '@/services/photoStorage'
+import { flushOfflinePhotos, isDesktopHost } from '@/services/photoStorage'
 import type { ScoutingRecord, ScoutingEvent } from '@/types'
 
 export interface EventWebRtcBridgeOptions {
@@ -42,6 +42,8 @@ export function useEventWebRtcBridge({
   const lastHostSeqKey = computed(() => `sp27_lastHostSeq_${eventId.value}`)
   const lastHostSeq = ref<number>(0)
   watch(lastHostSeq, (v) => localStorage.setItem(lastHostSeqKey.value, String(v)))
+  const lastConnectedHostSessionId = ref<string>('')
+  const wasActiveHostBeforeDemotion = ref<boolean>(false)
 
   function advanceLastHostSeq(incomingRecords: ScoutingRecord[]) {
     const validSeqs = incomingRecords
@@ -76,7 +78,7 @@ export function useEventWebRtcBridge({
       router.replace('/')
       return
     }
-    const evt = eventStore.currentEvent
+    const evt = event.value || eventStore.currentEvent
     if (!evt) return
 
     const rtcCallbacks: WebRtcCallbacks = {
@@ -281,25 +283,44 @@ export function useEventWebRtcBridge({
       },
 
       onEventMetadataReceived: async (eventMeta: ScoutingEvent) => {
+        if (!eventMeta || !eventMeta.id) {
+          console.warn('[EventView] Received invalid empty event metadata:', eventMeta)
+          return
+        }
         let actualEvent = eventMeta
         try {
           const { syncExternalEvent } = await import('@/services/api')
           const synced = await syncExternalEvent(eventMeta)
-          if (synced) {
+          if (synced && typeof synced === 'object' && !Array.isArray(synced) && synced.id) {
             actualEvent = synced
           }
         } catch (e) {
           console.warn('[EventView] Failed to sync external event metadata:', e)
         }
-        eventStore.currentEvent = actualEvent
-        if (!eventStore.events.some((e) => e.id === actualEvent.id)) {
-          eventStore.events.push(actualEvent)
+
+        const currentRouteEventId = router.currentRoute.value.params.eventId as string
+        const isEphemeralPlaceholder = Boolean(
+          !isDesktopHost() &&
+          currentRouteEventId &&
+          actualEvent.inviteCode &&
+          currentRouteEventId.toUpperCase() === `EVT-${actualEvent.inviteCode.toUpperCase()}`
+        )
+
+        if (isEphemeralPlaceholder && currentRouteEventId) {
+          eventStore.migratePlaceholder(currentRouteEventId, actualEvent)
+        } else {
+          eventStore.setCurrentEvent(actualEvent)
+          const existingIdx = eventStore.events.findIndex((e) => e.id === actualEvent.id)
+          if (existingIdx >= 0) {
+            eventStore.events[existingIdx] = actualEvent
+          } else {
+            eventStore.events.push(actualEvent)
+          }
         }
 
-        // 核心修复 Bug 2：若当前路由或本地使用的还是临时事件 ID (如 evt-CODE)，自动升迁至真实 UUID
-        const currentRouteEventId = router.currentRoute.value.params.eventId as string
-        if (actualEvent.id && currentRouteEventId && actualEvent.id !== currentRouteEventId) {
-          console.log(`[EventView] Migrating temporary event ID "${currentRouteEventId}" to authoritative UUID "${actualEvent.id}"`)
+        // 核心修复 Bug 2：仅当手机端以临时占位 ID (如 evt-INVITECODE) 访问且收到了 Host 下发的权威元数据时，才升迁临时 ID
+        if (actualEvent.id && isEphemeralPlaceholder && actualEvent.id !== currentRouteEventId) {
+          console.log(`[EventView] Migrating temporary mobile event ID "${currentRouteEventId}" to authoritative UUID "${actualEvent.id}"`)
           recordStore.migrateEventId(currentRouteEventId, actualEvent.id)
           pitStore.migrateEventId(currentRouteEventId, actualEvent.id)
           scheduleStore.migrateEventId(currentRouteEventId, actualEvent.id)
@@ -344,16 +365,56 @@ export function useEventWebRtcBridge({
 
       onHostPromoted: () => {
         connStore.setStandbyHost(false)
+        wasActiveHostBeforeDemotion.value = false
         const dbMaxSeq = recordStore.records
           .filter((r) => r.eventId === eventId.value)
           .reduce((m, r) => Math.max(m, r.hostSeq || 0), 0)
         connStore.initHostSeq(Math.max(dbMaxSeq, lastHostSeq.value))
+
+        // 升迁为主机后，主动向所有 Peer 广播最新排班、标签与自定义字段基准包
+        if (connStore.rtcService && eventStore.currentEvent?.id) {
+          const evId = eventStore.currentEvent.id
+          connStore.rtcService.sendMessage({
+            type: 'SCHEDULE_FULL_SYNC',
+            schedules: scheduleStore.schedules,
+            assignments: Object.values(scheduleStore.assignments)
+          })
+          connStore.rtcService.sendTagsFullSync(recordStore.teamTags, evId)
+          connStore.rtcService.sendMessage({
+            type: 'CUSTOM_FIELDS_FULL_SYNC',
+            eventId: evId,
+            fields: customFieldsStore.getFields(evId)
+          })
+        }
         toastStore.showToast(t('event.host_activated'), 'success')
       },
 
       onHostDemoted: (info?: { hostSessionId: string; hostDeviceId?: string }) => {
         connStore.setStandbyHost(true, info)
+        wasActiveHostBeforeDemotion.value = true
         toastStore.showToast(t('event.demoted_to_standby'), 'warning')
+      },
+
+      onHostHandoffReceived: async (batch) => {
+        console.log(`[EventView] Processing onHostHandoffReceived: ${batch.records?.length || 0} records`)
+        if (Array.isArray(batch.schedules) && Array.isArray(batch.assignments)) {
+          scheduleStore.applyScheduleFullSync(batch.schedules, batch.assignments)
+        }
+        if (Array.isArray(batch.pitRecords)) {
+          pitStore.applyFullSync(batch.pitRecords)
+        }
+        if (Array.isArray(batch.teamTags) && batch.eventId) {
+          recordStore.applyTagsFullSync(batch.teamTags)
+        }
+        if (Array.isArray(batch.customFields) && batch.eventId) {
+          customFieldsStore.applyFullSync(batch.eventId, batch.customFields)
+        }
+        toastStore.showToast(t('event.handoff_received_toast'), 'success')
+        return batch.records?.length || 0
+      },
+
+      onHostHandoffAck: (ack) => {
+        console.log('[EventView] Host handoff acknowledged by active host:', ack)
       },
 
       onActiveHostLeft: () => {
@@ -396,7 +457,12 @@ export function useEventWebRtcBridge({
     }
 
     try {
-      if (eventStore.isHost) {
+      const shouldHost = Boolean(
+        eventStore.isHost ||
+        (isDesktopHost() && evt.hostId === userStore.userId) ||
+        (connStore.rtcService && typeof connStore.rtcService.isHostMode === 'function' && connStore.rtcService.isHostMode())
+      )
+      if (shouldHost) {
         await rtc.host(evt.inviteCode, evt, userStore.username, userStore.userId)
       } else {
         await rtc.join(evt.inviteCode, userStore.username, userStore.userId)
@@ -418,19 +484,60 @@ export function useEventWebRtcBridge({
           inboxStore.flushOutbox(connStore.rtcService)
         }
 
+        if (connStore.isStandbyHost && wasActiveHostBeforeDemotion.value) {
+          // 旧主控降级后连通新主控：主动触发全量资产交接 (HOST_HANDOFF_BATCH)
+          console.log('[EventView] Standby host reconnected to new host, initiating HOST_HANDOFF_BATCH...')
+          const eventRecords = recordStore.records.filter((r) => r.eventId === evt.id)
+          const maxDbSeq = eventRecords.reduce((m, r) => Math.max(m, r.hostSeq || 0), 0)
+          const curCounter = connStore.rtcService?.getHostSeqCounter?.() || 0
+          const outgoingMaxSeq = Math.max(maxDbSeq, curCounter, lastHostSeq.value)
+
+          connStore.rtcService?.sendHostHandoffBatch({
+            eventId: evt.id,
+            incomingMaxSeq: outgoingMaxSeq,
+            hostEpoch: 0,
+            records: eventRecords,
+            schedules: scheduleStore.schedules,
+            assignments: Object.values(scheduleStore.assignments),
+            pitRecords: pitStore.records.filter((r) => r.eventId === evt.id),
+            teamTags: recordStore.teamTags.filter((t) => t.eventId === evt.id),
+            customFields: customFieldsStore.getFields(evt.id),
+            senderUserId: userStore.userId
+          })
+          wasActiveHostBeforeDemotion.value = false
+          toastStore.showToast(t('event.handoff_sent_toast'), 'info')
+        }
+
         if (!eventStore.isHost) {
-          // Client 连接／重连：用 lastHostSeq 做增量请求（=0 时全量）
+          const curHostSessionId =
+            connStore.rtcService?.getCurrentHostSessionId?.() ||
+            connStore.standbyHostInfo?.hostSessionId ||
+            ''
+          const isHostTakeover = Boolean(
+            lastConnectedHostSessionId.value &&
+              curHostSessionId &&
+              curHostSessionId !== lastConnectedHostSessionId.value
+          )
+          if (curHostSessionId) {
+            lastConnectedHostSessionId.value = curHostSessionId
+          }
+
+          // Client 连接／重连：若为主机接管则以 sinceVersion=0 全量对齐最新基线；否则按 lastHostSeq 增量对齐
           connStore.requestSync(
-            lastHostSeq.value,
+            isHostTakeover ? 0 : lastHostSeq.value,
             undefined,
             userStore.userId,
             userStore.username,
-            userStore.token
+            userStore.token,
+            { isHostTakeover, clientMaxSeq: lastHostSeq.value }
           )
 
-          // 只推送本地尚未同步到 Host 的记录（严禁排除 isDeleted 墓碑，确保离线删除能同步到 Host）
+          // 核心自愈：若发生主机切换，即使此前已标记为 SYNCED 也重推属于自己的记录，确保新主机不漏历史打分；常规重连只推 PENDING
           const myRecs = recordStore.records.filter(
-            (r) => r.eventId === evt.id && r.scoutId === userStore.userId && r.syncStatus === 'PENDING'
+            (r) =>
+              r.eventId === evt.id &&
+              r.scoutId === userStore.userId &&
+              (isHostTakeover || r.syncStatus === 'PENDING')
           )
           if (myRecs.length > 0) {
             connStore.pushRecords(myRecs)
@@ -474,6 +581,8 @@ export function useEventWebRtcBridge({
     connStore.setRtcService(null)
     connStore.clearConnectedScouts()
     connStore.setStandbyHost(false)
+    wasActiveHostBeforeDemotion.value = false
+    lastConnectedHostSessionId.value = ''
     connStore.setStatus('offline')
   }
 

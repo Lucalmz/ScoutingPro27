@@ -49,6 +49,12 @@ export const useConnectionStore = defineStore('connection', () => {
   })
   const isStandbyHost = ref(false)
   const standbyHostInfo = ref<{ hostSessionId: string; hostDeviceId?: string } | null>(null)
+  const isTakingOver = ref(false)
+  const lastTakeoverTime = ref(0)
+  const takeoverCooldownRemaining = computed(() => {
+    const elapsed = Date.now() - lastTakeoverTime.value
+    return Math.max(0, Math.ceil((3000 - elapsed) / 1000))
+  })
 
   const isConnected = computed(() => status.value === 'connected')
   const isOffline = computed(() => status.value === 'offline')
@@ -90,10 +96,23 @@ export const useConnectionStore = defineStore('connection', () => {
   }
 
   async function takeoverHost() {
-    if (rtcService.value) {
-      await rtcService.value.takeoverHost()
-      isStandbyHost.value = false
-      standbyHostInfo.value = null
+    const now = Date.now()
+    if (isTakingOver.value || now - lastTakeoverTime.value < 3000) {
+      console.warn('[ConnectionStore] Takeover throttled by mutex/cooldown')
+      return
+    }
+    isTakingOver.value = true
+    lastTakeoverTime.value = now
+    try {
+      if (rtcService.value) {
+        await rtcService.value.takeoverHost()
+        isStandbyHost.value = false
+        standbyHostInfo.value = null
+      }
+    } finally {
+      setTimeout(() => {
+        isTakingOver.value = false
+      }, 3000)
     }
   }
 
@@ -174,8 +193,15 @@ export const useConnectionStore = defineStore('connection', () => {
     }
   }
 
-  function requestSync(sinceVersion: number, authCode?: string, senderUserId?: string, senderUserName?: string, token?: string) {
-    rtcService.value?.requestSync(sinceVersion, authCode, senderUserId, senderUserName, token)
+  function requestSync(
+    sinceVersion: number,
+    authCode?: string,
+    senderUserId?: string,
+    senderUserName?: string,
+    token?: string,
+    options?: { isHostTakeover?: boolean; clientMaxSeq?: number }
+  ) {
+    rtcService.value?.requestSync(sinceVersion, authCode, senderUserId, senderUserName, token, options)
   }
 
   /** Host：对记录数组打 hostSeq（本地写入前调用） */
@@ -315,5 +341,7 @@ export const useConnectionStore = defineStore('connection', () => {
     standbyHostInfo,
     setStandbyHost,
     takeoverHost,
+    isTakingOver,
+    takeoverCooldownRemaining,
   }
 })

@@ -220,6 +220,53 @@ h2 {
 .event-meta {
   font-size: 13px;
   color: var(--muted-foreground);
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 2px;
+}
+
+.btn-card-qr {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  background: rgba(255, 255, 255, 0.08);
+  border: 1px solid rgba(255, 255, 255, 0.15);
+  border-radius: 4px;
+  color: var(--primary, #39ff14);
+  padding: 1px 4px;
+  margin: 0 4px;
+  cursor: pointer;
+  transition: all 0.2s ease;
+  line-height: 1;
+}
+
+.btn-card-qr:hover {
+  background: rgba(57, 255, 20, 0.2);
+  border-color: var(--primary, #39ff14);
+  transform: scale(1.08);
+}
+
+.btn-card-delete {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  background: rgba(255, 255, 255, 0.08);
+  border: 1px solid rgba(255, 255, 255, 0.15);
+  border-radius: 4px;
+  color: var(--muted-foreground);
+  padding: 1px 4px;
+  margin: 0 4px;
+  cursor: pointer;
+  transition: all 0.2s ease;
+  line-height: 1;
+}
+
+.btn-card-delete:hover {
+  background: rgba(239, 68, 68, 0.2);
+  border-color: #ef4444;
+  color: #ef4444;
+  transform: scale(1.08);
 }
 
 .event-card:hover .event-arrow {
@@ -391,6 +438,12 @@ h2 {
 }
 
 @media (max-width: 480px) {
+  .btn-card-qr,
+  .btn-card-delete {
+    padding: 3px 6px;
+    min-height: 26px;
+    min-width: 26px;
+  }
   .user-tag-btn {
     margin-right: 6px;
     padding: 6px 8px;

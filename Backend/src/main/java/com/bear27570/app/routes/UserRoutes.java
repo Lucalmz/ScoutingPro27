@@ -260,19 +260,17 @@ public class UserRoutes {
                     synchronized (DbUtil.RECORD_WRITE_LOCK) {
                         return jdbi.inTransaction(handle -> {
                             UserDao dao = handle.attach(UserDao.class);
-                            User sourceUser = dao.findById(sourceId);
-                            if (sourceUser == null) {
-                                throw new NotFoundResponse("Source user not found");
-                            }
                             User target = dao.findRegisteredByUsername(targetUsername.trim());
                             if (target == null) {
                                 throw new NotFoundResponse("Target user not found");
                             }
-                            if (target.getId().equals(sourceId)) {
-                                throw new BadRequestResponse("Cannot merge user into itself");
-                            }
-                            if (target.getPassword() == null || target.getPassword().isBlank() || !BCrypt.checkpw(targetPassword, target.getPassword())) {
+                            String cleanTargetPwd = targetPassword.trim();
+                            if (target.getPassword() == null || target.getPassword().isBlank() || !BCrypt.checkpw(cleanTargetPwd, target.getPassword())) {
                                 throw new UnauthorizedResponse("Invalid target account password");
+                            }
+                            if (target.getId().equals(sourceId)) {
+                                // Already target user and password is verified! Return target user directly.
+                                return target;
                             }
 
                             // Perform atomic cascade migration from sourceId to target.getId()

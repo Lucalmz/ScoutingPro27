@@ -81,15 +81,24 @@ function handleStaticHostFallback<T>(method: string, path: string, body?: unknow
     }
     return Promise.resolve(pwaEvt as unknown as T)
   }
+  // 6b. External sync event -> return authoritative event object passed in body
+  if (path.startsWith('/events/external-sync')) {
+    const b = (body || {}) as ScoutingEvent
+    return Promise.resolve(b as unknown as T)
+  }
   // 7. Create event
   if (path.startsWith('/events') && method === 'POST') {
-    const b = (body || {}) as { name: string }
+    const b = (body || {}) as { name?: string }
     const code = 'SP' + Math.random().toString(36).slice(2, 6).toUpperCase()
     const pwaEvt: CreateEventResponse = {
       id: 'evt-' + code,
       inviteCode: code
     }
     return Promise.resolve(pwaEvt as unknown as T)
+  }
+  // 7b. Delete event
+  if (path.startsWith('/events/') && method === 'DELETE') {
+    return Promise.resolve(undefined as unknown as T)
   }
   // 8. Records
   if (path.startsWith('/records/batch')) {
@@ -281,6 +290,10 @@ export function createEvent(body: { name: string }): Promise<CreateEventResponse
 
 export function joinEvent(inviteCode: string): Promise<ScoutingEvent> {
   return request<ScoutingEvent>('POST', '/events/join', { inviteCode })
+}
+
+export function deleteEvent(eventId: string): Promise<void> {
+  return request<void>('DELETE', `/events/${encodeURIComponent(eventId)}`)
 }
 
 export interface EventMemberItem {

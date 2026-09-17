@@ -55,6 +55,8 @@ export type WebRtcCallbacks = {
   onHostPromoted?: () => void
   onHostDemoted?: (info?: { hostSessionId: string; hostDeviceId?: string }) => void
   onActiveHostLeft?: () => void
+  onHostHandoffReceived?: (batch: import('@/types').WebRtcHostHandoffBatch) => Promise<number>
+  onHostHandoffAck?: (ack: import('@/types').WebRtcHostHandoffAck) => void
 }
 
 export interface ClientEntry {
@@ -76,11 +78,22 @@ export interface WebRtcService {
   host: (inviteCode: string, eventMetadata?: ScoutingEvent, username?: string, userId?: string) => Promise<void>
   setEventMetadata: (meta: ScoutingEvent) => void
   join: (inviteCode: string, username?: string, userId?: string) => Promise<void>
-  requestSync: (sinceVersion?: number, authCode?: string, senderUserId?: string, senderUserName?: string, token?: string) => void
+  requestSync: (
+    sinceVersion?: number,
+    authCode?: string,
+    senderUserId?: string,
+    senderUserName?: string,
+    token?: string,
+    options?: { isHostTakeover?: boolean; clientMaxSeq?: number }
+  ) => void
   pushRecords: (records: ScoutingRecord[], targetId?: string) => Promise<void>
   ackRecords: (recordIds: string[], targetId?: string, stampedRecords?: ScoutingRecord[], rejectedRecordIds?: string[]) => Promise<void>
   sendMessage: (msg: WebRtcMessage, targetId?: string) => Promise<void>
   sendDirectMessage: (msg: WebRtcDirectMessage) => Promise<boolean>
+  sendHostHandoffBatch: (payload: Omit<import('@/types').WebRtcHostHandoffBatch, 'type'>, targetId?: string) => Promise<void>
+  sendHostHandoffAck: (ack: Omit<import('@/types').WebRtcHostHandoffAck, 'type'>, targetId?: string) => Promise<void>
+  getHostSeqCounter: () => number
+  getCurrentHostSessionId: () => string
   broadcastTagUpdate: (tag: TeamTagItem, action: 'ADD' | 'REMOVE', targetId?: string) => Promise<void>
   sendTagsFullSync: (tags: TeamTagItem[], eventId: string, targetId?: string) => Promise<void>
   requestTagsSync: (eventId: string, targetId?: string) => Promise<void>

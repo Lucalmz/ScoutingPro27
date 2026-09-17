@@ -213,6 +213,8 @@ export type WebRtcMessage =
   | WebRtcPitPhotoAck
   | WebRtcMergeAccountRequest
   | WebRtcMergeAccountResponse
+  | WebRtcHostHandoffBatch
+  | WebRtcHostHandoffAck
 
 export interface WebRtcPitPhotoUpload {
   type: 'PIT_PHOTO_UPLOAD'
@@ -471,6 +473,10 @@ export interface WebRtcRequestSync {
   senderUserName?: string
   token?: string
   hostSessionId?: string
+  /** 主备切换/对齐标识 */
+  isHostTakeover?: boolean
+  /** 客户端已知的最高 hostSeq，供新主机时钟单调向前推进 */
+  clientMaxSeq?: number
 }
 
 export interface WebRtcSyncData {
@@ -490,6 +496,32 @@ export interface WebRtcAckSync {
   stampedRecords?: ScoutingRecord[]
   /** 被 Host 判定为旧版本而被拒绝的记录 ID 列表 */
   rejectedRecordIds?: string[]
+  authCode?: string
+  hostSessionId?: string
+}
+
+export interface WebRtcHostHandoffBatch {
+  type: 'HOST_HANDOFF_BATCH'
+  eventId: string
+  incomingMaxSeq: number
+  hostEpoch: number
+  records: ScoutingRecord[]
+  schedules?: MatchScheduleItem[]
+  assignments?: ScoutAssignment[]
+  pitRecords?: PitScoutingRecord[]
+  teamTags?: TeamTagItem[]
+  customFields?: CustomFieldDefinition[]
+  authCode?: string
+  senderUserId?: string
+  hostSessionId?: string
+}
+
+export interface WebRtcHostHandoffAck {
+  type: 'HOST_HANDOFF_ACK'
+  eventId: string
+  acceptedCount: number
+  alignedMaxSeq: number
+  hostEpoch: number
   authCode?: string
   hostSessionId?: string
 }

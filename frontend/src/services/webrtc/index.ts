@@ -88,6 +88,56 @@ export function createWebRtcService(callbacks: WebRtcCallbacks): WebRtcService {
   let localUserId: string | undefined = undefined
   let localUserName: string | undefined = undefined
   let hostSeqCounter = 0
+  let localEpoch = 0
+  try {
+    const savedEpoch = localStorage.getItem('scoutingpro_host_epoch')
+    if (savedEpoch) localEpoch = parseInt(savedEpoch, 10) || 0
+  } catch (_) {}
+
+  function setLocalEpoch(ep: number) {
+    localEpoch = ep
+    try {
+      localStorage.setItem('scoutingpro_host_epoch', String(ep))
+    } catch (_) {}
+  }
+
+  let inTakeoverReconciliation = false
+  let takeoverReconciliationResolvers: Array<() => void> = []
+  let takeoverReconciliationTimer: any = null
+
+  function startTakeoverReconciliation(timeoutMs = 2000) {
+    inTakeoverReconciliation = true
+    if (takeoverReconciliationTimer) clearTimeout(takeoverReconciliationTimer)
+    takeoverReconciliationTimer = setTimeout(() => {
+      finishTakeoverReconciliation('timeout')
+    }, timeoutMs)
+  }
+
+  function finishTakeoverReconciliation(reason = 'completed') {
+    if (!inTakeoverReconciliation) return
+    console.log(`[WebRTC Host] Takeover reconciliation finished (${reason})`)
+    inTakeoverReconciliation = false
+    if (takeoverReconciliationTimer) {
+      clearTimeout(takeoverReconciliationTimer)
+      takeoverReconciliationTimer = null
+    }
+    const resolvers = [...takeoverReconciliationResolvers]
+    takeoverReconciliationResolvers = []
+    for (const resolve of resolvers) {
+      try {
+        resolve()
+      } catch (e) {
+        console.error(e)
+      }
+    }
+  }
+
+  function waitForTakeoverReconciliation(): Promise<void> {
+    if (!inTakeoverReconciliation) return Promise.resolve()
+    return new Promise((resolve) => {
+      takeoverReconciliationResolvers.push(resolve)
+    })
+  }
 
   function enqueueHostTask(sender: string, task: () => Promise<void>): Promise<void> {
     const q = hostQueues.get(sender) || Promise.resolve()
@@ -209,7 +259,9 @@ export function createWebRtcService(callbacks: WebRtcCallbacks): WebRtcService {
     sendTakeoverDecision,
     sendIdentityMigration,
     initHostSeq,
-    stampHostSeq
+    stampHostSeq,
+    sendHostHandoffBatch,
+    sendHostHandoffAck
   } = dispatcher
 
   const pendingMergeRequests = new Map<
@@ -321,6 +373,9 @@ export function createWebRtcService(callbacks: WebRtcCallbacks): WebRtcService {
       }
     },
     setStatus,
+    isTakeoverReconciling: () => inTakeoverReconciliation,
+    waitForTakeoverReconciliation,
+    finishTakeoverReconciliation,
     getUsername: () => currentUsername,
     getUserId: () => currentUserId
   })
@@ -494,7 +549,8 @@ export function createWebRtcService(callbacks: WebRtcCallbacks): WebRtcService {
         hostSessionId,
         deviceId: localDeviceId,
         ecdhPublicKey: localEcdhPubHex,
-        timestamp: Date.now()
+        timestamp: Date.now(),
+        hostEpoch: localEpoch
       })
     }
     hostHeartbeatTimer = setInterval(() => {
@@ -504,7 +560,8 @@ export function createWebRtcService(callbacks: WebRtcCallbacks): WebRtcService {
           hostSessionId,
           deviceId: localDeviceId,
           ecdhPublicKey: localEcdhPubHex,
-          timestamp: Date.now()
+          timestamp: Date.now(),
+          hostEpoch: localEpoch
         })
       }
     }, 3000)
@@ -584,12 +641,15 @@ export function createWebRtcService(callbacks: WebRtcCallbacks): WebRtcService {
     console.log('[WebRTC Host] Standby device initiating takeover to become Active Host!')
     const newHostSessionId = `host-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`
     hostSessionId = newHostSessionId
+    setLocalEpoch(localEpoch + 1)
+    startTakeoverReconciliation(2000)
 
-    signaling?.send({
+    await signaling?.send({
       type: 'host_takeover',
       oldHostSessionId: activeHostSessionId,
       newHostSessionId,
-      deviceId: localDeviceId
+      deviceId: localDeviceId,
+      hostEpoch: localEpoch
     })
 
     if (clientDc) {
@@ -611,11 +671,12 @@ export function createWebRtcService(callbacks: WebRtcCallbacks): WebRtcService {
     isStandbyHostMode = false
     isHostMode = true
 
-    signaling?.send({
+    await signaling?.send({
       type: 'host_hello',
       hostSessionId: newHostSessionId,
       ecdhPublicKey: localEcdhPubHex,
-      deviceId: localDeviceId
+      deviceId: localDeviceId,
+      hostEpoch: localEpoch
     })
     startHostHeartbeat()
     callbacks.onHostPromoted?.()
@@ -631,6 +692,7 @@ export function createWebRtcService(callbacks: WebRtcCallbacks): WebRtcService {
     isProbing = true
     isExplicitlyClosed = false
     currentInviteCode = inviteCode
+    setLocalEpoch(Math.max(localEpoch, 1))
     if (username) currentUsername = username
     if (userId) currentUserId = userId
     if (eventMetadata) {
@@ -701,6 +763,9 @@ export function createWebRtcService(callbacks: WebRtcCallbacks): WebRtcService {
       }
 
       if (data.type === 'host_heartbeat' || data.type === 'host_hello') {
+        if (data.hostEpoch) {
+          setLocalEpoch(Math.max(localEpoch, Number(data.hostEpoch)))
+        }
         if (data.hostSessionId && data.hostSessionId !== hostSessionId) {
           if (data.deviceId && data.deviceId === localDeviceId) {
             return
@@ -726,7 +791,8 @@ export function createWebRtcService(callbacks: WebRtcCallbacks): WebRtcService {
                 hostSessionId,
                 deviceId: localDeviceId,
                 ecdhPublicKey: localEcdhPubHex,
-                timestamp: Date.now()
+                timestamp: Date.now(),
+                hostEpoch: localEpoch
               })
               return
             }
@@ -739,9 +805,35 @@ export function createWebRtcService(callbacks: WebRtcCallbacks): WebRtcService {
         if (data.deviceId && data.deviceId === localDeviceId) {
           return
         }
+        const hasIncomingEpoch = data.hostEpoch !== undefined && data.hostEpoch !== null
+        const incomingEpoch = Number(data.hostEpoch ?? 0)
+        const incomingDeviceId = String(data.deviceId ?? '')
+
         if (isHostMode && data.sender !== signaling?.clientId) {
-          await demoteToStandby(data.newHostSessionId, data.deviceId)
-          return
+          const incomingWins =
+            !hasIncomingEpoch ||
+            incomingEpoch > localEpoch ||
+            (incomingEpoch === localEpoch && incomingDeviceId > localDeviceId)
+
+          if (incomingWins) {
+            setLocalEpoch(Math.max(localEpoch, incomingEpoch))
+            await demoteToStandby(data.newHostSessionId, data.deviceId)
+            return
+          } else {
+            console.warn(
+              `[WebRTC Host] Suppressed lower-priority takeover (epoch: ${incomingEpoch} vs ${localEpoch}, deviceId: ${incomingDeviceId} vs ${localDeviceId})`
+            )
+            signaling?.send({
+              type: 'host_hello',
+              hostSessionId,
+              ecdhPublicKey: localEcdhPubHex,
+              deviceId: localDeviceId,
+              hostEpoch: localEpoch
+            })
+            return
+          }
+        } else {
+          setLocalEpoch(Math.max(localEpoch, incomingEpoch))
         }
       }
 
@@ -779,7 +871,7 @@ export function createWebRtcService(callbacks: WebRtcCallbacks): WebRtcService {
             isStandbyHostMode = false
             isHostMode = true
             updateHostStatus()
-            signaling!.send({ type: 'host_hello', hostSessionId, ecdhPublicKey: localEcdhPubHex, deviceId: localDeviceId })
+            signaling!.send({ type: 'host_hello', hostSessionId, ecdhPublicKey: localEcdhPubHex, deviceId: localDeviceId, hostEpoch: localEpoch })
             startHostHeartbeat()
             callbacks.onHostPromoted?.()
           }
@@ -951,6 +1043,7 @@ export function createWebRtcService(callbacks: WebRtcCallbacks): WebRtcService {
       pendingTakeovers.forEach((p) => clearTimeout(p.timeoutTimer))
       pendingTakeovers.clear()
       takeoverCooldowns.clear()
+      finishTakeoverReconciliation('closed')
     } else {
       clientSender = null
       if (clientDc) clientDc.onclose = null
@@ -996,6 +1089,10 @@ export function createWebRtcService(callbacks: WebRtcCallbacks): WebRtcService {
     sendTakeoverDecision,
     sendIdentityMigration,
     takeoverHost,
+    sendHostHandoffBatch,
+    sendHostHandoffAck,
+    getHostSeqCounter: () => hostSeqCounter,
+    getCurrentHostSessionId: () => currentHostSessionId,
     isStandbyHost: () => isStandbyHostMode,
     reconnectNow,
     disconnect,

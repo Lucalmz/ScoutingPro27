@@ -7,12 +7,14 @@ import { useEventStore } from '@/stores/events'
 import { parseEventPackage } from '@/utils/offlineSync'
 import { useToastStore } from '@/stores/toast'
 import { useInboxStore } from '@/stores/inbox'
+import { useConfirm } from '@/composables/useConfirm'
 import { isDesktopHost } from '@/services/photoStorage'
 import { useIsMobile } from '@/composables/useIsMobile'
 import { hapticLight } from '@/utils/haptics'
 import { transitionState } from '@/utils/transitionState'
 import RenameModal from '@/components/common/RenameModal.vue'
 import QrScannerModal from '@/components/common/QrScannerModal.vue'
+import MobileQrModal from '@/components/common/MobileQrModal.vue'
 
 const { t } = useI18n()
 const toastStore = useToastStore()
@@ -20,6 +22,7 @@ const router = useRouter()
 const userStore = useUserStore()
 const eventStore = useEventStore()
 const inboxStore = useInboxStore()
+const { showConfirm } = useConfirm()
 const { isMobile } = useIsMobile()
 const isMobileClient = computed(() => isMobile.value && !isDesktopHost())
 
@@ -27,12 +30,19 @@ const showCreateModal = ref(false)
 const showJoinModal = ref(false)
 const showRenameModal = ref(false)
 const showQrScannerModal = ref(false)
+const showEventQrModal = ref(false)
+const selectedQrInviteCode = ref('')
 const eventFileInputRef = ref<HTMLInputElement | null>(null)
 const newEventName = ref('')
 const inviteCode = ref('')
 const creating = ref(false)
 const joining = ref(false)
 const enteringEventId = ref<string | null>(null)
+
+function openCardQr(evt: { inviteCode: string }) {
+  selectedQrInviteCode.value = evt.inviteCode
+  showEventQrModal.value = true
+}
 
 async function handleQrScanned(code: string) {
   if (!code) return
@@ -70,10 +80,42 @@ async function onEventFileSelected(e: Event) {
   }
 }
 
+async function handleDeleteEvent(evt: { id: string; name?: string; inviteCode?: string }) {
+  const name = evt.name || evt.inviteCode || 'Event'
+  const confirmed = await showConfirm({
+    title: t('dashboard.delete_event_title') || '删除比赛',
+    message: t('dashboard.delete_event_confirm', { name }) || `确定从本地移除比赛 "${name}" 吗？`,
+    type: 'danger',
+    confirmText: t('common.delete') || '删除'
+  })
+  if (confirmed) {
+    await eventStore.deleteEvent(evt.id)
+    toastStore.showToast(t('dashboard.event_deleted_toast') || '已从本地移除比赛', 'info')
+  }
+}
+
+async function handleClearAllCache() {
+  const confirmed = await showConfirm({
+    title: t('dashboard.clear_cache_title') || '清空离线缓存',
+    message:
+      t('dashboard.clear_cache_confirm') ||
+      '此操作将清空本地保存的所有赛事、打分暂存及离线缓存。确定要清空吗？',
+    type: 'danger',
+    confirmText: t('dashboard.clear_cache_confirm_btn') || '确认清空'
+  })
+  if (confirmed) {
+    eventStore.clearAllLocalCache()
+    toastStore.showToast(t('dashboard.cache_cleared_toast') || '本地离线缓存已全部清空', 'success')
+  }
+}
+
 onMounted(async () => {
   if (!userStore.isLoggedIn) {
     router.replace('/')
     return
+  }
+  if (router.currentRoute?.value?.query?.join || router.currentRoute?.value?.query?.code) {
+    router.replace({ path: '/dashboard', query: {} })
   }
   eventStore.restoreFromCache()
   await eventStore.fetchEvents(userStore.userId)
@@ -142,6 +184,11 @@ function enterEvent(evt: { id: string }) {
   hapticLight()
   enteringEventId.value = evt.id
   transitionState.startSharedTransition(`event-card-${evt.id}`)
+
+  const fullEvt = eventStore.events.find((e) => e.id === evt.id)
+  if (fullEvt) {
+    eventStore.setCurrentEvent(fullEvt)
+  }
 
   nextTick(() => {
     // Navigate immediately after the DOM has the inline style
@@ -216,6 +263,14 @@ function handleOpenRenameModal() {
           >{{ userStore.username }}</span>
           <span class="material-icons edit-icon" style="font-size: 14px; margin-left: 4px;">edit</span>
         </button>
+        <button
+          class="topbar-btn clear-cache-btn"
+          @click="handleClearAllCache"
+          :title="t('dashboard.clear_cache_title')"
+        >
+          <span class="material-icons" style="font-size: 16px; margin-right: 4px;">cleaning_services</span>
+          <span class="topbar-btn-text">{{ t('dashboard.clear_cache_btn') }}</span>
+        </button>
         <button class="btn-logout" @click="handleLogout">{{ t('dashboard.logout') }}</button>
       </div>
     </header>
@@ -280,6 +335,22 @@ function handleOpenRenameModal() {
             <span class="event-name" :style="{ viewTransitionName: transitionState.sharedElementId === `event-card-${evt.id}` ? 'event-card-title' : 'none' }">{{ evt.name }}</span>
             <span class="event-meta">
               {{ t('event.code') }}: <strong>{{ evt.inviteCode }}</strong>
+              <button
+                type="button"
+                class="btn-card-qr"
+                @click.stop="openCardQr(evt)"
+                :title="t('dashboard.view_qr_code')"
+              >
+                <span class="material-icons" style="font-size: 15px; vertical-align: middle;">qr_code_2</span>
+              </button>
+              <button
+                type="button"
+                class="btn-card-delete"
+                @click.stop="handleDeleteEvent(evt)"
+                :title="t('dashboard.delete_event_title')"
+              >
+                <span class="material-icons" style="font-size: 15px; vertical-align: middle;">delete_outline</span>
+              </button>
               - {{ evt.hostId === userStore.userId ? t('event.host') : t('event.client') }}
               <span v-if="evt.ftcEventCode" style="margin-left: 8px; color: var(--primary); font-weight: 500;">
                 • FTC: {{ evt.ftcEventCode }}
@@ -348,6 +419,9 @@ function handleOpenRenameModal() {
 
     <!-- Mobile QR Scanner Modal -->
     <QrScannerModal v-if="isMobileClient" v-model="showQrScannerModal" @scan="handleQrScanned" />
+
+    <!-- Provide Event QR Modal for Mobile to Scan -->
+    <MobileQrModal v-model="showEventQrModal" :invite-code="selectedQrInviteCode" />
   </div>
 </template>
 

@@ -115,9 +115,9 @@ function handleTakeover() {
                 <span class="material-icons" style="font-size: 18px; color: #f59e0b;">sensors</span>
                 <span>{{ t('event.standby_banner_desc') }}</span>
               </div>
-              <button type="button" class="btn-hud-takeover" @click="handleTakeover">
+              <button type="button" class="btn-hud-takeover" :disabled="connStore.isTakingOver" @click="handleTakeover">
                 <span class="material-icons" style="font-size: 16px; margin-right: 4px;">offline_bolt</span>
-                {{ t('event.takeover_as_host') }}
+                {{ connStore.isTakingOver ? t('event.taking_over') : t('event.takeover_as_host') }}
               </button>
             </div>
           </div>

@@ -13,4 +13,5 @@ Backend/app_data.lock.db
 frontend/dist/
 frontend/dist-pwa/
 frontend/node_modules/
+node_modules/
 .agents/

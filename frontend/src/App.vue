@@ -25,12 +25,12 @@ watch(() => inboxStore.messages.length, (newLen, oldLen) => {
   <ToastProvider />
   <ConfirmModal />
   <div class="router-view-container">
-    <router-view v-slot="{ Component }">
+    <router-view v-slot="{ Component, route }">
       <transition 
         :name="isViewTransitionSupported ? 'none' : 'page'" 
         :css="!isViewTransitionSupported"
         :mode="isViewTransitionSupported ? undefined : 'out-in'">
-        <component :is="Component" />
+        <component :is="Component" :key="route.path" />
       </transition>
     </router-view>
   </div>

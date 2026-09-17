@@ -128,6 +128,29 @@
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.btn-inline-qr {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  background: rgba(255, 255, 255, 0.08);
+  border: 1px solid rgba(255, 255, 255, 0.15);
+  border-radius: 4px;
+  color: var(--primary, #39ff14);
+  padding: 1px 4px;
+  cursor: pointer;
+  transition: all 0.2s ease;
+  line-height: 1;
+}
+
+.btn-inline-qr:hover {
+  background: rgba(57, 255, 20, 0.2);
+  border-color: var(--primary, #39ff14);
+  transform: scale(1.05);
 }
 
 /* Tab Bar */

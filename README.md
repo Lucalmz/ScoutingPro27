@@ -11,6 +11,12 @@
   <img src="https://img.shields.io/badge/H2_Database-003545?style=for-the-badge&logo=databricks&logoColor=white" alt="H2 Database" />
 </p>
 
+<p align="left">
+  <b>Language:</b>
+  <a href="README.md"><b>简体中文</b></a> |
+  <a href="README_en.md"><b>English</b></a>
+</p>
+
 > 💡 **本项目完全由 FIRST Tech Challenge (FTC) Team 27570 的中学生团队独立构思、架构设计并全栈开发完成。**  
 > 诞生于真实赛场的一线实战需求，用硬核的现代工程实践，重新定义全球 FIRST 赛事的侦察协同体验。
 
@@ -34,14 +40,15 @@
   - [2.6 第五步：现场侦察——全新统一 Cycle 轮次急速盲操打分 (Match Scouting)](#26-第五步现场侦察全新统一-cycle-轮次急速盲操打分-match-scouting)
   - [2.7 第六步：战力天梯榜与“吹牛指数”量化对账 (Brag Index)](#27-第六步战力天梯榜与吹牛指数量化对账-brag-index)
   - [2.8 第七步：FTC 官方赛事 API 绑定与官方比分核销](#28-第七步ftc-官方赛事-api-绑定与官方比分核销)
-  - [2.9 第八步：双主机互斥热备与赛场应急平滑接管 (Standby Host Takeover)](#29-第八步双主机互斥热备与赛场应急平滑接管-standby-host-takeover)
+  - [2.9 第八步：双主机互斥热备与全量双向对齐交接 (Host Takeover & Full-Sync Handoff)](#29-第八步双主机互斥热备与全量双向对齐交接-host-takeover--full-sync-handoff)
   - [2.10 第九步：战术 AI 军师助手](#210-第九步战术-ai-军师助手)
   - [2.11 第十步：数据导出与 U 盘离线应急同步包](#211-第十步数据导出与-u-盘离线应急同步包)
+  - [2.12 第十一步：单入口安全删除赛事与离线缓存彻底清理 (Safe Event Deletion & Cache Flush)](#212-第十一步单入口安全删除赛事与离线缓存彻底清理-safe-event-deletion--cache-flush)
 - [三、 核心技术深度讲解 (Technical Deep Dive)](#三-核心技术深度讲解-technical-deep-dive)
   - [3.1 公网 P2P 穿透与盲信令协同网络 (Architecture Diagram)](#31-公网-p2p-穿透与盲信令协同网络-architecture-diagram)
   - [3.2 零信任安全与双向身份校验流程 (Zero-Trust Security Flow)](#32-零信任安全与双向身份校验流程-zero-trust-security-flow)
   - [3.3 分布式单调时钟与冲突自动消解 (Data Sync & Conflict Resolution)](#33-分布式单调时钟与冲突自动消解-data-sync--conflict-resolution)
-  - [3.4 双主机互斥镜像与零中断热备接管架构 (Host Mutex & Standby Mirror)](#34-双主机互斥镜像与零中断热备接管架构-host-mutex--standby-mirror)
+  - [3.4 主机切换全量双向对齐与交接架构 (Host Takeover Full-Sync & Handoff Protocol)](#34-主机切换全量双向对齐与交接架构-host-takeover-full-sync--handoff-protocol)
   - [3.5 “吹牛指数”算法与常规赛留力特赦状态机 (Brag Index State Machine)](#35-吹牛指数算法与常规赛留力特赦状态机-brag-index-state-machine)
 - [四、 开发者指南与测试验收 (Developer & Testing)](#四-开发者指南与测试验收-developer--testing)
 
@@ -225,16 +232,22 @@ ScoutingPro27 在整个 FIRST 社区最大的创新与突破，在于**将先进
 
 ---
 
-### 2.9 第八步：双主机互斥热备与赛场应急平滑接管 (Standby Host Takeover)
-赛场如战场，领队笔记本电脑随时面临电量耗尽、硬件故障或意外踢掉电源线的严重风险。为避免全场侦察瘫痪，ScoutingPro27 打造了**零单点故障的双主机互斥热备方案**：
-1. **从机静默镜像 (Standby Mirror)**：
-   - 领队助理的第二台电脑以 `--standby` 模式或在界面上选定为备用主机加入房间；
-   - 备机实时监听主机所有增量报文，本地嵌入式 H2 数据库始终保持完全一致的数据快照。
-2. **一键平滑接管 (Active Takeover)**：
-   - 当主电脑突发离线，助理只需在备机点击 **【激活并接管为主机 (Take Over as Active Host)】**；
-   - 系统通过玻璃拟态对话框进行二次安全确认，展示接管警告与当前逻辑时间戳；
-   - 备机瞬间提权为新 Active Host，继承全局单调自增时钟 `hostSeq`；
-   - 现场所有侦察员手机在 1~2 秒内自动识别新主机并无缝重定向数据管道，全场数据零遗失、比赛打分零中断！
+### 2.9 第八步：双主机互斥热备与全量双向对齐交接 (Host Takeover & Full-Sync Handoff)
+赛场如战场，领队笔记本电脑随时面临电量耗尽、硬件故障或意外踢掉电源线的严重风险。为避免全场侦察瘫痪，ScoutingPro27 打造了**零单点故障、防并发脑裂、无感故障转移的双主机全量对齐架构**：
+1. **从机静默镜像与防抖保护 (Standby Mirror & Debounce)**：
+   - 领队助理的第二台电脑以备用主机身份加入房间，实时监听主机所有增量报文，本地嵌入式 H2 数据库保持一致的数据镜像；
+   - 界面接入 `isTakingOver` 互斥量与 **3 秒动态倒计时冷却锁**，接管时自动显示加载动效并禁用重复点击，杜绝短时间内掀起信令风暴。
+2. **一键平滑接管与 Tie-Breaker 确定性仲裁 (Active Takeover & Tie-Breaker)**：
+   - 当主电脑离线或需要轮换时，助理只需点击 **【激活并接管为主机 (Take Over as Active Host)】**；
+   - **防双向降级死锁**：若两台主机由于网络延时几乎在同一时刻互相点击接管，系统通过 **分布式 Epoch Term + 设备 ID 确定性仲裁引擎** 进行裁决：优先级高者胜出继续保持 Host 并立即广播 `host_hello` 重申权威，优先级低者主动降级为 Standby，绝不发生两端同时降级的“无主”死锁。
+3. **旧主机全量交接包 (`HOST_HANDOFF_BATCH`)**：
+   - 原主机降级后，自动作为 Client 连入新主机，主动发送全量资产包（包含所有比赛记录、排程表、工位排班、展位硬件档案、战队标签与自定义字段）；
+   - 新主机通过幂等 **3-Way Guarded Merge（带特写照片 Key 防覆盖保护）** 将数据无损并入本地库，并自适应拉升全局时钟 `hostSeqCounter`。
+4. **接管暂存门闸 (Takeover Staging Gate 解决“同步期间有人发包”竞态)**：
+   - 新主机宣布接管后开启 2000ms 异步暂存门闸。若此时恰有看台侦察员手机提交未盖戳的新比赛记录，该记录**不会被提前打上可能偏小的旧序列号**，而是排队挂起；
+   - 待旧主机的全量交接包到达并推进时钟后门闸自动释放，新记录再以最新权威递增序号安全入库并广播。若旧主机离线未响应，门闸超时自动放行，绝不阻断业务。
+5. **移动端感知切换与孤儿记录自愈**：
+   - 现场所有侦察员手机在 1~2 秒内自动识别新主机 `hostSessionId` 切换，以 `sinceVersion: 0` 向新主机请求基准对齐，并**自动补推本地归属的所有打分记录**（即便是此前已同步状态），确保断网切换期间的数据 100% 零丢单！
 
 ---
 
@@ -253,6 +266,17 @@ ScoutingPro27 在整个 FIRST 社区最大的创新与突破，在于**将先进
   如果比赛现场遇到极端无线电管制，完全禁止任何无线连接：
   - 领队在电脑端一键导出 **赛事配置包 (`.event`)** 与 **增量数据包 (`.info`)** 到 U 盘；
   - 侦察员插入 U 盘直接导入，无需网络即可加入该赛事并合并最新记录；侦察员录入的数据也可通过 U 盘交由电脑统一盖戳入库！
+
+---
+
+### 2.12 第十一步：单入口安全删除赛事与离线缓存彻底清理 (Safe Event Deletion & Cache Flush)
+在长周期的赛前测试与多场正式赛事之间，历史测试赛事与浏览器离线缓存可能造成列表冗余或混淆：
+1. **单入口聚焦：Dashboard 卡片安全删除 (Safe Event Deletion)**：
+   - 为彻底杜绝比赛现场紧张打分时队员误触，系统**移除了打分界面与状态胶囊内的一切删除按钮**；
+   - 统一聚焦至 Dashboard 大厅赛事列表卡片上的专属删除按钮（垃圾桶图标）；点击后调起赛博玻璃拟态 Danger 级确认弹窗，明确展示赛事全称，确认后执行级联销毁，干净利落。
+2. **彻底清理本地离线缓存 (Deep Cache Flush)**：
+   - 针对浏览器端 PWA 离线存储特性，大厅顶栏提供专属 **【清空离线缓存 (Clear Cache)】** 按钮；
+   - 点击确认后，系统执行前缀递归扫描，深度抹除所有本地赛事数据、赛程、排班、打分草稿、特写照片队列及临时键（包括 `sp27_*`、`scoutingpro27_*`、`sp_inbox_*` 等），**同时严格保留用户的登录凭据 (`scoutingpro-user`)**，无需重新输入密码，一键回归出厂纯净状态！
 
 ---
 
@@ -404,41 +428,73 @@ stateDiagram-v2
 
 ---
 
-### 3.4 双主机互斥镜像与零中断热备接管架构 (Host Mutex & Standby Mirror)
-为抵御赛场严苛环境下主控电脑单点故障（如突发蓝屏、断电、被踢掉电源线），ScoutingPro27 创新实现了**双主机互斥热备与无感故障转移体系**。备用从机不仅持续增量镜像主库数据，还能在毫秒级完成主从提权，现场打分网络无需重启重配：
+### 3.4 主机切换全量双向对齐与交接架构 (Host Takeover Full-Sync & Handoff Protocol)
+在分布式无中心或弱局域网的 WebRTC 侦察网络中，多主机并发接管极易引发**双向降级死锁（脑裂）**、**多轮切换导致时钟回退（Clock Regression）并覆盖数据**、以及**交接同步期间瞬态发包丢失或乱序盖戳**等核心并发痛点。
+
+ScoutingPro27 落地了系统级的**零 Bug、防并发、自愈合**主机切换全量双向对齐与交接架构，并在协议层筑牢了五重防御屏障：
 
 <details>
-<summary><b>🔍 点击展开 Mermaid 热备镜像与接管时序图原生源码 (View Source)</b></summary>
+<summary><b>🔍 点击展开 Mermaid 主机交接与并发防护时序图原生源码 (View Source)</b></summary>
 
 ```mermaid
 sequenceDiagram
     autonumber
-    participant Host1 as 原活跃主机 (Primary Host)
-    participant Standby as 备用从机 (Standby Host)
-    participant Scout as 侦察员手机 (Scout Client)
+    participant Scout as 手机端 (Mobile Scout)
+    participant Host1 as 原主机 (Demoted Host 1)
+    participant Signaling as 公网 MQTT 盲信令
+    participant Host2 as 新主机 (New Host 2)
     actor Lead as 现场领队
 
-    Note over Host1,Standby: 正常阶段：数据单向实时增量镜像
-    Scout->>Host1: 提交打分记录 (DataChannel)
-    Host1->>Host1: 落盘本地 H2 数据库 (hostSeq = 105)
-    Host1->>Standby: P2P 增量镜像广播 (hostSeq = 105, Payload)
-    Standby->>Standby: 校验签名与自增时钟，同步落盘本地 H2
-    Host1-->>Scout: 确认回执 (ACK, hostSeq = 105)
+    Note over Host1,Host2: 阶段一：新主机接管与 Tie-Breaker 仲裁
+    Lead->>Host2: 点击【激活并接管为主机】(加持 3s 倒计时防抖)
+    Host2->>Host2: 本地 localEpoch 递增 (Epoch = N + 1)
+    Host2->>Signaling: 广播 host_takeover (epoch: N+1, deviceId: Dev-B)
+    
+    alt 双主机并发接管仲裁 (Tie-Breaker Engine)
+        Note over Host1,Host2: 若 Host1 也几乎同时发起 host_takeover:
+        Host1->>Host1: 确定性仲裁: 比较 (epoch, deviceId)。低优先级者主动降级为 Standby
+        Host2->>Host2: 高优先级者胜出，保持 Host 并立即广播 host_hello 重申权威
+    else 单边正常接管
+        Host1->>Host1: 识别高优先级的远程 Takeover，主动降级为 Standby
+    end
 
-    Note over Host1: 突发状况：Primary 主机意外断电 / 故障下线
-    Lead->>Standby: 点击【激活并接管为主机】
-    Standby->>Standby: 弹窗二次防误触安全确认 (ConfirmModal)
-    Standby->>Standby: 提权升级为主机 (State: ACTIVE)
-    Standby->>Standby: 锁定并承接逻辑时钟基线 (Base hostSeq = 105)
+    Note over Host2: 阶段二：开启 Takeover Staging Gate (2000ms 暂存门闸)
+    Host2->>Host2: inTakeoverReconciliation = true (拦截未盖戳新包，避免序号碰撞)
 
-    Note over Standby,Scout: 故障转移与无感重定向 (Failover & Reconnect)
-    Standby->>Scout: 广播主机接管与心跳信令 (HOST_TAKEOVER)
-    Scout->>Scout: 识别新主机公钥与信令频道
-    Scout->>Standby: 重新协商 WebRTC 加密通道
-    Standby-->>Scout: 握手成功，无缝承接后续打分 (hostSeq = 106+)
+    par 并发发包防护 (解决“交接期间恰好有人发包”竞态)
+        Scout->>Host2: SYNC_DATA (未盖戳新打分记录，seq=0)
+        Note over Host2: 命中 Staging Gate 异步等待队列，暂停分配时钟序号
+    and 历史全量数据无损交接 (HOST_HANDOFF_BATCH)
+        Host1->>Host2: 重新以 Client 身份建连并发送 HOST_HANDOFF_BATCH
+        Note over Host2: 3-Way Guarded Merge (比赛记录/排程/Pit照片/标签/自定义字段)
+        Host2->>Host2: stampHostSeq 时钟拉升: hostSeqCounter = max(当前, 对方Max, 记录Max)
+        Host2-->>Host1: HOST_HANDOFF_ACK (回传最高序号与落库确认)
+        Host2->>Host2: 释放 Takeover Staging Gate 门闸 (finishTakeoverReconciliation)
+    end
+
+    Note over Host2: 阶段三：排队记录安全盖戳与广播
+    Host2->>Host2: 唤醒等待队列，以最新拉升的时钟单调递增盖戳落盘
+    Host2->>Scout: ACK_SYNC (回传权威最新 hostSeq)
+    Host2->>Scout: 广播 SYNC_DATA (向全场分发已盖戳数据)
+
+    Note over Scout,Host2: 阶段四：移动端感知切换与孤儿数据自愈
+    Scout->>Scout: 感知 hostSessionId 切换，发起 REQUEST_SYNC (sinceVersion: 0)
+    Scout->>Host2: 自动重新补推本地所拥有的自身比赛记录，杜绝网络波动遗漏
 ```
 
 </details>
+
+#### 核心并发攻防技术点剖析：
+1. **分布式 Epoch Term + 设备 ID 确定性 Tie-Breaker**：
+   - 彻底消除了两台电脑同时点击接管导致互相将对方踢下线、最终“双向降级无主”的脑裂死锁问题。
+2. **物理时钟绝对单调性推进 (`stampHostSeq`)**：
+   - 对已具备有效正序列号的历史记录非破坏性保留原戳，同时拉升本地计数器；仅对未盖戳新记录分配新号，全场版本号全局单调递增，彻底消除数据被旧版本覆盖。
+3. **接管暂存门闸 (`Takeover Staging Gate`)**：
+   - 接管启动后设置 2000ms 异步门禁；在旧主机全量交接包到达前，未盖戳的新比赛记录进入排队队列挂起，待时钟推进完毕后再安全打戳落盘，绝无编号交错或竞态。
+4. **SDP 协商重入与错误级联隔离 (`activeSetupPromise`)**：
+   - 串行化同一 peer 客户端的 SDP Offer/Answer 协商过程，并在等待队列上增加异常捕获隔离，彻底解决 WebRTC 状态机报错 `Called in wrong state: have-local-offer`。
+5. **本地嵌入式 H2 数据库回环绑定 (`h2.bindAddress=127.0.0.1`)**：
+   - 在 JVM 启动入口处强制 H2 `AUTO_SERVER` 仅在回环地址 `127.0.0.1` 监听并通信，彻底免疫现场 VPN / Clash TUN 虚拟代理网卡导致的文件锁假死 (`Locked by another process`)。
 
 ---
 
@@ -503,7 +559,7 @@ flowchart TD
 
 ### 4.2 快速编译与运行
 ```powershell
-# 1. 编译前端生产静态资源
+# 1. 编译前端生产静态资源 (含 PWA Service Worker 生成与强类型检查)
 cd frontend
 npm install
 npm run build
@@ -511,6 +567,10 @@ npm run build
 # 2. 运行后端 (跳过桌面容器，以 Headless 独立服务模式启动)
 cd ../Backend
 mvn compile exec:java -Dexec.mainClass="com.bear27570.app.Main" -Dexec.args="--headless --port=8080"
+
+# 3. 生产交付打包 (全依赖可执行 Fat Jar)
+mvn package -DskipTests
+# 打包生成物位于 target/ScoutingPro27.jar，双击或以 java -jar ScoutingPro27.jar 即可独立部署启动
 ```
 打开浏览器访问 `http://localhost:8080` 即可进入系统。
 
@@ -518,14 +578,14 @@ mvn compile exec:java -Dexec.mainClass="com.bear27570.app.Main" -Dexec.args="--h
 ScoutingPro27 遵循严格的**证据闭环验证铁律**，拥有高覆盖率的单元与端到端回归套件：
 
 ```powershell
-# 1. 运行前端 TypeScript 强类型编译检查 (0 error)
+# 1. 运行前端 TypeScript 强类型编译检查 (vue-tsc --build 0 error)
 cd frontend
 npm run type-check
 
-# 2. 运行前端 Vitest 单元与组件测试套件 (52 套件 / 353 项测试全部通过)
-npm test
+# 2. 运行前端 Vitest 单元与组件测试套件 (66 套件 / 495 项测试 100% 全部通过)
+npm test -- --run
 
-# 3. 运行后端 Maven Surefire 测试套件 (112 项测试 100% 通过)
+# 3. 运行后端 Maven Surefire 测试套件 (124 项测试 100% 全部通过)
 cd ../Backend
 mvn test
 

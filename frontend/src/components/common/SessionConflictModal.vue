@@ -82,7 +82,7 @@ async function handleRename() {
 }
 
 async function handleMergeAccount() {
-  const pwd = targetPassword.value
+  const pwd = targetPassword.value ? targetPassword.value.trim() : ''
   const targetName = conflictData.value?.conflictingUsername?.trim()
   if (!targetName || !pwd || merging.value || renaming.value) return
 

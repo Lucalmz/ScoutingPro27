@@ -278,4 +278,54 @@ describe('DashboardView.vue', () => {
 
     expect(wrapper.find('.account-merge-btn').exists()).toBe(false)
   })
+
+  it('renders delete button on event card and deletes event upon confirmation', async () => {
+    const userStore = useUserStore()
+    userStore.user = { id: 'u1', username: 'Tester', token: 'token' }
+    const eventStore = useEventStore()
+    eventStore.events = [
+      { id: 'evt-ghost-1', name: 'Ghost Event', inviteCode: 'SPWNSH', hostId: 'u1' }
+    ]
+    vi.spyOn(eventStore, 'fetchEvents').mockResolvedValue(undefined)
+    const deleteSpy = vi.spyOn(eventStore, 'deleteEvent').mockResolvedValue(undefined)
+
+    // Mock window.confirm
+    const confirmSpy = vi.spyOn(window, 'confirm').mockReturnValue(true)
+
+    const wrapper = mount(DashboardView)
+    await new Promise((r) => setTimeout(r, 10))
+
+    const deleteBtn = wrapper.find('.btn-card-delete')
+    expect(deleteBtn.exists()).toBe(true)
+
+    await deleteBtn.trigger('click')
+    await new Promise((r) => setTimeout(r, 10))
+
+    expect(deleteSpy).toHaveBeenCalledWith('evt-ghost-1')
+    confirmSpy.mockRestore()
+  })
+
+  it('renders clear cache button in topbar and clears all offline cache upon confirmation', async () => {
+    const userStore = useUserStore()
+    userStore.user = { id: 'u1', username: 'Tester', token: 'token' }
+    const eventStore = useEventStore()
+    eventStore.events = []
+    vi.spyOn(eventStore, 'fetchEvents').mockResolvedValue(undefined)
+    const clearSpy = vi.spyOn(eventStore, 'clearAllLocalCache')
+
+    // Mock window.confirm
+    const confirmSpy = vi.spyOn(window, 'confirm').mockReturnValue(true)
+
+    const wrapper = mount(DashboardView)
+    await new Promise((r) => setTimeout(r, 10))
+
+    const clearBtn = wrapper.find('.clear-cache-btn')
+    expect(clearBtn.exists()).toBe(true)
+
+    await clearBtn.trigger('click')
+    await new Promise((r) => setTimeout(r, 10))
+
+    expect(clearSpy).toHaveBeenCalled()
+    confirmSpy.mockRestore()
+  })
 })

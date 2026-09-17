@@ -12,6 +12,15 @@ import java.io.File;
  */
 public class AppConfig {
 
+    static {
+        // Ensure H2's AUTO_SERVER socket always binds to loopback interface (127.0.0.1),
+        // preventing it from selecting VPN/Clash TUN virtual adapters (e.g. 198.18.0.1)
+        // which block inter-process local communication on Windows.
+        if (System.getProperty("h2.bindAddress") == null) {
+            System.setProperty("h2.bindAddress", "127.0.0.1");
+        }
+    }
+
     public enum Environment {
         DEV, PROD, TEST
     }

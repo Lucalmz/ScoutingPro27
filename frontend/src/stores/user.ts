@@ -210,28 +210,46 @@ export const useUserStore = defineStore('user', () => {
       const connStore = useConnectionStore()
       const eventStore = useEventStore()
 
+      const cleanTargetUser = targetUsername.trim()
+      const cleanTargetPwd = targetPassword.trim()
       let res: { id: string; username: string; token?: string }
 
-      if (connStore.rtcService && !connStore.rtcService.isHostMode()) {
-        const mergeResult = await connStore.rtcService.requestAccountMerge(
-          targetUsername.trim(),
-          targetPassword,
-          oldId,
-          currentUsername
-        )
-        if (!mergeResult.success || !mergeResult.newId) {
-          throw new Error(mergeResult.error || 'Failed to merge account via Host')
-        }
-        res = {
-          id: mergeResult.newId,
-          username: mergeResult.newUsername || targetUsername.trim(),
-          token: mergeResult.token
+      const isRemoteClient = Boolean(
+        connStore.rtcService && (!connStore.rtcService.isHostMode() || connStore.sessionConflict)
+      )
+
+      if (isRemoteClient && connStore.rtcService) {
+        try {
+          const mergeResult = await connStore.rtcService.requestAccountMerge(
+            cleanTargetUser,
+            cleanTargetPwd,
+            oldId,
+            currentUsername
+          )
+          if (!mergeResult.success || !mergeResult.newId) {
+            throw new Error(mergeResult.error || 'Failed to merge account via Host')
+          }
+          res = {
+            id: mergeResult.newId,
+            username: mergeResult.newUsername || cleanTargetUser,
+            token: mergeResult.token
+          }
+        } catch (webrtcErr: any) {
+          const msg = webrtcErr?.message || ''
+          if (msg.includes('credentials') || msg.includes('password') || msg.includes('401')) {
+            throw webrtcErr
+          }
+          const { mergeUser: apiMergeUser } = await import('@/services/api')
+          res = await apiMergeUser({
+            targetUsername: cleanTargetUser,
+            targetPassword: cleanTargetPwd
+          })
         }
       } else {
         const { mergeUser: apiMergeUser } = await import('@/services/api')
         const apiRes = await apiMergeUser({
-          targetUsername: targetUsername.trim(),
-          targetPassword
+          targetUsername: cleanTargetUser,
+          targetPassword: cleanTargetPwd
         })
         if (!apiRes || !apiRes.id) {
           throw new Error('Invalid response from merge API')

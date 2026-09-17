@@ -102,7 +102,26 @@ export function createClientSession(ctx: ClientSessionContext) {
     }, delay)
   }
 
-  async function setupClientConnection(forceRelay = false) {
+  let activeSetupPromise: Promise<void> | null = null
+
+  async function setupClientConnection(forceRelay = false): Promise<void> {
+    while (activeSetupPromise) {
+      try {
+        await activeSetupPromise
+      } catch (_) {}
+    }
+    const currentPromise = doSetupClientConnection(forceRelay)
+    activeSetupPromise = currentPromise
+    try {
+      await currentPromise
+    } finally {
+      if (activeSetupPromise === currentPromise) {
+        activeSetupPromise = null
+      }
+    }
+  }
+
+  async function doSetupClientConnection(forceRelay = false) {
     clearReconnectTimer()
     if (forceRelay) {
       ctx.setClientForceRelay(true)

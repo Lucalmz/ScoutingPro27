@@ -14,16 +14,87 @@ export const useEventStore = defineStore('events', () => {
   
   const userStore = useUserStore()
 
+  function sanitizeEventList(list: any[]): ScoutingEvent[] {
+    if (!Array.isArray(list)) return []
+    const cleanList: ScoutingEvent[] = []
+    const seenIds = new Set<string>()
+    const codeToAuthoritative = new Map<string, ScoutingEvent>()
+
+    // First pass: register authoritative UUID events (not starting with evt-)
+    for (const item of list) {
+      if (!item || typeof item !== 'object' || Array.isArray(item)) continue
+      const id = String(item.id || '').trim()
+      if (!id) continue
+      const inviteCode = String(item.inviteCode || '').trim().toUpperCase()
+      const rawName = typeof item.name === 'string' ? item.name.trim() : ''
+      const name =
+        rawName && rawName.toLowerCase() !== 'scoutingpro27' && rawName.toLowerCase() !== 'scoutingpro 27'
+          ? rawName
+          : inviteCode
+          ? `Event ${inviteCode}`
+          : 'Scouting Event'
+      const sanitized: ScoutingEvent = {
+        ...item,
+        id,
+        name,
+        inviteCode
+      }
+      if (!id.startsWith('evt-') && inviteCode) {
+        codeToAuthoritative.set(inviteCode, sanitized)
+      }
+    }
+
+    // Second pass: eliminate placeholders if authoritative exists, and deduplicate
+    for (const item of list) {
+      if (!item || typeof item !== 'object' || Array.isArray(item)) continue
+      const id = String(item.id || '').trim()
+      if (!id || seenIds.has(id)) continue
+      const inviteCode = String(item.inviteCode || '').trim().toUpperCase()
+      if (id.startsWith('evt-') && inviteCode && codeToAuthoritative.has(inviteCode)) {
+        continue
+      }
+      const rawName = typeof item.name === 'string' ? item.name.trim() : ''
+      const name =
+        rawName && rawName.toLowerCase() !== 'scoutingpro27' && rawName.toLowerCase() !== 'scoutingpro 27'
+          ? rawName
+          : inviteCode
+          ? `Event ${inviteCode}`
+          : 'Scouting Event'
+      const sanitized: ScoutingEvent = {
+        ...item,
+        id,
+        name,
+        inviteCode
+      }
+      seenIds.add(id)
+      cleanList.push(sanitized)
+    }
+
+    return cleanList
+  }
+
   function restoreFromCache() {
     if (typeof localStorage === 'undefined') return
     try {
       const rawEvents = localStorage.getItem('scoutingpro_events')
       if (rawEvents && events.value.length === 0) {
-        events.value = JSON.parse(rawEvents)
+        const parsed = JSON.parse(rawEvents)
+        events.value = sanitizeEventList(parsed)
       }
       const rawCurrent = localStorage.getItem('scoutingpro_current_event')
       if (rawCurrent && !currentEvent.value) {
-        currentEvent.value = JSON.parse(rawCurrent)
+        const parsedCurrent = JSON.parse(rawCurrent)
+        if (parsedCurrent && typeof parsedCurrent === 'object' && !Array.isArray(parsedCurrent) && parsedCurrent.id) {
+          const rawName = typeof parsedCurrent.name === 'string' ? parsedCurrent.name.trim() : ''
+          const code = String(parsedCurrent.inviteCode || '').trim().toUpperCase()
+          parsedCurrent.name =
+            rawName && rawName.toLowerCase() !== 'scoutingpro27' && rawName.toLowerCase() !== 'scoutingpro 27'
+              ? rawName
+              : code
+              ? `Event ${code}`
+              : 'Scouting Event'
+          currentEvent.value = parsedCurrent
+        }
       }
     } catch {}
   }
@@ -58,13 +129,13 @@ export const useEventStore = defineStore('events', () => {
 
   const isHost = computed(() => {
     const conn = useConnectionStore()
-    if (conn.rtcService && typeof conn.rtcService.isHostMode === 'function') {
-      return conn.rtcService.isHostMode()
+    if (conn.rtcService && typeof conn.rtcService.isHostMode === 'function' && conn.rtcService.isHostMode()) {
+      return true
     }
     if (!isDesktopHost()) {
       return false
     }
-    return currentEvent.value?.hostId === userStore.userId
+    return Boolean(currentEvent.value?.hostId && currentEvent.value.hostId === userStore.userId)
   })
 
   async function fetchEvents(userId: string) {
@@ -82,7 +153,7 @@ export const useEventStore = defineStore('events', () => {
         for (const re of remoteEvents) {
           map.set(re.id, re)
         }
-        events.value = Array.from(map.values())
+        events.value = sanitizeEventList(Array.from(map.values()))
       }
     } catch (e: any) {
       console.warn('[eventStore] Failed to fetch events from backend:', e)
@@ -202,6 +273,84 @@ export const useEventStore = defineStore('events', () => {
     error.value = null
   }
 
+  async function deleteEvent(eventId: string) {
+    events.value = events.value.filter((e) => e.id !== eventId)
+    if (currentEvent.value?.id === eventId) {
+      currentEvent.value = null
+    }
+    if (typeof localStorage !== 'undefined') {
+      try {
+        localStorage.setItem('scoutingpro_events', JSON.stringify(events.value))
+        if (currentEvent.value === null) {
+          localStorage.removeItem('scoutingpro_current_event')
+        }
+        localStorage.removeItem(`scoutingpro27_schedule_${eventId}`)
+        localStorage.removeItem(`scoutingpro27_assignments_${eventId}`)
+        localStorage.removeItem(`sp27_records_${eventId}`)
+        localStorage.removeItem(`sp27_pit_records_${eventId}`)
+        localStorage.removeItem(`sp27_pit_teams_${eventId}`)
+        localStorage.removeItem(`sp27_cf_${eventId}`)
+        localStorage.removeItem(`sp27_team_tags_${eventId}`)
+      } catch {}
+    }
+    try {
+      const { deleteEvent: apiDeleteEvent } = await import('@/services/api')
+      await apiDeleteEvent(eventId)
+    } catch (e) {
+      console.warn('[eventStore] Failed to delete event on backend API:', e)
+    }
+  }
+
+  function migratePlaceholder(placeholderId: string, authoritativeEvent: ScoutingEvent) {
+    if (!authoritativeEvent || !authoritativeEvent.id) return
+    const cleanList = events.value.filter(
+      (e) =>
+        e.id !== placeholderId &&
+        e.id !== authoritativeEvent.id &&
+        !(e.id.startsWith('evt-') && e.inviteCode && e.inviteCode === authoritativeEvent.inviteCode)
+    )
+    cleanList.push(authoritativeEvent)
+    events.value = sanitizeEventList(cleanList)
+    if (currentEvent.value?.id === placeholderId || currentEvent.value?.id === authoritativeEvent.id) {
+      currentEvent.value = authoritativeEvent
+    }
+    if (typeof localStorage !== 'undefined') {
+      try {
+        localStorage.setItem('scoutingpro_events', JSON.stringify(events.value))
+        if (currentEvent.value) {
+          localStorage.setItem('scoutingpro_current_event', JSON.stringify(currentEvent.value))
+        }
+      } catch {}
+    }
+  }
+
+  function clearAllLocalCache() {
+    events.value = []
+    currentEvent.value = null
+    if (typeof localStorage !== 'undefined') {
+      try {
+        const toRemove: string[] = []
+        for (let i = 0; i < localStorage.length; i++) {
+          const key = localStorage.key(i)
+          if (
+            key &&
+            key !== 'scoutingpro-user' &&
+            (key.startsWith('scoutingpro_') ||
+              key.startsWith('scoutingpro27_') ||
+              key.startsWith('sp27_') ||
+              key.startsWith('sp_inbox_') ||
+              key.startsWith('sp_outbox_'))
+          ) {
+            toRemove.push(key)
+          }
+        }
+        for (const k of toRemove) {
+          localStorage.removeItem(k)
+        }
+      } catch {}
+    }
+  }
+
   return {
     events,
     currentEvent,
@@ -216,6 +365,9 @@ export const useEventStore = defineStore('events', () => {
     updateFtcConfig,
     clearError,
     restoreFromCache,
+    deleteEvent,
+    migratePlaceholder,
+    clearAllLocalCache,
   }
 })
 

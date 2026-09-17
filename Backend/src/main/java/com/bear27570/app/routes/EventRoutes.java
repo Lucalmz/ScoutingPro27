@@ -118,6 +118,36 @@ public class EventRoutes {
             ctx.status(200).result(gson.toJson(evt)).contentType("application/json");
         });
 
+        routes.delete("/api/events/{id}", ctx -> {
+            String userId = ctx.attribute("userId");
+            if (userId == null || userId.isBlank()) {
+                throw new io.javalin.http.UnauthorizedResponse("Unauthorized");
+            }
+            String eventId = ctx.pathParam("id");
+            if (eventId == null || eventId.isBlank()) {
+                ctx.status(400).result("Event ID required");
+                return;
+            }
+
+            jdbi.useTransaction(handle -> {
+                EventDao dao = handle.attach(EventDao.class);
+                ScoutingEvent event = dao.findById(eventId);
+                if (event == null) {
+                    return;
+                }
+                if (userId.equals(event.getHostId())) {
+                    dao.delete(eventId);
+                } else {
+                    handle.createUpdate("DELETE FROM event_users WHERE event_id = :eventId AND user_id = :userId")
+                          .bind("eventId", eventId)
+                          .bind("userId", userId)
+                          .execute();
+                }
+            });
+
+            ctx.status(204);
+        });
+
         routes.post("/api/events/external-sync", ctx -> {
             String userId = ctx.attribute("userId");
             if (userId == null || userId.isBlank()) {

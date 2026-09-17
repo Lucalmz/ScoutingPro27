@@ -183,6 +183,9 @@ public class Main {
     }
     private static void initAndRun(String[] args, SplashScreen splash) {
         try {
+            if (System.getProperty("h2.bindAddress") == null) {
+                System.setProperty("h2.bindAddress", "127.0.0.1");
+            }
             // ==========================================
             // 数据库配置 + 迁移
             // ==========================================

@@ -114,6 +114,82 @@ describe('Account Conflict & Takeover Fixes', () => {
     // If login fails in test environment, it handles the branch gracefully
   })
 
+  it('trims password and handles self-merge properly without deleting mapping in MERGE_ACCOUNT_REQUEST', async () => {
+    const api = await import('@/services/api')
+    const loginSpy = vi.spyOn(api, 'login').mockResolvedValue({
+      id: 'target_id_123',
+      username: 'TargetAlice',
+      token: 'valid_token'
+    })
+
+    const scoutIdToClientIds = new Map<string, Set<string>>()
+    scoutIdToClientIds.set('target_id_123', new Set(['client_1']))
+    const clientIdToScoutId = new Map<string, string>()
+    const clientIdToScoutName = new Map<string, string>()
+    const sendMessage = vi.fn()
+
+    const handler = createChannelMessageHandler({
+      isHostMode: () => true,
+      currentInviteCode: () => 'K9X2B4',
+      getCurrentEventId: () => 'uuid-event-1',
+      getHostSessionId: () => 'h1',
+      getCurrentHostSessionId: () => 'h1',
+      setCurrentHostSessionId: () => {},
+      callbacks: {},
+      clients: new Map([
+        ['client_1', { pc: {} as any, dc: { readyState: 'open' } as any }]
+      ]),
+      stagedClients: new Map(),
+      scoutIdToClientIds,
+      clientIdToScoutId,
+      clientIdToScoutName,
+      pendingTakeovers: new Map(),
+      takeoverCooldowns: new Map(),
+      offlineMessages: {} as any,
+      sendMessage,
+      promoteTakeover: vi.fn(),
+      enqueueHostTask: async (_id, task) => { await task() },
+      cleanupPeerResources: vi.fn(),
+      stampHostSeq: vi.fn(),
+      getHostSeqCounter: () => 0,
+      setHostSeqCounter: () => {},
+      closeClient: vi.fn(),
+      setStatus: vi.fn()
+    })
+
+    // Notice whitespace in targetPassword: ' password123 \n '
+    await handler({
+      data: JSON.stringify({
+        type: 'MERGE_ACCOUNT_REQUEST',
+        requestId: 'req-trim-1',
+        targetUsername: ' TargetAlice ',
+        targetPassword: ' password123 \n ',
+        sourceUserId: 'target_id_123', // Same ID (self-merge)
+        sourceUsername: 'TargetAlice'
+      })
+    } as MessageEvent, 'client_1')
+
+    expect(loginSpy).toHaveBeenCalledWith({
+      username: 'TargetAlice',
+      password: 'password123'
+    })
+
+    // scoutIdToClientIds for target_id_123 must NOT have been deleted
+    expect(scoutIdToClientIds.get('target_id_123')).toBeDefined()
+    expect(scoutIdToClientIds.get('target_id_123')?.has('client_1')).toBe(true)
+
+    // MERGE_ACCOUNT_RESPONSE with success: true must have been sent back
+    expect(sendMessage).toHaveBeenCalledWith(
+      expect.objectContaining({
+        type: 'MERGE_ACCOUNT_RESPONSE',
+        requestId: 'req-trim-1',
+        success: true,
+        newId: 'target_id_123'
+      }),
+      'client_1'
+    )
+  })
+
   it('allows editing original match and team without triggering conflict deadlock', () => {
     const recordStore = useRecordStore()
     const r1: ScoutingRecord = {

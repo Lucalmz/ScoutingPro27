@@ -203,18 +203,33 @@ class UserMergeRouteTest {
     }
 
     @Test
-    void testUserMergeSelfFails() {
+    void testUserMergeSelfWithValidPasswordSucceeds() {
         JavalinTest.test(app, (server, client) -> {
             var reg = client.post("/api/user/register", "{\"username\":\"charlie\", \"password\":\"CharliePass\"}");
-            String token = (String) gson.fromJson(reg.body().string(), Map.class).get("token");
+            Map<?, ?> regMap = gson.fromJson(reg.body().string(), Map.class);
+            String userId = (String) regMap.get("id");
+            String token = (String) regMap.get("token");
 
+            // Correct password when verifying own account -> 200 OK
             String reqJson = gson.toJson(Map.of(
                     "targetUsername", "charlie",
                     "targetPassword", "CharliePass"
             ));
 
             var response = client.post("/api/users/merge", reqJson, b -> b.header("Authorization", "Bearer " + token));
-            assertThat(response.code()).isEqualTo(400);
+            assertThat(response.code()).isEqualTo(200);
+            Map<?, ?> respMap = gson.fromJson(response.body().string(), Map.class);
+            assertThat(respMap.get("id")).isEqualTo(userId);
+            assertThat(respMap.get("username")).isEqualTo("charlie");
+            assertThat(respMap.get("token")).isNotNull();
+
+            // Wrong password when verifying own account -> 401 Unauthorized
+            String wrongJson = gson.toJson(Map.of(
+                    "targetUsername", "charlie",
+                    "targetPassword", "WrongPass"
+            ));
+            var wrongResponse = client.post("/api/users/merge", wrongJson, b -> b.header("Authorization", "Bearer " + token));
+            assertThat(wrongResponse.code()).isEqualTo(401);
         });
     }
 

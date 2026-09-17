@@ -531,6 +531,7 @@ export const usePitScoutStore = defineStore('pitScout', () => {
     pendingPitRecords,
     applyRemoteUpdate,
     applyFullSync,
+    applyPitFullSync: applyFullSync,
     syncFtcRoster,
     applyOfficialRosterSync,
     migrateScoutId,
