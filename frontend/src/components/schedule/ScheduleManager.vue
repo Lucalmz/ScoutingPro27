@@ -12,6 +12,7 @@ import ScheduleAuditModal from './ScheduleAuditModal.vue'
 import PitStatusIndicator from '@/components/pit/PitStatusIndicator.vue'
 import { getRecordTournamentLevel } from '@/utils/tournament'
 import { useConfirm } from '@/composables/useConfirm'
+import { getKnownScouts } from '@/services/scoutStorage'
 
 const props = defineProps<{
   event: ScoutingEvent | null
@@ -146,27 +147,64 @@ onUnmounted(() => {
   window.removeEventListener('mouseup', onWindowMouseUp)
 })
 
-// 可用 Scout 列表（整合在线 Scout、历史 Scout 及当前用户）
-const availableScouts = computed(() => {
-  const map = new Map<string, string>()
-  if (userStore.userId) {
-    map.set(userStore.userId, userStore.username)
+export interface AvailableScoutItem {
+  id: string
+  name: string
+  isOnline: boolean
+}
+
+// 可用 Scout 列表（整合在线 Scout、历史 Scout、已知持久化 Scout 及当前用户）
+const availableScouts = computed<AvailableScoutItem[]>(() => {
+  const map = new Map<string, AvailableScoutItem>()
+
+  // 1. 本地已知持久化 Scout（离线兜底）
+  if (props.event?.id) {
+    for (const k of getKnownScouts(props.event.id)) {
+      map.set(k.id, { id: k.id, name: k.name, isOnline: false })
+    }
   }
-  for (const s of connStore.connectedScouts) {
-    map.set(s.id, s.name)
-  }
+
+  // 2. 历史打分记录中的 Scout
   for (const r of recordStore.activeRecords) {
     if (r.scoutId && r.scoutName) {
-      map.set(r.scoutId, r.scoutName)
+      if (!map.has(r.scoutId)) {
+        map.set(r.scoutId, { id: r.scoutId, name: r.scoutName, isOnline: false })
+      }
     }
   }
-  // 赛程中已被排过的 Scout
+
+  // 3. 赛程中已被排过的 Scout
   for (const a of Object.values(scheduleStore.assignments)) {
     if (a.scoutId && a.scoutName) {
-      map.set(a.scoutId, a.scoutName)
+      if (!map.has(a.scoutId)) {
+        map.set(a.scoutId, { id: a.scoutId, name: a.scoutName, isOnline: false })
+      }
     }
   }
-  return Array.from(map.entries()).map(([id, name]) => ({ id, name }))
+
+  // 4. 当前登录用户（房主/自己）
+  if (userStore.userId) {
+    map.set(userStore.userId, {
+      id: userStore.userId,
+      name: userStore.username,
+      isOnline: true
+    })
+  }
+
+  // 5. 实时 WebRTC 在线 Scout（覆盖 isOnline 为 true）
+  for (const s of connStore.connectedScouts) {
+    map.set(s.id, {
+      id: s.id,
+      name: s.name || s.id,
+      isOnline: true
+    })
+  }
+
+  // 按在线优先、名称字典序排序
+  return Array.from(map.values()).sort((a, b) => {
+    if (a.isOnline !== b.isOnline) return a.isOnline ? -1 : 1
+    return a.name.localeCompare(b.name)
+  })
 })
 
 // 过滤后的赛程列表
@@ -515,7 +553,7 @@ async function handleClearSchedule() {
                     >
                       <option value="">{{ t('schedule.unassigned') }}</option>
                       <option v-for="s in availableScouts" :key="s.id" :value="s.id">
-                        {{ s.name }}
+                        {{ s.name }} ({{ s.isOnline ? t('event.status_online') : t('event.status_offline') }})
                       </option>
                     </select>
                   </div>
@@ -564,7 +602,7 @@ async function handleClearSchedule() {
                     >
                       <option value="">{{ t('schedule.unassigned') }}</option>
                       <option v-for="s in availableScouts" :key="s.id" :value="s.id">
-                        {{ s.name }}
+                        {{ s.name }} ({{ s.isOnline ? t('event.status_online') : t('event.status_offline') }})
                       </option>
                     </select>
                   </div>

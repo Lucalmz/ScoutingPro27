@@ -29,8 +29,11 @@ import java.io.InputStream;
 import java.nio.file.Files;
 import java.util.ArrayList;
 import java.util.List;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
 public class Main {
+    private static final Logger logger = LoggerFactory.getLogger(Main.class);
     private static final String JCEF_BUNDLE_RESOURCE = "/jcef-bundle.zip";
     private static final String JCEF_BUNDLE_TAR_RESOURCE = "/jcef-bundle.tar.gz";
 
@@ -38,6 +41,14 @@ public class Main {
     private static java.nio.channels.FileChannel heldProfileChannel = null;
 
     public static void main(String[] args) {
+        // 配置 SLF4J SimpleLogger 时间戳格式（毫秒级精度）
+        if (System.getProperty("org.slf4j.simpleLogger.showDateTime") == null) {
+            System.setProperty("org.slf4j.simpleLogger.showDateTime", "true");
+        }
+        if (System.getProperty("org.slf4j.simpleLogger.dateTimeFormat") == null) {
+            System.setProperty("org.slf4j.simpleLogger.dateTimeFormat", "yyyy-MM-dd HH:mm:ss.SSS");
+        }
+
         setupFileLogging();
 
         // Enforce Windows ClearType subpixel font antialiasing on all Swing components
@@ -124,9 +135,11 @@ public class Main {
             System.setOut(new java.io.PrintStream(dualOut, true, java.nio.charset.StandardCharsets.UTF_8));
             System.setErr(new java.io.PrintStream(dualErr, true, java.nio.charset.StandardCharsets.UTF_8));
 
+            String startupTimestamp = java.time.LocalDateTime.now()
+                    .format(java.time.format.DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm:ss.SSS"));
             System.out.println("=======================================================");
-            System.out.println("ScoutingPro27 日志系统启动: " + logFile.getAbsolutePath());
-            System.out.println("启动时间: " + java.time.LocalDateTime.now());
+            System.out.println("[" + startupTimestamp + "] ScoutingPro27 日志系统启动: " + logFile.getAbsolutePath());
+            System.out.println("[" + startupTimestamp + "] 启动时间戳: " + startupTimestamp);
             System.out.println("=======================================================");
         } catch (Exception e) {
             System.err.println("初始化文件日志失败: " + e.getMessage());
@@ -263,7 +276,7 @@ public class Main {
             String dbPassword = "";
 
             if (splash != null) splash.updateProgress(10, "Preparing database...");
-            System.out.println("初始化 HikariCP 数据库连接池并执行迁移...");
+            logger.info("初始化 HikariCP 数据库连接池并执行迁移...");
             javax.sql.DataSource dataSource = JdbiConfig.getOrCreateDataSource(dbUrl, dbUser, dbPassword);
             Flyway flyway = Flyway.configure()
                     .dataSource(dataSource)
@@ -274,7 +287,7 @@ public class Main {
             flyway.migrate();
 
             if (splash != null) splash.updateProgress(35, "Connecting to database...");
-            System.out.println("连接 JDBI...");
+            logger.info("连接 JDBI...");
             Jdbi jdbi = JdbiConfig.create(dataSource);
 
             // ==========================================
@@ -309,7 +322,7 @@ public class Main {
             }, "app-shutdown-hook"));
 
             String localUrl = "http://localhost:" + app.port() + "/index.html";
-            System.out.println("Javalin 运行在: " + localUrl + " (监听 IPv4/IPv6 双栈端口 :" + app.port() + ")");
+            logger.info("Javalin 运行在: {} (监听 IPv4/IPv6 双栈端口 :{})", localUrl, app.port());
             
             boolean headless = false;
             for (String arg : args) {
@@ -320,7 +333,7 @@ public class Main {
             }
             
             if (headless) {
-                System.out.println("运行在 Headless 模式，已跳过 JCEF UI 的启动。");
+                logger.info("运行在 Headless 模式，已跳过 JCEF UI 的启动。");
                 return;
             }
 
@@ -634,7 +647,7 @@ public class Main {
         File primary = new File(baseDir, "jcef_profile");
         primary.mkdirs();
         if (tryAcquireProfileLock(primary)) {
-            System.out.println("成功分配并锁定主 JCEF 缓存目录: " + primary.getAbsolutePath());
+            logger.info("成功分配并锁定主 JCEF 缓存目录: {}", primary.getAbsolutePath());
             return primary;
         }
 
@@ -642,14 +655,14 @@ public class Main {
             File multiDir = new File(baseDir, "jcef_profile_" + i);
             multiDir.mkdirs();
             if (tryAcquireProfileLock(multiDir)) {
-                System.out.println("检测到主实例正在运行，多实例隔离模式已激活，当前实例使用独立缓存目录: " + multiDir.getAbsolutePath());
+                logger.info("检测到主实例正在运行，多实例隔离模式已激活，当前实例使用独立缓存目录: {}", multiDir.getAbsolutePath());
                 return multiDir;
             }
         }
 
         File fallback = new File(System.getProperty("java.io.tmpdir"), "scoutingpro-jcef-" + System.currentTimeMillis());
         fallback.mkdirs();
-        System.out.println("多实例预置目录已满，使用临时缓存目录: " + fallback.getAbsolutePath());
+        logger.info("多实例预置目录已满，使用临时缓存目录: {}", fallback.getAbsolutePath());
         return fallback;
     }
 

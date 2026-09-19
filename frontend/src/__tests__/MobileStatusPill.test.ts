@@ -21,7 +21,14 @@ vi.mock('vue-i18n', async (importOriginal) => {
           'event.host': 'Host',
           'event.client': 'Scout Client',
           'event.takeover_as_host': 'Takeover as Host',
-          'event.standby_banner_desc': 'Standby Host Active'
+          'event.standby_banner_desc': 'Standby Host Active',
+          'connection.transport_type': 'Connection Type',
+          'connection.host_topology': 'Host Mesh Topology',
+          'connection.transport_ipv6': 'IPv6 Direct',
+          'connection.transport_lan': 'LAN Direct',
+          'connection.transport_nat': 'IPv4 Hole-punch',
+          'connection.transport_relay': 'Relay',
+          'connection.transport_unknown': 'P2P'
         }
         return dict[key] || key
       }
@@ -55,15 +62,14 @@ describe('MobileStatusPill.vue', () => {
     expect(dot.exists()).toBe(true)
   })
 
-  it('opens HUD popover modal when pill is clicked', async () => {
+  it('opens HUD popover modal when pill is clicked and shows Scout Client role', async () => {
     const connStore = useConnectionStore()
     connStore.status = 'connected'
 
     const wrapper = mount(MobileStatusPill, {
       props: {
         eventName: 'Championship Event',
-        inviteCode: 'CHAMP1',
-        isHost: true
+        inviteCode: 'CHAMP1'
       }
     })
 
@@ -78,7 +84,7 @@ describe('MobileStatusPill.vue', () => {
     expect(popover).not.toBeNull()
     expect(popover!.textContent).toContain('Championship Event')
     expect(popover!.textContent).toContain('CHAMP1')
-    expect(popover!.textContent).toContain('Host')
+    expect(popover!.textContent).toContain('Scout Client')
 
     // Close HUD
     const closeBtn = popover!.querySelector('.btn-close-hud') as HTMLButtonElement
@@ -86,30 +92,79 @@ describe('MobileStatusPill.vue', () => {
     expect(document.body.querySelector('.hud-popover')).toBeNull()
   })
 
-  it('shows standby takeover banner and emits takeoverHost when standby host', async () => {
+  it('does not render standby badge or takeover controls on mobile', async () => {
     const connStore = useConnectionStore()
     connStore.status = 'connected'
-    connStore.isStandbyHost = true
 
     const wrapper = mount(MobileStatusPill, {
       props: {
         eventName: 'Standby Event',
-        inviteCode: 'STAND1',
-        isHost: false
+        inviteCode: 'STAND1'
       }
     })
 
-    // Pill shows standby badge
-    expect(wrapper.find('.pill-standby-badge').exists()).toBe(true)
+    // Pill does not show standby badge
+    expect(wrapper.find('.pill-standby-badge').exists()).toBe(false)
 
     // Open HUD
     await wrapper.find('.status-pill').trigger('click')
 
-    const takeoverBtn = document.body.querySelector('.btn-hud-takeover') as HTMLButtonElement
-    expect(takeoverBtn).not.toBeNull()
+    const takeoverBtn = document.body.querySelector('.btn-hud-takeover')
+    expect(takeoverBtn).toBeNull()
+  })
 
-    // Click takeover
-    await takeoverBtn.click()
-    expect(wrapper.emitted('takeoverHost')).toBeTruthy()
+  it('displays connection type line in HUD popover for client with transport and RTT', async () => {
+    const connStore = useConnectionStore()
+    connStore.status = 'connected'
+    connStore.setTransportInfo({
+      type: 'nat_p2p',
+      localCandidateType: 'srflx',
+      remoteCandidateType: 'srflx',
+      localAddress: '216.195.192.84',
+      remoteAddress: '39.157.117.55',
+      protocol: 'UDP',
+      rttMs: 303
+    })
+
+    const wrapper = mount(MobileStatusPill, {
+      props: {
+        eventName: 'Quals 26',
+        inviteCode: 'BUZZ26'
+      }
+    })
+
+    await wrapper.find('.status-pill').trigger('click')
+
+    const popover = document.body.querySelector('.hud-popover')
+    expect(popover).not.toBeNull()
+    expect(popover!.textContent).toContain('Connection Type')
+    expect(popover!.textContent).toContain('IPv4 Hole-punch')
+    expect(popover!.textContent).toContain('(303ms)')
+  })
+
+  it('displays LAN connection type line in HUD popover for mobile client', async () => {
+    const connStore = useConnectionStore()
+    connStore.status = 'connected'
+    connStore.setTransportInfo({
+      type: 'lan_p2p',
+      localCandidateType: 'host',
+      remoteCandidateType: 'host',
+      protocol: 'UDP',
+      rttMs: 4
+    })
+
+    const wrapper = mount(MobileStatusPill, {
+      props: {
+        eventName: 'LAN Event',
+        inviteCode: 'LAN001'
+      }
+    })
+
+    await wrapper.find('.status-pill').trigger('click')
+
+    const popover = document.body.querySelector('.hud-popover')
+    expect(popover).not.toBeNull()
+    expect(popover!.textContent).toContain('Connection Type')
+    expect(popover!.textContent).toContain('LAN Direct')
   })
 })

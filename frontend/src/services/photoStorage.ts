@@ -7,14 +7,17 @@ import {
   deleteMobileCachedPhoto
 } from './mobilePhotoCache'
 
+import { isMobileDevice } from '@/composables/useIsMobile'
+
 /**
  * 严格判定当前运行环境是否为电脑端 Host 节点。
- * 电脑端 (PC Host / JCEF) 访问源必定为 localhost / 127.0.0.1。
+ * 手机端 (Mobile Device) 无论通过何种地址访问，绝对不可作为 Host。
+ * 电脑端 (PC Host / JCEF) 访问源必定为 localhost / 127.0.0.1 / ::1。
  * 手机端 (Mobile Client) 访问源为局域网 IP (192.168.x.x / 10.x.x.x)。
- * 严禁使用屏幕宽度判定节点物理身份！
  */
 export function isDesktopHost(): boolean {
   if (typeof window === 'undefined') return true
+  if (isMobileDevice()) return false
   const host = window.location.hostname
   return host === 'localhost' || host === '127.0.0.1' || host === '::1'
 }

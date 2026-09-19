@@ -5,6 +5,7 @@ import {
   saveRecord,
   syncRecords,
   markRecordsSynced,
+  isStaticCloudHost,
   fetchBannedTeams as apiFetchBannedTeams,
   banTeam as apiBanTeam,
   unbanTeam as apiUnbanTeam,
@@ -293,9 +294,22 @@ export const useRecordStore = defineStore('records', () => {
       ])
       const userStore = useUserStore()
       const eventStore = useEventStore()
-      if (record.scoutId === userStore.userId || eventStore.isHost || !userStore.userId) {
+      const isAuthoritativeHost = Boolean(eventStore.isHost && !isStaticCloudHost())
+
+      if (isAuthoritativeHost) {
         await saveRecord(record)
         record.syncStatus = 'SYNCED'
+      } else {
+        // 非主机客户端（手机端/从机/静态托管）：严格保持 PENDING 状态，等待连通主机并收到 ACK 及 hostSeq 后方可标为 SYNCED
+        record.syncStatus = 'PENDING'
+        record.hostSeq = undefined
+        if (!isStaticCloudHost()) {
+          try {
+            await saveRecord(record)
+          } catch {
+            // 离线环境静默忽略，由 WebRTC 链路接管
+          }
+        }
       }
       return { success: true, recordsToPush: uniqueRecordsToPush }
     } catch (e: any) {
@@ -323,9 +337,12 @@ export const useRecordStore = defineStore('records', () => {
     try {
       const [{ useEventStore }] = await Promise.all([import('@/stores/events')])
       const eventStore = useEventStore()
-      if (eventStore.isHost) {
+      const isAuthoritativeHost = Boolean(eventStore.isHost && !isStaticCloudHost())
+      if (isAuthoritativeHost) {
         await saveRecord(target)
         target.syncStatus = 'SYNCED'
+      } else {
+        target.syncStatus = 'PENDING'
       }
     } catch (e) {
       console.warn('[RecordStore] Failed to sync deleted tombstone to backend:', e)

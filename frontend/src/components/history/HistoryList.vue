@@ -4,10 +4,19 @@ import { useRoute } from 'vue-router'
 import { useI18n } from 'vue-i18n'
 import type { ScoutingRecord } from '@/types'
 import { useRecordStore } from '@/stores/records'
+import { useUserStore } from '@/stores/user'
+import { useConnectionStore } from '@/stores/connection'
+import { useEventStore } from '@/stores/events'
+import { useToastStore } from '@/stores/toast'
+import { hapticLight, hapticSuccess, hapticWarning } from '@/utils/haptics'
 import { getRecordTournamentLevel, sortRecordsChronologically } from '@/utils/tournament'
 
 const { t } = useI18n()
 const recordStore = useRecordStore()
+const userStore = useUserStore()
+const connStore = useConnectionStore()
+const eventStore = useEventStore()
+const toastStore = useToastStore()
 
 const props = defineProps<{
   records: ScoutingRecord[]
@@ -58,19 +67,39 @@ watch([highlightMatch, highlightTeam, highlightLevel, () => sortedRecords.value]
   }
 }, { immediate: true })
 
-function syncIcon(status: string): string {
-  return status === 'SYNCED' ? 'check_circle' : 'hourglass_empty'
+function isRecordSynced(rec: ScoutingRecord): boolean {
+  // 在 Host 端，只要状态为 SYNCED 即为权威落库
+  if (eventStore.isHost) return rec.syncStatus === 'SYNCED'
+  // 在 Client 端，必须同时满足 SYNCED 且获得 Host 分配的权威序号 hostSeq
+  return rec.syncStatus === 'SYNCED' && Boolean(rec.hostSeq)
 }
 
-function syncTooltip(status: string): string {
-  return status === 'SYNCED'
+function syncIcon(rec: ScoutingRecord): string {
+  return isRecordSynced(rec) ? 'check_circle' : 'hourglass_empty'
+}
+
+function syncTooltip(rec: ScoutingRecord): string {
+  return isRecordSynced(rec)
     ? t('history.sync_synced')
     : t('history.sync_pending')
 }
 
 function startEdit(record: ScoutingRecord) {
-  if (record.syncStatus === 'SYNCED' && !record.isConflict) return // can't edit synced unless conflicted
+  if (isRecordSynced(record) && !record.isConflict) return // can't edit synced unless conflicted
   emit('editRecord', record)
+}
+
+function retrySyncRecord(record: ScoutingRecord) {
+  hapticLight()
+  record.syncStatus = 'PENDING'
+  if (connStore.isConnected) {
+    connStore.pushRecords([record])
+    hapticSuccess()
+    toastStore.showToast(t('history.resync_triggered'), 'info')
+  } else {
+    hapticWarning()
+    toastStore.showToast(t('history.resync_offline_queued'), 'warning')
+  }
 }
 
 function formatDate(iso: string): string {
@@ -167,7 +196,14 @@ function enter(el: Element, done: () => void) {
             <span class="card-teams">
               {{ t('history.match') }} #{{ (getRecordTournamentLevel(rec) === 'PLAYOFF' ? 'P' : 'Q') }}{{ rec.matchNumber }} | {{ t('history.team') }} #{{ rec.teamNumber }}
             </span>
-            <span class="card-date">{{ formatDate(rec.createdAt) }}</span>
+            <div class="card-meta">
+              <span class="card-date">{{ formatDate(rec.createdAt) }}</span>
+              <span v-if="rec.scoutId" class="card-scout-id" :title="rec.scoutName ? `${rec.scoutName} (${rec.scoutId})` : rec.scoutId">
+                <span class="material-icons scout-meta-icon">person</span>
+                <span class="scout-meta-text">{{ t('history.scout_id') }}: {{ rec.scoutId }}</span>
+                <span v-if="rec.scoutName" class="scout-meta-name">({{ rec.scoutName }})</span>
+              </span>
+            </div>
           </div>
           <div class="card-right">
             <span
@@ -179,9 +215,10 @@ function enter(el: Element, done: () => void) {
             <span class="card-score">{{ rec.totalScore }} {{ t('history.pts') }}</span>
             <span
               class="sync-badge material-icons"
+              :class="{ 'is-synced': isRecordSynced(rec), 'is-pending': !isRecordSynced(rec) }"
               style="font-size: 18px; vertical-align: bottom;"
-              :title="syncTooltip(rec.syncStatus)"
-            >{{ syncIcon(rec.syncStatus) }}</span>
+              :title="syncTooltip(rec)"
+            >{{ syncIcon(rec) }}</span>
           </div>
         </div>
 
@@ -196,14 +233,24 @@ function enter(el: Element, done: () => void) {
           <span>{{ t('history.endgame') }}: {{ rec.endgameScore }} {{ t('history.pts') }}</span>
         </div>
 
-        <!-- Edit button for PENDING records or conflicted records -->
-        <div v-if="rec.syncStatus === 'PENDING' || rec.isConflict" class="card-actions">
+        <!-- Edit & Resync buttons for unconfirmed records or conflicted records -->
+        <div v-if="!isRecordSynced(rec) || rec.isConflict" class="card-actions">
           <button
             class="btn-edit"
             :class="{ 'btn-edit-conflict': rec.isConflict }"
             @click="startEdit(rec)"
           >
             <span class="material-icons" style="font-size: 16px; margin-right: 4px;">edit</span> {{ t('history.btn_edit') }}
+          </button>
+
+          <button
+            v-if="!eventStore.isHost && (!rec.hostSeq || rec.syncStatus === 'PENDING') && rec.scoutId === userStore.userId"
+            type="button"
+            class="btn-resync"
+            @click="retrySyncRecord(rec)"
+            :title="connStore.isConnected ? t('history.btn_resync') : t('history.resync_offline_queued')"
+          >
+            <span class="material-icons" style="font-size: 16px; margin-right: 4px;">sync</span> {{ t('history.btn_resync') }}
           </button>
         </div>
       </div>
@@ -313,6 +360,41 @@ function enter(el: Element, done: () => void) {
   color: var(--muted-foreground);
 }
 
+.card-meta {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+  margin-top: 2px;
+}
+
+.card-scout-id {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  font-size: 11px;
+  color: var(--muted-foreground);
+  background: rgba(255, 255, 255, 0.05);
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  padding: 1px 6px;
+  border-radius: 4px;
+}
+
+.scout-meta-icon {
+  font-size: 13px;
+  color: var(--primary, #39ff14);
+}
+
+.scout-meta-text {
+  font-family: var(--font-mono, monospace);
+}
+
+.scout-meta-name {
+  color: var(--foreground);
+  font-weight: 500;
+  margin-left: 2px;
+}
+
 .card-right {
   display: flex;
   align-items: center;
@@ -376,6 +458,38 @@ function enter(el: Element, done: () => void) {
 .btn-cancel {
   background: var(--border);
   color: var(--muted-foreground);
+}
+
+.sync-badge.is-synced {
+  color: #39ff14;
+}
+
+.sync-badge.is-pending {
+  color: #f59e0b;
+}
+
+.btn-resync {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 6px 14px;
+  border-radius: 8px;
+  font-size: 12px;
+  font-weight: 600;
+  cursor: pointer;
+  border: 1px solid rgba(245, 158, 11, 0.4);
+  background: rgba(245, 158, 11, 0.15);
+  color: #f59e0b;
+  transition: all 0.2s ease;
+}
+
+.btn-resync:hover {
+  background: rgba(245, 158, 11, 0.25);
+  border-color: #f59e0b;
+}
+
+.btn-resync:active {
+  transform: scale(0.97);
 }
 </style>
 

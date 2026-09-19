@@ -10,8 +10,10 @@ import { useScheduleStore } from '@/stores/schedule'
 import { usePitScoutStore } from '@/stores/pitScout'
 import { useCustomFieldsStore } from '@/stores/customFields'
 import { createWebRtcService, type WebRtcCallbacks } from '@/services/webrtc'
-import { syncRecords, syncPitRecordsBatch, savePitRecord } from '@/services/api'
+import { syncRecords, syncPitRecordsBatch, savePitRecord, addEventMember } from '@/services/api'
+import { saveKnownScout } from '@/services/scoutStorage'
 import { flushOfflinePhotos, isDesktopHost } from '@/services/photoStorage'
+import { isMobileDevice } from '@/composables/useIsMobile'
 import type { ScoutingRecord, ScoutingEvent } from '@/types'
 
 export interface EventWebRtcBridgeOptions {
@@ -44,6 +46,7 @@ export function useEventWebRtcBridge({
   watch(lastHostSeq, (v) => localStorage.setItem(lastHostSeqKey.value, String(v)))
   const lastConnectedHostSessionId = ref<string>('')
   const wasActiveHostBeforeDemotion = ref<boolean>(false)
+  const syncedMemberIds = new Set<string>()
 
   function advanceLastHostSeq(incomingRecords: ScoutingRecord[]) {
     const validSeqs = incomingRecords
@@ -234,6 +237,17 @@ export function useEventWebRtcBridge({
         connStore.addConnectedScout(userId, userName)
         if (connStore.rtcService) {
           inboxStore.flushOutbox(connStore.rtcService, userId)
+        }
+        const currentEventId = eventStore.currentEvent?.id || eventId.value
+        if (currentEventId && userId) {
+          saveKnownScout(currentEventId, { id: userId, name: userName, lastSeen: Date.now() })
+          if (!syncedMemberIds.has(userId) && eventStore.isHost) {
+            syncedMemberIds.add(userId)
+            addEventMember(currentEventId, userId, userName).catch((err) => {
+              console.warn(`[WebRTC Bridge] Failed to persist member ${userId} to backend:`, err)
+              syncedMemberIds.delete(userId)
+            })
+          }
         }
       },
 
@@ -471,9 +485,13 @@ export function useEventWebRtcBridge({
 
     try {
       const shouldHost = Boolean(
-        eventStore.isHost ||
-        (isDesktopHost() && evt.hostId === userStore.userId) ||
-        (connStore.rtcService && typeof connStore.rtcService.isHostMode === 'function' && connStore.rtcService.isHostMode())
+        isDesktopHost() &&
+        !isMobileDevice() &&
+        (
+          eventStore.isHost ||
+          evt.hostId === userStore.userId ||
+          (connStore.rtcService && typeof connStore.rtcService.isHostMode === 'function' && connStore.rtcService.isHostMode())
+        )
       )
       if (shouldHost) {
         await rtc.host(evt.inviteCode, evt, userStore.username, userStore.userId)
@@ -545,14 +563,15 @@ export function useEventWebRtcBridge({
             { isHostTakeover, clientMaxSeq: lastHostSeq.value }
           )
 
-          // 核心自愈：若发生主机切换，即使此前已标记为 SYNCED 也重推属于自己的记录，确保新主机不漏历史打分；常规重连只推 PENDING
+          // 核心自愈：若发生主机切换，即使此前已标记为 SYNCED 也重推属于自己的记录，确保新主机不漏历史打分；常规重连推送 PENDING 及未获 Host 签发的未打号记录
           const myRecs = recordStore.records.filter(
             (r) =>
               r.eventId === evt.id &&
               r.scoutId === userStore.userId &&
-              (isHostTakeover || r.syncStatus === 'PENDING')
+              (isHostTakeover || r.syncStatus === 'PENDING' || !r.hostSeq)
           )
           if (myRecs.length > 0) {
+            console.log(`[EventView] Auto self-healing: pushing ${myRecs.length} unconfirmed/pending records to host...`)
             connStore.pushRecords(myRecs)
           }
 
@@ -597,6 +616,7 @@ export function useEventWebRtcBridge({
     wasActiveHostBeforeDemotion.value = false
     lastConnectedHostSessionId.value = ''
     connStore.setStatus('offline')
+    syncedMemberIds.clear()
   }
 
   function handleBeforeUnload() {

@@ -100,7 +100,15 @@ function handleStaticHostFallback<T>(method: string, path: string, body?: unknow
   if (path.startsWith('/events/') && method === 'DELETE') {
     return Promise.resolve(undefined as unknown as T)
   }
-  // 8. Records
+  // 8. Records & Pit records write -> reject on static cloud host to prevent silent fake persistence
+  if (
+    (path.startsWith('/records') || path.includes('/pit-records') || path.includes('/pit/records')) &&
+    (method === 'POST' || method === 'PUT')
+  ) {
+    return Promise.reject(
+      new Error(`Static cloud host does not support direct HTTP record persistence for ${path}; data must be synced via WebRTC`)
+    )
+  }
   if (path.startsWith('/records/batch')) {
     return Promise.resolve({ synced: Array.isArray(body) ? body.length : 0, failed: 0 } as unknown as T)
   }
@@ -305,6 +313,14 @@ export interface EventMemberItem {
 
 export function fetchEventMembers(eventId: string): Promise<EventMemberItem[]> {
   return request<EventMemberItem[]>('GET', `/events/${encodeURIComponent(eventId)}/members`)
+}
+
+export function addEventMember(eventId: string, userId: string, username?: string): Promise<void> {
+  return request<void>('POST', `/events/${encodeURIComponent(eventId)}/members`, { userId, username })
+}
+
+export function removeEventMember(eventId: string, userId: string): Promise<void> {
+  return request<void>('DELETE', `/events/${encodeURIComponent(eventId)}/members/${encodeURIComponent(userId)}`)
 }
 
 export function syncExternalEvent(event: ScoutingEvent): Promise<ScoutingEvent> {

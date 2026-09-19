@@ -10,7 +10,8 @@ vi.mock('../services/api', () => ({
   savePitRecord: vi.fn().mockResolvedValue({ success: true }),
   syncPitRecordsBatch: vi.fn().mockResolvedValue({ success: true, count: 0 }),
   syncOfficialTeams: vi.fn().mockResolvedValue({ success: true, count: 0 }),
-  fetchFtcTeams: vi.fn().mockResolvedValue([])
+  fetchFtcTeams: vi.fn().mockResolvedValue([]),
+  isStaticCloudHost: vi.fn(() => false)
 }))
 
 const createMockPitRecord = (overrides: Partial<PitScoutingRecord> = {}): PitScoutingRecord => ({

@@ -23,7 +23,8 @@ vi.mock('@/services/api', () => ({
   uploadPitPhoto: vi.fn().mockResolvedValue(undefined),
   deletePitPhoto: vi.fn().mockResolvedValue(undefined),
   fetchEventTags: vi.fn().mockResolvedValue([]),
-  syncExternalEvent: vi.fn().mockImplementation((ev) => Promise.resolve(ev))
+  syncExternalEvent: vi.fn().mockImplementation((ev) => Promise.resolve(ev)),
+  isStaticCloudHost: vi.fn(() => false)
 }))
 
 describe('Network Sync Link Fixes & Verification', () => {

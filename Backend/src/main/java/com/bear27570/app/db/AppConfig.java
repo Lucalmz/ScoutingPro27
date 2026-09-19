@@ -192,7 +192,32 @@ public class AppConfig {
         return logDir;
     }
 
-    public static File resolveLogFile() {
-        return new File(resolveLogDir(), "scoutingpro.log");
+    private static File currentLogFile = null;
+
+    /**
+     * 获取当前运行实例的独立日志文件 (log/scoutingpro_yyyy-MM-dd_HH-mm-ss.log)。
+     * 每次运行（JVM 启动）都独立出一个新的日志文件，单次运行内缓存单例复用。
+     */
+    public static synchronized File resolveLogFile() {
+        if (currentLogFile == null) {
+            String timestamp = java.time.LocalDateTime.now()
+                .format(java.time.format.DateTimeFormatter.ofPattern("yyyy-MM-dd_HH-mm-ss"));
+            File dir = resolveLogDir();
+            File candidate = new File(dir, "scoutingpro_" + timestamp + ".log");
+            int counter = 1;
+            while (candidate.exists() && candidate.length() > 0) {
+                candidate = new File(dir, "scoutingpro_" + timestamp + "_" + counter + ".log");
+                counter++;
+            }
+            currentLogFile = candidate;
+        }
+        return currentLogFile;
+    }
+
+    /**
+     * 仅供单元测试重置当前运行日志文件
+     */
+    public static synchronized void resetLogFileForTest() {
+        currentLogFile = null;
     }
 }

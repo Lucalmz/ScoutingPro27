@@ -9,7 +9,7 @@ import { useNavigationStore, type EventTab } from '@/stores/navigation'
 import { useInboxStore } from '@/stores/inbox'
 import { usePitScoutStore } from '@/stores/pitScout'
 import { useScheduleStore } from '@/stores/schedule'
-import { flushOfflinePhotos } from '@/services/photoStorage'
+import { flushOfflinePhotos, isDesktopHost } from '@/services/photoStorage'
 import { useI18n } from 'vue-i18n'
 import type { ScoutingRecord } from '@/types'
 import ConnectionStatus from '@/components/common/ConnectionStatus.vue'
@@ -29,7 +29,7 @@ import MobileQrModal from '@/components/common/MobileQrModal.vue'
 import MobileBottomNav from '@/components/common/MobileBottomNav.vue'
 import MobileStatusPill from '@/components/common/MobileStatusPill.vue'
 import MobilePhaseWizardForm from '@/components/scouting/mobile/MobilePhaseWizardForm.vue'
-import { useIsMobile } from '@/composables/useIsMobile'
+import { useIsMobile, isMobileDevice } from '@/composables/useIsMobile'
 import { syncRecords } from '@/services/api'
 import { transitionState } from '@/utils/transitionState'
 import { useToastStore } from '@/stores/toast'
@@ -299,6 +299,7 @@ async function onRecordSubmitted(recordOrRecords: ScoutingRecord | ScoutingRecor
 }
 
 async function handleTakeoverHost() {
+  if (isMobile.value || isMobileDevice() || !isDesktopHost()) return
   try {
     await connStore.takeoverHost()
   } catch (e: any) {
@@ -315,8 +316,6 @@ async function handleTakeoverHost() {
       v-if="isMobile"
       :event-name="event?.name"
       :invite-code="event?.inviteCode"
-      :is-host="isHost"
-      @takeover-host="handleTakeoverHost"
     />
 
     <!-- Header -->
@@ -402,8 +401,8 @@ async function handleTakeoverHost() {
       <span>{{ t('connection.congested_banner') }}</span>
     </div>
 
-    <!-- Standby Host Banner -->
-    <div v-if="connStore.isStandbyHost" class="standby-host-banner">
+    <!-- Standby Host Banner (Desktop only) -->
+    <div v-if="!isMobile && connStore.isStandbyHost" class="standby-host-banner">
       <div class="standby-banner-left">
         <span class="material-icons standby-icon">sensors</span>
         <span class="standby-text">

@@ -221,7 +221,7 @@
 }
 .btn-action.primary {
   background: var(--primary);
-  color: #fff;
+  color: var(--primary-foreground, #000000);
 }
 .btn-action.secondary {
   background: var(--surface-hover);

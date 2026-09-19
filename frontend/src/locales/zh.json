@@ -222,7 +222,11 @@
     "sync_synced": "已同步 - 主机已接收",
     "btn_edit": "编辑",
     "btn_cancel": "取消",
-    "btn_save": "保存修改"
+    "btn_save": "保存修改",
+    "scout_id": "提交者 ID",
+    "btn_resync": "重推",
+    "resync_triggered": "已向主机发起同步推送",
+    "resync_offline_queued": "当前离线，已标记待同步，连通主机后将自动补发"
   },
   "rankings": {
     "loading": "正在加载排名...",
@@ -303,6 +307,8 @@
     "diagnostics_tooltip": "查看实时 WebRTC 链路与信令诊断日志",
     "view_diagnostics": "查看连接诊断与日志",
     "transport": "传输拓扑",
+    "transport_type": "连接类型",
+    "host_topology": "主机多路拓扑",
     "sas_state": "安全核验 (SAS)"
   },
   "diagnostics": {

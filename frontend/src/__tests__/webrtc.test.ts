@@ -1366,7 +1366,7 @@ describe('IPv6 Priority & Transport Diagnostics', () => {
     vi.clearAllMocks()
   })
 
-  it('configures Cloudflare Anycast STUN as the primary STUN servers', () => {
+  it('configures Cloudflare Anycast STUN as the primary STUN servers and excludes non-IPv6 domestic STUNs in favor of HiTV', () => {
     const iceServers = STUN_SERVERS.iceServers || []
     expect(iceServers.length).toBeGreaterThanOrEqual(3)
     const firstServer = iceServers[0]
@@ -1379,6 +1379,20 @@ describe('IPv6 Priority & Transport Diagnostics', () => {
       'stun:stun.l.google.com:19302',
       'stun:stun1.l.google.com:19302'
     ])
+
+    // Flatten all configured STUN URLs to verify presence of HiTV and removal of non-IPv6 servers
+    const allUrls = iceServers.flatMap((server) =>
+      Array.isArray(server.urls) ? server.urls : [server.urls]
+    )
+
+    // HiTV STUN (both domain and direct IPv6) must be present
+    expect(allUrls).toContain('stun:stun.hitv.com:3478')
+    expect(allUrls).toContain('stun:[2409:8c50:e00::4]:3478')
+
+    // Domestic non-IPv6 STUN servers (miwifi, bilibili, qq) must not exist
+    expect(allUrls.some((u) => u.includes('miwifi'))).toBe(false)
+    expect(allUrls.some((u) => u.includes('bilibili'))).toBe(false)
+    expect(allUrls.some((u) => u.includes('stun.qq.com'))).toBe(false)
   })
 
   it('correctly validates Global Unicast IPv6 addresses and rejects local/private addresses', () => {
@@ -1438,29 +1452,43 @@ describe('IPv6 Priority & Transport Diagnostics', () => {
     expect(isPrivateIpv4Address('114.114.114.114')).toBe(false)
   })
 
-  it('optimizes candidate priority according to RFC 8445 for IPv6 hole punching', () => {
-    // IPv6 host candidate (default type-pref 126, component 1, local-pref boosted to 65535)
-    // priority = 126*16777216 + 65535*256 + 255 = 2130706431
-    const ipv6HostCand = 'candidate:1001 1 udp 2122260223 240e:398:3241:880:c0de::1 54321 typ host generation 0'
-    const optimizedHost = optimizeCandidatePriority(ipv6HostCand)
-    expect(optimizedHost).toContain('candidate:1001 1 udp 2130706431 240e:398:3241:880:c0de::1 54321 typ host generation 0')
+  it('optimizes candidate priority according to RFC 8445 prioritizing LAN host, followed by IPv6 and IPv4 STUN, suppressing relay', () => {
+    // 1. LAN host candidate (type-pref 126, component 1, local-pref boosted to 65535)
+    // priority = 126*16777216 + 65535*256 + 255 = 2130706431 (HIGHEST)
+    const ipv4HostCand = 'candidate:1003 1 udp 2122260223 192.168.1.100 54323 typ host generation 0'
+    const optimizedLanHost = optimizeCandidatePriority(ipv4HostCand)
+    expect(optimizedLanHost).toContain('candidate:1003 1 udp 2130706431 192.168.1.100 54323 typ host generation 0')
 
-    // IPv6 srflx candidate (type-pref 100, component 1, local-pref boosted to 65535)
+    // 2. IPv6 host candidate (type-pref 120, component 1, local-pref boosted to 65535)
+    // priority = 120*16777216 + 65535*256 + 255 = 2030043135
+    const ipv6HostCand = 'candidate:1001 1 udp 2122260223 240e:398:3241:880:c0de::1 54321 typ host generation 0'
+    const optimizedIpv6Host = optimizeCandidatePriority(ipv6HostCand)
+    expect(optimizedIpv6Host).toContain('candidate:1001 1 udp 2030043135 240e:398:3241:880:c0de::1 54321 typ host generation 0')
+
+    // 3. IPv6 srflx candidate (type-pref 100, component 1, local-pref boosted to 65535)
     // priority = 100*16777216 + 65535*256 + 255 = 1694498815
     const ipv6SrflxCand = 'candidate:1002 1 udp 1686052607 2408:8207:7852:12::1 54322 typ srflx raddr :: rport 0 generation 0'
     const optimizedSrflx = optimizeCandidatePriority(ipv6SrflxCand)
     expect(optimizedSrflx).toContain('candidate:1002 1 udp 1694498815 2408:8207:7852:12::1 54322 typ srflx raddr :: rport 0 generation 0')
 
-    // IPv4 host candidate remains unchanged
-    const ipv4HostCand = 'candidate:1003 1 udp 2122260223 192.168.1.100 54323 typ host generation 0'
-    expect(optimizeCandidatePriority(ipv4HostCand)).toBe(ipv4HostCand)
+    // 4. IPv4 srflx candidate (type-pref 90, component 1, local-pref 32768)
+    // priority = 90*16777216 + 32768*256 + 255 = 1518338303
+    const ipv4SrflxCand = 'candidate:1005 1 udp 1686052607 114.114.114.114 54325 typ srflx raddr 192.168.1.100 rport 54323 generation 0'
+    const optimizedIpv4Srflx = optimizeCandidatePriority(ipv4SrflxCand)
+    expect(optimizedIpv4Srflx).toContain('candidate:1005 1 udp 1518338303 114.114.114.114 54325 typ srflx raddr 192.168.1.100 rport 54323 generation 0')
+
+    // 5. TURN relay candidate (type-pref 0, component 1, local-pref 0)
+    // priority = 0*16777216 + 0*256 + 255 = 255 (LOWEST)
+    const relayCand = 'candidate:1006 1 udp 1000 162.159.207.1 54326 typ relay raddr 114.114.114.114 rport 54325 generation 0'
+    const optimizedRelay = optimizeCandidatePriority(relayCand)
+    expect(optimizedRelay).toContain('candidate:1006 1 udp 255 162.159.207.1 54326 typ relay raddr 114.114.114.114 rport 54325 generation 0')
 
     // IPv6 Link-local candidate remains unchanged
     const fe80Cand = 'candidate:1004 1 udp 2122260223 fe80::1 54324 typ host generation 0'
     expect(optimizeCandidatePriority(fe80Cand)).toBe(fe80Cand)
   })
 
-  it('optimizes SDP by rewriting candidate lines for IPv6 priority', () => {
+  it('optimizes SDP by rewriting candidate lines prioritizing LAN host, then IPv6 host and srflx', () => {
     const sdp = [
       'v=0',
       'o=- 12345 2 IN IP4 127.0.0.1',
@@ -1476,16 +1504,16 @@ describe('IPv6 Priority & Transport Diagnostics', () => {
     const lines = optimized.split('\r\n')
 
     expect(lines[0]).toBe('v=0')
-    // IPv4 host line untouched
-    expect(lines[4]).toBe('a=candidate:1 1 udp 2122260223 192.168.1.10 50000 typ host')
-    // IPv6 host line priority boosted to 2130706431
-    expect(lines[5]).toBe('a=candidate:2 1 udp 2130706431 240e:398:1::1 50001 typ host')
+    // LAN host line priority boosted to 2130706431 (highest)
+    expect(lines[4]).toBe('a=candidate:1 1 udp 2130706431 192.168.1.10 50000 typ host')
+    // IPv6 host line priority boosted to 2030043135
+    expect(lines[5]).toBe('a=candidate:2 1 udp 2030043135 240e:398:1::1 50001 typ host')
     // IPv6 srflx line priority boosted to 1694498815
     expect(lines[6]).toBe('a=candidate:3 1 udp 1694498815 240e:398:1::1 50002 typ srflx raddr :: rport 0')
     expect(lines[7]).toBe('a=end-of-candidates')
   })
 
-  it('sorts candidates placing IPv6 candidates ahead of IPv4 and relay', () => {
+  it('sorts candidates placing LAN host first, then IPv6, then IPv4 srflx, with TURN relay as last resort', () => {
     const list = [
       { candidate: 'candidate:1 1 udp 2122260223 192.168.1.10 50000 typ host' },
       { candidate: 'candidate:2 1 udp 1000 1.2.3.4 50001 typ relay' },
@@ -1495,9 +1523,9 @@ describe('IPv6 Priority & Transport Diagnostics', () => {
     ]
 
     const sorted = sortCandidatesPreferIpv6(list)
-    expect(sorted[0].candidate).toContain('240e:398::1 50003 typ host')
-    expect(sorted[1].candidate).toContain('240e:398::1 50002 typ srflx')
-    expect(sorted[2].candidate).toContain('192.168.1.10 50000 typ host')
+    expect(sorted[0].candidate).toContain('192.168.1.10 50000 typ host')
+    expect(sorted[1].candidate).toContain('240e:398::1 50003 typ host')
+    expect(sorted[2].candidate).toContain('240e:398::1 50002 typ srflx')
     expect(sorted[3].candidate).toContain('114.114.114.114 50004 typ srflx')
     expect(sorted[4].candidate).toContain('typ relay')
   })

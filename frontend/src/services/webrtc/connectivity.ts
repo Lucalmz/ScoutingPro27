@@ -74,7 +74,7 @@ export async function probePublicConnectivity(timeoutMs = 2500, bypassThrottle =
 
 export const STUN_SERVERS: RTCConfiguration = {
   iceServers: [
-    // 1. Cloudflare Anycast STUN（全球 Anycast、低延迟双栈）
+    // 1. Cloudflare Anycast STUN（全球 Anycast、低延迟双栈，优先使用）
     {
       urls: ['stun:stun.cloudflare.com:3478', 'stun:stun.cloudflare.com:53']
     },
@@ -86,18 +86,15 @@ export const STUN_SERVERS: RTCConfiguration = {
     {
       urls: [
         'stun:[2606:4700:49::]:3478',
-        'stun:[2001:4860:4864:5:8000::1]:19302'
+        'stun:[2001:4860:4864:5:8000::1]:19302',
+        'stun:[2409:8c50:e00::4]:3478'
       ]
     },
-    // 3. 国内主流 Anycast STUN（腾讯、小米、哔哩哔哩，全网极低延迟、零丢包、支持 IPv4/IPv6 双栈）
+    // 4. 国内主流 STUN（湖南广电/中国移动 HiTV，低延迟、支持 IPv4/IPv6 双栈）
     {
-      urls: [
-        'stun:stun.qq.com:3478',
-        'stun:stun.miwifi.com:3478',
-        'stun:stun.chat.bilibili.com:3478'
-      ]
+      urls: ['stun:stun.hitv.com:3478']
     },
-    // 4. Metered STUN
+    // 5. Metered STUN
     {
       urls: 'stun:stun.relay.metered.ca:80'
     },
@@ -235,7 +232,7 @@ export function isPrivateIpv4Address(ip: string): boolean {
 }
 
 /**
- * 根据 RFC 8445 计算重写 candidate 优先级，实现 IPv6 打洞优先：
+ * 根据 RFC 8445 计算重写 candidate 优先级，实现 LAN 优先 > IPv6 优先 > 公网 STUN > TURN 兜底：
  * priority = (2^24)*(type-preference) + (2^8)*(local-preference) + (256 - component)
  */
 export function optimizeCandidatePriority(candidateStr: string): string {
@@ -256,9 +253,19 @@ export function optimizeCandidatePriority(candidateStr: string): string {
     const typeIndex = parts.indexOf('typ')
     const candType = typeIndex !== -1 && parts[typeIndex + 1] ? parts[typeIndex + 1] : ''
 
+    // 1. LAN 私有局域网 Host 候选（RFC 1918 私网 IPv4 或 mDNS .local）具备最高优先级，优先走本地网络零公网流量
+    if (candType === 'host' && (isPrivateIpv4Address(cleanAddr) || cleanAddr.endsWith('.local'))) {
+      const typePref = 126
+      const localPref = 65535
+      const boostedPriority = typePref * 16777216 + localPref * 256 + (256 - component)
+      parts[3] = String(boostedPriority)
+      return hasPrefix ? `candidate:${parts.join(' ')}` : parts.join(' ')
+    }
+
+    // 2. 公网全球单播 IPv6 候选（无需 NAT 打洞，跨网点对点直连）
     if (cleanAddr && isGlobalIpv6Address(cleanAddr)) {
       let typePref = 0
-      if (candType === 'host') typePref = 126
+      if (candType === 'host') typePref = 120
       else if (candType === 'prflx') typePref = 110
       else if (candType === 'srflx') typePref = 100
       else if (candType === 'relay') typePref = 0
@@ -268,6 +275,24 @@ export function optimizeCandidatePriority(candidateStr: string): string {
         parts[3] = String(boostedPriority)
         return hasPrefix ? `candidate:${parts.join(' ')}` : parts.join(' ')
       }
+    }
+
+    // 3. 公网 IPv4 STUN 穿透候选 (srflx / prflx)
+    if (candType === 'srflx') {
+      const typePref = 90
+      const localPref = 32768
+      const boostedPriority = typePref * 16777216 + localPref * 256 + (256 - component)
+      parts[3] = String(boostedPriority)
+      return hasPrefix ? `candidate:${parts.join(' ')}` : parts.join(' ')
+    }
+
+    // 4. TURN Relay 中继候选（压制到最低，确保仅在对称 NAT 且 IPv6 无法直连时作为最终兜底）
+    if (candType === 'relay') {
+      const typePref = 0
+      const localPref = 0
+      const minPriority = typePref * 16777216 + localPref * 256 + (256 - component)
+      parts[3] = String(minPriority)
+      return hasPrefix ? `candidate:${parts.join(' ')}` : parts.join(' ')
     }
   } catch (err) {
     console.warn('[WebRTC] optimizeCandidatePriority parsing anomaly, keeping original candidate:', err)
@@ -299,7 +324,16 @@ export function optimizeSdpCandidates(sdp: string): string {
 }
 
 /**
- * 对收集或接收到的 ICE 候选列表排序，确保 IPv6 候选优先被加入和探测
+ * 对收集或接收到的 ICE 候选列表排序，优先保证：
+ * 1. 局域网私有 IPv4 Host（最高：120 分，本地零公网流量直连）
+ * 2. 公网全球单播 IPv6 Host（100 分）
+ * 3. 公网全球单播 IPv6 STUN srflx（90 分）
+ * 4. 其他有效 IPv6（80 分）
+ * 5. 公网 IPv4 Host（70 分）
+ * 6. 公网 IPv4 STUN srflx（50 分）
+ * 7. 公网 IPv4 prflx（45 分）
+ * 8. 其他候选（20 分）
+ * 9. TURN Relay 中继（5 分，最低兜底）
  */
 export function sortCandidatesPreferIpv6<T extends { candidate?: string }>(candidates: T[]): T[] {
   return [...candidates].sort((a, b) => {
@@ -316,15 +350,24 @@ export function sortCandidatesPreferIpv6<T extends { candidate?: string }>(candi
       const typeIndex = parts.indexOf('typ')
       const candType = typeIndex !== -1 && parts[typeIndex + 1] ? parts[typeIndex + 1] : ''
 
+      // 1. LAN 局域网私有 IPv4 Host 具备最高优先级（零公网流量、超低延迟）
+      if (candType === 'host' && (isPrivateIpv4Address(cleanAddr) || cleanAddr.endsWith('.local'))) {
+        return 120
+      }
+      // 2. 公网全球单播 IPv6（无需 NAT 打洞，点对点直连）
       if (isGlobalIpv6Address(cleanAddr)) {
         if (candType === 'host') return 100
         if (candType === 'srflx') return 90
-        return 80
+        return 85
       }
-      if (isIpv6Address(cleanAddr)) return 70
-      if (candType === 'host') return 50
-      if (candType === 'srflx') return 40
-      if (candType === 'relay') return 10
+      if (isIpv6Address(cleanAddr)) return 80
+      // 3. 其他公网 Host 候选
+      if (candType === 'host') return 70
+      // 4. IPv4 STUN 穿透候选 (srflx / prflx)
+      if (candType === 'srflx') return 50
+      if (candType === 'prflx') return 45
+      // 5. TURN Relay 中继候选（兜底方案，优先级极低）
+      if (candType === 'relay') return 5
       return 20
     }
 
@@ -347,11 +390,6 @@ export function classifyCandidatePair(
   const cleanLocal = cleanIpAddress(localIp)
   const cleanRemote = cleanIpAddress(remoteIp)
 
-  const hasGlobalIpv6 = isGlobalIpv6Address(cleanLocal) || isGlobalIpv6Address(cleanRemote)
-  if (hasGlobalIpv6) {
-    return 'ipv6_p2p'
-  }
-
   const isLocalLan =
     isPrivateIpv4Address(cleanLocal) &&
     isPrivateIpv4Address(cleanRemote) &&
@@ -359,6 +397,11 @@ export function classifyCandidatePair(
     remoteCandType === 'host'
   if (isLocalLan) {
     return 'lan_p2p'
+  }
+
+  const hasGlobalIpv6 = isGlobalIpv6Address(cleanLocal) || isGlobalIpv6Address(cleanRemote)
+  if (hasGlobalIpv6) {
+    return 'ipv6_p2p'
   }
 
   if (isIpv6Address(cleanLocal) || isIpv6Address(cleanRemote)) {

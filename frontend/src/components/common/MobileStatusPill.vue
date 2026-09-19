@@ -8,11 +8,6 @@ import { hapticLight, hapticMedium } from '@/utils/haptics'
 const props = defineProps<{
   eventName?: string
   inviteCode?: string
-  isHost?: boolean
-}>()
-
-const emit = defineEmits<{
-  (e: 'takeoverHost'): void
 }>()
 
 const { t } = useI18n()
@@ -49,15 +44,53 @@ const statusLabel = computed(() => {
   }
 })
 
+const transportIcon = computed(() => {
+  if (!connStore.isConnected) {
+    return connStore.status === 'connecting' ? 'sync' : 'link_off'
+  }
+  const type = connStore.transportInfo?.type
+  switch (type) {
+    case 'ipv6_p2p':
+      return 'public'
+    case 'lan_p2p':
+      return 'router'
+    case 'nat_p2p':
+      return 'alt_route'
+    case 'relay':
+      return 'sync_alt'
+    default:
+      return 'link'
+  }
+})
+
+const transportDisplayLabel = computed(() => {
+  if (!connStore.isConnected) {
+    if (connStore.status === 'connecting') {
+      return t('connection.connecting') || '连接中...'
+    }
+    return t('connection.offline') || '已离线'
+  }
+  const type = connStore.transportInfo?.type
+  if (!type || type === 'unknown') {
+    return t('connection.transport_unknown') || 'P2P 通信'
+  }
+  switch (type) {
+    case 'ipv6_p2p':
+      return t('connection.transport_ipv6')
+    case 'lan_p2p':
+      return t('connection.transport_lan')
+    case 'nat_p2p':
+      return t('connection.transport_nat')
+    case 'relay':
+      return t('connection.transport_relay')
+    default:
+      return t('connection.transport_unknown')
+  }
+})
+
 function toggleHud() {
   hapticLight()
   showHud.value = !showHud.value
-}
-
-function handleTakeover() {
-  hapticMedium()
-  showHud.value = false
-  emit('takeoverHost')
 }
 </script>
 
@@ -73,7 +106,6 @@ function handleTakeover() {
     >
       <span class="status-indicator-dot" :style="{ backgroundColor: statusColor }"></span>
       <span class="pill-title">{{ inviteCode || 'SP27' }}</span>
-      <span v-if="connStore.isStandbyHost" class="pill-standby-badge">Standby</span>
       <span class="material-icons pill-arrow" :class="{ 'is-open': showHud }">expand_more</span>
     </button>
 
@@ -104,21 +136,19 @@ function handleTakeover() {
               <span class="hud-label">{{ t('connection.status') }}</span>
               <span class="hud-value" :style="{ color: statusColor }">{{ statusLabel }} (WebRTC P2P)</span>
             </div>
+            <div class="hud-item hud-transport-item">
+              <span class="hud-label">{{ t('connection.transport_type', '连接类型') }}</span>
+              <span class="hud-value hud-transport">
+                <span class="material-icons hud-transport-icon" :class="{ spinning: connStore.status === 'connecting' }">{{ transportIcon }}</span>
+                <span class="hud-transport-label">{{ transportDisplayLabel }}</span>
+                <span v-if="connStore.isConnected && connStore.transportInfo?.rttMs !== null && connStore.transportInfo?.rttMs !== undefined" class="hud-rtt">
+                  ({{ connStore.transportInfo.rttMs }}ms)
+                </span>
+              </span>
+            </div>
             <div class="hud-item">
               <span class="hud-label">{{ t('event.role') }}</span>
-              <span class="hud-value">{{ isHost ? t('event.host') : t('event.client') }}</span>
-            </div>
-
-            <!-- Standby Takeover Prompt in HUD -->
-            <div v-if="connStore.isStandbyHost" class="hud-standby-card">
-              <div class="hud-standby-info">
-                <span class="material-icons" style="font-size: 18px; color: #f59e0b;">sensors</span>
-                <span>{{ t('event.standby_banner_desc') }}</span>
-              </div>
-              <button type="button" class="btn-hud-takeover" :disabled="connStore.isTakingOver" @click="handleTakeover">
-                <span class="material-icons" style="font-size: 16px; margin-right: 4px;">offline_bolt</span>
-                {{ connStore.isTakingOver ? t('event.taking_over') : t('event.takeover_as_host') }}
-              </button>
+              <span class="hud-value">{{ t('event.client') }}</span>
             </div>
           </div>
         </div>
@@ -182,15 +212,6 @@ function handleTakeover() {
 .pill-title {
   font-family: var(--font-mono, monospace);
   letter-spacing: 0.5px;
-}
-
-.pill-standby-badge {
-  font-size: 9px;
-  padding: 1px 5px;
-  background: rgba(245, 158, 11, 0.2);
-  border: 1px solid rgba(245, 158, 11, 0.4);
-  color: #f59e0b;
-  border-radius: 4px;
 }
 
 .pill-arrow {
@@ -285,6 +306,33 @@ function handleTakeover() {
   font-weight: 500;
 }
 
+.hud-transport {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.hud-transport-icon {
+  font-size: 16px;
+  color: var(--primary, #39ff14);
+}
+
+.hud-transport-icon.spinning {
+  animation: hud-spin 1.5s linear infinite;
+}
+
+@keyframes hud-spin {
+  from { transform: rotate(0deg); }
+  to { transform: rotate(360deg); }
+}
+
+.hud-rtt {
+  font-size: 11px;
+  color: #8b949e;
+  font-family: var(--font-mono, monospace);
+  margin-left: 2px;
+}
+
 .hud-code {
   font-family: monospace;
   background: rgba(255, 255, 255, 0.06);
@@ -292,39 +340,6 @@ function handleTakeover() {
   border-radius: 4px;
   border: 1px solid rgba(255, 255, 255, 0.1);
   color: #39ff14;
-}
-
-.hud-standby-card {
-  margin-top: 6px;
-  padding: 10px;
-  background: rgba(245, 158, 11, 0.1);
-  border: 1px solid rgba(245, 158, 11, 0.3);
-  border-radius: 8px;
-  display: flex;
-  flex-direction: column;
-  gap: 8px;
-}
-
-.hud-standby-info {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  font-size: 12px;
-  color: #f59e0b;
-}
-
-.btn-hud-takeover {
-  background: #f59e0b;
-  color: #000000;
-  border: none;
-  border-radius: 6px;
-  padding: 6px 12px;
-  font-size: 12px;
-  font-weight: 700;
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  cursor: pointer;
 }
 
 /* Transitions */

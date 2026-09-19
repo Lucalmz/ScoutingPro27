@@ -23,6 +23,7 @@ import { createClientSession } from './clientSession'
 import { createMessageDispatcher } from './messageDispatcher'
 import { setupSelfHealing } from './selfHealing'
 import { createLogger } from '@/utils/logger'
+import { isMobileDevice } from '@/composables/useIsMobile'
 
 const log = createLogger('WebRTC:Service')
 
@@ -190,6 +191,10 @@ export function createWebRtcService(callbacks: WebRtcCallbacks): WebRtcService {
 
   function setStatus(s: ConnectionStatus) {
     status = s
+    if (s === 'connected') {
+      // 成功建联后清除强制 relay 标记，确保后续重连继续优先尝试 LAN 与 IPv6 P2P
+      clientForceRelay = false
+    }
     if (s === 'offline' || s === 'long_offline') {
       peerMgr.resetTransportInfo()
     }
@@ -692,6 +697,10 @@ export function createWebRtcService(callbacks: WebRtcCallbacks): WebRtcService {
   }
 
   async function enterStandbyMode(existingHostSessionId: string, existingDeviceId?: string) {
+    if (isMobileDevice()) {
+      log.info('Mobile device ignored enterStandbyMode; strictly acting as scout client.')
+      return
+    }
     log.info(`Entering standby mode. Existing active host: ${existingHostSessionId}`)
     stopHostHeartbeat()
     startStandbyWatchdog()
@@ -717,6 +726,10 @@ export function createWebRtcService(callbacks: WebRtcCallbacks): WebRtcService {
   }
 
   async function demoteToStandby(newHostSessionId: string, newDeviceId?: string) {
+    if (isMobileDevice()) {
+      log.info('Mobile device ignored demoteToStandby.')
+      return
+    }
     log.info(`Demoted to Standby by new host: ${newHostSessionId}`)
     stopHostHeartbeat()
     startStandbyWatchdog()
@@ -757,6 +770,10 @@ export function createWebRtcService(callbacks: WebRtcCallbacks): WebRtcService {
   }
 
   async function takeoverHost(): Promise<void> {
+    if (isMobileDevice()) {
+      log.warn('Mobile devices are strictly prohibited from acting as host or taking over host.')
+      return
+    }
     log.info('Standby device initiating takeover to become Active Host!')
     stopStandbyWatchdog()
     clientSession.stopDataChannelHeartbeat()
@@ -820,6 +837,10 @@ export function createWebRtcService(callbacks: WebRtcCallbacks): WebRtcService {
   }
 
   async function host(inviteCode: string, eventMetadata?: ScoutingEvent, username?: string, userId?: string, preferredBroker?: string): Promise<void> {
+    if (isMobileDevice()) {
+      log.warn('Mobile devices are strictly prohibited from acting as host. Falling back to join() client mode.')
+      return join(inviteCode, username, userId, preferredBroker)
+    }
     isHostMode = true
     isStandbyHostMode = false
     isProbing = true

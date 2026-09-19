@@ -222,7 +222,11 @@
     "sync_synced": "Synced - received by host",
     "btn_edit": "Edit",
     "btn_cancel": "Cancel",
-    "btn_save": "Save Changes"
+    "btn_save": "Save Changes",
+    "scout_id": "Scout ID",
+    "btn_resync": "Re-sync",
+    "resync_triggered": "Sync pushed to host",
+    "resync_offline_queued": "Currently offline; marked as pending and will sync upon reconnect"
   },
   "rankings": {
     "loading": "Loading rankings...",
@@ -303,6 +307,8 @@
     "diagnostics_tooltip": "View real-time WebRTC connection and signaling diagnostic logs",
     "view_diagnostics": "View Connection Diagnostics & Logs",
     "transport": "Transport",
+    "transport_type": "Connection Type",
+    "host_topology": "Host Mesh Topology",
     "sas_state": "Security Verification (SAS)"
   },
   "diagnostics": {

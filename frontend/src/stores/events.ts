@@ -2,6 +2,7 @@ import { defineStore } from 'pinia'
 import { ref, computed, watch } from 'vue'
 import { listEvents, createEvent, joinEvent, syncExternalEvent, isStaticCloudHost } from '@/services/api'
 import { isDesktopHost } from '@/services/photoStorage'
+import { isMobileDevice } from '@/composables/useIsMobile'
 import { useUserStore } from '@/stores/user'
 import { useConnectionStore } from '@/stores/connection'
 import type { ScoutingEvent } from '@/types'
@@ -128,12 +129,13 @@ export const useEventStore = defineStore('events', () => {
   )
 
   const isHost = computed(() => {
+    // 手机端坚决不可作为主机（无例外）
+    if (isMobileDevice() || !isDesktopHost()) {
+      return false
+    }
     const conn = useConnectionStore()
     if (conn.rtcService && typeof conn.rtcService.isHostMode === 'function' && conn.rtcService.isHostMode()) {
       return true
-    }
-    if (!isDesktopHost()) {
-      return false
     }
     return Boolean(currentEvent.value?.hostId && currentEvent.value.hostId === userStore.userId)
   })
@@ -291,6 +293,7 @@ export const useEventStore = defineStore('events', () => {
         localStorage.removeItem(`sp27_pit_teams_${eventId}`)
         localStorage.removeItem(`sp27_cf_${eventId}`)
         localStorage.removeItem(`sp27_team_tags_${eventId}`)
+        localStorage.removeItem(`sp27_known_scouts_${eventId}`)
       } catch {}
     }
     try {

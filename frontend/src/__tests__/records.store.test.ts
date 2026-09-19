@@ -8,7 +8,8 @@ vi.mock('../services/api', () => ({
   listRecords: vi.fn(),
   saveRecord: vi.fn(),
   syncRecords: vi.fn(),
-  markRecordsSynced: vi.fn()
+  markRecordsSynced: vi.fn(),
+  isStaticCloudHost: vi.fn(() => false)
 }))
 
 const createDummyRecord = (
@@ -71,7 +72,7 @@ describe('Records Store', () => {
     expect(r1Data.allianceColor).toBe('red')
   })
 
-  it('addRecord', async () => {
+  it('addRecord on client keeps record as PENDING without fake authoritative sync', async () => {
     const store = useRecordStore()
     vi.mocked(api.saveRecord).mockResolvedValue(undefined)
     
@@ -79,6 +80,22 @@ describe('Records Store', () => {
     const { success } = await store.addRecord(rec)
     expect(success).toBe(true)
     expect(store.records).toHaveLength(1)
+    expect(store.records[0].syncStatus).toBe('PENDING')
+    expect(store.records[0].hostSeq).toBeUndefined()
+  })
+
+  it('addRecord on authoritative host marks record as SYNCED', async () => {
+    const { useEventStore } = await import('../stores/events')
+    const eventStore = useEventStore()
+    vi.spyOn(eventStore, 'isHost', 'get').mockReturnValue(true)
+    vi.mocked(api.isStaticCloudHost).mockReturnValue(false)
+    vi.mocked(api.saveRecord).mockResolvedValue(undefined)
+
+    const store = useRecordStore()
+    const rec = createDummyRecord('rhost', 27570, 10, 20, 30)
+    const { success } = await store.addRecord(rec)
+    expect(success).toBe(true)
+    expect(store.records.find((r) => r.id === 'rhost')?.syncStatus).toBe('SYNCED')
   })
 
   it('myRecords filtering', () => {

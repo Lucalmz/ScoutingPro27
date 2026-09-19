@@ -5,6 +5,7 @@ import com.bear27570.app.dao.EventDao;
 import com.bear27570.app.dao.UserDao;
 import com.bear27570.app.model.EventMember;
 import com.bear27570.app.model.ScoutingEvent;
+import com.bear27570.app.model.User;
 import com.google.gson.Gson;
 import io.javalin.config.RoutesConfig;
 import org.jdbi.v3.core.Jdbi;
@@ -335,6 +336,83 @@ public class EventRoutes {
             String eventId = ctx.pathParam("id");
             List<EventMember> members = jdbi.withExtension(EventDao.class, dao -> dao.findMembersByEvent(eventId));
             ctx.result(gson.toJson(members)).contentType("application/json");
+        });
+
+        routes.post("/api/events/{id}/members", ctx -> {
+            String eventId = ctx.pathParam("id");
+            String callerUserId = ctx.attribute("userId");
+            if (callerUserId == null || callerUserId.isBlank()) {
+                throw new io.javalin.http.UnauthorizedResponse("Unauthorized");
+            }
+            @SuppressWarnings("unchecked")
+            Map<String, Object> body = gson.fromJson(ctx.body(), Map.class);
+            if (body == null) {
+                ctx.status(400).result("Invalid JSON body");
+                return;
+            }
+            String memberUserId = asString(body.get("userId"));
+            String memberUsername = asString(body.get("username"));
+            if (memberUserId == null || memberUserId.isBlank()) {
+                ctx.status(400).result("Missing userId");
+                return;
+            }
+            if (memberUsername == null || memberUsername.isBlank()) {
+                memberUsername = memberUserId;
+            }
+            final String finalMemberUsername = memberUsername;
+
+            jdbi.useTransaction(handle -> {
+                EventDao eventDao = handle.attach(EventDao.class);
+                UserDao userDao = handle.attach(UserDao.class);
+
+                ScoutingEvent e = eventDao.findById(eventId);
+                if (e == null) {
+                    throw new io.javalin.http.NotFoundResponse("Event not found");
+                }
+                // Host-Only Authorization: Only event host can proxy-register members
+                if (!callerUserId.equals(e.getHostId())) {
+                    throw new io.javalin.http.ForbiddenResponse("Only the event host can register members");
+                }
+
+                User existingUser = userDao.findById(memberUserId);
+                if (existingUser == null) {
+                    // Safe creation of placeholder scout user
+                    userDao.ensureScoutUserPlaceholder(memberUserId, finalMemberUsername);
+                } else {
+                    // Anti-hijacking: If user already has a password, never overwrite their username
+                    if (existingUser.getPassword() == null || existingUser.getPassword().isBlank()) {
+                        handle.execute("UPDATE users SET username = ? WHERE id = ? AND (password = '' OR password IS NULL)", finalMemberUsername, memberUserId);
+                    }
+                }
+                eventDao.joinEvent(eventId, memberUserId);
+            });
+            ctx.status(200).result("OK");
+        });
+
+        routes.delete("/api/events/{id}/members/{userId}", ctx -> {
+            String eventId = ctx.pathParam("id");
+            String targetUserId = ctx.pathParam("userId");
+            String callerUserId = ctx.attribute("userId");
+            if (callerUserId == null || callerUserId.isBlank()) {
+                throw new io.javalin.http.UnauthorizedResponse("Unauthorized");
+            }
+            jdbi.useTransaction(handle -> {
+                EventDao eventDao = handle.attach(EventDao.class);
+                ScoutingEvent e = eventDao.findById(eventId);
+                if (e == null) {
+                    throw new io.javalin.http.NotFoundResponse("Event not found");
+                }
+                // Host-Only Authorization: Only event host can remove members
+                if (!callerUserId.equals(e.getHostId())) {
+                    throw new io.javalin.http.ForbiddenResponse("Only the event host can remove members");
+                }
+                // Host cannot remove themselves from their own event
+                if (callerUserId.equals(targetUserId)) {
+                    throw new io.javalin.http.BadRequestResponse("Host cannot be removed from event");
+                }
+                handle.execute("DELETE FROM event_users WHERE event_id = ? AND user_id = ?", eventId, targetUserId);
+            });
+            ctx.status(200).result("OK");
         });
     }
 

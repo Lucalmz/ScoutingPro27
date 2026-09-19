@@ -4,6 +4,8 @@ import type { ConnectionStatus, ScoutingRecord, ConnectionTransportInfo } from '
 import type { WebRtcService } from '@/services/webrtc'
 import { probePublicConnectivity } from '@/services/webrtc'
 import { ENABLE_DIAGNOSTICS } from '@/config/features'
+import { isDesktopHost } from '@/services/photoStorage'
+import { isMobileDevice } from '@/composables/useIsMobile'
 
 export const useConnectionStore = defineStore('connection', () => {
   const status = ref<ConnectionStatus>('offline')
@@ -109,12 +111,21 @@ export const useConnectionStore = defineStore('connection', () => {
   }
 
   function setStandbyHost(isStandby: boolean, info?: { hostSessionId: string; hostDeviceId?: string }) {
+    if (!isDesktopHost() || isMobileDevice()) {
+      isStandbyHost.value = false
+      standbyHostInfo.value = null
+      return
+    }
     isStandbyHost.value = isStandby
     if (info) standbyHostInfo.value = info
     else if (!isStandby) standbyHostInfo.value = null
   }
 
   async function takeoverHost() {
+    if (!isDesktopHost() || isMobileDevice()) {
+      console.warn('[ConnectionStore] Mobile devices cannot act as host or takeover host')
+      return
+    }
     const now = Date.now()
     if (isTakingOver.value || now - lastTakeoverTime.value < 3000) {
       console.warn('[ConnectionStore] Takeover throttled by mutex/cooldown')

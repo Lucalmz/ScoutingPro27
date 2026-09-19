@@ -131,9 +131,8 @@ export function createClientSession(ctx: ClientSessionContext) {
 
   async function doSetupClientConnection(forceRelay = false) {
     clearReconnectTimer()
-    if (forceRelay) {
-      ctx.setClientForceRelay(true)
-    }
+    // 明确同步 forceRelay 状态：仅在主动触发 relay 降级时强制 relay，常规重连优先重试 P2P 直连
+    ctx.setClientForceRelay(forceRelay)
     ctx.setClientPendingCandidates([])
     const newClientSessionId = `client-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`
     ctx.setClientSessionId(newClientSessionId)

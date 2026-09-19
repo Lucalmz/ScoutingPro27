@@ -41,6 +41,7 @@ function createRecord(overrides: Partial<ScoutingRecord> = {}): ScoutingRecord {
     endgameScore: 20,
     totalScore: 100,
     syncStatus: 'SYNCED',
+    hostSeq: 1,
     isConflict: false,
     createdAt: new Date().toISOString(),
     updatedAt: new Date().toISOString(),
@@ -94,6 +95,25 @@ describe('HistoryList.vue Component & Animations', () => {
     expect(cards.length).toBe(2)
     expect(wrapper.text()).toContain('120 history.pts')
     expect(wrapper.text()).toContain('140 history.pts')
+    expect(wrapper.text()).toContain('history.scout_id: scout-1')
+    expect(wrapper.text()).toContain('(Tester)')
+  })
+
+  it('displays submitter scoutId even when scoutName is absent', () => {
+    const records = [
+      createRecord({ id: 'r1', scoutId: 'usr_xyz999', scoutName: '' })
+    ]
+    const wrapper = mount(HistoryList, {
+      props: {
+        records,
+        loading: false
+      }
+    })
+
+    const scoutBadge = wrapper.find('.card-scout-id')
+    expect(scoutBadge.exists()).toBe(true)
+    expect(scoutBadge.text()).toContain('history.scout_id: usr_xyz999')
+    expect(scoutBadge.find('.scout-meta-name').exists()).toBe(false)
   })
 
   it('applies is-conflict-card class and displays conflict badge when isConflict is true', () => {
@@ -233,5 +253,91 @@ describe('HistoryList.vue Component & Animations', () => {
     await list.trigger('mouseleave')
 
     expect((highlightEl.element as HTMLElement).style.opacity).toBe('0')
+  })
+
+  it('correctly distinguishes authoritative synced records and unstamped pending records', () => {
+    const records = [
+      createRecord({ id: 'r-synced', hostSeq: 42, syncStatus: 'SYNCED' }),
+      createRecord({ id: 'r-unstamped', hostSeq: undefined, syncStatus: 'SYNCED' })
+    ]
+    const wrapper = mount(HistoryList, {
+      props: {
+        records,
+        loading: false
+      }
+    })
+
+    const cards = wrapper.findAll('.history-card')
+    // First card is stamped and synced
+    expect(cards[0].find('.sync-badge').text()).toBe('check_circle')
+    expect(cards[0].find('.btn-edit').exists()).toBe(false)
+    expect(cards[0].find('.btn-resync').exists()).toBe(false)
+
+    // Second card lacks hostSeq -> rendered as pending and editable/resyncable
+    expect(cards[1].find('.sync-badge').text()).toBe('hourglass_empty')
+    expect(cards[1].find('.btn-edit').exists()).toBe(true)
+  })
+
+  it('triggers pushRecords and toast when re-sync button is clicked online', async () => {
+    const { useUserStore } = await import('../stores/user')
+    const { useConnectionStore } = await import('../stores/connection')
+    const { useToastStore } = await import('../stores/toast')
+
+    const userStore = useUserStore()
+    userStore.user = { id: 'scout-1', username: 'Tester', token: 'tok' } as any
+
+    const connStore = useConnectionStore()
+    connStore.status = 'connected'
+    const pushSpy = vi.spyOn(connStore, 'pushRecords').mockImplementation(() => {})
+
+    const toastStore = useToastStore()
+    const toastSpy = vi.spyOn(toastStore, 'showToast')
+
+    const unconfirmed = createRecord({ id: 'r-unconfirmed', scoutId: 'scout-1', hostSeq: undefined, syncStatus: 'PENDING' })
+    const wrapper = mount(HistoryList, {
+      props: {
+        records: [unconfirmed],
+        loading: false
+      }
+    })
+
+    const resyncBtn = wrapper.find('.btn-resync')
+    expect(resyncBtn.exists()).toBe(true)
+    await resyncBtn.trigger('click')
+
+    expect(pushSpy).toHaveBeenCalledWith([unconfirmed])
+    expect(toastSpy).toHaveBeenCalledWith('history.resync_triggered', 'info')
+  })
+
+  it('shows offline queued toast when re-sync button is clicked while offline', async () => {
+    const { useUserStore } = await import('../stores/user')
+    const { useConnectionStore } = await import('../stores/connection')
+    const { useToastStore } = await import('../stores/toast')
+
+    const userStore = useUserStore()
+    userStore.user = { id: 'scout-1', username: 'Tester', token: 'tok' } as any
+
+    const connStore = useConnectionStore()
+    connStore.status = 'offline'
+    const pushSpy = vi.spyOn(connStore, 'pushRecords').mockImplementation(() => {})
+
+    const toastStore = useToastStore()
+    const toastSpy = vi.spyOn(toastStore, 'showToast')
+
+    const unconfirmed = createRecord({ id: 'r-unconfirmed-off', scoutId: 'scout-1', hostSeq: undefined, syncStatus: 'SYNCED' })
+    const wrapper = mount(HistoryList, {
+      props: {
+        records: [unconfirmed],
+        loading: false
+      }
+    })
+
+    const resyncBtn = wrapper.find('.btn-resync')
+    expect(resyncBtn.exists()).toBe(true)
+    await resyncBtn.trigger('click')
+
+    expect(pushSpy).not.toHaveBeenCalled()
+    expect(unconfirmed.syncStatus).toBe('PENDING')
+    expect(toastSpy).toHaveBeenCalledWith('history.resync_offline_queued', 'warning')
   })
 })

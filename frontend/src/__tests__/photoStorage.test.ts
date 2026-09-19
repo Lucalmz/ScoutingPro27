@@ -68,6 +68,23 @@ describe('photoStorage Service', () => {
       setHostname('scout.local')
       expect(isDesktopHost()).toBe(false)
     })
+
+    it('identifies mobile user agent as mobile client even if hostname is localhost', () => {
+      setHostname('localhost')
+      const originalUserAgent = navigator.userAgent
+      try {
+        Object.defineProperty(navigator, 'userAgent', {
+          value: 'Mozilla/5.0 (iPhone; CPU iPhone OS 16_0 like Mac OS X) AppleWebKit/605.1.15',
+          configurable: true
+        })
+        expect(isDesktopHost()).toBe(false)
+      } finally {
+        Object.defineProperty(navigator, 'userAgent', {
+          value: originalUserAgent,
+          configurable: true
+        })
+      }
+    })
   })
 
   describe('Desktop Host Flow (Zero IndexedDB)', () => {

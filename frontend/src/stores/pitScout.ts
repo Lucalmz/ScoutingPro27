@@ -11,7 +11,8 @@ import {
   savePitRecord as apiSavePitRecord,
   syncPitRecordsBatch,
   syncOfficialTeams,
-  fetchFtcTeams
+  fetchFtcTeams,
+  isStaticCloudHost
 } from '@/services/api'
 import { useScheduleStore } from './schedule'
 import { useRecordStore } from './records'
@@ -277,8 +278,12 @@ export const usePitScoutStore = defineStore('pitScout', () => {
 
     // 本地 / Host 后端落盘
     try {
-      await apiSavePitRecord(currentEventId.value, record)
-      record.syncStatus = 'SYNCED'
+      if (!isStaticCloudHost()) {
+        await apiSavePitRecord(currentEventId.value, record)
+        record.syncStatus = 'SYNCED'
+      } else {
+        record.syncStatus = 'PENDING'
+      }
       saveToLocalStorage(currentEventId.value)
     } catch (e) {
       console.warn('[PitScoutStore] Saved locally, backend sync deferred:', e)
@@ -293,17 +298,17 @@ export const usePitScoutStore = defineStore('pitScout', () => {
 
     console.log(`[PitScoutStore] Flushing ${pending.length} pending pit records for event ${eid}...`)
 
-    let httpSuccess = false
-    try {
-      await syncPitRecordsBatch(eid, pending)
-      httpSuccess = true
-      for (const rec of pending) {
-        rec.syncStatus = 'SYNCED'
+    if (!isStaticCloudHost()) {
+      try {
+        await syncPitRecordsBatch(eid, pending)
+        for (const rec of pending) {
+          rec.syncStatus = 'SYNCED'
+        }
+        saveToLocalStorage(eid)
+        console.log(`[PitScoutStore] Successfully flushed ${pending.length} pit records via HTTP API`)
+      } catch (e) {
+        console.warn('[PitScoutStore] HTTP batch flush deferred/failed:', e)
       }
-      saveToLocalStorage(eid)
-      console.log(`[PitScoutStore] Successfully flushed ${pending.length} pit records via HTTP API`)
-    } catch (e) {
-      console.warn('[PitScoutStore] HTTP batch flush deferred/failed:', e)
     }
 
     try {

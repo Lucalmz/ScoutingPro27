@@ -7,7 +7,8 @@ import { useRecordStore } from '@/stores/records'
 import { useConnectionStore } from '@/stores/connection'
 import { useInboxStore } from '@/stores/inbox'
 import { useToastStore } from '@/stores/toast'
-import { updateEventFtcConfig, fetchEventMembers, type EventMemberItem } from '@/services/api'
+import { updateEventFtcConfig, fetchEventMembers, removeEventMember, type EventMemberItem } from '@/services/api'
+import { getKnownScouts, removeKnownScout } from '@/services/scoutStorage'
 import { downloadCSV } from '@/utils/csvExport'
 import { sortRecordsChronologically, getRecordTournamentLevel } from '@/utils/tournament'
 import OfflineSyncModal from '@/components/common/OfflineSyncModal.vue'
@@ -240,7 +241,22 @@ const uniqueScouts = computed(() => {
     })
   }
 
-  // 2. Connected WebRTC peers
+  // 2. Local storage known scouts fallback (for offline / PWA / persistent view)
+  if (props.event?.id) {
+    for (const k of getKnownScouts(props.event.id)) {
+      if (!scouts.has(k.id)) {
+        scouts.set(k.id, {
+          id: k.id,
+          name: k.name || k.id,
+          role: 'scout',
+          recordCount: 0,
+          isOnline: false
+        })
+      }
+    }
+  }
+
+  // 3. Connected WebRTC peers
   for (const s of connStore.connectedScouts) {
     if (!scouts.has(s.id)) {
       scouts.set(s.id, {
@@ -256,7 +272,7 @@ const uniqueScouts = computed(() => {
     }
   }
 
-  // 3. Submitted scout records
+  // 4. Submitted scout records
   for (const r of recordStore.activeRecords) {
     if (!scouts.has(r.scoutId)) {
       scouts.set(r.scoutId, {
@@ -271,6 +287,26 @@ const uniqueScouts = computed(() => {
 
   return Array.from(scouts.values())
 })
+
+async function handleRemoveMember(scoutId: string, scoutName: string) {
+  if (!props.event?.id) return
+  const confirmMsg = isZh.value
+    ? `确定要从当前赛事移除考察员 "${scoutName}" 吗？`
+    : `Are you sure you want to remove scout "${scoutName}" from this event?`
+  if (!confirm(confirmMsg)) return
+
+  try {
+    removeKnownScout(props.event.id, scoutId)
+    await removeEventMember(props.event.id, scoutId)
+    await refreshMembers()
+    toastStore.showToast(isZh.value ? '已成功移除该考察员' : 'Scout removed successfully', 'success')
+  } catch (err: any) {
+    console.warn('[EventScoutsPanel] Failed to remove member via backend:', err)
+    removeKnownScout(props.event.id, scoutId)
+    await refreshMembers()
+    toastStore.showToast(isZh.value ? '已从本地名单中移除' : 'Removed from local known list', 'info')
+  }
+}
 
 async function sendDirectMessage(scoutId: string, scoutName?: string) {
   if (connStore.rtcService) {
@@ -373,10 +409,20 @@ async function sendDirectMessage(scoutId: string, scoutName?: string) {
             {{ t('event.scouts_records_count', { count: s.recordCount }) }}
           </span>
         </div>
-        <button @click="sendDirectMessage(s.id, s.name)" class="btn-msg">
-          <span class="material-icons" style="font-size: 16px; vertical-align: middle; margin-right: 4px;">mail</span>
-          {{ t('event.send_message') }}
-        </button>
+        <div class="scout-actions">
+          <button @click="sendDirectMessage(s.id, s.name)" class="btn-msg">
+            <span class="material-icons" style="font-size: 16px; vertical-align: middle; margin-right: 4px;">mail</span>
+            {{ t('event.send_message') }}
+          </button>
+          <button
+            v-if="eventStore.isHost && s.role !== 'host'"
+            @click="handleRemoveMember(s.id, s.name)"
+            class="btn-remove-scout"
+            :title="t('event.remove_scout') || (isZh ? '从赛事中移除' : 'Remove from Event')"
+          >
+            <span class="material-icons" style="font-size: 16px; vertical-align: middle;">delete_outline</span>
+          </button>
+        </div>
       </li>
     </ul>
 
@@ -501,6 +547,31 @@ async function sendDirectMessage(scoutId: string, scoutName?: string) {
 .btn-msg:hover {
   background: var(--primary);
   color: var(--primary-foreground, #000);
+}
+
+.scout-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.btn-remove-scout {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 6px 8px;
+  background: transparent;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  color: var(--muted-foreground);
+  cursor: pointer;
+  transition: all 0.2s ease;
+}
+
+.btn-remove-scout:hover {
+  border-color: #ef4444;
+  color: #ef4444;
+  background: rgba(239, 68, 68, 0.12);
 }
 
 .settings-panel {

@@ -116,7 +116,7 @@ describe('Events Store', () => {
       expect(store.isHost).toBe(true)
     })
 
-    it('identifies takeover host on mobile client when isHostMode returns true', async () => {
+    it('enforces that mobile client can never act as host even if isHostMode is mocked to true', async () => {
       const { useConnectionStore } = await import('../stores/connection')
       const photoStorage = await import('../services/photoStorage')
       vi.spyOn(photoStorage, 'isDesktopHost').mockReturnValue(false) // Mobile device
@@ -129,12 +129,12 @@ describe('Events Store', () => {
       // On mobile before takeover: not host
       expect(store.isHost).toBe(false)
 
-      // Mobile takes over as host: rtcService.isHostMode() becomes true
+      // Even if an RTC service erroneously claims isHostMode = true, mobile is strictly client
       connStore.setRtcService({
         isHostMode: () => true
       } as any)
 
-      expect(store.isHost).toBe(true)
+      expect(store.isHost).toBe(false)
     })
 
     it('identifies desktop participant who joined someone else event as client', async () => {
