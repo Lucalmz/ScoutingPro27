@@ -799,6 +799,10 @@
     "empty_title": "暂无战队名单",
     "empty_desc_sync": "请点击右上角“同步 FTC 官方名单”或在“赛程”中导入对阵表。",
     "empty_desc_nosync": "当前活动暂无战队名单，等待主机同步或导入赛程。",
+    "not_in_roster_title": "底册中未检索到 #{teamNumber} 战队",
+    "not_in_roster_desc": "该队伍尚未在官方名单或赛程对阵表中登记，您可以直接为其新建展位走访记录。",
+    "create_pit_record_for_team": "点此为 #{teamNumber} 新增展位走访",
+    "discovered_from_match": "正赛已打 {count} 场 · 待走访",
     "status_recorded": "已录入",
     "status_unrecorded": "待侦察",
     "status_tooltip_recorded": "展位硬件与自述数据已登记",
@@ -1138,6 +1142,19 @@
     "tag_mechanics": "掉链/脱困",
     "tag_accuracy": "高命中率",
     "tag_fouls": "违规判罚",
-    "tag_synergy": "配合默契"
+    "tag_synergy": "配合默契",
+    "next_cycle_btn": "+ 下一轮",
+    "next_cycle_sub": "单轮满 4 球切轮",
+    "cycle_in_progress": "第 {cycle} 轮进行中",
+    "cycle_chip_desc": "#{cycle}: {hits}进 {misses}丢",
+    "accuracy": "命中率",
+    "preset_balls": "{count} 球",
+    "cap_reached_tip": "单轮已满 4 球，请点击【+ 下一轮】继续记录",
+    "cannot_start_empty_cycle": "当前轮尚未出球，无需切换新轮次",
+    "dismiss_draft": "忽略"
+  },
+  "webrtc": {
+    "single_record_received": "收到 #{team} 第 {match} 场正赛记录",
+    "batch_records_received": "已批量同步 {count} 条正赛记录"
   }
 }

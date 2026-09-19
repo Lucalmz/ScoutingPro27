@@ -1,10 +1,11 @@
 <script setup lang="ts">
-import { ref, computed, watch } from 'vue'
+import { ref, computed, watch, onMounted } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { useRecordStore } from '@/stores/records'
 import { useScheduleStore } from '@/stores/schedule'
 import { usePitScoutStore } from '@/stores/pitScout'
 import { useCustomFieldsStore } from '@/stores/customFields'
+import { useScreenWakeLock } from '@/utils/wakeLock'
 import {
   hapticFeedback,
   hapticLight,
@@ -113,9 +114,103 @@ function createEmptyTeam(): TeamScoutData {
 
 const team = ref<TeamScoutData>(createEmptyTeam())
 
-// Tap window grouping for TeleOp rapid tapping
-let lastTeleopTapTime = 0
-const TELEOP_TAP_WINDOW_MS = 2000
+// Screen WakeLock for continuous display during matches
+useScreenWakeLock()
+
+// Operation history stack for precise undo ('hit' | 'miss')
+const autoCycleHistory = ref<('hit' | 'miss')[]>([])
+const teleopCycleHistory = ref<('hit' | 'miss')[]>([])
+
+// Pulsing glow flags for "+ 下一轮" button when 4 balls cap is reached
+const autoPulsingGlow = ref(false)
+const teleopPulsingGlow = ref(false)
+let autoGlowTimer: any = null
+let teleopGlowTimer: any = null
+
+function triggerPulsingGlow(phase: 'auto' | 'teleop') {
+  if (phase === 'auto') {
+    autoPulsingGlow.value = true
+    if (autoGlowTimer) clearTimeout(autoGlowTimer)
+    autoGlowTimer = setTimeout(() => { autoPulsingGlow.value = false }, 3500)
+  } else {
+    teleopPulsingGlow.value = true
+    if (teleopGlowTimer) clearTimeout(teleopGlowTimer)
+    teleopGlowTimer = setTimeout(() => { teleopPulsingGlow.value = false }, 3500)
+  }
+}
+
+function clearPulsingGlow(phase: 'auto' | 'teleop') {
+  if (phase === 'auto') {
+    autoPulsingGlow.value = false
+    if (autoGlowTimer) clearTimeout(autoGlowTimer)
+  } else {
+    teleopPulsingGlow.value = false
+    if (teleopGlowTimer) clearTimeout(teleopGlowTimer)
+  }
+}
+
+// Draft Auto-Save & Restore across screen lock/reload
+const draftKey = computed(() => `sp27_mobile_active_draft_${props.eventId}`)
+const isDraftRestored = ref(false)
+let draftDebounceTimer: any = null
+
+function saveDraft() {
+  if (props.editRecord) return
+  clearTimeout(draftDebounceTimer)
+  draftDebounceTimer = setTimeout(() => {
+    if (!team.value.teamNumber && allianceColor.value === 'none' && team.value.autoCycles.length === 0 && team.value.teleopCycles.length === 0) {
+      localStorage.removeItem(draftKey.value)
+      return
+    }
+    const draftPayload = {
+      matchNumber: matchNumber.value,
+      allianceColor: allianceColor.value,
+      currentTournamentLevel: currentTournamentLevel.value,
+      team: team.value,
+      currentStep: currentStep.value,
+      savedAt: Date.now()
+    }
+    localStorage.setItem(draftKey.value, JSON.stringify(draftPayload))
+  }, 500)
+}
+
+function restoreDraft() {
+  if (props.editRecord) return
+  try {
+    const raw = localStorage.getItem(draftKey.value)
+    if (!raw) return
+    const draft = JSON.parse(raw)
+    if (draft && draft.team) {
+      matchNumber.value = draft.matchNumber || matchNumber.value
+      allianceColor.value = draft.allianceColor || allianceColor.value
+      currentTournamentLevel.value = draft.currentTournamentLevel || currentTournamentLevel.value
+      team.value = { ...createEmptyTeam(), ...draft.team }
+      syncAutoBalls()
+      currentStep.value = typeof draft.currentStep === 'number' ? draft.currentStep : 0
+      isDraftRestored.value = true
+    }
+  } catch (e) {
+    console.warn('[MobileScout] Failed to restore draft:', e)
+  }
+}
+
+function clearDraft() {
+  clearTimeout(draftDebounceTimer)
+  localStorage.removeItem(draftKey.value)
+  isDraftRestored.value = false
+}
+
+onMounted(() => {
+  restoreDraft()
+})
+
+watch(
+  [matchNumber, allianceColor, currentTournamentLevel, team, currentStep],
+  () => {
+    saveDraft()
+  },
+  { deep: true }
+)
 
 // Localized Quick notes presets
 const quickNotesPresets = computed(() => [
@@ -197,107 +292,344 @@ const totalScore = computed(() => {
   return autoScore.value + teleopScore.value + endgameScore.value
 })
 
+// Auto cycle helpers
+const lastAutoCycleIndex = computed(() => team.value.autoCycles.length - 1)
+const currentAutoHits = computed(() => {
+  if (team.value.autoCycles.length === 0) return 0
+  return team.value.autoCycles[lastAutoCycleIndex.value] ?? 0
+})
+const currentAutoMisses = computed(() => {
+  if (team.value.autoMissedCycles.length === 0) return 0
+  return team.value.autoMissedCycles[lastAutoCycleIndex.value] ?? 0
+})
+const currentAutoAttempts = computed(() => currentAutoHits.value + currentAutoMisses.value)
+const canStartNewAutoCycle = computed(() => {
+  if (team.value.autoCycles.length === 0) return true
+  return currentAutoAttempts.value > 0
+})
+
+// TeleOp cycle helpers
+const lastTeleopCycleIndex = computed(() => team.value.teleopCycles.length - 1)
+const currentTeleopHits = computed(() => {
+  if (team.value.teleopCycles.length === 0) return 0
+  return team.value.teleopCycles[lastTeleopCycleIndex.value] ?? 0
+})
+const currentTeleopMisses = computed(() => {
+  if (team.value.teleopMissedCycles.length === 0) return 0
+  return team.value.teleopMissedCycles[lastTeleopCycleIndex.value] ?? 0
+})
+const currentTeleopAttempts = computed(() => currentTeleopHits.value + currentTeleopMisses.value)
+const canStartNewTeleopCycle = computed(() => {
+  if (team.value.teleopCycles.length === 0) return true
+  return currentTeleopAttempts.value > 0
+})
+const teleopAccuracy = computed(() => {
+  const attempts = getTeleopBallsTotal() + getTeleopMissedTotal()
+  if (attempts === 0) return '--'
+  return `${Math.round((getTeleopBallsTotal() / attempts) * 100)}%`
+})
+
 // Auto phase actions
 function addAutoBall() {
-  hapticMedium()
   if (team.value.autoCycles.length === 0) {
     team.value.autoCycles.push(1)
-  } else {
-    const lastIdx = team.value.autoCycles.length - 1
-    const cur = team.value.autoCycles[lastIdx]
-    if (cur !== undefined && cur < 4) {
-      team.value.autoCycles[lastIdx] = cur + 1
-    } else {
-      team.value.autoCycles.push(1)
-    }
+    team.value.autoMissedCycles.push(0)
+    autoCycleHistory.value.push('hit')
+    hapticMedium()
+    syncAutoBalls()
+    return
   }
-  syncAutoBalls()
+
+  const idx = lastAutoCycleIndex.value
+  const curHits = team.value.autoCycles[idx] ?? 0
+  const curMisses = team.value.autoMissedCycles[idx] ?? 0
+
+  if (curHits + curMisses < 4) {
+    team.value.autoCycles[idx] = curHits + 1
+    autoCycleHistory.value.push('hit')
+    hapticMedium()
+    if (curHits + 1 + curMisses >= 4) {
+      triggerPulsingGlow('auto')
+    }
+    syncAutoBalls()
+  } else {
+    hapticWarning()
+    triggerPulsingGlow('auto')
+  }
 }
 
 function addAutoMiss() {
-  hapticLight()
-  if (team.value.autoMissedCycles.length === 0) {
+  if (team.value.autoCycles.length === 0) {
+    team.value.autoCycles.push(0)
     team.value.autoMissedCycles.push(1)
+    autoCycleHistory.value.push('miss')
+    hapticWarning()
+    return
+  }
+
+  const idx = lastAutoCycleIndex.value
+  const curHits = team.value.autoCycles[idx] ?? 0
+  const curMisses = team.value.autoMissedCycles[idx] ?? 0
+
+  if (curHits + curMisses < 4) {
+    team.value.autoMissedCycles[idx] = curMisses + 1
+    autoCycleHistory.value.push('miss')
+    hapticWarning()
+    if (curHits + curMisses + 1 >= 4) {
+      triggerPulsingGlow('auto')
+    }
   } else {
-    const lastIdx = team.value.autoMissedCycles.length - 1
-    const cur = team.value.autoMissedCycles[lastIdx] || 0
-    team.value.autoMissedCycles[lastIdx] = cur + 1
+    hapticWarning()
+    triggerPulsingGlow('auto')
   }
 }
 
+function setAutoPresetBalls(val: number) {
+  if (team.value.autoCycles.length === 0) {
+    team.value.autoCycles.push(val)
+    team.value.autoMissedCycles.push(0)
+    autoCycleHistory.value = []
+    if (val >= 4) triggerPulsingGlow('auto')
+    hapticSelection()
+    syncAutoBalls()
+    return
+  }
+  const idx = lastAutoCycleIndex.value
+  const curMisses = team.value.autoMissedCycles[idx] ?? 0
+  const newHits = val
+  const newMisses = Math.min(curMisses, 4 - val)
+  team.value.autoCycles[idx] = newHits
+  team.value.autoMissedCycles[idx] = newMisses
+  autoCycleHistory.value = []
+  if (newHits + newMisses >= 4) {
+    triggerPulsingGlow('auto')
+  } else {
+    clearPulsingGlow('auto')
+  }
+  hapticSelection()
+  syncAutoBalls()
+}
+
+function handleNewAutoCycle() {
+  if (!canStartNewAutoCycle.value) {
+    hapticWarning()
+    return
+  }
+  team.value.autoCycles.push(0)
+  team.value.autoMissedCycles.push(0)
+  autoCycleHistory.value = []
+  clearPulsingGlow('auto')
+  hapticMedium()
+}
+
 function undoAuto() {
-  hapticLight()
-  if (team.value.autoCycles.length > 0) {
-    const lastIdx = team.value.autoCycles.length - 1
-    const cur = team.value.autoCycles[lastIdx]
-    if (cur !== undefined && cur > 1) {
-      team.value.autoCycles[lastIdx] = cur - 1
-    } else {
-      team.value.autoCycles.pop()
+  if (team.value.autoCycles.length === 0) return
+
+  const idx = lastAutoCycleIndex.value
+  const curHits = team.value.autoCycles[idx] ?? 0
+  const curMisses = team.value.autoMissedCycles[idx] ?? 0
+
+  if (autoCycleHistory.value.length > 0) {
+    const lastAction = autoCycleHistory.value.pop()
+    if (lastAction === 'hit' && curHits > 0) {
+      team.value.autoCycles[idx] = curHits - 1
+      clearPulsingGlow('auto')
+      hapticLight()
+      syncAutoBalls()
+      return
+    } else if (lastAction === 'miss' && curMisses > 0) {
+      team.value.autoMissedCycles[idx] = curMisses - 1
+      clearPulsingGlow('auto')
+      hapticLight()
+      return
     }
+  }
+
+  if (curHits > 0) {
+    team.value.autoCycles[idx] = curHits - 1
+    clearPulsingGlow('auto')
+    hapticLight()
+    syncAutoBalls()
+    return
+  } else if (curMisses > 0) {
+    team.value.autoMissedCycles[idx] = curMisses - 1
+    clearPulsingGlow('auto')
+    hapticLight()
+    return
+  }
+
+  // Cross-cycle undo: current cycle is empty, pop it and revert to previous cycle
+  if (team.value.autoCycles.length > 0) {
+    team.value.autoCycles.pop()
+    team.value.autoMissedCycles.pop()
+    autoCycleHistory.value = []
+    clearPulsingGlow('auto')
+    hapticLight()
     syncAutoBalls()
   }
 }
 
 // TeleOp Phase Actions
 function addTeleopCycleShot() {
-  hapticMedium()
-  const now = Date.now()
-  const isWithinWindow = (now - lastTeleopTapTime) < TELEOP_TAP_WINDOW_MS && team.value.teleopCycles.length > 0
-  lastTeleopTapTime = now
-
-  if (isWithinWindow) {
-    const lastIdx = team.value.teleopCycles.length - 1
-    const current = team.value.teleopCycles[lastIdx] ?? 0
-    if (current < 4) {
-      team.value.teleopCycles[lastIdx] = current + 1
-      return
-    }
+  if (team.value.teleopCycles.length === 0) {
+    team.value.teleopCycles.push(1)
+    team.value.teleopMissedCycles.push(0)
+    teleopCycleHistory.value.push('hit')
+    hapticMedium()
+    return
   }
-  // Start new cycle with 1 ball
-  team.value.teleopCycles.push(1)
+
+  const idx = lastTeleopCycleIndex.value
+  const curHits = team.value.teleopCycles[idx] ?? 0
+  const curMisses = team.value.teleopMissedCycles[idx] ?? 0
+
+  if (curHits + curMisses < 4) {
+    team.value.teleopCycles[idx] = curHits + 1
+    teleopCycleHistory.value.push('hit')
+    hapticMedium()
+    if (curHits + 1 + curMisses >= 4) {
+      triggerPulsingGlow('teleop')
+    }
+  } else {
+    hapticWarning()
+    triggerPulsingGlow('teleop')
+  }
 }
 
 function addTeleopMiss() {
-  hapticLight()
-  if (team.value.teleopMissedCycles.length === 0) {
+  if (team.value.teleopCycles.length === 0) {
+    team.value.teleopCycles.push(0)
     team.value.teleopMissedCycles.push(1)
-  } else {
-    const lastIdx = team.value.teleopMissedCycles.length - 1
-    const cur = team.value.teleopMissedCycles[lastIdx] || 0
-    team.value.teleopMissedCycles[lastIdx] = cur + 1
+    teleopCycleHistory.value.push('miss')
+    hapticWarning()
+    return
   }
+
+  const idx = lastTeleopCycleIndex.value
+  const curHits = team.value.teleopCycles[idx] ?? 0
+  const curMisses = team.value.teleopMissedCycles[idx] ?? 0
+
+  if (curHits + curMisses < 4) {
+    team.value.teleopMissedCycles[idx] = curMisses + 1
+    teleopCycleHistory.value.push('miss')
+    hapticWarning()
+    if (curHits + curMisses + 1 >= 4) {
+      triggerPulsingGlow('teleop')
+    }
+  } else {
+    hapticWarning()
+    triggerPulsingGlow('teleop')
+  }
+}
+
+function setTeleopPresetBalls(val: number) {
+  if (team.value.teleopCycles.length === 0) {
+    team.value.teleopCycles.push(val)
+    team.value.teleopMissedCycles.push(0)
+    teleopCycleHistory.value = []
+    if (val >= 4) triggerPulsingGlow('teleop')
+    hapticSelection()
+    return
+  }
+  const idx = lastTeleopCycleIndex.value
+  const curMisses = team.value.teleopMissedCycles[idx] ?? 0
+  const newHits = val
+  const newMisses = Math.min(curMisses, 4 - val)
+  team.value.teleopCycles[idx] = newHits
+  team.value.teleopMissedCycles[idx] = newMisses
+  teleopCycleHistory.value = []
+  if (newHits + newMisses >= 4) {
+    triggerPulsingGlow('teleop')
+  } else {
+    clearPulsingGlow('teleop')
+  }
+  hapticSelection()
+}
+
+function handleNewTeleopCycle() {
+  if (!canStartNewTeleopCycle.value) {
+    hapticWarning()
+    return
+  }
+  team.value.teleopCycles.push(0)
+  team.value.teleopMissedCycles.push(0)
+  teleopCycleHistory.value = []
+  clearPulsingGlow('teleop')
+  hapticMedium()
 }
 
 function undoTeleop() {
-  hapticLight()
+  if (team.value.teleopCycles.length === 0) return
+
+  const idx = lastTeleopCycleIndex.value
+  const curHits = team.value.teleopCycles[idx] ?? 0
+  const curMisses = team.value.teleopMissedCycles[idx] ?? 0
+
+  if (teleopCycleHistory.value.length > 0) {
+    const lastAction = teleopCycleHistory.value.pop()
+    if (lastAction === 'hit' && curHits > 0) {
+      team.value.teleopCycles[idx] = curHits - 1
+      clearPulsingGlow('teleop')
+      hapticLight()
+      return
+    } else if (lastAction === 'miss' && curMisses > 0) {
+      team.value.teleopMissedCycles[idx] = curMisses - 1
+      clearPulsingGlow('teleop')
+      hapticLight()
+      return
+    }
+  }
+
+  if (curHits > 0) {
+    team.value.teleopCycles[idx] = curHits - 1
+    clearPulsingGlow('teleop')
+    hapticLight()
+    return
+  } else if (curMisses > 0) {
+    team.value.teleopMissedCycles[idx] = curMisses - 1
+    clearPulsingGlow('teleop')
+    hapticLight()
+    return
+  }
+
+  // Cross-cycle undo: current cycle is empty, pop it and revert to previous cycle
   if (team.value.teleopCycles.length > 0) {
-    const lastIdx = team.value.teleopCycles.length - 1
-    const cur = team.value.teleopCycles[lastIdx]
-    if (cur !== undefined && cur > 1) {
-      team.value.teleopCycles[lastIdx] = cur - 1
-    } else {
-      team.value.teleopCycles.pop()
+    team.value.teleopCycles.pop()
+    team.value.teleopMissedCycles.pop()
+    teleopCycleHistory.value = []
+    clearPulsingGlow('teleop')
+    hapticLight()
+  }
+}
+
+function removeCycleAtIndex(index: number, phase: 'auto' | 'teleop' = 'teleop') {
+  hapticLight()
+  const targetCycles = phase === 'auto' ? team.value.autoCycles : team.value.teleopCycles
+  const targetMissed = phase === 'auto' ? team.value.autoMissedCycles : team.value.teleopMissedCycles
+  if (index >= 0 && index < targetCycles.length) {
+    targetCycles.splice(index, 1)
+    if (index < targetMissed.length) {
+      targetMissed.splice(index, 1)
     }
+    if (phase === 'auto') syncAutoBalls()
   }
 }
 
-function removeCycleAtIndex(index: number) {
+function decrementCycleAtIndex(index: number, phase: 'auto' | 'teleop' = 'teleop') {
   hapticLight()
-  if (index >= 0 && index < team.value.teleopCycles.length) {
-    team.value.teleopCycles.splice(index, 1)
-  }
-}
-
-function decrementCycleAtIndex(index: number) {
-  hapticLight()
-  if (index >= 0 && index < team.value.teleopCycles.length) {
-    const cur = team.value.teleopCycles[index] ?? 1
+  const targetCycles = phase === 'auto' ? team.value.autoCycles : team.value.teleopCycles
+  const targetMissed = phase === 'auto' ? team.value.autoMissedCycles : team.value.teleopMissedCycles
+  if (index >= 0 && index < targetCycles.length) {
+    const cur = targetCycles[index] ?? 1
     if (cur > 1) {
-      team.value.teleopCycles[index] = cur - 1
+      targetCycles[index] = cur - 1
     } else {
-      team.value.teleopCycles.splice(index, 1)
+      targetCycles.splice(index, 1)
+      if (index < targetMissed.length) {
+        targetMissed.splice(index, 1)
+      }
     }
+    if (phase === 'auto') syncAutoBalls()
   }
 }
 
@@ -503,6 +835,7 @@ async function handleSubmit() {
     emit('submit', record)
     submitStatus.value = 'success'
     hapticSuccess()
+    clearDraft()
 
     if (!props.editRecord) {
       matchNumber.value = String(matchNum + 1)
@@ -568,6 +901,18 @@ async function handleSubmit() {
     <div class="wizard-body">
       <!-- STEP 0: PRE-MATCH SETUP -->
       <section v-if="currentStep === 0" class="step-pane step-pre-match">
+        <!-- Draft Restored Banner -->
+        <div v-if="isDraftRestored" class="draft-restored-banner">
+          <div class="draft-restored-content">
+            <span class="material-icons" style="font-size: 16px;">restore</span>
+            <span>{{ t('scouting.draft_restored', '已从息屏防丢草稿自动恢复') }}</span>
+          </div>
+          <button type="button" class="btn-clear-draft" @click="clearDraft">
+            <span class="material-icons" style="font-size: 14px;">close</span>
+            <span>{{ t('wizard.dismiss_draft', '忽略') }}</span>
+          </button>
+        </div>
+
         <div class="pane-header">
           <h2 class="pane-title">{{ t('wizard.pre_match') }}</h2>
           <span class="pane-subtitle">{{ t('wizard.pre_match_sub') }}</span>
@@ -715,6 +1060,78 @@ async function handleSubmit() {
           </div>
         </div>
 
+        <!-- Live Cycles Ticker for Auto -->
+        <div class="cycles-ticker-bar">
+          <div class="ticker-stat">
+            <span class="ticker-label">{{ t('wizard.total_scored') }}</span>
+            <span class="ticker-val text-green">{{ team.autoBalls }}</span>
+          </div>
+          <div class="ticker-divider"></div>
+          <div class="ticker-stat">
+            <span class="ticker-label">{{ t('wizard.completed_cycles') }}</span>
+            <span class="ticker-val">{{ team.autoCycles.length }} {{ t('wizard.cycles_unit') }}</span>
+          </div>
+          <div class="ticker-divider"></div>
+          <div class="ticker-stat">
+            <span class="ticker-label">{{ t('wizard.missed_balls') }}</span>
+            <span class="ticker-val text-red">{{ team.autoMissedCycles.reduce((a, b) => a + b, 0) }}</span>
+          </div>
+        </div>
+
+        <!-- Cycle History Chips Row for Auto -->
+        <div v-if="team.autoCycles.length > 0" class="cycle-chips-scroll">
+          <button
+            v-for="(balls, idx) in team.autoCycles"
+            :key="'ac-' + idx"
+            type="button"
+            class="cycle-chip"
+            :class="{ 'is-current': idx === lastAutoCycleIndex }"
+            @click="decrementCycleAtIndex(idx, 'auto')"
+            :title="t('wizard.undo_btn')"
+          >
+            <span class="chip-idx">#{{ idx + 1 }}</span>
+            <span class="chip-val">{{ balls }} {{ t('wizard.balls_unit') }}</span>
+            <span v-if="(team.autoMissedCycles[idx] || 0) > 0" class="chip-miss-val text-red">
+              ({{ team.autoMissedCycles[idx] }}丢)
+            </span>
+            <span class="material-icons chip-remove-icon" @click.stop="removeCycleAtIndex(idx, 'auto')">close</span>
+          </button>
+        </div>
+
+        <!-- Current Cycle Indicator & Preset Capsules for Auto -->
+        <div class="current-cycle-status-card">
+          <div class="current-cycle-meta">
+            <span class="cycle-badge">
+              {{ t('wizard.cycle_in_progress', { cycle: team.autoCycles.length || 1 }) }}
+            </span>
+            <div class="ball-slots-row">
+              <span
+                v-for="dotIdx in 4"
+                :key="'auto-dot-' + dotIdx"
+                class="slot-dot"
+                :class="{
+                  'is-hit': dotIdx <= currentAutoHits,
+                  'is-miss': dotIdx > currentAutoHits && dotIdx <= currentAutoHits + currentAutoMisses
+                }"
+              ></span>
+            </div>
+          </div>
+
+          <!-- 4 Quick Preset Capsules with Safety Truncation -->
+          <div class="preset-capsules-grid">
+            <button
+              v-for="k in [1, 2, 3, 4]"
+              :key="'auto-preset-' + k"
+              type="button"
+              class="btn-preset-capsule"
+              :class="{ 'is-active': currentAutoHits === k }"
+              @click="setAutoPresetBalls(k)"
+            >
+              {{ t('wizard.preset_balls', { count: k }) }}
+            </button>
+          </div>
+        </div>
+
         <!-- Giant Auto Scored Button (76px) -->
         <div class="hero-button-wrap">
           <button type="button" class="btn-hero-hit auto-hero-hit" @click="addAutoBall">
@@ -722,7 +1139,9 @@ async function handleSubmit() {
               <span class="material-icons hero-icon">sports_baseball</span>
               <div class="hero-text-col">
                 <span class="hero-btn-title">{{ t('wizard.auto_hit_btn') }}</span>
-                <span class="hero-btn-subtitle">{{ t('wizard.auto_hit_sub', { count: team.autoBalls, pts: team.autoBalls * 3 }) }}</span>
+                <span class="hero-btn-subtitle">
+                  {{ currentAutoAttempts >= 4 ? t('wizard.cap_reached_tip') : t('wizard.auto_hit_sub', { count: team.autoBalls, pts: team.autoBalls * 3 }) }}
+                </span>
               </div>
             </div>
           </button>
@@ -733,13 +1152,30 @@ async function handleSubmit() {
           <button type="button" class="btn-secondary-action btn-miss" @click="addAutoMiss">
             <span class="material-icons" style="font-size: 18px;">close</span>
             <span>{{ t('wizard.miss_btn') }}</span>
-            <span v-if="team.autoMissedCycles.length > 0" class="mini-count-badge">
+            <span v-if="team.autoMissedCycles.reduce((a, b) => a + b, 0) > 0" class="mini-count-badge">
               {{ team.autoMissedCycles.reduce((a, b) => a + b, 0) }}
             </span>
           </button>
           <button type="button" class="btn-secondary-action btn-undo" @click="undoAuto">
             <span class="material-icons" style="font-size: 18px;">undo</span>
             <span>{{ t('wizard.undo_btn') }}</span>
+          </button>
+        </div>
+
+        <!-- Manual Next Cycle Button for Auto -->
+        <div class="next-cycle-action-row">
+          <button
+            type="button"
+            class="btn-new-cycle"
+            :class="{
+              'pulsing-glow': autoPulsingGlow,
+              'is-disabled-soft': !canStartNewAutoCycle
+            }"
+            @click="handleNewAutoCycle"
+          >
+            <span class="material-icons">add_circle_outline</span>
+            <span class="new-cycle-text">{{ t('wizard.next_cycle_btn') }}</span>
+            <span class="new-cycle-hint">({{ t('wizard.next_cycle_sub') }})</span>
           </button>
         </div>
 
@@ -814,6 +1250,11 @@ async function handleSubmit() {
             <span class="ticker-label">{{ t('wizard.missed_balls') }}</span>
             <span class="ticker-val text-red">{{ getTeleopMissedTotal() }}</span>
           </div>
+          <div class="ticker-divider"></div>
+          <div class="ticker-stat">
+            <span class="ticker-label">{{ t('wizard.accuracy') }}</span>
+            <span class="ticker-val">{{ teleopAccuracy }}</span>
+          </div>
         </div>
 
         <!-- Cycle History Chips Row (clickable to adjust/delete) -->
@@ -823,16 +1264,54 @@ async function handleSubmit() {
             :key="'c-' + idx"
             type="button"
             class="cycle-chip"
-            @click="decrementCycleAtIndex(idx)"
+            :class="{ 'is-current': idx === lastTeleopCycleIndex }"
+            @click="decrementCycleAtIndex(idx, 'teleop')"
             :title="t('wizard.undo_btn')"
           >
             <span class="chip-idx">#{{ idx + 1 }}</span>
             <span class="chip-val">{{ balls }} {{ t('wizard.balls_unit') }}</span>
-            <span class="material-icons chip-remove-icon" @click.stop="removeCycleAtIndex(idx)">close</span>
+            <span v-if="(team.teleopMissedCycles[idx] || 0) > 0" class="chip-miss-val text-red">
+              ({{ team.teleopMissedCycles[idx] }}丢)
+            </span>
+            <span class="material-icons chip-remove-icon" @click.stop="removeCycleAtIndex(idx, 'teleop')">close</span>
           </button>
         </div>
 
-        <!-- 96px HERO BUTTON FOR BLIND TAPPING -->
+        <!-- Current Cycle Indicator & Preset Capsules -->
+        <div class="current-cycle-status-card">
+          <div class="current-cycle-meta">
+            <span class="cycle-badge">
+              {{ t('wizard.cycle_in_progress', { cycle: team.teleopCycles.length || 1 }) }}
+            </span>
+            <div class="ball-slots-row">
+              <span
+                v-for="dotIdx in 4"
+                :key="'dot-' + dotIdx"
+                class="slot-dot"
+                :class="{
+                  'is-hit': dotIdx <= currentTeleopHits,
+                  'is-miss': dotIdx > currentTeleopHits && dotIdx <= currentTeleopHits + currentTeleopMisses
+                }"
+              ></span>
+            </div>
+          </div>
+
+          <!-- 4 Quick Preset Capsules with Safety Truncation -->
+          <div class="preset-capsules-grid">
+            <button
+              v-for="k in [1, 2, 3, 4]"
+              :key="'preset-' + k"
+              type="button"
+              class="btn-preset-capsule"
+              :class="{ 'is-active': currentTeleopHits === k }"
+              @click="setTeleopPresetBalls(k)"
+            >
+              {{ t('wizard.preset_balls', { count: k }) }}
+            </button>
+          </div>
+        </div>
+
+        <!-- 84px HERO BUTTON FOR BLIND TAPPING -->
         <div class="hero-button-wrap hero-teleop-wrap">
           <button
             type="button"
@@ -843,7 +1322,9 @@ async function handleSubmit() {
               <span class="material-icons hero-icon-giant">sports_score</span>
               <div class="hero-text-col">
                 <span class="hero-giant-title">{{ t('wizard.teleop_giant_hit') }}</span>
-                <span class="hero-giant-subtitle">{{ t('wizard.teleop_giant_sub') }}</span>
+                <span class="hero-giant-subtitle">
+                  {{ currentTeleopAttempts >= 4 ? t('wizard.cap_reached_tip') : t('wizard.teleop_giant_sub') }}
+                </span>
               </div>
             </div>
           </button>
@@ -859,6 +1340,23 @@ async function handleSubmit() {
           <button type="button" class="btn-secondary-action btn-undo" @click="undoTeleop">
             <span class="material-icons" style="font-size: 20px;">undo</span>
             <span>{{ t('wizard.teleop_undo') }}</span>
+          </button>
+        </div>
+
+        <!-- Manual Next Cycle Button with Pulsing Glow Animation -->
+        <div class="next-cycle-action-row">
+          <button
+            type="button"
+            class="btn-new-cycle"
+            :class="{
+              'pulsing-glow': teleopPulsingGlow,
+              'is-disabled-soft': !canStartNewTeleopCycle
+            }"
+            @click="handleNewTeleopCycle"
+          >
+            <span class="material-icons">add_circle_outline</span>
+            <span class="new-cycle-text">{{ t('wizard.next_cycle_btn') }}</span>
+            <span class="new-cycle-hint">({{ t('wizard.next_cycle_sub') }})</span>
           </button>
         </div>
       </section>
@@ -1847,6 +2345,12 @@ async function handleSubmit() {
   border-color: #ef4444;
 }
 
+.cycle-chip.is-current {
+  border-color: #39ff14;
+  background: rgba(57, 255, 20, 0.28);
+  box-shadow: 0 0 10px rgba(57, 255, 20, 0.35);
+}
+
 .chip-idx {
   color: #8b949e;
   font-size: 10px;
@@ -1857,10 +2361,193 @@ async function handleSubmit() {
   font-weight: 700;
 }
 
+.chip-miss-val {
+  font-size: 11px;
+  font-weight: 600;
+}
+
 .chip-remove-icon {
   font-size: 12px;
   color: #8b949e;
   margin-left: 2px;
+}
+
+/* Current Cycle Status Card & Preset Capsules */
+.current-cycle-status-card {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  background: rgba(22, 27, 34, 0.7);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: 14px;
+  padding: 10px 12px;
+}
+
+.current-cycle-meta {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.cycle-badge {
+  font-size: 13px;
+  font-weight: 700;
+  color: #39ff14;
+}
+
+.ball-slots-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.slot-dot {
+  width: 12px;
+  height: 12px;
+  border-radius: 50%;
+  border: 1.5px solid rgba(255, 255, 255, 0.3);
+  background: rgba(255, 255, 255, 0.06);
+  transition: all 0.2s ease;
+}
+
+.slot-dot.is-hit {
+  background: #39ff14;
+  border-color: #39ff14;
+  box-shadow: 0 0 8px rgba(57, 255, 20, 0.6);
+}
+
+.slot-dot.is-miss {
+  background: #ef4444;
+  border-color: #ef4444;
+  box-shadow: 0 0 8px rgba(239, 68, 68, 0.6);
+}
+
+.preset-capsules-grid {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: 6px;
+}
+
+.btn-preset-capsule {
+  height: 38px;
+  border-radius: 10px;
+  background: rgba(255, 255, 255, 0.06);
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  color: #c9d1d9;
+  font-size: 13px;
+  font-weight: 700;
+  cursor: pointer;
+  transition: all 0.15s ease;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.btn-preset-capsule:active {
+  transform: scale(0.95);
+}
+
+.btn-preset-capsule.is-active {
+  background: rgba(57, 255, 20, 0.25);
+  border-color: #39ff14;
+  color: #39ff14;
+}
+
+/* Next Cycle Action Button */
+.next-cycle-action-row {
+  display: flex;
+  margin-top: 4px;
+}
+
+.btn-new-cycle {
+  width: 100%;
+  height: 52px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  border-radius: 12px;
+  background: rgba(57, 255, 20, 0.12);
+  border: 1.5px solid rgba(57, 255, 20, 0.4);
+  color: #39ff14;
+  font-size: 14px;
+  font-weight: 800;
+  cursor: pointer;
+  transition: all 0.2s ease;
+}
+
+.btn-new-cycle:active {
+  transform: scale(0.98);
+}
+
+.btn-new-cycle .new-cycle-hint {
+  font-size: 11px;
+  font-weight: 500;
+  color: #8b949e;
+}
+
+.btn-new-cycle.is-disabled-soft {
+  opacity: 0.6;
+}
+
+@keyframes pulsing-glow {
+  0% {
+    box-shadow: 0 0 0 0 rgba(57, 255, 20, 0.8);
+    transform: scale(1);
+  }
+  50% {
+    box-shadow: 0 0 20px 4px rgba(57, 255, 20, 0.95);
+    transform: scale(1.02);
+    border-color: #39ff14;
+  }
+  100% {
+    box-shadow: 0 0 0 0 rgba(57, 255, 20, 0);
+    transform: scale(1);
+  }
+}
+
+.pulsing-glow {
+  animation: pulsing-glow 1.2s infinite ease-in-out !important;
+  border-color: #39ff14 !important;
+  background: rgba(57, 255, 20, 0.25) !important;
+}
+
+/* Draft Restored Banner */
+.draft-restored-banner {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 8px 12px;
+  background: rgba(59, 130, 246, 0.15);
+  border: 1px solid rgba(59, 130, 246, 0.35);
+  border-radius: 10px;
+  margin-bottom: 12px;
+  color: #93c5fd;
+  font-size: 12px;
+  font-weight: 600;
+}
+
+.draft-restored-content {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.btn-clear-draft {
+  background: transparent;
+  border: none;
+  color: #93c5fd;
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+  font-size: 11px;
+  padding: 2px 6px;
+  border-radius: 4px;
+}
+
+.btn-clear-draft:hover {
+  background: rgba(59, 130, 246, 0.2);
 }
 
 /* Notes & TagPicker & Custom Fields */

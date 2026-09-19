@@ -80,6 +80,12 @@ const bragLabel = computed(() => {
       <PitStatusIndicator :team-number="team.teamNumber" :show-label="true" size="md" :clickable="false" />
     </div>
 
+    <!-- 来自正赛自动发现的高亮标识 -->
+    <div v-if="!team.hasPitRecord && team.matchCount > 0" class="match-discovery-badge">
+      <span class="material-icons" style="font-size: 13px;">visibility</span>
+      <span>{{ t('pit_scout.discovered_from_match', { count: team.matchCount }) }}</span>
+    </div>
+
     <!-- 机器人名称与地点 -->
     <div v-if="team.robotName || team.city" class="card-subtitle">
       <span v-if="team.robotName" class="robot-name">
@@ -250,6 +256,20 @@ const bragLabel = computed(() => {
   overflow: hidden;
   text-overflow: ellipsis;
   max-width: 180px;
+}
+
+.match-discovery-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 3px 8px;
+  border-radius: 6px;
+  background: rgba(59, 130, 246, 0.15);
+  border: 1px solid rgba(59, 130, 246, 0.35);
+  color: #60a5fa;
+  font-size: 11px;
+  font-weight: 700;
+  width: fit-content;
 }
 
 .card-subtitle {

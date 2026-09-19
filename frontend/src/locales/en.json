@@ -799,6 +799,10 @@
     "empty_title": "No Team Data",
     "empty_desc_sync": "Click 'Sync Official Roster' at top-right or import matches in Schedule.",
     "empty_desc_nosync": "Please import matches in Schedule or bind FTC Event Code in settings.",
+    "not_in_roster_title": "Team #{teamNumber} Not Found in Roster",
+    "not_in_roster_desc": "This team is not in the official roster or schedule yet. You can create a pit scouting record directly.",
+    "create_pit_record_for_team": "Create Pit Record for #{teamNumber}",
+    "discovered_from_match": "{count} matches scouted · Pending pit",
     "status_recorded": "Recorded",
     "status_unrecorded": "Pending",
     "status_tooltip_recorded": "Pit Recorded",
@@ -1138,6 +1142,19 @@
     "tag_mechanics": "Mechanics",
     "tag_accuracy": "High Acc",
     "tag_fouls": "Fouls",
-    "tag_synergy": "Synergy"
+    "tag_synergy": "Synergy",
+    "next_cycle_btn": "+ Next Cycle",
+    "next_cycle_sub": "Cut cycle after 4 balls",
+    "cycle_in_progress": "Cycle #{cycle} in progress",
+    "cycle_chip_desc": "#{cycle}: {hits} Scored {misses} Missed",
+    "accuracy": "Accuracy",
+    "preset_balls": "{count} Balls",
+    "cap_reached_tip": "4 balls reached. Tap [+ Next Cycle] to continue",
+    "cannot_start_empty_cycle": "Current cycle has no balls shot yet",
+    "dismiss_draft": "Dismiss"
+  },
+  "webrtc": {
+    "single_record_received": "Received match record for #{team} Match {match}",
+    "batch_records_received": "Batch synchronized {count} match records"
   }
 }

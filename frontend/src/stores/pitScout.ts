@@ -59,15 +59,16 @@ export const usePitScoutStore = defineStore('pitScout', () => {
   const activeRecords = computed(() => records.value.filter((r) => !r.isDeleted))
 
   /**
-   * 响应式核心：统一赛事战队池 (Unified Event Team Roster)
-   * 并集去重 FTC 官方名录、赛程表各工位战队、比赛侦察战队、标签战队及 Pit 记录战队
+   * 响应式核心：全量赛事展位底册 (All Event Roster Teams - Unfiltered)
+   * 严格以赛事参与战队为基准：FTC 官方名录、赛程表各工位战队、已有展位走访战队及战队标签
+   * 【注】严禁遍历 match records (recordStore.activeRecords) 误将正赛临时战队注入走访底册导致虚增分母
    */
-  const unifiedTeamList = computed<UnifiedTeamItem[]>(() => {
+  const allRosterTeams = computed<UnifiedTeamItem[]>(() => {
     const scheduleStore = useScheduleStore()
     const recordStore = useRecordStore()
     const targetEventId = currentEventId.value
 
-    // 1. 汇集所有数据源的战队号并去重
+    // 1. 汇集赛事名录、赛程与走访数据源战队号并去重
     const teamNumberSet = new Set<number>()
 
     officialTeams.value.forEach((t) => {
@@ -83,10 +84,6 @@ export const usePitScoutStore = defineStore('pitScout', () => {
       }
     })
 
-    recordStore.activeRecords.forEach((r) => {
-      if ((!targetEventId || r.eventId === targetEventId) && r.teamNumber > 0) teamNumberSet.add(r.teamNumber)
-    })
-
     recordStore.teamTags.forEach((t) => {
       if ((!targetEventId || t.eventId === targetEventId) && t.teamNumber > 0) teamNumberSet.add(t.teamNumber)
     })
@@ -95,8 +92,13 @@ export const usePitScoutStore = defineStore('pitScout', () => {
       if ((!targetEventId || p.eventId === targetEventId) && p.teamNumber > 0) teamNumberSet.add(p.teamNumber)
     })
 
-    // 2. 为每支战队构建统一对象
-    const allTeams: UnifiedTeamItem[] = Array.from(teamNumberSet).map((teamNumber) => {
+    // 4. 收集看台正赛打分记录中的队伍号（如果正赛中出现了未在底册登记的队伍，自动追加为空白待走访队伍，总数 +1）
+    recordStore.activeRecords.forEach((r) => {
+      if ((!targetEventId || r.eventId === targetEventId) && r.teamNumber > 0) teamNumberSet.add(r.teamNumber)
+    })
+
+    // 2. 为每支战队构建统一对象（若存在正赛记录，正常附着实战战绩与吹牛指数）
+    return Array.from(teamNumberSet).map((teamNumber) => {
       const official = officialTeams.value.find((t) => t.teamNumber === teamNumber && (!targetEventId || !t.eventId || t.eventId === targetEventId))
       const pitRec = activeRecords.value.find((p) => p.teamNumber === teamNumber && (!targetEventId || p.eventId === targetEventId)) || null
       const teamMatches = recordStore.activeRecords.filter((r) => r.teamNumber === teamNumber && (!targetEventId || r.eventId === targetEventId))
@@ -127,9 +129,13 @@ export const usePitScoutStore = defineStore('pitScout', () => {
         tags
       }
     })
+  })
 
-    // 3. 多维筛选与排序
-    let filtered = allTeams
+  /**
+   * UI 视图列表：在全量底册的基础上应用用户当前设置的搜索与过滤条件
+   */
+  const unifiedTeamList = computed<UnifiedTeamItem[]>(() => {
+    let filtered = allRosterTeams.value
 
     if (searchQuery.value.trim()) {
       const q = searchQuery.value.trim().toLowerCase()
@@ -174,9 +180,13 @@ export const usePitScoutStore = defineStore('pitScout', () => {
     })
   })
 
+  /**
+   * 核心防篡改修复：走访进度统计必须且只能基于未过滤的全量底册 allRosterTeams 计算，
+   * 严禁与 UI 搜索框 / 筛选下拉框联动，彻底杜绝搜索时虚变为 100% 或 0% 的统计 Bug。
+   */
   const stats = computed(() => {
-    const total = unifiedTeamList.value.length
-    const recorded = unifiedTeamList.value.filter((t) => t.hasPitRecord).length
+    const total = allRosterTeams.value.length
+    const recorded = allRosterTeams.value.filter((t) => t.hasPitRecord).length
     return {
       total,
       recorded,
@@ -185,7 +195,7 @@ export const usePitScoutStore = defineStore('pitScout', () => {
   })
 
   function getUnifiedTeam(teamNumber: number): UnifiedTeamItem | undefined {
-    return unifiedTeamList.value.find((t) => t.teamNumber === teamNumber)
+    return allRosterTeams.value.find((t) => t.teamNumber === teamNumber)
   }
 
   // --- API 与同步操作 ---
@@ -535,6 +545,7 @@ export const usePitScoutStore = defineStore('pitScout', () => {
     filterRecordStatus,
     sortBy,
     activeRecords,
+    allRosterTeams,
     unifiedTeamList,
     stats,
     getUnifiedTeam,

@@ -94,6 +94,25 @@ export function useEventWebRtcBridge({
         if (!eventStore.isHost || connStore.isStandbyHost) {
           advanceLastHostSeq(records)
         }
+        if (accepted.length > 0) {
+          const first = accepted[0]
+          if (accepted.length === 1 && first) {
+            toastStore.showToast(
+              t('webrtc.single_record_received', {
+                team: first.teamNumber,
+                match: first.matchNumber
+              }),
+              'info'
+            )
+          } else {
+            toastStore.showToast(
+              t('webrtc.batch_records_received', {
+                count: accepted.length
+              }),
+              'info'
+            )
+          }
+        }
         return accepted
       },
 
