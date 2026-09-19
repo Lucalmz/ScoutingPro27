@@ -19,6 +19,10 @@
 
 > 💡 **This project was independently conceived, architected, and full-stack developed by middle and high school students of FIRST Tech Challenge (FTC) Team 27570 B.E.A.R.**  
 > Born directly out of front-line competition demands, it redefines the scouting and match collaboration experience across global FIRST events through hardcore modern engineering practices.
+> 
+> 📌 **Release Positioning & Season Commitment (v1.0.1 MVP)**:  
+> This release marks our **first stable, production-ready Minimum Viable Product (MVP)** for the new competition season.  
+> **We officially commit: Prior to the very first official qualifying tournament, our team will deliver a major update** incorporating rule-driven refinements and front-line feedback to continuously advance our alliance analytics and collaboration capabilities!
 
 ---
 
@@ -122,19 +126,29 @@ Robot scouting holds sensitive tactical intelligence: alliance preferences, mech
 
 ---
 
-### 1.6 Full Bilingual Support & Native Glassmorphic Interface
+### 1.6 Full Bilingual Support, Local High-Res Typography & Native Ergonomics
+ScoutingPro27 delivers an uncompromised user experience crafted for global FIRST championships and cross-alliance multinational collaboration:
 - **Seamless Internationalization (Full i18n Support)**:
-  - Built on `vue-i18n` with comprehensive English and Simplified Chinese dictionaries, persistent preferences, and sub-millisecond hot-switching.
+  - Powered by `vue-i18n` with comprehensive English and Simplified Chinese dictionaries (1100+ keys with 100% strict 1:1 parity), supporting sub-millisecond hot-switching and persistent preferences.
   - Complete coverage spans Dashboard, QR onboarding, Pit scouting, match matrix, cycle counters, power ladders, dual-host takeover, and AI tactical chats.
+- **Embedded Noto Sans SC High-Res Variable Font**:
+  - Locally bundles Google Fonts `Noto Sans SC` Variable Font (weight range 100~900), completely packaged offline inside frontend static bundles and desktop installers;
+  - Completely cures font blurring and edge artifacts for small Chinese characters, form badges, and buttons on high-DPI screens.
 - **Unified Cyber Glassmorphic Design System**:
   - Eliminates jarring native browser `window.confirm` / `alert` popups (`localhost:8080 says`).
   - Powered by responsive custom glassmorphic modals (`ConfirmModal.vue` + `useConfirm.ts`) with Danger, Warning, and Info visual tiers, keyboard navigation, and mobile touch optimization.
+- **Mobile Fast Transport HUD & Live Network Indicator**:
+  - Micro Transport HUD pinned to mobile status bar displays real-time connection status with neon indicators (P2P Direct / TURN Relay / Offline);
+  - Tap anytime to inspect network round-trip diagnostic metrics directly from the bleachers.
+- **Host Permission Governance & Humanized Username Visibility**:
+  - Strict role-based permissions: Host administrators maintain global authority to inspect, edit, or delete any scout's records; scouts retain full control over their own submissions;
+  - History table and details completely hide internal database UUIDs, presenting human-readable scouter usernames.
 
 ---
 
 ### 1.7 Tech Stack Overview
 - **Frontend & Client**: Vue 3 (Composition API), TypeScript, Pinia, Vue Router 4, TailwindCSS Animations, Web Crypto API, IndexedDB.
-- **Transport & P2P Mesh**: WebRTC DataChannel, MQTT over WSS (EMQX Blind Signaling), STUN/TURN (Metered.ca ICE Infrastructure).
+- **Transport & P2P Mesh**: WebRTC DataChannel, MQTT over WSS (Multi-broker failover cluster + Blind Signaling), STUN/TURN (Tencent Cloud / Xiaomi / Metered.ca ICE Infrastructure).
 - **Desktop Host & Storage**: Java 21, Javalin 7 Lightweight Asynchronous Microservices, Embedded Relational H2 Database (`AUTO_SERVER=TRUE`), Jdbi 3, Flyway Database Migration, JCEF (Chromium Embedded Framework).
 
 ---
@@ -580,10 +594,10 @@ ScoutingPro27 enforces an **Evidence Triad verification policy** with comprehens
 cd frontend
 npm run type-check
 
-# 2. Frontend Vitest unit & component test suite (66 test suites / 495 tests 100% passing)
+# 2. Frontend Vitest unit & component test suite (73 test suites / 562 tests 100% passing)
 npm test -- --run
 
-# 3. Backend Maven Surefire test suite (124 tests 100% passing)
+# 3. Backend Maven Surefire test suite (136 tests 100% passing)
 cd ../Backend
 mvn test
 

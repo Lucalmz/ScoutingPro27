@@ -18,3 +18,4 @@ node_modules/
 log/
 *.log
 report-from-phone/
+scratch/

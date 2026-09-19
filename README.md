@@ -19,6 +19,10 @@
 
 > 💡 **本项目完全由 FIRST Tech Challenge (FTC) Team 27570 的中学生团队独立构思、架构设计并全栈开发完成。**  
 > 诞生于真实赛场的一线实战需求，用硬核的现代工程实践，重新定义全球 FIRST 赛事的侦察协同体验。
+> 
+> 📌 **版本定位与赛前承诺 (v1.0.1 MVP)**：  
+> 本版本定位为新赛季**首版现场稳定可用的基础交付版 (Production-Ready MVP)**。  
+> **我们郑重承诺：在第一场官方资格赛打响之前，团队将带来一次重大版本更新**，紧密结合赛规落地与一线赛场实战反馈，持续打磨并带来更强大的战术分析与协同能力！
 
 ---
 
@@ -120,20 +124,29 @@ ScoutingPro27 在整个 FIRST 社区最大的创新与突破，在于**将先进
 
 ---
 
-### 1.6 全站中英双语与原生级主题化交互
+### 1.6 全站中英双语、本地高质字体与原生级交互
 为适配全球 FIRST 国际锦标赛、世锦赛 (World Championship) 跨国联队协作以及多元语言场景，ScoutingPro27 打造了无死角的高品质交互体验：
 - **无缝中英双语国际化 (Full i18n Support)**：
-  - 内置基于 `vue-i18n` 的高覆盖度中英词典体系（简体中文 / English），支持全站毫秒级热切换与持久化偏好记忆。
+  - 内置基于 `vue-i18n` 的高覆盖度中英词典体系（简体中文 / English，1100+ 键值 1:1 绝对对齐），支持全站毫秒级热切换与持久化偏好记忆。
   - 彻底覆盖大厅、扫码入场、展位硬件摸底、赛程排班矩阵、现场极速盲操打分、战力天梯榜、双机热备接管乃至战术 AI 军师的所有界面标签、状态徽章、错误提示与动态气泡。
+- **内置 Noto Sans SC 本地高清中文字体系统**：
+  - 本地化嵌入 Google Fonts `Noto Sans SC` 变量字体（Variable Font，覆盖 100~900 宽范围字重），完全离线内置于前端静态资源及客户端安装包中；
+  - 彻底攻克 Windows 与高分屏下中文小字、表单标签、徽章与按钮字形模糊与毛刺难题，带来细腻丝滑的排版质感。
 - **告别浏览器原生弹窗，统一赛博玻璃拟态风格 (Custom Glassmorphism Modals)**：
   - 彻底杜绝暴露端口号、割裂视觉体验的原生 `window.confirm` / `alert`（告别尴尬的 `localhost:8080 says` 弹窗）。
   - 研发专属的响应式玻璃拟态对话框系统（`ConfirmModal.vue` + `useConfirm.ts`），严格统一在系统的暗黑赛博主题之下，提供危险熔断 (Danger)、警告确认 (Warning)、信息提示 (Info) 三级视觉分级，并支持移动端触控优化与键盘快捷键交互。
+- **移动端极速 Transport HUD 与实时网络状态指示**：
+  - 移动端顶部状态栏集成微型 Transport HUD，实时以赛博光效显示当前链路状态（P2P 直连 Direct / TURN 中继 Relay / 离线断网 Offline）；
+  - 随时轻触即可调出网络诊断详情，让看台队员对当前信号了然于胸。
+- **完善的 Host 全局权限与人性化用户名呈现**：
+  - 健全的数据权限体系：Host 主机管理员具备全局管理权，可查看并修改/删除全场任何选手的记录；普通 Scouter 维护自身记录修改权限；
+  - 历史记录表格与详情移除底层数据库 UUID 泄露，全面平滑呈现选手用户名。
 
 ---
 
 ### 1.7 核心技术栈概览
 - **客户端交互与移动端**：Vue 3 (Composition API)、TypeScript、Pinia、Vue Router 4、TailwindCSS 高性能动效系统、Web Crypto API、IndexedDB。
-- **通信传输与直连层**：WebRTC DataChannel、MQTT over WSS (EMQX 盲信令)、STUN/TURN (Metered.ca ICE 穿透自愈体系)。
+- **通信传输与直连层**：WebRTC DataChannel、MQTT over WSS (多 Broker 灾备切换 + 盲信令)、STUN/TURN (腾讯云 / 小米 / Metered.ca 国内外混合 ICE 自愈体系)。
 - **电脑主机端底座**：Java 21、Javalin 7 高性能异步轻量级微服务、嵌入式关系型 H2 数据库 (`AUTO_SERVER=TRUE`)、Jdbi 3、Flyway 数据库自动化版本迁移、JCEF (Chromium 桌面原生嵌入容器)。
 
 ---
@@ -582,10 +595,10 @@ ScoutingPro27 遵循严格的**证据闭环验证铁律**，拥有高覆盖率�
 cd frontend
 npm run type-check
 
-# 2. 运行前端 Vitest 单元与组件测试套件 (66 套件 / 495 项测试 100% 全部通过)
+# 2. 运行前端 Vitest 单元与组件测试套件 (73 套件 / 562 项测试 100% 全部通过)
 npm test -- --run
 
-# 3. 运行后端 Maven Surefire 测试套件 (124 项测试 100% 全部通过)
+# 3. 运行后端 Maven Surefire 测试套件 (136 项测试 100% 全部通过)
 cd ../Backend
 mvn test
 
