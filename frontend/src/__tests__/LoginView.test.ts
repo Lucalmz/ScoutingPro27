@@ -140,4 +140,23 @@ describe('LoginView.vue', () => {
     await new Promise((r) => setTimeout(r, 20))
     expect(wrapper.find('#confirmPassword').exists()).toBe(false)
   })
+
+  it('does NOT render scan QR button on desktop host', async () => {
+    const photoStorage = await import('@/services/photoStorage')
+    vi.spyOn(photoStorage, 'isDesktopHost').mockReturnValue(true)
+
+    const wrapper = mount(LoginView)
+    expect(wrapper.find('.btn-scan-login').exists()).toBe(false)
+  })
+
+  it('renders scan QR button on mobile client', async () => {
+    const { ref } = await import('vue')
+    const photoStorage = await import('@/services/photoStorage')
+    vi.spyOn(photoStorage, 'isDesktopHost').mockReturnValue(false)
+    const isMobileComposable = await import('@/composables/useIsMobile')
+    vi.spyOn(isMobileComposable, 'useIsMobile').mockReturnValue({ isMobile: ref(true) } as any)
+
+    const wrapper = mount(LoginView)
+    expect(wrapper.find('.btn-scan-login').exists()).toBe(true)
+  })
 })

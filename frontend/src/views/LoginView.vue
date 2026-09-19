@@ -225,7 +225,7 @@ async function handleLogin() {
         </button>
       </form>
 
-      <div class="login-alt-actions">
+      <div v-if="isMobileClient" class="login-alt-actions">
         <button type="button" class="btn-scan-login" @click="showQrScannerModal = true">
           <span class="material-icons">qr_code_scanner</span>
           {{ effectiveInviteCode ? t('login.rescan_qr_code') : t('login.scan_qr_join') }}

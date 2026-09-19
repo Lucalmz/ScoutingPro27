@@ -347,4 +347,21 @@ describe('DashboardView.vue', () => {
     expect(clearSpy).toHaveBeenCalled()
     confirmSpy.mockRestore()
   })
+
+  it('does NOT render scan-to-join button on desktop host', async () => {
+    const { isDesktopHost } = await import('@/services/photoStorage')
+    vi.mocked(isDesktopHost).mockReturnValue(true)
+
+    const userStore = useUserStore()
+    userStore.user = { id: 'u1', username: 'Tester', token: 'token' }
+    const eventStore = useEventStore()
+    eventStore.events = []
+    vi.spyOn(eventStore, 'fetchEvents').mockResolvedValue(undefined)
+
+    const wrapper = mount(DashboardView)
+    await new Promise((r) => setTimeout(r, 10))
+
+    expect(wrapper.find('.scan-btn').exists()).toBe(false)
+    expect(wrapper.find('.btn-scan-input').exists()).toBe(false)
+  })
 })

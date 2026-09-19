@@ -286,7 +286,7 @@ function handleOpenRenameModal() {
         <button class="action-btn" :class="{ primary: !isDesktopHost(), secondary: isDesktopHost() }" @click="showJoinModal = true">
           {{ t('dashboard.join_event') }}
         </button>
-        <button class="action-btn scan-btn" :class="{ primary: !isDesktopHost(), secondary: isDesktopHost() }" @click="showQrScannerModal = true">
+        <button v-if="isMobileClient" class="action-btn scan-btn" :class="{ primary: !isDesktopHost(), secondary: isDesktopHost() }" @click="showQrScannerModal = true">
           <span class="material-icons" style="font-size: 18px; margin-right: 4px; vertical-align: text-bottom;">qr_code_scanner</span>
           {{ t('dashboard.scan_to_join') }}
         </button>
@@ -401,7 +401,7 @@ function handleOpenRenameModal() {
               @keyup.enter="handleJoin"
               style="text-transform: uppercase;"
             />
-            <button type="button" class="btn-scan-input" @click="showQrScannerModal = true" :title="t('dashboard.scan_qr_btn')">
+            <button v-if="isMobileClient" type="button" class="btn-scan-input" @click="showQrScannerModal = true" :title="t('dashboard.scan_qr_btn')">
               <span class="material-icons">qr_code_scanner</span>
             </button>
           </div>
