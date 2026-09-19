@@ -157,7 +157,7 @@ function close() {
               @click="qrChannelMode = 'cloud'"
             >
               <span class="material-icons pill-icon">cloud</span>
-              <span>{{ t('qr_modal.channel_cloud', '公网云端') }}</span>
+              <span>{{ t('qr_modal.channel_cloud') }}</span>
             </button>
             <button
               type="button"
@@ -166,7 +166,7 @@ function close() {
               @click="qrChannelMode = 'lan'"
             >
               <span class="material-icons pill-icon">wifi_tethering</span>
-              <span>{{ t('qr_modal.channel_lan', '赛场内网/热点 (纯离线)') }}</span>
+              <span>{{ t('qr_modal.channel_lan') }}</span>
             </button>
           </div>
 
@@ -196,7 +196,7 @@ function close() {
             <input readonly :value="joinUrl" class="url-input" />
             <button class="btn-copy" @click="copyUrl">
               <span class="material-icons">{{ copied ? 'check' : 'content_copy' }}</span>
-              {{ copied ? t('qr_modal.copied') : t('qr_modal.cloud_copy_link') }}
+              <span>{{ copied ? t('qr_modal.copied') : t('qr_modal.cloud_copy_link') }}</span>
             </button>
           </div>
 
@@ -210,7 +210,7 @@ function close() {
                 @click="isEditingCloudUrl = !isEditingCloudUrl"
               >
                 <span class="material-icons">{{ isEditingCloudUrl ? 'close' : 'settings' }}</span>
-                <span>{{ isEditingCloudUrl ? t('common.cancel', '取消') : t('qr_modal.cloud_url_config_btn') }}</span>
+                <span>{{ isEditingCloudUrl ? t('common.cancel') : t('qr_modal.cloud_url_config_btn') }}</span>
               </button>
             </div>
             <div v-if="isEditingCloudUrl" class="cloud-url-editor">
@@ -218,11 +218,11 @@ function close() {
                 v-model="cloudUrlInput"
                 type="text"
                 class="cloud-url-input"
-                placeholder="https://your-team.github.io/ScoutingPro27"
+                :placeholder="t('qr_modal.cloud_url_placeholder')"
               />
               <button type="button" class="btn-save-cloud-url" @click="saveCloudUrl">
                 <span class="material-icons">check</span>
-                <span>{{ t('common.save', '保存') }}</span>
+                <span>{{ t('common.save') }}</span>
               </button>
             </div>
             <p v-if="isEditingCloudUrl" class="cloud-url-hint">
@@ -240,8 +240,8 @@ function close() {
   position: fixed;
   inset: 0;
   z-index: 1000;
-  background: rgba(0, 0, 0, 0.75);
-  backdrop-filter: blur(8px);
+  background: rgba(0, 0, 0, 0.85);
+  backdrop-filter: blur(10px);
   display: flex;
   align-items: center;
   justify-content: center;
@@ -251,16 +251,16 @@ function close() {
 }
 
 .qr-modal-dialog {
-  background: #181c24;
-  border: 1px solid rgba(255, 255, 255, 0.12);
+  background: var(--card, #0a0a0a);
+  border: 1px solid var(--border, #262626);
   border-radius: 16px;
   width: 100%;
   max-width: 440px;
-  box-shadow: 0 20px 48px rgba(0, 0, 0, 0.6), 0 0 0 1px rgba(255, 255, 255, 0.05);
+  box-shadow: 0 24px 60px rgba(0, 0, 0, 0.8), 0 0 0 1px rgba(255, 255, 255, 0.05);
   display: flex;
   flex-direction: column;
-  color: #e5e7eb;
-  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;
+  color: var(--foreground, #f1f5f9);
+  font-family: inherit;
   overflow: hidden;
   animation: modalPop 0.25s cubic-bezier(0.16, 1, 0.3, 1);
 }
@@ -281,7 +281,7 @@ function close() {
   align-items: center;
   justify-content: space-between;
   padding: 16px 20px;
-  border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+  border-bottom: 1px solid var(--border, #262626);
   background: rgba(255, 255, 255, 0.02);
 }
 
@@ -293,33 +293,35 @@ function close() {
 
 .header-icon {
   font-size: 22px;
-  color: #39ff14;
+  color: var(--primary, #39ff14);
+  text-shadow: 0 0 8px rgba(57, 255, 20, 0.5);
 }
 
 .qr-modal-header h3 {
   margin: 0;
+  font-family: 'Orbitron', 'ZCOOLQingKeHuangYou', sans-serif;
   font-size: 17px;
   font-weight: 700;
-  color: #f3f4f6;
-  letter-spacing: -0.01em;
+  color: var(--foreground, #f1f5f9);
+  letter-spacing: 0.04em;
 }
 
 .close-btn {
   background: transparent;
   border: none;
-  color: #9ca3af;
+  color: var(--muted-foreground, #a3a3a3);
   cursor: pointer;
   padding: 4px;
   border-radius: 6px;
   display: flex;
   align-items: center;
   justify-content: center;
-  transition: all 0.15s;
+  transition: all 0.15s ease;
 }
 
 .close-btn:hover {
-  background: rgba(255, 255, 255, 0.1);
-  color: #ffffff;
+  background: var(--muted, #1a1a1a);
+  color: var(--foreground, #f1f5f9);
 }
 
 .qr-modal-body {
@@ -333,14 +335,14 @@ function close() {
   margin: 0;
   font-size: 13px;
   line-height: 1.5;
-  color: #9ca3af;
+  color: var(--muted-foreground, #a3a3a3);
   text-align: center;
 }
 
 .channel-pill-bar {
   display: flex;
-  background: rgba(255, 255, 255, 0.05);
-  border: 1px solid rgba(255, 255, 255, 0.1);
+  background: var(--muted, #1a1a1a);
+  border: 1px solid var(--border, #262626);
   border-radius: 12px;
   padding: 4px;
   gap: 4px;
@@ -358,41 +360,44 @@ function close() {
   border-radius: 8px;
   border: 1px solid transparent;
   background: transparent;
-  color: #9ca3af;
+  color: var(--muted-foreground, #a3a3a3);
   cursor: pointer;
   transition: all 0.2s ease;
 }
 
 .channel-pill-item:hover {
-  color: #e5e7eb;
+  color: var(--foreground, #f1f5f9);
+  background: rgba(255, 255, 255, 0.04);
 }
 
 .channel-pill-item.active {
-  background: rgba(59, 130, 246, 0.2);
-  color: #60a5fa;
-  border-color: rgba(59, 130, 246, 0.35);
+  background: rgba(57, 255, 20, 0.12);
+  color: var(--primary, #39ff14);
+  border-color: rgba(57, 255, 20, 0.35);
+  box-shadow: 0 0 10px rgba(57, 255, 20, 0.15);
 }
 
 .pill-icon {
   font-size: 16px;
 }
 
-/* 邀请码大磁贴 */
+/* 邀请码高亮大磁贴 */
 .code-badge-bar {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  background: linear-gradient(135deg, rgba(57, 255, 20, 0.08), rgba(16, 185, 129, 0.04));
-  border: 1px solid rgba(57, 255, 20, 0.25);
+  background: linear-gradient(135deg, rgba(57, 255, 20, 0.1), rgba(0, 0, 0, 0.4));
+  border: 1px solid rgba(57, 255, 20, 0.3);
   border-radius: 12px;
   padding: 12px 16px;
   cursor: pointer;
-  transition: all 0.2s;
+  transition: all 0.2s ease;
 }
 
 .code-badge-bar:hover {
-  background: linear-gradient(135deg, rgba(57, 255, 20, 0.14), rgba(16, 185, 129, 0.08));
-  border-color: rgba(57, 255, 20, 0.45);
+  background: linear-gradient(135deg, rgba(57, 255, 20, 0.16), rgba(0, 0, 0, 0.5));
+  border-color: var(--primary, #39ff14);
+  box-shadow: var(--glow-primary);
 }
 
 .code-badge-left {
@@ -402,46 +407,50 @@ function close() {
 }
 
 .code-label {
+  font-family: 'Orbitron', sans-serif;
   font-size: 11px;
   font-weight: 600;
   text-transform: uppercase;
   letter-spacing: 0.05em;
-  color: #9ca3af;
+  color: var(--muted-foreground, #a3a3a3);
 }
 
 .code-value {
-  font-family: 'SF Mono', Monaco, Consolas, monospace;
+  font-family: 'Orbitron', monospace;
   font-size: 26px;
   font-weight: 900;
-  color: #39ff14;
+  color: var(--primary, #39ff14);
   letter-spacing: 2px;
+  text-shadow: 0 0 10px rgba(57, 255, 20, 0.5);
 }
 
 .btn-copy-code-mini {
   display: flex;
   align-items: center;
   gap: 4px;
-  background: rgba(255, 255, 255, 0.08);
-  border: 1px solid rgba(255, 255, 255, 0.15);
+  background: var(--card, #0a0a0a);
+  border: 1px solid var(--border, #262626);
   border-radius: 8px;
   padding: 6px 10px;
-  color: #d1d5db;
+  color: var(--foreground, #f1f5f9);
   font-size: 12px;
   font-weight: 600;
   cursor: pointer;
-  transition: all 0.15s;
+  transition: all 0.15s ease;
 }
 
 .btn-copy-code-mini:hover {
-  background: rgba(57, 255, 20, 0.15);
-  color: #ffffff;
-  border-color: rgba(57, 255, 20, 0.3);
+  background: rgba(57, 255, 20, 0.12);
+  color: var(--primary, #39ff14);
+  border-color: var(--primary, #39ff14);
+  box-shadow: 0 0 10px rgba(57, 255, 20, 0.2);
 }
 
 .btn-copy-code-mini.is-copied {
-  background: #10b981;
-  color: #ffffff;
-  border-color: #10b981;
+  background: var(--primary, #39ff14);
+  color: var(--primary-foreground, #000000);
+  border-color: var(--primary, #39ff14);
+  box-shadow: var(--glow-primary);
 }
 
 .btn-copy-code-mini .material-icons {
@@ -457,7 +466,8 @@ function close() {
   background: #ffffff;
   border-radius: 12px;
   padding: 16px;
-  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.3);
+  box-shadow: 0 8px 30px rgba(0, 0, 0, 0.6);
+  border: 2px solid var(--border, #262626);
   margin: 0 auto;
 }
 
@@ -473,15 +483,15 @@ function close() {
   margin-top: 10px;
   font-size: 12px;
   font-weight: 600;
-  color: #4b5563;
+  color: #1a1a1a;
 }
 
 /* 链接输入框与复制 */
 .url-copy-box {
   display: flex;
   gap: 8px;
-  background: #11141a;
-  border: 1px solid rgba(255, 255, 255, 0.1);
+  background: var(--input, #1a1a1a);
+  border: 1px solid var(--border, #262626);
   border-radius: 10px;
   padding: 4px 4px 4px 12px;
   align-items: center;
@@ -491,7 +501,7 @@ function close() {
   flex: 1;
   background: transparent;
   border: none;
-  color: #93c5fd;
+  color: var(--foreground, #f1f5f9);
   font-family: 'SF Mono', Monaco, Consolas, monospace;
   font-size: 12px;
   outline: none;
@@ -504,20 +514,21 @@ function close() {
   display: flex;
   align-items: center;
   gap: 4px;
-  background: #2563eb;
+  background: var(--primary, #39ff14);
+  color: var(--primary-foreground, #000000);
   border: none;
   border-radius: 7px;
   padding: 8px 14px;
-  color: #ffffff;
   font-size: 12px;
-  font-weight: 600;
+  font-weight: 700;
   cursor: pointer;
   white-space: nowrap;
-  transition: all 0.15s;
+  transition: all 0.15s ease;
 }
 
 .btn-copy:hover {
-  background: #1d4ed8;
+  background: #2cd40e;
+  box-shadow: var(--glow-primary);
 }
 
 .btn-copy .material-icons {
@@ -530,7 +541,7 @@ function close() {
   flex-direction: column;
   gap: 8px;
   padding-top: 4px;
-  border-top: 1px dashed rgba(255, 255, 255, 0.08);
+  border-top: 1px dashed var(--border, #262626);
 }
 
 .cloud-url-header {
@@ -540,11 +551,12 @@ function close() {
 }
 
 .cloud-url-title {
+  font-family: 'Orbitron', 'ZCOOLQingKeHuangYou', sans-serif;
   font-size: 11px;
   font-weight: 600;
-  color: #6b7280;
+  color: var(--muted-foreground, #a3a3a3);
   text-transform: uppercase;
-  letter-spacing: 0.04em;
+  letter-spacing: 0.05em;
 }
 
 .btn-edit-cloud-url {
@@ -553,17 +565,17 @@ function close() {
   gap: 4px;
   background: transparent;
   border: none;
-  color: #9ca3af;
+  color: var(--muted-foreground, #a3a3a3);
   font-size: 11px;
   cursor: pointer;
   padding: 2px 6px;
   border-radius: 4px;
-  transition: all 0.15s;
+  transition: all 0.15s ease;
 }
 
 .btn-edit-cloud-url:hover {
-  background: rgba(255, 255, 255, 0.08);
-  color: #e5e7eb;
+  background: var(--muted, #1a1a1a);
+  color: var(--foreground, #f1f5f9);
 }
 
 .btn-edit-cloud-url .material-icons {
@@ -577,35 +589,38 @@ function close() {
 
 .cloud-url-input {
   flex: 1;
-  background: #0f1217;
-  border: 1px solid rgba(255, 255, 255, 0.15);
+  background: var(--input, #1a1a1a);
+  border: 1px solid var(--border, #262626);
   border-radius: 6px;
   padding: 6px 10px;
-  color: #f3f4f6;
+  color: var(--foreground, #f1f5f9);
   font-size: 12px;
   outline: none;
 }
 
 .cloud-url-input:focus {
-  border-color: #3b82f6;
+  border-color: var(--ring, #39ff14);
+  box-shadow: var(--glow-primary);
 }
 
 .btn-save-cloud-url {
   display: flex;
   align-items: center;
   gap: 4px;
-  background: #10b981;
+  background: var(--primary, #39ff14);
   border: none;
   border-radius: 6px;
   padding: 6px 12px;
-  color: #ffffff;
+  color: var(--primary-foreground, #000000);
   font-size: 12px;
-  font-weight: 600;
+  font-weight: 700;
   cursor: pointer;
+  transition: all 0.15s ease;
 }
 
 .btn-save-cloud-url:hover {
-  background: #059669;
+  background: #2cd40e;
+  box-shadow: var(--glow-primary);
 }
 
 .btn-save-cloud-url .material-icons {
@@ -615,7 +630,7 @@ function close() {
 .cloud-url-hint {
   margin: 0;
   font-size: 11px;
-  color: #6b7280;
+  color: var(--muted-foreground, #a3a3a3);
   line-height: 1.4;
 }
 </style>

@@ -22,6 +22,8 @@ export class SasSecurityManager {
 
   clientHostEcdhPubHex = ''
   clientHostDeviceId = ''
+  clientHostUserId = ''
+  clientHostUsername = ''
   clientSecurityFingerprint = ''
 
   confirmSas(
@@ -44,9 +46,10 @@ export class SasSecurityManager {
       const identity = this.clientVerifiedIdentities.get(peerId)
       const effectiveUserId = identity?.userId || peerId
       const effectiveUsername = identity?.username || peerId
-      const devId = this.clientDeviceIds.get(peerId) || 'device_default'
+      const devId = this.clientDeviceIds.get(peerId) || (pubHex ? `dev_pub_${pubHex.slice(0, 16)}` : 'device_default')
       if (pubHex && sas) {
         try {
+          localStorage.setItem(`scoutingpro_verified_sas_${currentInviteCode}_${pubHex}`, sas)
           localStorage.setItem(`scoutingpro_verified_sas_${currentInviteCode}_${effectiveUserId}_${pubHex}`, sas)
         } catch {}
         savePeerTrustRecord({
@@ -87,11 +90,14 @@ export class SasSecurityManager {
             this.clientSecurityFingerprint
           )
         } catch {}
+        const devId = this.clientHostDeviceId || `host_dev_${this.clientHostEcdhPubHex.slice(0, 16)}`
+        const effectiveHostUserId = this.clientHostUserId || `device:${devId}`
+        const effectiveHostUsername = this.clientHostUsername || 'Node'
         savePeerTrustRecord({
           eventId: currentInviteCode || 'default_event',
-          userId: 'host',
-          username: 'Host',
-          deviceId: this.clientHostDeviceId || 'host_device_default',
+          userId: effectiveHostUserId,
+          username: effectiveHostUsername,
+          deviceId: devId,
           publicKeyHex: this.clientHostEcdhPubHex,
           firstSeenAt: Date.now(),
           lastSeenAt: Date.now(),

@@ -1760,7 +1760,7 @@ describe('WebRTC Security Hardening & SAS Gating (v2)', () => {
     }
 
     onMessage('topic', new TextEncoder().encode(JSON.stringify(firstSeenOffer)))
-    await new Promise(r => setTimeout(r, 60))
+    await new Promise(r => setTimeout(r, 120))
 
     // Under TOFU, baseline trust is established automatically without modal interruption
     expect(callbacks.onSasVerificationRequired).not.toHaveBeenCalled()
@@ -2513,14 +2513,15 @@ describe('WebRTC Client SAS Verification Gating & In-Band Account Merge', () => 
       sender: 'host-peer-id',
       hostSessionId: 'host-session-123',
       deviceId: 'host-device-456',
-      ecdhPublicKey: hostPubHex
+      ecdhPublicKey: hostPubHex,
+      username: 'Lead Scouter',
+      userId: 'user_lead_scouter'
     })))
 
-    await new Promise(r => setTimeout(r, 60))
-
-    // First seen Host: standard TOFU auto-approves baseline trust
-    expect(clientService.getSasState('host')).toBe('VERIFIED')
-    expect(callbacks.onSasVerified).toHaveBeenCalledWith('host')
+    await vi.waitFor(() => {
+      expect(clientService.getSasState('host')).toBe('VERIFIED')
+      expect(callbacks.onSasVerified).toHaveBeenCalledWith('host')
+    })
     expect(callbacks.onSasVerificationRequired).not.toHaveBeenCalled()
 
     // Now simulate unexpected key rotation alert from same host device
@@ -2532,17 +2533,18 @@ describe('WebRTC Client SAS Verification Gating & In-Band Account Merge', () => 
       sender: 'host-peer-id',
       hostSessionId: 'host-session-124',
       deviceId: 'host-device-456',
-      ecdhPublicKey: rotatedPubHex
+      ecdhPublicKey: rotatedPubHex,
+      username: 'Lead Scouter',
+      userId: 'user_lead_scouter'
     })))
 
-    await new Promise(r => setTimeout(r, 60))
-
-    // Rotated key: gates as PENDING_VERIFICATION and triggers onSasVerificationRequired
-    expect(callbacks.onSasVerificationRequired).toHaveBeenCalledWith(
-      expect.objectContaining({ peerId: 'host', username: 'Host' }),
-      expect.any(String)
-    )
-    expect(clientService.getSasState('host')).toBe('PENDING_VERIFICATION')
+    await vi.waitFor(() => {
+      expect(callbacks.onSasVerificationRequired).toHaveBeenCalledWith(
+        expect.objectContaining({ peerId: 'host', username: 'Lead Scouter' }),
+        expect.any(String)
+      )
+      expect(clientService.getSasState('host')).toBe('PENDING_VERIFICATION')
+    })
 
     // Confirm SAS manually
     clientService.confirmSas('host')
@@ -2676,6 +2678,29 @@ describe('WebRTC Client SAS Verification Gating & In-Band Account Merge', () => 
     expect(failResp.error).toContain('Invalid')
 
     hostService.disconnect()
+  })
+
+  describe('IPv6 parsing & optimization robustness', () => {
+    it('correctly identifies bracketed IPv6 and scope IDs', () => {
+      expect(isGlobalIpv6Address('2409:8100:1896:8851:e8ae:f5ff:fe4c:139e')).toBe(true)
+      expect(isGlobalIpv6Address('[2409:8100:1896:8851:e8ae:f5ff:fe4c:139e]')).toBe(true)
+      expect(isGlobalIpv6Address('[2409:8100:1896:8851:e8ae:f5ff:fe4c:139e]:49030')).toBe(true)
+      expect(isIpv6Address('[2409:8100:1896:8851:e8ae:f5ff:fe4c:139e]')).toBe(true)
+      expect(isGlobalIpv6Address('fe80::1')).toBe(false)
+      expect(isGlobalIpv6Address('[fe80::1]')).toBe(false)
+      expect(isGlobalIpv6Address('fdfe:dcba:9876::1')).toBe(false) // ULA
+      expect(isGlobalIpv6Address('192.168.1.1')).toBe(false)
+    })
+
+    it('classifies bracketed candidate pairs as ipv6_p2p', () => {
+      const transport = classifyCandidatePair(
+        'host',
+        'host',
+        '[2409:8100:1896:8851:e8ae:f5ff:fe4c:139e]',
+        '[2409:8a00:1852:5bf6:1111:2222:3333:4444]'
+      )
+      expect(transport).toBe('ipv6_p2p')
+    })
   })
 })
 

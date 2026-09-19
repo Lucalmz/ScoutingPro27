@@ -741,6 +741,8 @@
   "qr_modal": {
     "title": "Mobile QR Join",
     "subtitle_simple": "Scan the QR code with your mobile camera or browser, or enter the invite code manually to join this event.",
+    "channel_cloud": "Public Cloud",
+    "channel_lan": "Arena LAN / Hotspot (Offline)",
     "invite_code_label": "Event Invite Code",
     "copy_code_btn": "Copy Code",
     "click_copy_code": "Click to copy invite code",
@@ -751,8 +753,10 @@
     "cloud_copy_link": "Copy Web Link",
     "cloud_url_label": "Web Access URL",
     "cloud_url_config_btn": "Custom Domain",
+    "cloud_url_placeholder": "https://your-team.github.io/ScoutingPro27",
     "cloud_url_hint": "If your team hosts a custom PWA domain, you can configure the QR prefix here.",
-    "cloud_url_saved": "Custom URL saved successfully"
+    "cloud_url_saved": "Custom URL saved successfully",
+    "desktop_scan_title": "Scan to Join"
   },
   "bottom_nav": {
     "scout": "Scout",

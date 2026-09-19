@@ -52,5 +52,27 @@ public class SystemRoutes {
             resp.put("os", System.getProperty("os.name", "").toLowerCase());
             ctx.result(gson.toJson(resp)).contentType("application/json");
         });
+
+        routes.post("/api/system/log", ctx -> {
+            String body = ctx.body();
+            if (body != null && !body.isBlank()) {
+                java.io.File logFile = com.bear27570.app.db.AppConfig.resolveLogFile();
+                String time = java.time.LocalDateTime.now().format(java.time.format.DateTimeFormatter.ISO_LOCAL_DATE_TIME);
+                String formatted = String.format("[%s] [RemoteClient-%s] %s%n", time, ctx.ip(), body.trim());
+                synchronized (com.bear27570.app.db.AppConfig.class) {
+                    try {
+                        java.nio.file.Files.writeString(
+                            logFile.toPath(),
+                            formatted,
+                            java.nio.file.StandardOpenOption.CREATE,
+                            java.nio.file.StandardOpenOption.APPEND
+                        );
+                    } catch (Exception e) {
+                        System.err.println("写入客户端上报日志失败: " + e.getMessage());
+                    }
+                }
+            }
+            ctx.result("{\"success\":true}").contentType("application/json");
+        });
     }
 }

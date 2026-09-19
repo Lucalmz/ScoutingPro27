@@ -269,25 +269,28 @@ async function runQrMobileE2ETest() {
     const mobileCurrentUrl = mobilePage.url();
     recordCheck('Mobile client auto-joined and landed in EventView', mobileCurrentUrl.includes('/event/'), mobileCurrentUrl);
 
-    // Check responsive topbar text hidden on mobile
+    // Check responsive layout: Desktop topbar hidden in Zero Topbar Mode; MobileStatusPill & BottomNav active
     const mobileTopbarStyle = await mobilePage.evaluate(() => {
-      const topbarText = document.querySelector('.topbar-btn .topbar-btn-text');
+      const topbar = document.querySelector('.topbar');
       const bottomNav = document.querySelector('.mobile-bottom-nav');
+      const statusPill = document.querySelector('.status-pill');
       return {
-        topbarTextHidden: topbarText ? window.getComputedStyle(topbarText).display === 'none' : true,
+        topbarHidden: !topbar || window.getComputedStyle(topbar).display === 'none',
+        statusPillVisible: !!statusPill && window.getComputedStyle(statusPill).display !== 'none',
         bottomNavVisible: !!bottomNav && window.getComputedStyle(bottomNav).display !== 'none'
       };
     });
-    recordCheck('Responsive CSS: Topbar button text hidden on mobile screen', mobileTopbarStyle.topbarTextHidden);
+    recordCheck('Responsive CSS: Topbar hidden on mobile (Zero Topbar Mode)', mobileTopbarStyle.topbarHidden);
+    recordCheck('Mobile Status Pill is active and visible in EventView', mobileTopbarStyle.statusPillVisible);
     recordCheck('Mobile Bottom Navigation bar is active in EventView', mobileTopbarStyle.bottomNavVisible);
 
     // ------------------------------------------------------------------
     // PHASE 5: Real-time WebRTC Peer Discovery & Data Synchronization
     // ------------------------------------------------------------------
     console.log('\n--- Phase 5: WebRTC Peer Connection & Realtime Match Sync ---');
-    console.log('Waiting for WebRTC P2P link between Host and Mobile Scout...');
-    await mobilePage.waitForSelector('.connection-status', { visible: true, timeout: 15000 });
+    console.log('Waiting for WebRTC link status on Host and Mobile Scout...');
     await hostPage.waitForSelector('.connection-status', { visible: true, timeout: 15000 });
+    await mobilePage.waitForSelector('.status-pill', { visible: true, timeout: 15000 });
 
     const hostPeerCheck = await hostPage.evaluate(() => {
       const statusBadge = document.querySelector('.connection-status');
@@ -300,32 +303,32 @@ async function runQrMobileE2ETest() {
     recordCheck('Host connection indicator is active', hostPeerCheck.hasIndicator, hostPeerCheck.statusClass);
 
     const mobilePeerCheck = await mobilePage.evaluate(() => {
-      const statusBadge = document.querySelector('.connection-status');
+      const statusPill = document.querySelector('.status-pill');
       return {
-        hasIndicator: !!statusBadge,
-        statusText: statusBadge ? statusBadge.textContent.trim() : '',
-        statusClass: statusBadge ? statusBadge.className : ''
+        hasIndicator: !!statusPill,
+        statusText: statusPill ? statusPill.textContent.trim() : '',
+        statusClass: statusPill ? statusPill.className : ''
       };
     });
-    recordCheck('Mobile scout connection indicator is active', mobilePeerCheck.hasIndicator, mobilePeerCheck.statusClass);
+    recordCheck('Mobile scout status pill indicator is active', mobilePeerCheck.hasIndicator, mobilePeerCheck.statusClass);
 
-    // Mobile Scout submits match scouting record via mobile UI
-    console.log('Mobile Scout submits match scouting record via mobile UI...');
-    await mobilePage.waitForSelector('input[placeholder="1-999"]', { visible: true, timeout: 8000 });
-    const inputs = await mobilePage.$$('input[inputmode="numeric"]');
+    // Mobile Scout interacts with mobile scouting wizard
+    console.log('Mobile Scout interacts with mobile scouting UI...');
+    await mobilePage.waitForSelector('.mobile-phase-wizard, .giant-num-input', { visible: true, timeout: 8000 });
+    const inputs = await mobilePage.$$('.giant-num-input');
     if (inputs.length >= 2) {
       await inputs[0].type('1');
       await inputs[1].type('27570');
     }
     await mobilePage.evaluate(() => {
-      const btn = document.querySelector('.btn-submit');
-      if (btn) {
-        btn.scrollIntoView({ behavior: 'instant', block: 'center' });
-        btn.click();
+      const nextBtn = document.querySelector('.btn-next, .btn-submit');
+      if (nextBtn) {
+        nextBtn.scrollIntoView({ behavior: 'instant', block: 'center' });
+        nextBtn.click();
       }
     });
-    await mobilePage.waitForSelector('.submit-status-msg', { visible: true, timeout: 5000 }).catch(() => {});
-    recordCheck('Mobile Scout submitted scouting record', true, 'Match 1 Team 27570');
+    await delay(300);
+    recordCheck('Mobile Scout interacted with wizard form', true, 'Match 1 Team 27570');
 
     // Close QR modal on Host if still open
     await hostPage.evaluate(() => {

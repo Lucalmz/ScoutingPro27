@@ -34,7 +34,12 @@ public class Main {
     private static final String JCEF_BUNDLE_RESOURCE = "/jcef-bundle.zip";
     private static final String JCEF_BUNDLE_TAR_RESOURCE = "/jcef-bundle.tar.gz";
 
+    private static java.nio.channels.FileLock heldProfileLock = null;
+    private static java.nio.channels.FileChannel heldProfileChannel = null;
+
     public static void main(String[] args) {
+        setupFileLogging();
+
         // Enforce Windows ClearType subpixel font antialiasing on all Swing components
         System.setProperty("awt.useSystemAAFontSettings", "lcd_hrgb");
         System.setProperty("swing.aatext", "true");
@@ -64,6 +69,70 @@ public class Main {
             new Thread(() -> initAndRun(args, splash), "app-init").start();
         }
     }
+
+    /**
+     * 初始化根目录文件日志：
+     * 创建 log/scoutingpro.log，使用双向流同时向终端控制台与日志文件实时写入，记录后端服务与前端报错。
+     */
+    private static void setupFileLogging() {
+        try {
+            File logFile = com.bear27570.app.db.AppConfig.resolveLogFile();
+            FileOutputStream fos = new FileOutputStream(logFile, true);
+            java.io.PrintStream originalOut = System.out;
+            java.io.PrintStream originalErr = System.err;
+
+            java.io.OutputStream dualOut = new java.io.OutputStream() {
+                @Override
+                public synchronized void write(int b) throws IOException {
+                    originalOut.write(b);
+                    fos.write(b);
+                }
+
+                @Override
+                public synchronized void write(byte[] b, int off, int len) throws IOException {
+                    originalOut.write(b, off, len);
+                    fos.write(b, off, len);
+                }
+
+                @Override
+                public synchronized void flush() throws IOException {
+                    originalOut.flush();
+                    fos.flush();
+                }
+            };
+
+            java.io.OutputStream dualErr = new java.io.OutputStream() {
+                @Override
+                public synchronized void write(int b) throws IOException {
+                    originalErr.write(b);
+                    fos.write(b);
+                }
+
+                @Override
+                public synchronized void write(byte[] b, int off, int len) throws IOException {
+                    originalErr.write(b, off, len);
+                    fos.write(b, off, len);
+                }
+
+                @Override
+                public synchronized void flush() throws IOException {
+                    originalErr.flush();
+                    fos.flush();
+                }
+            };
+
+            System.setOut(new java.io.PrintStream(dualOut, true, java.nio.charset.StandardCharsets.UTF_8));
+            System.setErr(new java.io.PrintStream(dualErr, true, java.nio.charset.StandardCharsets.UTF_8));
+
+            System.out.println("=======================================================");
+            System.out.println("ScoutingPro27 日志系统启动: " + logFile.getAbsolutePath());
+            System.out.println("启动时间: " + java.time.LocalDateTime.now());
+            System.out.println("=======================================================");
+        } catch (Exception e) {
+            System.err.println("初始化文件日志失败: " + e.getMessage());
+        }
+    }
+
     /** 仅供 CI 使用：触发 jcefmaven 真实下载解压当前平台的原生库到 ./jcef-bundle，然后退出 */
     private static void prewarmJcef() {
         try {
@@ -235,6 +304,7 @@ public class Main {
                     apiRoutes.shutdown();
                     app.stop();
                     JdbiConfig.closeDataSources();
+                    releaseProfileLock();
                 } catch (Throwable ignored) {}
             }, "app-shutdown-hook"));
 
@@ -273,13 +343,26 @@ public class Main {
             }
 
 
-            // 为每个实例分配独立的缓存目录，防止多开时互相锁死崩溃
-            File cacheDir = new File(System.getProperty("java.io.tmpdir"), "scoutingpro-jcef-" + java.util.UUID.randomUUID());
-            cacheDir.mkdirs();
+            // 智能分配 JCEF 缓存目录（主实例持久化保证公私钥与信任稳定，多开实例自动隔离防止 CEF lockfile 崩溃）
+            File cacheDir = resolveJcefProfileDir();
             builder.getCefSettings().cache_path = cacheDir.getAbsolutePath();
 
             CefApp cefApp = builder.build();
             CefClient cefClient = cefApp.createClient();
+
+            // 拦截并转发前端控制台日志，统一追加落盘至 log/scoutingpro.log
+            cefClient.addDisplayHandler(new org.cef.handler.CefDisplayHandlerAdapter() {
+                @Override
+                public boolean onConsoleMessage(CefBrowser browser, org.cef.CefSettings.LogSeverity level,
+                                                String message, String source, int line) {
+                    System.out.printf("[%s] [Frontend-Console] (%s:%d) %s%n",
+                            java.time.LocalDateTime.now().format(java.time.format.DateTimeFormatter.ISO_LOCAL_DATE_TIME),
+                            source != null ? source : "unknown",
+                            line,
+                            message);
+                    return false;
+                }
+            });
             
             // Handle file downloads (e.g. CSV exports)
             cefClient.addDownloadHandler(new org.cef.handler.CefDownloadHandlerAdapter() {
@@ -537,5 +620,83 @@ public class Main {
             }
         }
         file.delete();
+    }
+
+    /**
+     * 为当前 JCEF 实例智能分配 profile 缓存目录：
+     * 1. 优先使用主持久化目录 (jcef_profile)，保证单实例日常使用时 IndexedDB、公私钥、SAS 信任持久留存。
+     * 2. 若检测到主目录已被其他实例独占持有（多开场景），自动探测并分配独立的 jcef_profile_2, jcef_profile_3 等。
+     *    既允许同机多开实例平稳并存（杜绝 Chromium/CEF lockfile 锁冲突导致 AbortError 崩溃），
+     *    又为多开的实例赋予独立的设备身份与 LocalStorage。
+     */
+    private static File resolveJcefProfileDir() {
+        File baseDir = com.bear27570.app.db.AppConfig.resolveBaseDataDir();
+        File primary = new File(baseDir, "jcef_profile");
+        primary.mkdirs();
+        if (tryAcquireProfileLock(primary)) {
+            System.out.println("成功分配并锁定主 JCEF 缓存目录: " + primary.getAbsolutePath());
+            return primary;
+        }
+
+        for (int i = 2; i <= 10; i++) {
+            File multiDir = new File(baseDir, "jcef_profile_" + i);
+            multiDir.mkdirs();
+            if (tryAcquireProfileLock(multiDir)) {
+                System.out.println("检测到主实例正在运行，多实例隔离模式已激活，当前实例使用独立缓存目录: " + multiDir.getAbsolutePath());
+                return multiDir;
+            }
+        }
+
+        File fallback = new File(System.getProperty("java.io.tmpdir"), "scoutingpro-jcef-" + System.currentTimeMillis());
+        fallback.mkdirs();
+        System.out.println("多实例预置目录已满，使用临时缓存目录: " + fallback.getAbsolutePath());
+        return fallback;
+    }
+
+    private static boolean tryAcquireProfileLock(File profileDir) {
+        // 1. 探测 Chromium 自身的 lockfile 是否被其他活动进程独占
+        File cefLock = new File(profileDir, "lockfile");
+        if (cefLock.exists()) {
+            try (FileOutputStream fos = new FileOutputStream(cefLock, true);
+                 java.nio.channels.FileLock l = fos.getChannel().tryLock()) {
+                if (l == null) {
+                    return false;
+                }
+            } catch (Throwable e) {
+                // 正被运行中的 Chromium 或其他进程独占
+                return false;
+            }
+        }
+
+        // 2. 探测并持有当前 Java 进程的应用级独占锁 (.instance.lock)
+        try {
+            File lockFile = new File(profileDir, ".instance.lock");
+            java.nio.channels.FileChannel channel = java.nio.channels.FileChannel.open(
+                    lockFile.toPath(),
+                    java.nio.file.StandardOpenOption.CREATE,
+                    java.nio.file.StandardOpenOption.WRITE);
+            java.nio.channels.FileLock lock = channel.tryLock();
+            if (lock != null) {
+                heldProfileChannel = channel;
+                heldProfileLock = lock;
+                return true;
+            } else {
+                channel.close();
+                return false;
+            }
+        } catch (Throwable e) {
+            return false;
+        }
+    }
+
+    private static void releaseProfileLock() {
+        try {
+            if (heldProfileLock != null && heldProfileLock.isValid()) {
+                heldProfileLock.release();
+            }
+            if (heldProfileChannel != null && heldProfileChannel.isOpen()) {
+                heldProfileChannel.close();
+            }
+        } catch (Exception ignored) {}
     }
 }

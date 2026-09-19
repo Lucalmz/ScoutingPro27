@@ -243,6 +243,11 @@ export async function getPeerTrustRecord(
   })
 }
 
+function isInvalidPseudoUser(userId?: string): boolean {
+  if (!userId) return false
+  return userId.trim().toLowerCase() === 'host'
+}
+
 /**
  * 2b. Find trusted peer record by (eventId, deviceId) across all users
  */
@@ -254,7 +259,11 @@ export async function findPeerTrustRecordByDevice(
 
   // Check memory for the most recently seen record for this device
   let latestRecord: PeerTrustRecord | null = null
-  for (const record of memTrustedPeers.values()) {
+  for (const [key, record] of memTrustedPeers.entries()) {
+    if (isInvalidPseudoUser(record.userId)) {
+      memTrustedPeers.delete(key)
+      continue
+    }
     if (record.eventId === eventId && record.deviceId === deviceId) {
       if (!latestRecord || (record.lastSeenAt || 0) > (latestRecord.lastSeenAt || 0)) {
         latestRecord = record
@@ -267,13 +276,19 @@ export async function findPeerTrustRecordByDevice(
 
   return new Promise((resolve) => {
     try {
-      const tx = db.transaction(STORE_PEERS, 'readonly')
+      const tx = db.transaction(STORE_PEERS, 'readwrite')
       const store = tx.objectStore(STORE_PEERS)
       const req = store.openCursor()
       req.onsuccess = (e: any) => {
         const cursor = e.target.result
         if (cursor) {
           const val = cursor.value as PeerTrustRecord
+          if (val && isInvalidPseudoUser(val.userId)) {
+            // 物理清除旧版本残留的伪造 'host' 脏记录
+            cursor.delete()
+            cursor.continue()
+            return
+          }
           if (val && val.eventId === eventId && val.deviceId === deviceId) {
             if (!latestRecord || (val.lastSeenAt || 0) > (latestRecord.lastSeenAt || 0)) {
               latestRecord = val
@@ -290,6 +305,63 @@ export async function findPeerTrustRecordByDevice(
       req.onerror = () => resolve(latestRecord)
     } catch {
       resolve(latestRecord)
+    }
+  })
+}
+
+/**
+ * 2c. Find trusted peer record by (eventId, publicKeyHex) across all devices and users
+ * 核心安全机制：允许对端公钥白名单模型，杜绝多主机切换/重连时的虚假中间人警报
+ */
+export async function findPeerTrustRecordByPublicKey(
+  eventId: string,
+  publicKeyHex: string
+): Promise<PeerTrustRecord | null> {
+  if (!publicKeyHex) return null
+  const targetHex = publicKeyHex.toLowerCase()
+
+  // 1. Check memory
+  for (const [key, record] of memTrustedPeers.entries()) {
+    if (isInvalidPseudoUser(record.userId)) {
+      memTrustedPeers.delete(key)
+      continue
+    }
+    if (record.eventId === eventId && record.publicKeyHex.toLowerCase() === targetHex) {
+      return record
+    }
+  }
+
+  // 2. Check IndexedDB
+  const db = await openDb()
+  if (!db) return null
+
+  return new Promise((resolve) => {
+    try {
+      const tx = db.transaction(STORE_PEERS, 'readwrite')
+      const store = tx.objectStore(STORE_PEERS)
+      const req = store.openCursor()
+      req.onsuccess = (e: any) => {
+        const cursor = e.target.result
+        if (cursor) {
+          const val = cursor.value as PeerTrustRecord
+          if (val && isInvalidPseudoUser(val.userId)) {
+            cursor.delete()
+            cursor.continue()
+            return
+          }
+          if (val && val.eventId === eventId && val.publicKeyHex.toLowerCase() === targetHex) {
+            memTrustedPeers.set(`${val.eventId}:${val.userId}:${val.deviceId}`, val)
+            resolve(val)
+            return
+          }
+          cursor.continue()
+        } else {
+          resolve(null)
+        }
+      }
+      req.onerror = () => resolve(null)
+    } catch {
+      resolve(null)
     }
   })
 }
@@ -389,31 +461,48 @@ export async function evaluatePeerKeyTrust(params: {
     latestDeviceRecord = await findPeerTrustRecordByDevice(eventId, deviceId)
   }
 
-  // Case 1: Same device historically bound to a DIFFERENT user, or device was last used by someone else!
+  // Case 1: Same device historically bound to a DIFFERENT real user!
   if (latestDeviceRecord && latestDeviceRecord.userId !== userId) {
     if (!existingRecord || (latestDeviceRecord.lastSeenAt || 0) > (existingRecord.lastSeenAt || 0)) {
       return {
         status: 'MULTI_USER_DEVICE_SWITCH',
         existingRecord: latestDeviceRecord,
         requestedUserId: userId,
-        requestedUsername: username,
+        requestedUsername: username || userId,
         message: `检测到设备 [${deviceId}] 曾绑定侦察员 [${latestDeviceRecord.username || latestDeviceRecord.userId}]，当前请求用户为 [${username || userId}]。必须通过安全码核验重新绑定。`
       }
     }
   }
 
-  // Case 2: Historical record for (eventId, userId, deviceId)
-  if (existingRecord) {
-    if (existingRecord.publicKeyHex.toLowerCase() === publicKeyHex.toLowerCase()) {
-      existingRecord.lastSeenAt = Date.now()
-      await savePeerTrustRecord(existingRecord)
-      return {
-        status: 'TRUSTED_MATCH',
-        record: existingRecord
-      }
+  // Case 2: Historical record for (eventId, userId, deviceId) with matching public key
+  if (existingRecord && existingRecord.publicKeyHex.toLowerCase() === publicKeyHex.toLowerCase()) {
+    existingRecord.lastSeenAt = Date.now()
+    if (username && username !== existingRecord.username) {
+      existingRecord.username = username
     }
+    await savePeerTrustRecord(existingRecord)
+    return {
+      status: 'TRUSTED_MATCH',
+      record: existingRecord
+    }
+  }
 
-    // Case 2: Same device presents DIFFERENT public key!
+  // Case 3: Public key already verified for this user in this event (e.g. multi-host standby switching or device roaming)
+  const recordByPubKey = await findPeerTrustRecordByPublicKey(eventId, publicKeyHex)
+  if (recordByPubKey && recordByPubKey.userId === userId) {
+    recordByPubKey.lastSeenAt = Date.now()
+    if (username && username !== recordByPubKey.username) {
+      recordByPubKey.username = username
+    }
+    await savePeerTrustRecord(recordByPubKey)
+    return {
+      status: 'TRUSTED_MATCH',
+      record: recordByPubKey
+    }
+  }
+
+  // Case 4: Same device presents DIFFERENT, UNTRUSTED public key!
+  if (existingRecord) {
     // Distinguish active in-session flapping from normal key reinstallation
     if (isInSessionFlapping) {
       return {
@@ -434,7 +523,7 @@ export async function evaluatePeerKeyTrust(params: {
     }
   }
 
-  // Case 3: Device not seen before for this (eventId, userId)
+  // Case 5: Device not seen before for this (eventId, userId)
   // Check if user has other devices
   const userDevices = await listUserTrustedDevices(eventId, userId)
   const isNewDeviceForUser = userDevices.length > 0

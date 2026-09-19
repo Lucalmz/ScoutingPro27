@@ -264,6 +264,7 @@ function handleOpenRenameModal() {
           <span class="material-icons edit-icon" style="font-size: 14px; margin-left: 4px;">edit</span>
         </button>
         <button
+          v-if="!isDesktopHost()"
           class="topbar-btn clear-cache-btn"
           @click="handleClearAllCache"
           :title="t('dashboard.clear_cache_title')"
@@ -285,7 +286,7 @@ function handleOpenRenameModal() {
         <button class="action-btn" :class="{ primary: !isDesktopHost(), secondary: isDesktopHost() }" @click="showJoinModal = true">
           {{ t('dashboard.join_event') }}
         </button>
-        <button v-if="isMobileClient" class="action-btn scan-btn" :class="{ primary: !isDesktopHost(), secondary: isDesktopHost() }" @click="showQrScannerModal = true">
+        <button class="action-btn scan-btn" :class="{ primary: !isDesktopHost(), secondary: isDesktopHost() }" @click="showQrScannerModal = true">
           <span class="material-icons" style="font-size: 18px; margin-right: 4px; vertical-align: text-bottom;">qr_code_scanner</span>
           {{ t('dashboard.scan_to_join') }}
         </button>
@@ -400,7 +401,7 @@ function handleOpenRenameModal() {
               @keyup.enter="handleJoin"
               style="text-transform: uppercase;"
             />
-            <button v-if="isMobileClient" type="button" class="btn-scan-input" @click="showQrScannerModal = true" :title="t('dashboard.scan_qr_btn')">
+            <button type="button" class="btn-scan-input" @click="showQrScannerModal = true" :title="t('dashboard.scan_qr_btn')">
               <span class="material-icons">qr_code_scanner</span>
             </button>
           </div>
@@ -417,8 +418,8 @@ function handleOpenRenameModal() {
     <!-- Rename User Modal -->
     <RenameModal v-model:visible="showRenameModal" />
 
-    <!-- Mobile QR Scanner Modal -->
-    <QrScannerModal v-if="isMobileClient" v-model="showQrScannerModal" @scan="handleQrScanned" />
+    <!-- QR Scanner Modal -->
+    <QrScannerModal v-model="showQrScannerModal" @scan="handleQrScanned" />
 
     <!-- Provide Event QR Modal for Mobile to Scan -->
     <MobileQrModal v-model="showEventQrModal" :invite-code="selectedQrInviteCode" />

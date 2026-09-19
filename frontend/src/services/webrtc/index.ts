@@ -120,6 +120,15 @@ export function createWebRtcService(callbacks: WebRtcCallbacks): WebRtcService {
 
   let localUserId: string | undefined = undefined
   let localUserName: string | undefined = undefined
+
+  function resolveCurrentUserId(): string {
+    return callbacks.getCurrentUser?.()?.userId || currentUserId || localUserId || (localDeviceId ? `node_${localDeviceId}` : '')
+  }
+
+  function resolveCurrentUsername(): string {
+    return callbacks.getCurrentUser?.()?.username || currentUsername || localUserName || (localDeviceId ? `Node ${localDeviceId.slice(0, 8)}` : '')
+  }
+
   let hostSeqCounter = 0
   let localEpoch = 0
   try {
@@ -522,7 +531,7 @@ export function createWebRtcService(callbacks: WebRtcCallbacks): WebRtcService {
               type: 'sas_challenge',
               fingerprint: fp,
               hostSessionId,
-              username: currentUsername || 'Host'
+              username: resolveCurrentUsername()
             },
             peerId
           )
@@ -539,7 +548,7 @@ export function createWebRtcService(callbacks: WebRtcCallbacks): WebRtcService {
         callbacks.onSasVerificationRequired?.(
           {
             peerId: 'host',
-            username: 'Host',
+            username: sas.clientHostUsername || 'Node',
             ecdhPublicKey: sas.clientHostEcdhPubHex || ''
           },
           sas.clientSecurityFingerprint
@@ -618,8 +627,8 @@ export function createWebRtcService(callbacks: WebRtcCallbacks): WebRtcService {
     handleChannelMessage,
     rejectSas,
     confirmSas,
-    getUsername: () => currentUsername,
-    getUserId: () => currentUserId,
+    getUsername: resolveCurrentUsername,
+    getUserId: resolveCurrentUserId,
     isStandbyHost: () => isStandbyHostMode,
     callbacks
   })
@@ -633,8 +642,8 @@ export function createWebRtcService(callbacks: WebRtcCallbacks): WebRtcService {
       ecdhPublicKey: localEcdhPubHex,
       timestamp: Date.now(),
       hostEpoch: localEpoch,
-      username: currentUsername || localUserName || 'Host',
-      userId: currentUserId || localUserId || 'host'
+      username: resolveCurrentUsername(),
+      userId: resolveCurrentUserId()
     }
     if (isHostMode && signaling) {
       signaling.send(payload)
@@ -644,7 +653,9 @@ export function createWebRtcService(callbacks: WebRtcCallbacks): WebRtcService {
         signaling.send({
           ...payload,
           timestamp: Date.now(),
-          hostEpoch: localEpoch
+          hostEpoch: localEpoch,
+          username: resolveCurrentUsername(),
+          userId: resolveCurrentUserId()
         })
       }
     }, 3000)
@@ -660,12 +671,16 @@ export function createWebRtcService(callbacks: WebRtcCallbacks): WebRtcService {
   function startStandbyWatchdog() {
     lastActiveHostHeartbeat = Date.now()
     if (!standbyWatchdogTimer) {
+      const timeoutMs = (globalThis as any).__TEST_WATCHDOG_TIMEOUT_MS__ ?? 5000
+      const checkIntervalMs = (globalThis as any).__TEST_WATCHDOG_INTERVAL_MS__ ?? 2000
       standbyWatchdogTimer = setInterval(() => {
-        if (isStandbyHostMode && lastActiveHostHeartbeat > 0 && Date.now() - lastActiveHostHeartbeat > 8000) {
-          log.warn('[Standby Watchdog] Active host heartbeat missing for >8s, notifying active host left')
+        if (isStandbyHostMode && lastActiveHostHeartbeat > 0 && Date.now() - lastActiveHostHeartbeat > timeoutMs) {
+          log.warn(`[Standby Watchdog] Active host heartbeat missing for >${timeoutMs}ms, notifying active host left`)
+          peerMgr.resetTransportInfo()
+          setStatus('degraded')
           callbacks.onActiveHostLeft?.()
         }
-      }, 3000)
+      }, checkIntervalMs)
     }
   }
 
@@ -745,6 +760,9 @@ export function createWebRtcService(callbacks: WebRtcCallbacks): WebRtcService {
   async function takeoverHost(): Promise<void> {
     log.info('Standby device initiating takeover to become Active Host!')
     stopStandbyWatchdog()
+    clientSession.stopDataChannelHeartbeat()
+    peerMgr.resetTransportInfo()
+    setStatus('waiting')
     const newHostSessionId = `host-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`
     hostSessionId = newHostSessionId
     const nextEpoch = localEpoch + 1
@@ -757,8 +775,8 @@ export function createWebRtcService(callbacks: WebRtcCallbacks): WebRtcService {
       newHostSessionId,
       deviceId: localDeviceId,
       hostEpoch: nextEpoch,
-      username: currentUsername || localUserName || 'Host',
-      userId: currentUserId || localUserId || 'host'
+      username: resolveCurrentUsername(),
+      userId: resolveCurrentUserId()
     })
 
     if (clientDc) {
@@ -786,8 +804,8 @@ export function createWebRtcService(callbacks: WebRtcCallbacks): WebRtcService {
       ecdhPublicKey: localEcdhPubHex,
       deviceId: localDeviceId,
       hostEpoch: nextEpoch,
-      username: currentUsername || localUserName || 'Host',
-      userId: currentUserId || localUserId || 'host'
+      username: resolveCurrentUsername(),
+      userId: resolveCurrentUserId()
     })
     startHostHeartbeat()
     callbacks.onHostPromoted?.()
@@ -818,6 +836,21 @@ export function createWebRtcService(callbacks: WebRtcCallbacks): WebRtcService {
     if (eventMetadata) {
       currentEventMetadata = eventMetadata
     }
+    clients.forEach((c) => {
+      if (c.dc) c.dc.onclose = null
+      c.pc.onconnectionstatechange = null
+      c.pc.oniceconnectionstatechange = null
+      c.dc?.close()
+      c.pc.close()
+    })
+    clients.clear()
+    stagedClients.clear()
+    scoutIdToClientIds.clear()
+    clientIdToScoutId.clear()
+    clientIdToScoutName.clear()
+    hostQueues.clear()
+    preOfferCandidates.clear()
+
     hostSessionId = `host-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`
     setStatus('connecting')
 
@@ -842,12 +875,14 @@ export function createWebRtcService(callbacks: WebRtcCallbacks): WebRtcService {
     signaling = new SignalingChannel(inviteCode, resolveTargetSignalingEndpoint(preferredBroker))
     await signaling.initTopic()
 
+    const sessionStartTime = Date.now()
+
     const onHostSignalingMessage = async (data: any) => {
       if (!data) return
 
       // When another device is actively probing, if this device is the Active Host, reply immediately!
       if (data.type === 'host_probe') {
-        if (data.deviceId && data.deviceId === localDeviceId) {
+        if (data.sender === signaling?.clientId || data.hostSessionId === hostSessionId) {
           return
         }
         if (isHostMode && !isStandbyHostMode && data.hostSessionId !== hostSessionId) {
@@ -855,7 +890,11 @@ export function createWebRtcService(callbacks: WebRtcCallbacks): WebRtcService {
             type: 'host_heartbeat',
             hostSessionId,
             deviceId: localDeviceId,
-            timestamp: Date.now()
+            ecdhPublicKey: localEcdhPubHex,
+            timestamp: Date.now(),
+            hostEpoch: localEpoch,
+            username: resolveCurrentUsername(),
+            userId: resolveCurrentUserId()
           })
         }
         return
@@ -866,10 +905,16 @@ export function createWebRtcService(callbacks: WebRtcCallbacks): WebRtcService {
           (data.type === 'host_heartbeat' || data.type === 'host_hello') &&
           data.hostSessionId !== hostSessionId
         ) {
-          // Stale messages from own device's prior session must NOT trigger standby demotion
-          if (data.deviceId && data.deviceId === localDeviceId) {
-            log.info(`Ignoring stale host message from same device during probe: ${data.hostSessionId}`)
+          if (data.sender === signaling?.clientId) {
             return
+          }
+          // Stale messages from own device's prior session (e.g. before page reload) must NOT trigger standby demotion
+          if (data.deviceId && data.deviceId === localDeviceId) {
+            const msgTs = Number(data.timestamp || 0)
+            if (msgTs && msgTs < sessionStartTime - 100) {
+              log.info(`Ignoring stale host message from same device prior session during probe: ${data.hostSessionId}`)
+              return
+            }
           }
           log.info(`Discovered existing host during probe: ${data.hostSessionId} (sender: ${data.sender})`)
           if (probeTimer) {
@@ -889,7 +934,7 @@ export function createWebRtcService(callbacks: WebRtcCallbacks): WebRtcService {
         const incomingSessionId = String(data.hostSessionId ?? '')
 
         if (incomingSessionId && incomingSessionId !== hostSessionId) {
-          if (incomingDeviceId && incomingDeviceId === localDeviceId) {
+          if (data.sender === signaling?.clientId) {
             return
           }
           if (isStandbyHostMode) {
@@ -935,8 +980,8 @@ export function createWebRtcService(callbacks: WebRtcCallbacks): WebRtcService {
                 ecdhPublicKey: localEcdhPubHex,
                 timestamp: Date.now(),
                 hostEpoch: localEpoch,
-                username: currentUsername || localUserName || 'Host',
-                userId: currentUserId || localUserId || 'host'
+                username: resolveCurrentUsername(),
+                userId: resolveCurrentUserId()
               })
               return
             }
@@ -946,7 +991,7 @@ export function createWebRtcService(callbacks: WebRtcCallbacks): WebRtcService {
       }
 
       if (data.type === 'host_takeover') {
-        if (data.deviceId && data.deviceId === localDeviceId) {
+        if (data.sender === signaling?.clientId || data.newHostSessionId === hostSessionId) {
           return
         }
         const hasIncomingEpoch = data.hostEpoch !== undefined && data.hostEpoch !== null
@@ -983,8 +1028,8 @@ export function createWebRtcService(callbacks: WebRtcCallbacks): WebRtcService {
               ecdhPublicKey: localEcdhPubHex,
               deviceId: localDeviceId,
               hostEpoch: localEpoch,
-              username: currentUsername || localUserName || 'Host',
-              userId: currentUserId || localUserId || 'host'
+              username: resolveCurrentUsername(),
+              userId: resolveCurrentUserId()
             })
             return
           }
@@ -1000,7 +1045,7 @@ export function createWebRtcService(callbacks: WebRtcCallbacks): WebRtcService {
       }
 
       if (data.type === 'HOST_LEAVING') {
-        if (data.deviceId && data.deviceId === localDeviceId) {
+        if (data.sender === signaling?.clientId || data.hostSessionId === hostSessionId) {
           return
         }
         if (isStandbyHostMode && data.hostSessionId === activeHostSessionId) {
@@ -1033,7 +1078,15 @@ export function createWebRtcService(callbacks: WebRtcCallbacks): WebRtcService {
             isStandbyHostMode = false
             isHostMode = true
             updateHostStatus()
-            signaling!.send({ type: 'host_hello', hostSessionId, ecdhPublicKey: localEcdhPubHex, deviceId: localDeviceId, hostEpoch: localEpoch })
+            signaling!.send({
+              type: 'host_hello',
+              hostSessionId,
+              ecdhPublicKey: localEcdhPubHex,
+              deviceId: localDeviceId,
+              hostEpoch: localEpoch,
+              username: resolveCurrentUsername(),
+              userId: resolveCurrentUserId()
+            })
             startHostHeartbeat()
             callbacks.onHostPromoted?.()
           }
@@ -1265,6 +1318,7 @@ export function createWebRtcService(callbacks: WebRtcCallbacks): WebRtcService {
     getHostSeqCounter: () => hostSeqCounter,
     getCurrentHostSessionId: () => currentHostSessionId,
     isStandbyHost: () => isStandbyHostMode,
+    pingPeer: async (timeoutMs?: number) => (isHostMode ? true : clientSession.pingHost(timeoutMs ?? 800)),
     reconnectNow,
     disconnect,
     initHostSeq,

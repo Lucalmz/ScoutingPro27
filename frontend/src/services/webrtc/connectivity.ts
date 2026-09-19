@@ -127,11 +127,39 @@ export const STUN_SERVERS: RTCConfiguration = {
 }
 
 /**
+ * 统一清洗 IP 地址：剥除中括号、附带的端口号以及 IPv6 作用域标识 (scope id)
+ */
+export function cleanIpAddress(ip: string): string {
+  if (!ip || typeof ip !== 'string') return ''
+  let clean = ip.trim()
+  // 匹配带中括号的形式 [2409:...]:port 或 [2409:...]
+  const bracketMatch = clean.match(/^\[([0-9a-fA-F:]+)\](?::\d+)?$/)
+  if (bracketMatch && bracketMatch[1]) {
+    clean = bracketMatch[1].trim()
+  } else {
+    clean = clean.replace(/^\[|\]$/g, '').trim()
+    // 若不是 IPv6（不含冒号）且包含端口号 (如 1.2.3.4:8080)
+    if (!clean.includes(':') && clean.includes('.')) {
+      const firstPart = clean.split(':')[0]
+      if (firstPart) {
+        clean = firstPart.trim()
+      }
+    }
+  }
+  // 去除 IPv6 作用域后缀 (如 fe80::1%eth0)
+  const scopeIdx = clean.indexOf('%')
+  if (scopeIdx !== -1) {
+    clean = clean.substring(0, scopeIdx)
+  }
+  return clean.toLowerCase()
+}
+
+/**
  * 校验是否为合法的公网全球单播 IPv6 地址 (Global Unicast Address, 2000::/3)
  */
 export function isGlobalIpv6Address(ip: string): boolean {
   if (!ip || typeof ip !== 'string') return false
-  const clean = ip.trim().toLowerCase()
+  const clean = cleanIpAddress(ip)
   if (!clean.includes(':')) return false
 
   // 基础特殊地址排除
@@ -187,7 +215,7 @@ export function isGlobalIpv6Address(ip: string): boolean {
  */
 export function isIpv6Address(ip: string): boolean {
   if (!ip || typeof ip !== 'string') return false
-  const clean = ip.trim().toLowerCase()
+  const clean = cleanIpAddress(ip)
   return clean.includes(':') && /^[0-9a-f:]+$/i.test(clean)
 }
 
@@ -196,7 +224,7 @@ export function isIpv6Address(ip: string): boolean {
  */
 export function isPrivateIpv4Address(ip: string): boolean {
   if (!ip || typeof ip !== 'string') return false
-  const clean = ip.trim()
+  const clean = cleanIpAddress(ip)
   return (
     clean.startsWith('10.') ||
     clean.startsWith('192.168.') ||
@@ -224,10 +252,11 @@ export function optimizeCandidatePriority(candidateStr: string): string {
     const compStr = parts[1] || '1'
     const component = parseInt(compStr, 10) || 1
     const address = parts[4] || ''
+    const cleanAddr = cleanIpAddress(address)
     const typeIndex = parts.indexOf('typ')
     const candType = typeIndex !== -1 && parts[typeIndex + 1] ? parts[typeIndex + 1] : ''
 
-    if (address && isGlobalIpv6Address(address)) {
+    if (cleanAddr && isGlobalIpv6Address(cleanAddr)) {
       let typePref = 0
       if (candType === 'host') typePref = 126
       else if (candType === 'prflx') typePref = 110
@@ -283,15 +312,16 @@ export function sortCandidatesPreferIpv6<T extends { candidate?: string }>(candi
       const parts = cleanStr.split(/\s+/)
       if (parts.length < 7) return 0
       const address = parts[4] || ''
+      const cleanAddr = cleanIpAddress(address)
       const typeIndex = parts.indexOf('typ')
       const candType = typeIndex !== -1 && parts[typeIndex + 1] ? parts[typeIndex + 1] : ''
 
-      if (isGlobalIpv6Address(address)) {
+      if (isGlobalIpv6Address(cleanAddr)) {
         if (candType === 'host') return 100
         if (candType === 'srflx') return 90
         return 80
       }
-      if (isIpv6Address(address)) return 70
+      if (isIpv6Address(cleanAddr)) return 70
       if (candType === 'host') return 50
       if (candType === 'srflx') return 40
       if (candType === 'relay') return 10
@@ -314,21 +344,24 @@ export function classifyCandidatePair(
   const isRelay = localCandType === 'relay' || remoteCandType === 'relay'
   if (isRelay) return 'relay'
 
-  const hasGlobalIpv6 = isGlobalIpv6Address(localIp) || isGlobalIpv6Address(remoteIp)
+  const cleanLocal = cleanIpAddress(localIp)
+  const cleanRemote = cleanIpAddress(remoteIp)
+
+  const hasGlobalIpv6 = isGlobalIpv6Address(cleanLocal) || isGlobalIpv6Address(cleanRemote)
   if (hasGlobalIpv6) {
     return 'ipv6_p2p'
   }
 
   const isLocalLan =
-    isPrivateIpv4Address(localIp) &&
-    isPrivateIpv4Address(remoteIp) &&
+    isPrivateIpv4Address(cleanLocal) &&
+    isPrivateIpv4Address(cleanRemote) &&
     localCandType === 'host' &&
     remoteCandType === 'host'
   if (isLocalLan) {
     return 'lan_p2p'
   }
 
-  if (isIpv6Address(localIp) || isIpv6Address(remoteIp)) {
+  if (isIpv6Address(cleanLocal) || isIpv6Address(cleanRemote)) {
     return 'ipv6_p2p'
   }
 

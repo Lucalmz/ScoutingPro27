@@ -59,12 +59,6 @@ function handleTakeover() {
   showHud.value = false
   emit('takeoverHost')
 }
-
-function openDiagnostics() {
-  hapticLight()
-  showHud.value = false
-  connStore.openDiagnosticsModal()
-}
 </script>
 
 <template>
@@ -126,17 +120,6 @@ function openDiagnostics() {
                 {{ connStore.isTakingOver ? t('event.taking_over') : t('event.takeover_as_host') }}
               </button>
             </div>
-
-            <!-- Diagnostics in HUD (Feature-Flagged) -->
-            <button
-              v-if="connStore.isDiagnosticsEnabled"
-              type="button"
-              class="btn-hud-diagnostics"
-              @click="openDiagnostics"
-            >
-              <span class="material-icons" style="font-size: 16px; margin-right: 4px;">terminal</span>
-              {{ t('connection.view_diagnostics', '查看连接诊断与日志') }}
-            </button>
           </div>
         </div>
       </Transition>
@@ -342,28 +325,6 @@ function openDiagnostics() {
   align-items: center;
   justify-content: center;
   cursor: pointer;
-}
-
-.btn-hud-diagnostics {
-  margin-top: 6px;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  padding: 8px 12px;
-  background: rgba(30, 41, 59, 0.7);
-  border: 1px solid rgba(255, 255, 255, 0.12);
-  border-radius: 6px;
-  color: #94a3b8;
-  font-size: 12px;
-  font-weight: 500;
-  cursor: pointer;
-  transition: all 0.2s ease;
-}
-
-.btn-hud-diagnostics:hover {
-  background: rgba(51, 65, 85, 0.9);
-  color: #38bdf8;
-  border-color: rgba(56, 189, 248, 0.4);
 }
 
 /* Transitions */

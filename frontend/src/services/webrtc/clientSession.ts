@@ -135,6 +135,7 @@ export function createClientSession(ctx: ClientSessionContext) {
     ctx.setClientSessionId(newClientSessionId)
     log.info(`Initiating setupClientConnection (sessionId: ${newClientSessionId}, forceRelay: ${forceRelay}, hostSenderId: ${ctx.getClientHostSenderId() || 'none'})`)
 
+    stopDataChannelHeartbeat()
     isRebuilding = true
     try {
       const oldDc = ctx.getClientDc()
@@ -178,9 +179,11 @@ export function createClientSession(ctx: ClientSessionContext) {
       ctx.setStatus('connected')
       reconnectAttempts = 0
       clearReconnectTimer()
+      startDataChannelHeartbeat()
     }
     dc.onclose = () => {
       log.warn(`DataChannel 'scoutingpro-data' CLOSED. isRebuilding=${isRebuilding}, sasState=${ctx.sas.clientSasState}`)
+      stopDataChannelHeartbeat()
       ctx.setClientSender(null)
       if (isRebuilding) return
       if (ctx.sas.clientSasState === 'PENDING_VERIFICATION' || ctx.sas.clientSasState === 'REJECTED') {
@@ -262,24 +265,42 @@ export function createClientSession(ctx: ClientSessionContext) {
     hostUserId?: string
   ) {
     const sas = ctx.sas
-    if (sas.clientSasState === 'PENDING_VERIFICATION' && sas.clientHostEcdhPubHex === hostPubKey) {
+    const previousHostPubHex = sas.clientHostEcdhPubHex
+    if (sas.clientSasState === 'PENDING_VERIFICATION' && previousHostPubHex === hostPubKey) {
       return
     }
-    sas.clientHostEcdhPubHex = hostPubKey
-    sas.clientHostDeviceId = hostDeviceId || 'host_device_default'
+
     const localEcdhPubHex = ctx.getLocalEcdhPubHex()
     const currentInviteCode = ctx.getCurrentInviteCode()
     if (!localEcdhPubHex || !currentInviteCode) return
 
+    // 确定性 Host 设备 ID：若信令未显式提供，依据公钥指纹前缀唯一绑定，支持主备多机并存
+    const effectiveHostDeviceId = hostDeviceId || `host_dev_${hostPubKey.slice(0, 16)}`
+    sas.clientHostDeviceId = effectiveHostDeviceId
     sas.clientSecurityFingerprint = await computeSecurityFingerprint(localEcdhPubHex, hostPubKey, currentInviteCode)
-    log.info(`Computed SAS Fingerprint for Host: ${sas.clientSecurityFingerprint}`)
+    log.info(`Computed SAS Fingerprint for Host: ${sas.clientSecurityFingerprint} (Device: ${effectiveHostDeviceId})`)
 
-    const effectiveHostUsername = hostUsername || 'Host'
-    const effectiveHostUserId = hostUserId || 'host'
+    const effectiveHostUserId = hostUserId || (hostDeviceId ? `device:${hostDeviceId}` : `peer:${sas.clientHostDeviceId}`)
+    const effectiveHostUsername = hostUsername || (hostUserId ? `User ${hostUserId.slice(0, 8)}` : 'Node')
+    sas.clientHostUserId = effectiveHostUserId
+    sas.clientHostUsername = effectiveHostUsername
 
     const isFlapping = Boolean(
-      sas.clientHostEcdhPubHex && sas.clientHostEcdhPubHex !== hostPubKey && sas.clientSasState === 'VERIFIED'
+      previousHostPubHex &&
+      previousHostPubHex !== hostPubKey &&
+      sas.clientSasState === 'VERIFIED'
     )
+
+    sas.clientHostEcdhPubHex = hostPubKey
+
+    // 检查本地 localStorage 显式核验记录（赛事 + 公钥）
+    let isLocallyApproved = false
+    try {
+      const storedSas = localStorage.getItem(`scoutingpro_verified_sas_${currentInviteCode}_${hostPubKey}`)
+      if (storedSas && storedSas === sas.clientSecurityFingerprint) {
+        isLocallyApproved = true
+      }
+    } catch {}
 
     const trustEval = await evaluatePeerKeyTrust({
       eventId: currentInviteCode || 'default_event',
@@ -290,11 +311,11 @@ export function createClientSession(ctx: ClientSessionContext) {
       isInSessionFlapping: isFlapping
     })
 
-    if (trustEval.status === 'TRUSTED_MATCH' || trustEval.status === 'TOFU_FIRST_SEEN') {
+    if (trustEval.status === 'TRUSTED_MATCH' || trustEval.status === 'TOFU_FIRST_SEEN' || isLocallyApproved) {
       log.info(
-        `Establishing baseline trust for Host device ${sas.clientHostDeviceId} (${effectiveHostUsername}). Auto-approving SAS. Status: ${trustEval.status}`
+        `Establishing baseline trust for Host device ${sas.clientHostDeviceId} (${effectiveHostUsername}). Auto-approving SAS. Status: ${trustEval.status} (localApproved: ${isLocallyApproved})`
       )
-      if (trustEval.status === 'TOFU_FIRST_SEEN') {
+      if (trustEval.status === 'TOFU_FIRST_SEEN' || isLocallyApproved) {
         await savePeerTrustRecord({
           eventId: currentInviteCode || 'default_event',
           userId: effectiveHostUserId,
@@ -304,7 +325,7 @@ export function createClientSession(ctx: ClientSessionContext) {
           firstSeenAt: Date.now(),
           lastSeenAt: Date.now(),
           trustedAt: Date.now(),
-          trustLevel: 'TOFU_TRUSTED'
+          trustLevel: isLocallyApproved ? 'MANUAL_VERIFIED' : 'TOFU_TRUSTED'
         })
       }
       sas.clientSasState = 'VERIFIED'
@@ -320,27 +341,22 @@ export function createClientSession(ctx: ClientSessionContext) {
       }
       ctx.callbacks.onSasVerified?.('host')
     } else if (trustEval.status === 'KEY_ROTATION_ALERT') {
-      // 仅在已建立信任的设备发生公钥异常变动（中间人攻击/冒名劫持隐患）时，才挂起并弹出安全核验
-      if (trustEval.level === 'CRITICAL') {
-        log.error(`Security Alert: ${trustEval.message}`)
-        ctx.rejectSas('host', trustEval.message)
-      } else {
-        log.warn(`Security Notice: ${trustEval.message}. Gating client verification.`)
-        sas.clientSasState = 'PENDING_VERIFICATION'
-        if (sas.sasTimeoutTimers.has('host')) {
-          clearTimeout(sas.sasTimeoutTimers.get('host'))
-          sas.sasTimeoutTimers.delete('host')
-        }
-
-        ctx.callbacks.onSasVerificationRequired?.(
-          {
-            peerId: 'host',
-            username: effectiveHostUsername,
-            ecdhPublicKey: hostPubKey
-          },
-          sas.clientSecurityFingerprint
-        )
+      // 当已建立信任的设备公钥发生变动时，挂起通信并弹出安全核验，由用户核对安全码后决定同意还是拒绝
+      log.warn(`Security Notice [${trustEval.level}]: ${trustEval.message}. Gating client verification.`)
+      sas.clientSasState = 'PENDING_VERIFICATION'
+      if (sas.sasTimeoutTimers.has('host')) {
+        clearTimeout(sas.sasTimeoutTimers.get('host'))
+        sas.sasTimeoutTimers.delete('host')
       }
+
+      ctx.callbacks.onSasVerificationRequired?.(
+        {
+          peerId: 'host',
+          username: effectiveHostUsername,
+          ecdhPublicKey: hostPubKey
+        },
+        sas.clientSecurityFingerprint
+      )
     }
   }
 
@@ -396,6 +412,12 @@ export function createClientSession(ctx: ClientSessionContext) {
       if (data.sender) {
         ctx.setClientHostSenderId(data.sender)
       }
+      if (data.userId) {
+        sas.clientHostUserId = data.userId
+      }
+      if (data.username) {
+        sas.clientHostUsername = data.username
+      }
       clearReconnectTimer()
       reconnectAttempts = 0
       await setupClientConnection()
@@ -422,7 +444,7 @@ export function createClientSession(ctx: ClientSessionContext) {
       ctx.callbacks.onActiveHostLeft?.()
     } else if (data.answer && clientPc) {
       try {
-        log.info(`Processing Host Answer from ${data.sender || 'Host'}`)
+        log.info(`Processing Host Answer from ${data.sender || 'Active Host'}`)
         ctx.setClientHostSenderId(data.sender)
         if (data.hostSessionId) {
           ctx.setCurrentHostSessionId(data.hostSessionId)
@@ -516,7 +538,7 @@ export function createClientSession(ctx: ClientSessionContext) {
       ctx.callbacks.onSasVerificationRequired?.(
         {
           peerId: 'host',
-          username: data.username || 'Host',
+          username: data.username || sas.clientHostUsername || 'Node',
           ecdhPublicKey: sas.clientHostEcdhPubHex || ''
         },
         data.fingerprint
@@ -573,6 +595,51 @@ export function createClientSession(ctx: ClientSessionContext) {
     })
   }
 
+  let dataChannelHeartbeatTimer: any = null
+  let consecutiveFailedPings = 0
+
+  function startDataChannelHeartbeat() {
+    stopDataChannelHeartbeat()
+    consecutiveFailedPings = 0
+    const intervalMs = (globalThis as any).__TEST_HEARTBEAT_INTERVAL_MS__ ?? 2000
+    const pingTimeoutMs = (globalThis as any).__TEST_PING_TIMEOUT_MS__ ?? 1000
+
+    dataChannelHeartbeatTimer = setInterval(async () => {
+      const dc = ctx.getClientDc()
+      const pc = ctx.getClientPc()
+      if (!dc || dc.readyState !== 'open' || !pc || pc.connectionState !== 'connected') {
+        return
+      }
+      const isAlive = await pingHost(pingTimeoutMs)
+      if (!isAlive) {
+        consecutiveFailedPings++
+        log.warn(`DataChannel heartbeat ping timeout (${consecutiveFailedPings}/2 missed)`)
+        if (consecutiveFailedPings >= 2) {
+          log.warn('Active host unresponsiveness confirmed via DataChannel heartbeat. Autonomous degradation triggered.')
+          stopDataChannelHeartbeat()
+          ctx.peerMgr.resetTransportInfo()
+          ctx.setStatus('degraded')
+          ctx.callbacks.onHostDisconnected?.()
+          ctx.callbacks.onActiveHostLeft?.()
+        }
+      } else {
+        if (consecutiveFailedPings > 0 && ctx.getStatus() === 'degraded') {
+          log.info('DataChannel heartbeat restored, updating status to connected.')
+          ctx.setStatus('connected')
+        }
+        consecutiveFailedPings = 0
+      }
+    }, intervalMs)
+  }
+
+  function stopDataChannelHeartbeat() {
+    if (dataChannelHeartbeatTimer) {
+      clearInterval(dataChannelHeartbeatTimer)
+      dataChannelHeartbeatTimer = null
+    }
+    consecutiveFailedPings = 0
+  }
+
   return {
     setupClientConnection,
     handleClientSignalingMessage,
@@ -580,6 +647,9 @@ export function createClientSession(ctx: ClientSessionContext) {
     clearReconnectTimer,
     resetReconnectAttempts,
     pingHost,
-    handlePong
+    handlePong,
+    startDataChannelHeartbeat,
+    stopDataChannelHeartbeat
   }
 }
+

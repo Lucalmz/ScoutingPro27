@@ -136,7 +136,7 @@ export function createChannelMessageHandler(ctx: ChannelMessageHandlerContext) {
                 } catch {}
               }
               if (!hostUser && ctx.getUsername?.()) {
-                hostUser = { id: ctx.getUserId?.() || 'host', username: ctx.getUsername?.() }
+                hostUser = { id: ctx.getUserId?.() || '', username: ctx.getUsername?.() || '' }
               }
 
               if (

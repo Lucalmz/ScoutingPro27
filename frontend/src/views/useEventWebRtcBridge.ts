@@ -82,6 +82,7 @@ export function useEventWebRtcBridge({
     if (!evt) return
 
     const rtcCallbacks: WebRtcCallbacks = {
+      getCurrentUser: () => ({ userId: userStore.userId, username: userStore.username }),
       onStatusChange: (s) => connStore.setStatus(s),
 
       // 返回真正被接受的记录，Host 端用此打 hostSeq + 广播
@@ -336,8 +337,8 @@ export function useEventWebRtcBridge({
       },
 
       onSasVerificationRequired: (peer, fingerprint) => {
-        // 次主机（Standby Host）为后台镜像，绝不向次主机弹窗核验主机的幽灵账户
-        if (connStore.isStandbyHost && peer.peerId === 'host') {
+        // 次主机（Standby Host）为后台镜像，连接活跃主机时通过密码学基线信任静默放行，不弹窗中断
+        if (connStore.isStandbyHost) {
           return
         }
         connStore.setPendingSas({
@@ -422,11 +423,19 @@ export function useEventWebRtcBridge({
       },
 
       onActiveHostLeft: () => {
+        connStore.setTransportInfo(null)
         if (connStore.isStandbyHost) {
+          connStore.setStatus('degraded')
           toastStore.showToast(t('event.host_exited_takeover_available'), 'warning', 7000)
         } else {
+          connStore.setStatus('offline')
           toastStore.showToast(t('event.host_left'), 'info')
         }
+      },
+
+      onHostDisconnected: () => {
+        connStore.setTransportInfo(null)
+        connStore.setStatus('degraded')
       }
     }
 

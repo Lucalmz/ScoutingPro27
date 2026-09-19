@@ -127,6 +127,7 @@ export const useConnectionStore = defineStore('connection', () => {
         await rtcService.value.takeoverHost()
         isStandbyHost.value = false
         standbyHostInfo.value = null
+        transportInfo.value = null
       }
     } finally {
       setTimeout(() => {
@@ -290,19 +291,19 @@ export const useConnectionStore = defineStore('connection', () => {
   }
 
   function confirmSas(peerId?: string) {
-    const target = peerId || pendingSas.value?.peerId || 'host'
+    const target = peerId || pendingSas.value?.peerId || ''
     rtcService.value?.confirmSas(target)
     clearPendingSas(target)
   }
 
   function rejectSas(peerId?: string, reason?: string) {
-    const target = peerId || pendingSas.value?.peerId || 'host'
+    const target = peerId || pendingSas.value?.peerId || ''
     rtcService.value?.rejectSas(target, reason)
     clearPendingSas(target)
   }
 
   async function retrySas(peerId?: string) {
-    const target = peerId || pendingSas.value?.peerId || 'host'
+    const target = peerId || pendingSas.value?.peerId || ''
     await rtcService.value?.retrySas?.(target)
   }
 

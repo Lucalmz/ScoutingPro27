@@ -86,7 +86,14 @@ export function createHostSignalingHandler(ctx: HostSessionContext) {
         deviceId: localDeviceId
       })
       signaling.send(
-        { type: 'host_hello', hostSessionId, ecdhPublicKey: localEcdhPubHex, deviceId: localDeviceId },
+        {
+          type: 'host_hello',
+          hostSessionId,
+          ecdhPublicKey: localEcdhPubHex,
+          deviceId: localDeviceId,
+          username: ctx.getUsername?.() || '',
+          userId: ctx.getUserId?.() || (localDeviceId ? `node_${localDeviceId}` : '')
+        },
         sender
       )
       return
@@ -111,7 +118,7 @@ export function createHostSignalingHandler(ctx: HostSessionContext) {
             type: 'sas_challenge',
             fingerprint,
             hostSessionId,
-            username: ctx.getUsername?.() || 'Host'
+            username: ctx.getUsername?.() || ''
           },
           sender
         )
@@ -225,9 +232,10 @@ export function createHostSignalingHandler(ctx: HostSessionContext) {
 
               const candidateUserId = data.userId || 'unknown'
               const storageKey = `scoutingpro_verified_sas_${currentInviteCode}_${candidateUserId}_${data.ecdhPublicKey}`
+              const pubKeyStorageKey = `scoutingpro_verified_sas_${currentInviteCode}_${data.ecdhPublicKey}`
               let storedSas: string | null = null
               try {
-                storedSas = localStorage.getItem(storageKey)
+                storedSas = localStorage.getItem(pubKeyStorageKey) || localStorage.getItem(storageKey)
               } catch {}
 
               if (storedSas && storedSas === fingerprint) {
@@ -421,7 +429,7 @@ export function createHostSignalingHandler(ctx: HostSessionContext) {
                   type: 'sas_challenge',
                   fingerprint,
                   hostSessionId,
-                  username: ctx.getUsername?.() || 'Host'
+                  username: ctx.getUsername?.() || ''
                 },
                 sender
               )
@@ -453,7 +461,7 @@ export function createHostSignalingHandler(ctx: HostSessionContext) {
                     type: 'sas_challenge',
                     fingerprint,
                     hostSessionId,
-                    username: ctx.getUsername?.() || 'Host'
+                    username: ctx.getUsername?.() || ''
                   },
                   sender
                 )

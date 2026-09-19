@@ -15,3 +15,6 @@ frontend/dist-pwa/
 frontend/node_modules/
 node_modules/
 .agents/
+log/
+*.log
+report-from-phone/

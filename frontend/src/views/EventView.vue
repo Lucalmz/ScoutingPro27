@@ -425,6 +425,7 @@ async function handleTakeoverHost() {
       <button
         v-for="tab in tabs"
         :key="tab.key"
+        :data-tab="tab.key"
         class="tab-btn"
         :class="{ active: activeTab === tab.key }"
         @click="switchTab(tab.key)"

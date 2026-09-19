@@ -178,4 +178,21 @@ public class AppConfig {
     public static File resolveMasterKeyFile() {
         return new File(resolveBaseDataDir(), "master.key");
     }
+
+    /**
+     * 获取根目录日志文件夹 (log/) 与主日志文件 (scoutingpro.log)。
+     * 优先在项目源码根目录创建 log 文件夹，否则在用户资产目录下创建。
+     */
+    public static File resolveLogDir() {
+        File root = findProjectRootDir();
+        File logDir = root != null ? new File(root, "log") : new File(resolveBaseDataDir(), "log");
+        if (!logDir.exists()) {
+            logDir.mkdirs();
+        }
+        return logDir;
+    }
+
+    public static File resolveLogFile() {
+        return new File(resolveLogDir(), "scoutingpro.log");
+    }
 }

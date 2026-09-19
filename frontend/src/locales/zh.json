@@ -741,6 +741,8 @@
   "qr_modal": {
     "title": "移动端扫码加入",
     "subtitle_simple": "手机浏览器或微信/相机扫描下方二维码，或手动输入邀请码快速加入本赛事。",
+    "channel_cloud": "公网云端",
+    "channel_lan": "赛场内网 / 热点 (纯离线)",
     "invite_code_label": "赛事邀请码",
     "copy_code_btn": "复制邀请码",
     "click_copy_code": "点击复制邀请码",
@@ -751,8 +753,10 @@
     "cloud_copy_link": "复制网页链接",
     "cloud_url_label": "Web 访问地址",
     "cloud_url_config_btn": "自定义域名",
+    "cloud_url_placeholder": "https://your-team.github.io/ScoutingPro27",
     "cloud_url_hint": "若团队部署了私有 PWA 域名，可在此修改二维码前缀。",
-    "cloud_url_saved": "自定义访问地址已保存"
+    "cloud_url_saved": "自定义访问地址已保存",
+    "desktop_scan_title": "扫码加入"
   },
   "bottom_nav": {
     "scout": "打分",

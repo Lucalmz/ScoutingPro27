@@ -18,6 +18,8 @@ export type WebRtcCallbacks = {
   onAckReceived: (recordIds: string[], stampedRecords?: ScoutingRecord[], rejectedRecordIds?: string[]) => void
   /** sinceVersion: 0 或缺失表示全量请求；>0 表示增量请求 */
   onRequestSync: (sinceVersion: number, senderId?: string) => void
+  /** 动态获取当前登录的真实用户身份，杜绝幽灵伪用户 */
+  getCurrentUser?: () => { userId?: string; username?: string }
   onClientConnected?: (userId: string, userName: string) => void
   onTagUpdateReceived?: (tag: TeamTagItem, action: 'ADD' | 'REMOVE', eventId: string, teamNumber: number) => void
   onRequestTagsSync?: (senderId?: string) => void
@@ -55,6 +57,7 @@ export type WebRtcCallbacks = {
   onHostPromoted?: () => void
   onHostDemoted?: (info?: { hostSessionId: string; hostDeviceId?: string }) => void
   onActiveHostLeft?: () => void
+  onHostDisconnected?: () => void
   onHostHandoffReceived?: (batch: import('@/types').WebRtcHostHandoffBatch) => Promise<number>
   onHostHandoffAck?: (ack: import('@/types').WebRtcHostHandoffAck) => void
 }
@@ -102,6 +105,7 @@ export interface WebRtcService {
   sendIdentityMigration: (eventId: string, oldScoutId: string, newScoutId: string, newScoutName: string) => Promise<void> | undefined
   takeoverHost: () => Promise<void>
   isStandbyHost: () => boolean
+  pingPeer?: (timeoutMs?: number) => Promise<boolean>
   reconnectNow: () => Promise<boolean>
   disconnect: () => void
   initHostSeq: (maxDbSeq: number) => void

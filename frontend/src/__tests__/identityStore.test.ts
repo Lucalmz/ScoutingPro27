@@ -3,6 +3,7 @@ import {
   getOrCreateDeviceIdentity,
   getPeerTrustRecord,
   savePeerTrustRecord,
+  findPeerTrustRecordByDevice,
   listUserTrustedDevices,
   evaluatePeerKeyTrust,
   clearSecurityStoreForTesting
@@ -209,6 +210,166 @@ describe('identityStore - Persistent Device Identity & TOFU Engine', () => {
       publicKeyHex: pubHex
     })
     expect(aliceReturnEval.status).toBe('MULTI_USER_DEVICE_SWITCH')
+  })
+
+  it('Guarantee 6: Multi-Host Seamless Switching without repeated SAS alerts', async () => {
+    const keyPairA = await generateEcdhKeyPair()
+    const pubHexA = await exportEcdhPublicKey(keyPairA.publicKey)
+    const devIdA = 'host_dev_A'
+
+    const keyPairB = await generateEcdhKeyPair()
+    const pubHexB = await exportEcdhPublicKey(keyPairB.publicKey)
+    const devIdB = 'host_dev_B'
+
+    const eventId = 'evt_championship_2026'
+
+    // Step 1: Connect to Host A (run by user Lead Alpha) for the first time -> TOFU_FIRST_SEEN
+    const hostAEval1 = await evaluatePeerKeyTrust({
+      eventId,
+      userId: 'user_lead_alpha',
+      username: 'Lead Alpha',
+      deviceId: devIdA,
+      publicKeyHex: pubHexA
+    })
+    expect(hostAEval1.status).toBe('TOFU_FIRST_SEEN')
+
+    // Host A trusted
+    await savePeerTrustRecord({
+      eventId,
+      userId: 'user_lead_alpha',
+      username: 'Lead Alpha',
+      deviceId: devIdA,
+      publicKeyHex: pubHexA,
+      firstSeenAt: 1000,
+      lastSeenAt: 1000,
+      trustedAt: 1000,
+      trustLevel: 'TOFU_TRUSTED'
+    })
+
+    // Step 2: Switch to Host B (Standby Host run by user Lead Beta) -> TOFU_FIRST_SEEN
+    const hostBEval = await evaluatePeerKeyTrust({
+      eventId,
+      userId: 'user_lead_beta',
+      username: 'Lead Beta',
+      deviceId: devIdB,
+      publicKeyHex: pubHexB
+    })
+    expect(hostBEval.status).toBe('TOFU_FIRST_SEEN')
+
+    // Host B trusted by user verification
+    await savePeerTrustRecord({
+      eventId,
+      userId: 'user_lead_beta',
+      username: 'Lead Beta',
+      deviceId: devIdB,
+      publicKeyHex: pubHexB,
+      firstSeenAt: 2000,
+      lastSeenAt: 2000,
+      trustedAt: 2000,
+      trustLevel: 'MANUAL_VERIFIED'
+    })
+
+    // Step 3: Switch BACK to Host A -> MUST silently return TRUSTED_MATCH, never alert!
+    const hostAReturnEval = await evaluatePeerKeyTrust({
+      eventId,
+      userId: 'user_lead_alpha',
+      username: 'Lead Alpha',
+      deviceId: devIdA,
+      publicKeyHex: pubHexA
+    })
+    expect(hostAReturnEval.status).toBe('TRUSTED_MATCH')
+
+    // Step 4: Switch BACK to Host B -> MUST silently return TRUSTED_MATCH, never alert!
+    const hostBReturnEval = await evaluatePeerKeyTrust({
+      eventId,
+      userId: 'user_lead_beta',
+      username: 'Lead Beta',
+      deviceId: devIdB,
+      publicKeyHex: pubHexB
+    })
+    expect(hostBReturnEval.status).toBe('TRUSTED_MATCH')
+
+    // Step 5: Even if a host connects from another device using the same trusted key,
+    // public key matching recognizes it immediately as TRUSTED_MATCH!
+    const hostAFallbackDevId = await evaluatePeerKeyTrust({
+      eventId,
+      userId: 'user_lead_alpha',
+      username: 'Lead Alpha',
+      deviceId: 'host_dev_roaming_' + pubHexA.slice(0, 16),
+      publicKeyHex: pubHexA
+    })
+    expect(hostAFallbackDevId.status).toBe('TRUSTED_MATCH')
+  })
+
+  it('Guarantee 7: Host Takeover & Demotion seamlessly binds to real user account without false MULTI_USER_DEVICE_SWITCH', async () => {
+    const eventId = 'evt_takeover_2026'
+    const keyPair1 = await generateEcdhKeyPair()
+    const pubHex1 = await exportEcdhPublicKey(keyPair1.publicKey)
+    const devId1 = 'dev_host_primary'
+
+    // Step 1: Device 1 originally established as Host under real user 'Lucalmz'
+    await savePeerTrustRecord({
+      eventId,
+      userId: 'user_lucalmz_83aa',
+      username: 'Lucalmz',
+      deviceId: devId1,
+      publicKeyHex: pubHex1,
+      firstSeenAt: 1000,
+      lastSeenAt: 1000,
+      trustedAt: 1000,
+      trustLevel: 'TOFU_TRUSTED'
+    })
+
+    // Step 2: Device 2 takes over! Device 1 demotes to client and reconnects with real user 'Lucalmz'
+    const demotedClientEval = await evaluatePeerKeyTrust({
+      eventId,
+      userId: 'user_lucalmz_83aa',
+      username: 'Lucalmz',
+      deviceId: devId1,
+      publicKeyHex: pubHex1
+    })
+
+    // CRITICAL: Must be TRUSTED_MATCH! Must NEVER trigger MULTI_USER_DEVICE_SWITCH or demand SAS!
+    expect(demotedClientEval.status).toBe('TRUSTED_MATCH')
+
+    // Step 3: Verify the record is preserved with the real user credentials
+    const updatedRecord = await getPeerTrustRecord(eventId, 'user_lucalmz_83aa', devId1)
+    expect(updatedRecord).toBeDefined()
+    expect(updatedRecord?.publicKeyHex).toBe(pubHex1)
+  })
+
+  it('Guarantee 8: Corrupt legacy records with userId "host" are automatically purged and do not cause false MULTI_USER_DEVICE_SWITCH', async () => {
+    const eventId = 'evt_purge_2026'
+    const keyPair = await generateEcdhKeyPair()
+    const pubHex = await exportEcdhPublicKey(keyPair.publicKey)
+    const devId = 'dev_legacy_corrupt'
+
+    // Intentionally insert a legacy corrupt record with userId: 'host'
+    await savePeerTrustRecord({
+      eventId,
+      userId: 'host',
+      username: 'Host',
+      deviceId: devId,
+      publicKeyHex: pubHex,
+      firstSeenAt: 500,
+      lastSeenAt: 500,
+      trustedAt: 500,
+      trustLevel: 'TOFU_TRUSTED'
+    })
+
+    // Querying by device should purge the legacy 'host' record
+    const found = await findPeerTrustRecordByDevice(eventId, devId)
+    expect(found).toBeNull()
+
+    // Evaluating real user 'Lucalmz' on this device should establish clean TOFU, not MULTI_USER_DEVICE_SWITCH
+    const evalResult = await evaluatePeerKeyTrust({
+      eventId,
+      userId: 'user_lucalmz_83aa',
+      username: 'Lucalmz',
+      deviceId: devId,
+      publicKeyHex: pubHex
+    })
+    expect(evalResult.status).toBe('TOFU_FIRST_SEEN')
   })
 })
 

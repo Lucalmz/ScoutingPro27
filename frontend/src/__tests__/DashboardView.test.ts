@@ -305,7 +305,26 @@ describe('DashboardView.vue', () => {
     confirmSpy.mockRestore()
   })
 
-  it('renders clear cache button in topbar and clears all offline cache upon confirmation', async () => {
+  it('does NOT render clear cache button on desktop host', async () => {
+    const { isDesktopHost } = await import('@/services/photoStorage')
+    vi.mocked(isDesktopHost).mockReturnValue(true)
+
+    const userStore = useUserStore()
+    userStore.user = { id: 'u1', username: 'Tester', token: 'token' }
+    const eventStore = useEventStore()
+    eventStore.events = []
+    vi.spyOn(eventStore, 'fetchEvents').mockResolvedValue(undefined)
+
+    const wrapper = mount(DashboardView)
+    await new Promise((r) => setTimeout(r, 10))
+
+    expect(wrapper.find('.clear-cache-btn').exists()).toBe(false)
+  })
+
+  it('renders clear cache button on mobile client and clears all offline cache upon confirmation', async () => {
+    const { isDesktopHost } = await import('@/services/photoStorage')
+    vi.mocked(isDesktopHost).mockReturnValue(false)
+
     const userStore = useUserStore()
     userStore.user = { id: 'u1', username: 'Tester', token: 'token' }
     const eventStore = useEventStore()
