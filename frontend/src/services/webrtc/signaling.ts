@@ -38,6 +38,34 @@ export const BUILTIN_BROKERS: SignalingEndpoint[] = [
 ]
 
 /**
+ * 健壮的信令代理地址解析器：
+ * 支持 broker ID (如 'emqx', 'fallback')、'lan' 快捷模式、自定义 ws/wss/mqtt URL 以及 localStorage 配置。
+ */
+export function resolveBrokerUrl(targetOrId?: string | null): string {
+  if (!targetOrId) {
+    const customConfig = typeof localStorage !== 'undefined' ? localStorage.getItem('sp27-custom-broker') : null
+    return customConfig || BUILTIN_BROKERS[0]?.url || 'wss://broker.emqx.io:8084/mqtt'
+  }
+  const clean = targetOrId.trim()
+  // 匹配内置 Broker ID（如 'emqx', 'fallback'）
+  const matched = BUILTIN_BROKERS.find((b) => b.id.toLowerCase() === clean.toLowerCase())
+  if (matched) {
+    return matched.url
+  }
+  // 局域网快捷模式 'lan'
+  if (clean.toLowerCase() === 'lan' && typeof window !== 'undefined') {
+    const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:'
+    return `${protocol}//${window.location.host}/ws/signal`
+  }
+  // 若已是完整合法的协议 URL
+  if (clean.includes('://') || clean.includes('/ws/signal')) {
+    return clean
+  }
+  log.warn(`Unrecognized broker endpoint "${targetOrId}", falling back to default EMQX broker`)
+  return BUILTIN_BROKERS[0]?.url || 'wss://broker.emqx.io:8084/mqtt'
+}
+
+/**
  * 混合信令通道：支持 MQTT 公网代理与原生局域网 WebSocket。
  * 特性：
  * 1. 硬隔离安全拦截：严禁业务类型走信令
@@ -87,7 +115,8 @@ export class SignalingChannel {
   }): void {
     this.messageCallback = callbacks.onMessage
     const customConfig = typeof localStorage !== 'undefined' ? localStorage.getItem('sp27-custom-broker') : null
-    const target = this.preferredEndpoint || customConfig || BUILTIN_BROKERS[this.currentBrokerIndex]?.url || BUILTIN_BROKERS[0]?.url || 'wss://broker.emqx.io:8084/mqtt'
+    const rawTarget = this.preferredEndpoint || customConfig || BUILTIN_BROKERS[this.currentBrokerIndex]?.url || BUILTIN_BROKERS[0]?.url || 'wss://broker.emqx.io:8084/mqtt'
+    const target = resolveBrokerUrl(rawTarget)
 
     // 1. 判断是否为局域网原生 WebSocket 端点 (以 ws:// 开头或包含 /ws/signal)
     if (target.startsWith('ws://') || target.includes('/ws/signal')) {
@@ -156,9 +185,10 @@ export class SignalingChannel {
 
     this.client.on('error', (err) => {
       log.error(`MQTT client error on ${brokerUrl}:`, err)
-      if (!hasConnected && !this.preferredEndpoint && this.currentBrokerIndex < BUILTIN_BROKERS.length - 1) {
+      if (!hasConnected && this.currentBrokerIndex < BUILTIN_BROKERS.length - 1) {
         log.warn(`Attempting failover to backup broker...`)
         this.currentBrokerIndex++
+        this.preferredEndpoint = undefined
         this.close()
         this.connect({ onMessage: this.messageCallback!, onConnect: callbacks.onConnect, onError: callbacks.onError })
         return
@@ -329,6 +359,10 @@ export class SignalingChannel {
   close(): void {
     if (this.wsClient) {
       try {
+        this.wsClient.onopen = null
+        this.wsClient.onmessage = null
+        this.wsClient.onerror = null
+        this.wsClient.onclose = null
         this.wsClient.close()
       } catch {}
       this.wsClient = null
@@ -336,8 +370,15 @@ export class SignalingChannel {
     if (this.client) {
       log.info(`Closing signaling channel on topic ${this.topic}...`)
       try {
-        this.client.unsubscribe(this.topic)
-        this.client.end()
+        if (typeof this.client.removeAllListeners === 'function') {
+          this.client.removeAllListeners()
+        }
+        if (typeof this.client.unsubscribe === 'function') {
+          this.client.unsubscribe(this.topic)
+        }
+        if (typeof this.client.end === 'function') {
+          this.client.end(true)
+        }
       } catch {}
       this.client = null
     }

@@ -103,6 +103,22 @@ describe('setupSelfHealing', () => {
     await listeners['pageshow'][0]()
 
     expect(reconnectNow).toHaveBeenCalledTimes(1)
+    expect(reconnectNow).toHaveBeenCalledWith(true)
+    selfHealing.dispose()
+  })
+
+  it('triggers reconnectNow(true) on resume when status is stuck in connecting', async () => {
+    const reconnectNow = vi.fn().mockResolvedValue(true)
+    const selfHealing = setupSelfHealing({
+      getStatus: () => 'connecting',
+      reconnectNow
+    })
+
+    expect(listeners['visibilitychange']).toBeDefined()
+    await listeners['visibilitychange'][0]()
+
+    expect(reconnectNow).toHaveBeenCalledTimes(1)
+    expect(reconnectNow).toHaveBeenCalledWith(true)
     selfHealing.dispose()
   })
 })

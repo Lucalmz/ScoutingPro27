@@ -13,7 +13,7 @@ import {
 } from '@/utils/identityStore'
 
 import type { WebRtcCallbacks, WebRtcService, ClientEntry } from './types'
-import { SignalingChannel } from './signaling'
+import { SignalingChannel, resolveBrokerUrl } from './signaling'
 import { OfflineMessageManager } from './offlineQueue'
 import { createChannelMessageHandler } from './channelMessageHandler'
 import { SasSecurityManager } from './sasManager'
@@ -815,13 +815,9 @@ export function createWebRtcService(callbacks: WebRtcCallbacks): WebRtcService {
   // =====================================================
   // Host: create room & wait for client offer
   // =====================================================
-  function resolveTargetSignalingEndpoint(preferredBroker?: string): string | undefined {
+  function resolveTargetSignalingEndpoint(preferredBroker?: string): string {
     const activeTarget = preferredBroker || (typeof sessionStorage !== 'undefined' ? sessionStorage.getItem('sp27-active-broker') : null) || undefined
-    if (activeTarget === 'lan' && typeof window !== 'undefined') {
-      const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:'
-      return `${protocol}//${window.location.host}/ws/signal`
-    }
-    return activeTarget
+    return resolveBrokerUrl(activeTarget)
   }
 
   async function host(inviteCode: string, eventMetadata?: ScoutingEvent, username?: string, userId?: string, preferredBroker?: string): Promise<void> {
@@ -1148,7 +1144,7 @@ export function createWebRtcService(callbacks: WebRtcCallbacks): WebRtcService {
     })
   }
 
-  async function reconnectNow(): Promise<boolean> {
+  async function reconnectNow(forceFreshSignaling = false): Promise<boolean> {
     isExplicitlyClosed = false
     if (!isHostMode && sas.clientSasState === 'REJECTED') {
       log.warn('Circuit breaker active: SAS verification was rejected. Suppressing automatic reconnection.')
@@ -1162,15 +1158,21 @@ export function createWebRtcService(callbacks: WebRtcCallbacks): WebRtcService {
       return false
     }
 
-    if (status === 'connected') return true
+    if (!forceFreshSignaling && status === 'connected' && clientDc?.readyState === 'open' && clientPc?.connectionState === 'connected') {
+      return true
+    }
 
     clientSession.clearReconnectTimer()
     clientSession.resetReconnectAttempts()
+    clientSession.resetOfferTimestamp()
     setStatus('connecting')
 
-    if (!signaling || !signaling.isConnected()) {
+    const needsFreshSignaling = forceFreshSignaling || !signaling || !signaling.isConnected()
+
+    if (needsFreshSignaling) {
       if (signaling) {
         try { signaling.close() } catch (_) {}
+        signaling = null
       }
       signaling = new SignalingChannel(currentInviteCode, resolveTargetSignalingEndpoint())
       await signaling.initTopic()
@@ -1179,10 +1181,16 @@ export function createWebRtcService(callbacks: WebRtcCallbacks): WebRtcService {
           if (localEcdhPubHex) {
             signaling!.send({ type: 'client_hello', ecdhPublicKey: localEcdhPubHex, deviceId: localDeviceId })
           }
-          if (clientPc && clientPc.connectionState === 'connected' && clientDc && clientDc.readyState === 'open') {
+          if (
+            !forceFreshSignaling &&
+            clientPc &&
+            clientPc.connectionState === 'connected' &&
+            clientDc &&
+            clientDc.readyState === 'open'
+          ) {
             return
           }
-          await clientSession.setupClientConnection()
+          await clientSession.setupClientConnection(clientForceRelay)
         },
         onError: () => {
           if (status !== 'connected' && (!clientPc || clientPc.connectionState !== 'connected')) {
@@ -1194,10 +1202,10 @@ export function createWebRtcService(callbacks: WebRtcCallbacks): WebRtcService {
         }
       })
     } else {
-      if (localEcdhPubHex) {
+      if (signaling && localEcdhPubHex) {
         signaling.send({ type: 'client_hello', ecdhPublicKey: localEcdhPubHex, deviceId: localDeviceId })
       }
-      await clientSession.setupClientConnection()
+      await clientSession.setupClientConnection(clientForceRelay)
     }
     return true
   }

@@ -110,4 +110,31 @@ describe('SignalingChannel Multi-Broker & LAN WebSocket', () => {
       expect.anything()
     )
   })
+
+  it('correctly maps broker ID "emqx" to official EMQX WebSocket URL', async () => {
+    const channel = new SignalingChannel('test-room-emqx', 'emqx')
+    await channel.initTopic()
+    channel.connect({
+      onMessage: vi.fn(),
+      onConnect: vi.fn()
+    })
+
+    expect(mqtt.connect).toHaveBeenCalledWith(
+      'wss://broker.emqx.io:8084/mqtt',
+      expect.anything()
+    )
+    expect(channel.isLanMode()).toBe(false)
+  })
+
+  it('resolveBrokerUrl maps broker IDs, lan shortcut, and fallbacks properly', async () => {
+    const { resolveBrokerUrl } = await import('../services/webrtc/signaling')
+    
+    expect(resolveBrokerUrl('emqx')).toBe('wss://broker.emqx.io:8084/mqtt')
+    expect(resolveBrokerUrl('EMQX')).toBe('wss://broker.emqx.io:8084/mqtt')
+    expect(resolveBrokerUrl('fallback')).toBe('wss://broker.emqx.io:8084/mqtt')
+    expect(resolveBrokerUrl(null)).toBe('wss://broker.emqx.io:8084/mqtt')
+    expect(resolveBrokerUrl('')).toBe('wss://broker.emqx.io:8084/mqtt')
+    expect(resolveBrokerUrl('wss://custom.io/mqtt')).toBe('wss://custom.io/mqtt')
+    expect(resolveBrokerUrl('invalid-broker-string')).toBe('wss://broker.emqx.io:8084/mqtt')
+  })
 })

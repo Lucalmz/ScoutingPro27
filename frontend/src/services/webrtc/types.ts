@@ -106,7 +106,7 @@ export interface WebRtcService {
   takeoverHost: () => Promise<void>
   isStandbyHost: () => boolean
   pingPeer?: (timeoutMs?: number) => Promise<boolean>
-  reconnectNow: () => Promise<boolean>
+  reconnectNow: (forceFreshSignaling?: boolean) => Promise<boolean>
   disconnect: () => void
   initHostSeq: (maxDbSeq: number) => void
   stampHostSeq: (records: ScoutingRecord[]) => ScoutingRecord[]

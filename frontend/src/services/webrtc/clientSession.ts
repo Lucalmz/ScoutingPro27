@@ -64,6 +64,7 @@ export function createClientSession(ctx: ClientSessionContext) {
   let reconnectAttempts = 0
   let reconnectTimer: any = null
   let isRebuilding = false
+  let lastOfferTimestamp = 0
 
   function clearReconnectTimer() {
     if (reconnectTimer) {
@@ -74,6 +75,10 @@ export function createClientSession(ctx: ClientSessionContext) {
 
   function resetReconnectAttempts() {
     reconnectAttempts = 0
+  }
+
+  function resetOfferTimestamp() {
+    lastOfferTimestamp = 0
   }
 
   function triggerClientReconnect() {
@@ -242,6 +247,7 @@ export function createClientSession(ctx: ClientSessionContext) {
         ctx.setClientSessionId(clientSessionId)
       }
 
+      lastOfferTimestamp = Date.now()
       log.info(`Dispatched Offer to Host via signaling (target: ${ctx.getClientHostSenderId() || 'broadcast'})`)
       signaling?.send({
         offer: offerPayload,
@@ -390,19 +396,25 @@ export function createClientSession(ctx: ClientSessionContext) {
 
       const curPc = ctx.getClientPc()
       const curDc = ctx.getClientDc()
-      const isActivelyConnectingOrOpen =
+      const isAlreadyConnected = Boolean(
         curPc &&
-        ['new', 'connecting', 'connected'].includes(curPc.connectionState) &&
+        curPc.connectionState === 'connected' &&
         curDc &&
-        curDc.readyState !== 'closed'
+        curDc.readyState === 'open'
+      )
+      const isOfferInFlight = Boolean(
+        curPc &&
+        curPc.signalingState === 'have-local-offer' &&
+        Date.now() - lastOfferTimestamp < 3000
+      )
 
-      if (!isActivelyConnectingOrOpen || hostSessionChanged) {
-        log.info(`Setting up client connection (isActivelyConnectingOrOpen: ${isActivelyConnectingOrOpen}, hostSessionChanged: ${hostSessionChanged})`)
+      if (hostSessionChanged || (!isAlreadyConnected && !isOfferInFlight)) {
+        log.info(`Setting up client connection on host_hello (isAlreadyConnected: ${isAlreadyConnected}, isOfferInFlight: ${isOfferInFlight}, hostSessionChanged: ${hostSessionChanged})`)
         clearReconnectTimer()
         reconnectAttempts = 0
         await setupClientConnection()
       } else {
-        log.info('Connection actively negotiating or open with host; preserving existing peer connection.')
+        log.info(`Preserving existing peer connection on host_hello (alreadyConnected: ${isAlreadyConnected}, offerInFlight: ${isOfferInFlight})`)
       }
     } else if (data.type === 'host_takeover') {
       log.info(`Received host_takeover by new host session: ${data.newHostSessionId} (from ${data.sender})`)
@@ -649,7 +661,8 @@ export function createClientSession(ctx: ClientSessionContext) {
     pingHost,
     handlePong,
     startDataChannelHeartbeat,
-    stopDataChannelHeartbeat
+    stopDataChannelHeartbeat,
+    resetOfferTimestamp
   }
 }
 
