@@ -56,7 +56,6 @@ export interface ClientSessionContext {
   confirmSas?: (peerId?: string) => void
   getUsername?: () => string
   getUserId?: () => string
-  isStandbyHost?: () => boolean
   callbacks: WebRtcCallbacks
 }
 
@@ -222,15 +221,13 @@ export function createClientSession(ctx: ClientSessionContext) {
         }
       }
 
-      const isStandbyHost = Boolean(ctx.isStandbyHost?.())
       const rawOffer = {
         type: offer.type,
         sdp: optimizeSdpCandidates(pc?.localDescription?.sdp || offer.sdp || ''),
         ticket: handshakeTicket,
         deviceId: localDeviceId,
         username: ctx.getUsername?.() || '',
-        userId: ctx.getUserId?.() || '',
-        isStandbyHost
+        userId: ctx.getUserId?.() || ''
       }
 
       let offerPayload: any = rawOffer
@@ -258,8 +255,7 @@ export function createClientSession(ctx: ClientSessionContext) {
         clientSessionId,
         hostSessionId: ctx.getCurrentHostSessionId(),
         username: ctx.getUsername?.() || '',
-        userId: ctx.getUserId?.() || '',
-        isStandbyHost
+        userId: ctx.getUserId?.() || ''
       }, ctx.getClientHostSenderId())
     } catch (err) {
       log.error('Error creating offer:', err)

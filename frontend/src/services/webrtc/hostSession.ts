@@ -342,7 +342,6 @@ export function createHostSignalingHandler(ctx: HostSessionContext) {
         if (data.ecdhPublicKey) {
           const clientDeviceId = offerData?.deviceId || data.deviceId || 'device_default'
           sas.clientDeviceIds.set(sender, clientDeviceId)
-          const isStandbyHostOffer = Boolean(offerData?.isStandbyHost || data.isStandbyHost)
           const isTicketVerified = Boolean(verifiedUser)
           const effectiveUserId = verifiedUser?.userId || offerData?.userId || data.userId || ''
           const effectiveUsername = verifiedUser?.username || offerData?.username || data.username || sender
@@ -367,10 +366,12 @@ export function createHostSignalingHandler(ctx: HostSessionContext) {
             isInSessionFlapping: isFlapping
           })
 
-          if (isStandbyHostOffer || trustEval.status === 'TRUSTED_MATCH') {
-            log.info(`[TOFU] ${isStandbyHostOffer ? 'Standby Host mirror connected' : 'Trusted device match'}: ${clientDeviceId} (${effectiveUsername}). Auto-approving SAS.`)
+          if (trustEval.status === 'TRUSTED_MATCH') {
+            log.info(`[TOFU] Trusted device match: ${clientDeviceId} (${effectiveUsername}). Auto-approving SAS.`)
             sas.clientSasStates.set(sender, 'VERIFIED')
-            ctx.callbacks.onClientConnected?.(effectiveUserId, effectiveUsername)
+            if (effectiveUserId) {
+              ctx.callbacks.onClientConnected?.(effectiveUserId, effectiveUsername)
+            }
 
             const pendingOut = sas.hostPendingOutgoing.get(sender) || []
             sas.hostPendingOutgoing.delete(sender)
@@ -384,19 +385,23 @@ export function createHostSignalingHandler(ctx: HostSessionContext) {
             }
           } else if (trustEval.status === 'TOFU_FIRST_SEEN') {
             log.info(`[TOFU] Establishing baseline trust for device ${clientDeviceId} (${effectiveUsername}) [ticketVerified: ${isTicketVerified}]. Auto-approving SAS.`)
-            await savePeerTrustRecord({
-              eventId: currentInviteCode || 'default_event',
-              userId: effectiveUserId,
-              username: effectiveUsername,
-              deviceId: clientDeviceId,
-              publicKeyHex: data.ecdhPublicKey,
-              firstSeenAt: Date.now(),
-              lastSeenAt: Date.now(),
-              trustedAt: Date.now(),
-              trustLevel: 'TOFU_TRUSTED'
-            })
+            if (effectiveUserId) {
+              await savePeerTrustRecord({
+                eventId: currentInviteCode || 'default_event',
+                userId: effectiveUserId,
+                username: effectiveUsername,
+                deviceId: clientDeviceId,
+                publicKeyHex: data.ecdhPublicKey,
+                firstSeenAt: Date.now(),
+                lastSeenAt: Date.now(),
+                trustedAt: Date.now(),
+                trustLevel: 'TOFU_TRUSTED'
+              })
+            }
             sas.clientSasStates.set(sender, 'VERIFIED')
-            ctx.callbacks.onClientConnected?.(effectiveUserId, effectiveUsername)
+            if (effectiveUserId) {
+              ctx.callbacks.onClientConnected?.(effectiveUserId, effectiveUsername)
+            }
 
             const pendingOut = sas.hostPendingOutgoing.get(sender) || []
             sas.hostPendingOutgoing.delete(sender)

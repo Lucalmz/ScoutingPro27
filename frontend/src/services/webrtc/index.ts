@@ -629,7 +629,6 @@ export function createWebRtcService(callbacks: WebRtcCallbacks): WebRtcService {
     confirmSas,
     getUsername: resolveCurrentUsername,
     getUserId: resolveCurrentUserId,
-    isStandbyHost: () => isStandbyHostMode,
     callbacks
   })
 
