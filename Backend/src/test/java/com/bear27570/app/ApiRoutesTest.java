@@ -160,6 +160,61 @@ class ApiRoutesTest {
     }
 
     @Test
+    void testOrphanTokenReturns401AndDoesNotCrashWith500() {
+        JavalinTest.test(app, (server, client) -> {
+            // Generate valid JWT signed with correct secret, but user ID does NOT exist in DB
+            String orphanToken = com.bear27570.app.util.JwtUtil.generateToken("9601957e-2221-47a1-9e6f-5fe3ed518982", "NonExistentUser");
+
+            var res = client.post("/api/events", "{\"name\":\"Should Fail Cleanly\"}", b -> b.header("Authorization", "Bearer " + orphanToken));
+            // Must return 401 Unauthorized so client clears localStorage, NOT 500 ForeignKey constraint violation
+            assertThat(res.code()).isEqualTo(401);
+            assertThat(res.body().string()).contains("User does not exist or database was reset");
+        });
+    }
+
+    @Test
+    void testMigratedUserTokenSelfHealsByUsernameAndUpdatesHostId() {
+        JavalinTest.test(app, (server, client) -> {
+            String oldLegacyUuid = "9601957e-2221-47a1-9e6f-5fe3ed518982";
+            String username = "Lucalmz";
+            String passwordHash = org.mindrot.jbcrypt.BCrypt.hashpw("123456", org.mindrot.jbcrypt.BCrypt.gensalt());
+
+            // 1. Initially insert user with legacy random UUID
+            jdbi.useHandle(handle -> {
+                handle.execute("INSERT INTO users (id, username, password) VALUES (?, ?, ?)", oldLegacyUuid, username, passwordHash);
+            });
+
+            // 2. Client has a cached token with old legacy UUID
+            String cachedClientToken = com.bear27570.app.util.JwtUtil.generateToken(oldLegacyUuid, username);
+
+            // 3. System executes UserDeterministicIdMigrator (changing Lucalmz ID to deterministic ID)
+            com.bear27570.app.db.UserDeterministicIdMigrator.migrate(jdbi);
+
+            String expectedDeterministicId = com.bear27570.app.util.UserUtil.generateDeterministicUserId(username);
+            jdbi.useHandle(handle -> {
+                // Ensure old UUID is gone from users table and new deterministic ID is present
+                var oldUser = handle.createQuery("SELECT * FROM users WHERE id = :id").bind("id", oldLegacyUuid).mapToMap().findOne();
+                assertThat(oldUser).isEmpty();
+                var newUser = handle.createQuery("SELECT * FROM users WHERE id = :id").bind("id", expectedDeterministicId).mapToMap().findOne();
+                assertThat(newUser).isPresent();
+            });
+
+            // 4. Client makes request with OLD token (like user did)
+            var res = client.post("/api/events", "{\"name\":\"Auto Healed Event\"}", b -> b.header("Authorization", "Bearer " + cachedClientToken));
+
+            // 5. Must succeed with 200, return X-Refreshed-Token, and set event host_id to deterministic ID
+            assertThat(res.code()).isEqualTo(200);
+            assertThat(res.headers().get("X-Refreshed-Token")).isNotNull();
+
+            String eventId = res.body().string().split("\"id\":\"")[1].split("\"")[0];
+            jdbi.useHandle(handle -> {
+                var evt = handle.createQuery("SELECT * FROM events WHERE id = :id").bind("id", eventId).mapToMap().one();
+                assertThat(evt.get("host_id")).isEqualTo(expectedDeterministicId);
+            });
+        });
+    }
+
+    @Test
     void testPreserveLegacyUserIdOnLogin() {
         JavalinTest.test(app, (server, client) -> {
             String legacyId = "legacy-random-uuid-555";

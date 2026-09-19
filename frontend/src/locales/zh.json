@@ -125,7 +125,11 @@
     "ftc_event_code_label": "FTC 比赛代码 (Event Code)",
     "ftc_event_code_placeholder": "例如: USUTSAS1",
     "standby_host_toast": "检测到当前赛事已有活跃主机，本机已自动进入【备用监控模式】",
-    "sas_rejected_toast": "检测到安全码不匹配或已切断连接: {reason}"
+    "sas_rejected_toast": "检测到安全码不匹配或已切断连接: {reason}",
+    "remove_scout": "从赛事中移除",
+    "remove_scout_confirm": "确定要从当前赛事移除考察员 \"{name}\" 吗？",
+    "scout_removed_success": "已成功移除该考察员",
+    "scout_removed_local": "已从本地名单中移除"
   },
   "confirm_dialog": {
     "title": "操作确认",
@@ -207,7 +211,8 @@
     "teleop_park": "终局装载区停泊 (PARK +5 分)",
     "balls_in": "{count} 进",
     "balls_missed": "{count} 丢",
-    "balls_summary": "{inCount} 进 / {missCount} 丢"
+    "balls_summary": "{inCount} 进 / {missCount} 丢",
+    "draft_restored": "已从息屏防丢草稿自动恢复"
   },
   "history": {
     "loading": "正在加载历史记录...",
@@ -224,6 +229,7 @@
     "btn_cancel": "取消",
     "btn_save": "保存修改",
     "scout_id": "提交者 ID",
+    "anonymous_scout": "匿名队员",
     "btn_resync": "重推",
     "resync_triggered": "已向主机发起同步推送",
     "resync_offline_queued": "当前离线，已标记待同步，连通主机后将自动补发"
@@ -245,7 +251,8 @@
     "ban_team": "Ban 队",
     "avg_tips": "出球率",
     "avg_tips_desc": "依据赛场实际进球数按比例分摊的队伍净贡献率",
-    "unban_team": "解除标记"
+    "unban_team": "解除标记",
+    "banned_badge": "已屏蔽"
   },
   "team_detail": {
     "title": "队伍 {team} 详情",
@@ -309,7 +316,8 @@
     "transport": "传输拓扑",
     "transport_type": "连接类型",
     "host_topology": "主机多路拓扑",
-    "sas_state": "安全核验 (SAS)"
+    "sas_state": "安全核验 (SAS)",
+    "sas_code_prompt": "请当面或通过语音核对以下安全码是否完全一致"
   },
   "diagnostics": {
     "modal_title": "WebRTC 连接与链路诊断",
@@ -551,7 +559,8 @@
     "close": "关闭",
     "saving": "保存中...",
     "edit": "编辑",
-    "delete": "删除"
+    "delete": "删除",
+    "dismiss": "忽略"
   },
   "user": {
     "edit_nickname": "修改资料与密码",
@@ -657,7 +666,17 @@
     "pill_sync_detail": "成功同步 {files} 个文件 ({records} 条记录)",
     "pill_dropped_detail": "已拦截 {count} 条非法身份记录",
     "pill_event_synced": "已导入赛事配置 [{name}]",
-    "scout_names_placeholder": "例如: Alice, Bob"
+    "scout_names_placeholder": "例如: Alice, Bob",
+    "export_success": "导出成功！",
+    "scanning_hint": "正在智能检索与筛选数据包...",
+    "records_count": "{count} 条记录",
+    "files_count": "{count} 个文件",
+    "selected_folder": "文件夹 [{folder}] ({count} 个文件)",
+    "selected_files": "已选 {count} 个文件",
+    "drag_imported_files": "拖拽导入 ({count} 个文件)",
+    "err_parse_failed": "数据包解析异常",
+    "err_apply_failed": "应用同步数据包失败",
+    "btn_processing": "处理中..."
   },
   "schedule": {
     "title": "赛程与排班",
@@ -952,7 +971,9 @@
       "sorting": "分选识别 (Sorting)",
       "pollen_only": "仅小球 (Pollen Only)"
     },
-    "claimed_pts_unit": "{pts}分"
+    "claimed_pts_unit": "{pts}分",
+    "flower_verified": "花朵已证实",
+    "flower_pending_verify": "花朵待验证"
   },
   "custom_fields": {
     "title": "自定义字段管理",
@@ -1151,10 +1172,20 @@
     "preset_balls": "{count} 球",
     "cap_reached_tip": "单轮已满 4 球，请点击【+ 下一轮】继续记录",
     "cannot_start_empty_cycle": "当前轮尚未出球，无需切换新轮次",
-    "dismiss_draft": "忽略"
+    "dismiss_draft": "忽略",
+    "missed_short": "丢"
   },
   "webrtc": {
     "single_record_received": "收到 #{team} 第 {match} 场正赛记录",
     "batch_records_received": "已批量同步 {count} 条正赛记录"
+  },
+  "inbox": {
+    "title": "消息箱",
+    "mark_all_read": "全部标为已读",
+    "clear_all": "清空",
+    "no_messages": "暂无新消息",
+    "mark_read": "标为已读",
+    "delete": "删除",
+    "enter_event_to_view_conflict": "请先进入对应赛事以查看冲突记录"
   }
 }

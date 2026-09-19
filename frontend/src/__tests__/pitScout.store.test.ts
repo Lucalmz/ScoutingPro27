@@ -103,7 +103,8 @@ describe('PitScout Store & Unified Team Roster', () => {
     ]
 
     const list = pitStore.unifiedTeamList
-    // Unique teams should be: 25787, 27570, 33333 (total 3)
+    // Unique teams should be: 25787 (schedule), 27570 (official+pit), 33333 (match scout)
+    // Teams appearing in match records without pit record are auto-added as blank unscouted teams (total 3)
     expect(list).toHaveLength(3)
 
     const team27570 = list.find((t) => t.teamNumber === 27570)
@@ -116,10 +117,51 @@ describe('PitScout Store & Unified Team Roster', () => {
     expect(team25787).toBeDefined()
     expect(team25787?.hasPitRecord).toBe(false)
 
+    // Team 33333 is auto-added from match scouting as blank unscouted team (+1 to total, hasPitRecord: false)
     const team33333 = list.find((t) => t.teamNumber === 33333)
     expect(team33333).toBeDefined()
     expect(team33333?.hasPitRecord).toBe(false)
     expect(team33333?.matchCount).toBe(1)
+  })
+
+  it('keeps stats invariant regardless of UI search and filter criteria', () => {
+    const pitStore = usePitScoutStore()
+    pitStore.currentEventId = 'e1'
+    pitStore.officialTeams = [
+      { teamNumber: 1001, nameFull: 'Team 1001' },
+      { teamNumber: 1002, nameFull: 'Team 1002' }
+    ]
+    pitStore.records = [
+      createMockPitRecord({
+        id: 'p_1001',
+        eventId: 'e1',
+        teamNumber: 1001,
+        drivetrainType: 'mecanum'
+      })
+    ]
+
+    // Base stats: total = 2, recorded = 1, percentage = 50
+    expect(pitStore.stats.total).toBe(2)
+    expect(pitStore.stats.recorded).toBe(1)
+    expect(pitStore.stats.percentage).toBe(50)
+
+    // Filter by searchQuery to '1001'
+    pitStore.searchQuery = '1001'
+    expect(pitStore.unifiedTeamList).toHaveLength(1)
+    // stats must remain based on allRosterTeams!
+    expect(pitStore.stats.total).toBe(2)
+    expect(pitStore.stats.recorded).toBe(1)
+    expect(pitStore.stats.percentage).toBe(50)
+
+    // Filter by record status 'unrecorded'
+    pitStore.searchQuery = ''
+    pitStore.filterRecordStatus = 'unrecorded'
+    expect(pitStore.unifiedTeamList).toHaveLength(1)
+    expect(pitStore.unifiedTeamList[0].teamNumber).toBe(1002)
+    // stats must still remain 2 total, 1 recorded (50%)
+    expect(pitStore.stats.total).toBe(2)
+    expect(pitStore.stats.recorded).toBe(1)
+    expect(pitStore.stats.percentage).toBe(50)
   })
 
   it('strictly isolates unifiedTeamList to currentEventId', () => {

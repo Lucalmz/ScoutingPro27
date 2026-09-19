@@ -148,7 +148,7 @@ function handleExportEvent() {
   )
   const filename = generateEventFileName(currentEvent.value)
   triggerFileDownload(filename, content)
-  toastStore.showToast(t('offline_sync.export_event_title') + ' 导出成功！', 'info')
+  toastStore.showToast(`${t('offline_sync.export_event_title')} ${t('offline_sync.export_success')}`, 'info')
 }
 
 function handleExportSync() {
@@ -178,7 +178,7 @@ function handleExportSync() {
 
   triggerFileDownload(previewFileName.value, content)
   toastStore.showToast(
-    isHost.value ? t('offline_sync.btn_export_info') + ' 导出成功！' : t('offline_sync.btn_export_my_records') + ' 导出成功！',
+    `${isHost.value ? t('offline_sync.btn_export_info') : t('offline_sync.btn_export_my_records')} ${t('offline_sync.export_success')}`,
     'info'
   )
 }
@@ -191,10 +191,10 @@ async function handleFilesSelected(e: Event, isFolder = false) {
     if (firstFile) {
       if (isFolder) {
         const sample = firstFile.webkitRelativePath
-        const folder = sample ? sample.split('/')[0] : '选中文件夹'
-        selectedSourceLabel.value = `文件夹 [${folder}] (${fileList.length} 个文件)`
+        const folder = sample ? sample.split('/')[0] : 'folder'
+        selectedSourceLabel.value = t('offline_sync.selected_folder', { folder, count: fileList.length })
       } else {
-        selectedSourceLabel.value = fileList.length === 1 ? firstFile.name : `已选 ${fileList.length} 个文件`
+        selectedSourceLabel.value = fileList.length === 1 ? firstFile.name : t('offline_sync.selected_files', { count: fileList.length })
       }
     }
     await processFiles(Array.from(fileList))
@@ -210,7 +210,7 @@ async function onDrop(e: DragEvent) {
       if (files.length > 0) {
         const firstFile = files[0]
         if (firstFile) {
-          selectedSourceLabel.value = files.length === 1 ? firstFile.name : `拖拽导入 (${files.length} 个文件)`
+          selectedSourceLabel.value = files.length === 1 ? firstFile.name : t('offline_sync.drag_imported_files', { count: files.length })
         }
         await processFiles(files)
       }
@@ -227,7 +227,7 @@ async function processFiles(files: File[]) {
     const res = await scanFilesAndFolders(files, currentEvent.value?.id)
     scanResult.value = res
   } catch (err: any) {
-    importError.value = err.message || '数据包解析异常'
+    importError.value = err.message || t('offline_sync.err_parse_failed')
   } finally {
     isScanning.value = false
   }
@@ -282,7 +282,7 @@ async function applyImport() {
     resetImport()
     handleClose()
   } catch (err: any) {
-    importError.value = err.message || '应用同步数据包失败'
+    importError.value = err.message || t('offline_sync.err_apply_failed')
     toastStore.showError(err, t('offline_sync.import_failed'))
   } finally {
     isApplying.value = false
@@ -478,7 +478,7 @@ async function applyImport() {
 
         <div v-if="isScanning" class="scanning-indicator">
           <div class="scanning-spinner"></div>
-          <span>正在智能检索与筛选数据包...</span>
+          <span>{{ t('offline_sync.scanning_hint') }}</span>
         </div>
 
         <div v-if="importError" class="import-error-banner">
@@ -543,7 +543,7 @@ async function applyImport() {
                 <span class="matched-file-name">{{ item.file.name }}</span>
               </div>
               <span class="matched-file-meta">
-                {{ item.scoutName || 'Scout' }} · {{ item.recordCount }} 条记录
+                {{ item.scoutName || 'Scout' }} · {{ t('offline_sync.records_count', { count: item.recordCount }) }}
               </span>
             </div>
           </div>
@@ -554,7 +554,7 @@ async function applyImport() {
             :disabled="isApplying"
           >
             <span class="material-icons">sync</span>
-            {{ isApplying ? '处理中...' : `${t('offline_sync.btn_apply_import')} (${scanResult.matchedEventFiles.length + scanResult.matchedSyncFiles.length} 个文件 / ${scanResult.totalRecords} 条记录)` }}
+            {{ isApplying ? t('offline_sync.btn_processing') : `${t('offline_sync.btn_apply_import')} (${t('offline_sync.files_count', { count: scanResult.matchedEventFiles.length + scanResult.matchedSyncFiles.length })} / ${t('offline_sync.records_count', { count: scanResult.totalRecords })})` }}
           </button>
         </div>
       </div>

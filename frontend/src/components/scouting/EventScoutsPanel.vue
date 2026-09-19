@@ -290,21 +290,19 @@ const uniqueScouts = computed(() => {
 
 async function handleRemoveMember(scoutId: string, scoutName: string) {
   if (!props.event?.id) return
-  const confirmMsg = isZh.value
-    ? `确定要从当前赛事移除考察员 "${scoutName}" 吗？`
-    : `Are you sure you want to remove scout "${scoutName}" from this event?`
+  const confirmMsg = t('event.remove_scout_confirm', { name: scoutName })
   if (!confirm(confirmMsg)) return
 
   try {
     removeKnownScout(props.event.id, scoutId)
     await removeEventMember(props.event.id, scoutId)
     await refreshMembers()
-    toastStore.showToast(isZh.value ? '已成功移除该考察员' : 'Scout removed successfully', 'success')
+    toastStore.showToast(t('event.scout_removed_success'), 'success')
   } catch (err: any) {
     console.warn('[EventScoutsPanel] Failed to remove member via backend:', err)
     removeKnownScout(props.event.id, scoutId)
     await refreshMembers()
-    toastStore.showToast(isZh.value ? '已从本地名单中移除' : 'Removed from local known list', 'info')
+    toastStore.showToast(t('event.scout_removed_local'), 'info')
   }
 }
 
@@ -418,7 +416,7 @@ async function sendDirectMessage(scoutId: string, scoutName?: string) {
             v-if="eventStore.isHost && s.role !== 'host'"
             @click="handleRemoveMember(s.id, s.name)"
             class="btn-remove-scout"
-            :title="t('event.remove_scout') || (isZh ? '从赛事中移除' : 'Remove from Event')"
+            :title="t('event.remove_scout')"
           >
             <span class="material-icons" style="font-size: 16px; vertical-align: middle;">delete_outline</span>
           </button>

@@ -84,8 +84,20 @@ function syncTooltip(rec: ScoutingRecord): string {
     : t('history.sync_pending')
 }
 
+function canEditRecord(rec: ScoutingRecord): boolean {
+  // 1. Host 账户：拥有最高管理权限，可以更改任何一个人的记录（无论是否已同步）
+  if (eventStore.isHost) return true
+  // 2. 普通 Scout 账户：每个用户可以更改属于自己的记录（无论是否已同步）
+  if (userStore.userId && rec.scoutId === userStore.userId) return true
+  // 3. 尚未权威同步/落库的记录（本地待确认记录）：允许编辑修正
+  if (!isRecordSynced(rec)) return true
+  // 4. 冲突记录：发生冲突时允许发起纠错编辑
+  if (rec.isConflict) return true
+  return false
+}
+
 function startEdit(record: ScoutingRecord) {
-  if (isRecordSynced(record) && !record.isConflict) return // can't edit synced unless conflicted
+  if (!canEditRecord(record)) return
   emit('editRecord', record)
 }
 
@@ -105,6 +117,20 @@ function retrySyncRecord(record: ScoutingRecord) {
 function formatDate(iso: string): string {
   const d = new Date(iso)
   return d.toLocaleString()
+}
+
+function getScoutDisplayName(rec: ScoutingRecord): string {
+  if (rec.scoutName && rec.scoutName.trim()) {
+    return rec.scoutName.trim()
+  }
+  if (rec.scoutId && rec.scoutId === userStore.userId && userStore.username) {
+    return userStore.username
+  }
+  const peer = connStore.connectedScouts?.find(s => s.id === rec.scoutId)
+  if (peer && peer.name) {
+    return peer.name
+  }
+  return t('history.anonymous_scout')
 }
 
 const highlightTop = ref(0)
@@ -198,10 +224,9 @@ function enter(el: Element, done: () => void) {
             </span>
             <div class="card-meta">
               <span class="card-date">{{ formatDate(rec.createdAt) }}</span>
-              <span v-if="rec.scoutId" class="card-scout-id" :title="rec.scoutName ? `${rec.scoutName} (${rec.scoutId})` : rec.scoutId">
+              <span v-if="rec.scoutId || rec.scoutName" class="card-scout-id" :title="getScoutDisplayName(rec)">
                 <span class="material-icons scout-meta-icon">person</span>
-                <span class="scout-meta-text">{{ t('history.scout_id') }}: {{ rec.scoutId }}</span>
-                <span v-if="rec.scoutName" class="scout-meta-name">({{ rec.scoutName }})</span>
+                <span class="scout-meta-name">{{ getScoutDisplayName(rec) }}</span>
               </span>
             </div>
           </div>
@@ -233,9 +258,10 @@ function enter(el: Element, done: () => void) {
           <span>{{ t('history.endgame') }}: {{ rec.endgameScore }} {{ t('history.pts') }}</span>
         </div>
 
-        <!-- Edit & Resync buttons for unconfirmed records or conflicted records -->
-        <div v-if="!isRecordSynced(rec) || rec.isConflict" class="card-actions">
+        <!-- Edit & Resync buttons -->
+        <div v-if="canEditRecord(rec) || (!isRecordSynced(rec) && rec.scoutId === userStore.userId)" class="card-actions">
           <button
+            v-if="canEditRecord(rec)"
             class="btn-edit"
             :class="{ 'btn-edit-conflict': rec.isConflict }"
             @click="startEdit(rec)"

@@ -66,7 +66,20 @@ public class JwtUtil {
                 .sign(ALGORITHM);
     }
 
-    public static String verifyToken(String token) {
+    public static class TokenClaims {
+        private final String userId;
+        private final String username;
+
+        public TokenClaims(String userId, String username) {
+            this.userId = userId;
+            this.username = username;
+        }
+
+        public String getUserId() { return userId; }
+        public String getUsername() { return username; }
+    }
+
+    public static TokenClaims verifyTokenClaims(String token) {
         try {
             JWTVerifier verifier = JWT.require(ALGORITHM)
                     .withIssuer("ScoutingPro27")
@@ -77,10 +90,17 @@ public class JwtUtil {
                 // Handshake ticket cannot be used for general API access!
                 return null;
             }
-            return jwt.getClaim("userId").asString();
+            String userId = jwt.getClaim("userId").asString();
+            String username = jwt.getClaim("username").asString();
+            return new TokenClaims(userId, username);
         } catch (JWTVerificationException exception) {
             return null; // Invalid signature/claims
         }
+    }
+
+    public static String verifyToken(String token) {
+        TokenClaims claims = verifyTokenClaims(token);
+        return claims != null ? claims.getUserId() : null;
     }
 
     public static String sha256Hex(String data) {

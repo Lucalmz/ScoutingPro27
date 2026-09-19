@@ -441,7 +441,7 @@ function viewTeamDetails(teamNumber: number) {
               >
                 <div class="team-header-line">
                   <span class="team-num">{{ row.teamNumber }}</span>
-                  <span v-if="recordStore.bannedTeams.includes(row.teamNumber)" class="banned-badge">BANNED</span>
+                  <span v-if="recordStore.bannedTeams.includes(row.teamNumber)" class="banned-badge">{{ t('rankings.banned_badge') }}</span>
                 </div>
                 <!-- 战术标签徽章 -->
                 <div v-if="recordStore.getTagsForTeam(row.teamNumber).length > 0" class="row-tags-list">

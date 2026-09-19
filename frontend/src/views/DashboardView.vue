@@ -244,10 +244,10 @@ function handleOpenRenameModal() {
         <button
           class="topbar-btn inbox-topbar-btn"
           @click="inboxStore.toggleOpen()"
-          title="Inbox"
+          :title="t('inbox.title')"
         >
           <span class="material-icons" style="font-size: 18px; margin-right: 4px;">inbox</span>
-          <span class="topbar-btn-text">Inbox</span>
+          <span class="topbar-btn-text">{{ t('inbox.title') }}</span>
           <span v-if="inboxStore.unreadCount > 0" class="topbar-unread-badge">{{ inboxStore.unreadCount }}</span>
         </button>
         <button

@@ -162,6 +162,27 @@
   max-width: 400px;
 }
 
+.btn-create-pit-record {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  margin-top: 8px;
+  padding: 10px 20px;
+  border-radius: 8px;
+  background: var(--primary, #39ff14);
+  border: 1px solid var(--primary, #39ff14);
+  color: var(--primary-foreground, #000000);
+  font-size: 14px;
+  font-weight: 700;
+  cursor: pointer;
+  transition: all 0.2s ease;
+}
+
+.btn-create-pit-record:hover {
+  filter: brightness(1.15);
+  box-shadow: 0 0 16px rgba(57, 255, 20, 0.4);
+}
+
 .spinning {
   animation: spin 1s linear infinite;
 }

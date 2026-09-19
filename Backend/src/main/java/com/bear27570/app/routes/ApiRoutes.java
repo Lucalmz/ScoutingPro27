@@ -1,6 +1,8 @@
 package com.bear27570.app.routes;
 
 import com.bear27570.app.dao.RecordDao;
+import com.bear27570.app.dao.UserDao;
+import com.bear27570.app.model.User;
 import com.bear27570.app.util.FtcApiClient;
 import com.bear27570.app.util.JwtUtil;
 import com.google.gson.Gson;
@@ -147,11 +149,29 @@ public class ApiRoutes {
                 throw new io.javalin.http.UnauthorizedResponse("Missing or invalid token");
             }
             String token = authHeader.substring(7);
-            String userId = JwtUtil.verifyToken(token);
-            if (userId == null) {
+            JwtUtil.TokenClaims claims = JwtUtil.verifyTokenClaims(token);
+            if (claims == null || claims.getUserId() == null || claims.getUserId().isBlank()) {
                 throw new io.javalin.http.UnauthorizedResponse("Invalid or expired token");
             }
-            ctx.attribute("userId", userId);
+
+            String effectiveUserId = claims.getUserId();
+            User user = jdbi.withExtension(UserDao.class, dao -> dao.findById(claims.getUserId()));
+            if (user == null) {
+                // 自愈容错：若因用户模型确定性迁移，原有 Token 中旧 UUID 在数据库中已重命名，尝试通过 Token 中的 username 查找已登记的用户
+                if (claims.getUsername() != null && !claims.getUsername().isBlank()) {
+                    User migratedUser = jdbi.withExtension(UserDao.class, dao -> dao.findRegisteredByUsername(claims.getUsername()));
+                    if (migratedUser != null) {
+                        effectiveUserId = migratedUser.getId();
+                        String refreshedToken = JwtUtil.generateToken(migratedUser.getId(), migratedUser.getUsername());
+                        ctx.header("X-Refreshed-Token", refreshedToken);
+                        ctx.attribute("userId", effectiveUserId);
+                        return;
+                    }
+                }
+                // 孤儿 Token / 数据库已重置：必须抛出 401 明确告知前端 Session 已失效，杜绝外键约束致命崩溃
+                throw new io.javalin.http.UnauthorizedResponse("User does not exist or database was reset; please log in again");
+            }
+            ctx.attribute("userId", effectiveUserId);
         });
 
         // ==================== Domain Sub-Routes ====================

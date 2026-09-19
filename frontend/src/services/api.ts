@@ -195,6 +195,19 @@ async function request<T>(
     clearTimeout(timeoutId)
   }
 
+  // Transparent token refresh for migrated accounts
+  const refreshedToken = res.headers.get('x-refreshed-token')
+  if (refreshedToken) {
+    const userJson = localStorage.getItem('scoutingpro-user')
+    if (userJson) {
+      try {
+        const u = JSON.parse(userJson)
+        u.token = refreshedToken
+        localStorage.setItem('scoutingpro-user', JSON.stringify(u))
+      } catch {}
+    }
+  }
+
   if (!res.ok) {
     const isAuthExempt =
       path.startsWith('/user/rename') ||

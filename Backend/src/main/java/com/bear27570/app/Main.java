@@ -287,8 +287,9 @@ public class Main {
             flyway.migrate();
 
             if (splash != null) splash.updateProgress(35, "Connecting to database...");
-            logger.info("连接 JDBI...");
+            logger.info("连接 JDBI 并执行确定性用户 ID 校验...");
             Jdbi jdbi = JdbiConfig.create(dataSource);
+            com.bear27570.app.db.UserDeterministicIdMigrator.migrate(jdbi);
 
             // ==========================================
             // 端口配置：默认 8080（标准防火墙规则端口），可通过 --port=N 或 DEV_PORT 自定义

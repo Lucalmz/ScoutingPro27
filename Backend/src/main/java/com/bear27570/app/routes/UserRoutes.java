@@ -5,6 +5,7 @@ import com.bear27570.app.db.UserDeterministicIdMigrator;
 import com.bear27570.app.model.User;
 import com.bear27570.app.util.DbUtil;
 import com.bear27570.app.util.JwtUtil;
+import com.bear27570.app.util.UserUtil;
 import com.google.gson.Gson;
 import io.javalin.config.RoutesConfig;
 import io.javalin.http.BadRequestResponse;
@@ -50,13 +51,27 @@ public class UserRoutes {
                 ctx.status(400).result("token required");
                 return;
             }
-            String userId = JwtUtil.verifyToken(tokenToVerify);
-            if (userId == null) {
+            JwtUtil.TokenClaims claims = JwtUtil.verifyTokenClaims(tokenToVerify);
+            if (claims == null || claims.getUserId() == null) {
                 ctx.status(401).result("Invalid token signature");
                 return;
             }
-            User user = jdbi.withExtension(UserDao.class, dao -> dao.findById(userId));
+            User user = jdbi.withExtension(UserDao.class, dao -> dao.findById(claims.getUserId()));
             if (user == null) {
+                if (claims.getUsername() != null && !claims.getUsername().isBlank()) {
+                    User migrated = jdbi.withExtension(UserDao.class, dao -> dao.findRegisteredByUsername(claims.getUsername()));
+                    if (migrated != null) {
+                        String refreshed = JwtUtil.generateToken(migrated.getId(), migrated.getUsername());
+                        ctx.header("X-Refreshed-Token", refreshed);
+                        ctx.result(gson.toJson(Map.of(
+                                "valid", true,
+                                "userId", migrated.getId(),
+                                "username", migrated.getUsername(),
+                                "token", refreshed
+                        ))).contentType("application/json");
+                        return;
+                    }
+                }
                 ctx.status(404).result("User not found");
                 return;
             }
@@ -92,7 +107,7 @@ public class UserRoutes {
                     if (existing != null) {
                         throw new RuntimeException("User already exists");
                     }
-                    String userId = UUID.randomUUID().toString();
+                    String userId = UserUtil.generateDeterministicUserId(username.trim());
                     User u = new User(userId, username.trim());
                     u.setPassword(BCrypt.hashpw(password, BCrypt.gensalt()));
                     dao.upsert(u);

@@ -25,13 +25,14 @@ vi.mock('vue-i18n', async (importOriginal) => {
     'wizard.cancel_edit': '取消编辑',
     'wizard.level_qual': '资格赛',
     'wizard.level_playoff': '淘汰赛',
+    'wizard.missed_short': '丢',
     'scouting.red': '红方',
     'scouting.blue': '蓝方'
   }
   return {
     ...actual,
     useI18n: () => ({
-      t: (key: string) => dict[key] || key,
+      t: (key: string, fallback?: any) => (typeof fallback === 'string' ? dict[key] || fallback : dict[key] || key),
       te: (key: string) => Boolean(dict[key])
     })
   }
@@ -315,5 +316,125 @@ describe('MobilePhaseWizardForm.vue', () => {
     await closeIcon.trigger('click')
     chips = wrapper.findAll('.cycle-chip')
     expect(chips.length).toBe(0)
+  })
+
+  it('enforces manual cycle progression with 0-ball protection and max-4-balls cap with pulsing glow', async () => {
+    const wrapper = mount(MobilePhaseWizardForm, {
+      props: {
+        eventId: 'evt_1',
+        scoutId: 'scout_1',
+        scoutName: 'Alice'
+      }
+    })
+
+    await wrapper.find('.red-btn').trigger('click')
+    await wrapper.findAll('.giant-num-input')[1].setValue('27570')
+    const steps = wrapper.findAll('.stepper-step')
+    await steps[2].trigger('click')
+
+    const newCycleBtn = wrapper.find('.step-teleop .btn-new-cycle')
+    const teleopHitBtn = wrapper.find('.teleop-hero-hit')
+
+    // 1 ball
+    await teleopHitBtn.trigger('click')
+    expect(wrapper.findAll('.step-teleop .cycle-chip').length).toBe(1)
+    expect(wrapper.find('.step-teleop .cycle-chip').text()).toContain('1')
+
+    // Now start new cycle
+    await newCycleBtn.trigger('click')
+    // Cycle #2 started with 0 balls
+    expect(wrapper.findAll('.step-teleop .cycle-chip').length).toBe(2)
+
+    // 0-ball protection: attempting to click newCycleBtn again while current cycle is 0 balls should be blocked!
+    await newCycleBtn.trigger('click')
+    expect(wrapper.findAll('.step-teleop .cycle-chip').length).toBe(2) // still 2
+
+    // Now fill 4 balls in Cycle #2
+    await teleopHitBtn.trigger('click') // 1
+    await teleopHitBtn.trigger('click') // 2
+    await teleopHitBtn.trigger('click') // 3
+    await teleopHitBtn.trigger('click') // 4 (cap reached!)
+    expect(wrapper.findAll('.step-teleop .cycle-chip')[1].text()).toContain('4')
+
+    // Pulsing glow should be active on the new cycle button
+    expect(newCycleBtn.classes()).toContain('pulsing-glow')
+
+    // Clicking hit again should NOT exceed 4 balls
+    await teleopHitBtn.trigger('click') // 5th click blocked
+    expect(wrapper.findAll('.step-teleop .cycle-chip')[1].text()).toContain('4')
+
+    // Cycle #2 is capped at 4 balls, cut to Cycle #3
+    await newCycleBtn.trigger('click')
+    expect(wrapper.findAll('.step-teleop .cycle-chip').length).toBe(3)
+  })
+
+  it('supports preset capsules [1, 2, 3, 4] with safety truncation', async () => {
+    const wrapper = mount(MobilePhaseWizardForm, {
+      props: {
+        eventId: 'evt_1',
+        scoutId: 'scout_1',
+        scoutName: 'Alice'
+      }
+    })
+
+    await wrapper.find('.red-btn').trigger('click')
+    await wrapper.findAll('.giant-num-input')[1].setValue('27570')
+    const steps = wrapper.findAll('.stepper-step')
+    await steps[2].trigger('click')
+
+    // Tapping preset capsule [3球]
+    const presetCapsules = wrapper.findAll('.step-teleop .btn-preset-capsule')
+    expect(presetCapsules.length).toBe(4)
+
+    await presetCapsules[2].trigger('click') // 3 balls
+    expect(wrapper.find('.step-teleop .cycle-chip').text()).toContain('3')
+
+    // Add 1 miss -> 3 hits + 1 miss = 4 attempts (full cap)
+    await wrapper.find('.step-teleop .btn-miss').trigger('click')
+    expect(wrapper.find('.step-teleop .cycle-chip').text()).toContain('3')
+    expect(wrapper.find('.step-teleop .chip-miss-val').text()).toContain('1丢')
+
+    // Tapping preset [4球] should truncate miss to 0 because 4 - 4 = 0: hits=4, misses=0
+    await presetCapsules[3].trigger('click') // 4 balls
+    expect(wrapper.find('.step-teleop .cycle-chip').text()).toContain('4')
+    expect(wrapper.find('.step-teleop .chip-miss-val').exists()).toBe(false)
+  })
+
+  it('supports single-step undo and cross-cycle empty undo', async () => {
+    const wrapper = mount(MobilePhaseWizardForm, {
+      props: {
+        eventId: 'evt_1',
+        scoutId: 'scout_1',
+        scoutName: 'Alice'
+      }
+    })
+
+    await wrapper.find('.red-btn').trigger('click')
+    await wrapper.findAll('.giant-num-input')[1].setValue('27570')
+    const steps = wrapper.findAll('.stepper-step')
+    await steps[2].trigger('click')
+
+    const teleopHitBtn = wrapper.find('.teleop-hero-hit')
+    const teleopUndoBtn = wrapper.find('.step-teleop .btn-undo')
+    const newCycleBtn = wrapper.find('.step-teleop .btn-new-cycle')
+
+    // Add 2 balls in Cycle #1
+    await teleopHitBtn.trigger('click')
+    await teleopHitBtn.trigger('click')
+    expect(wrapper.find('.step-teleop .cycle-chip').text()).toContain('2')
+
+    // Single step undo: decrements to 1 ball
+    await teleopUndoBtn.trigger('click')
+    expect(wrapper.find('.step-teleop .cycle-chip').text()).toContain('1')
+
+    // Cut to Cycle #2
+    await newCycleBtn.trigger('click')
+    expect(wrapper.findAll('.step-teleop .cycle-chip').length).toBe(2)
+
+    // Cycle #2 is currently 0 hits and 0 misses (empty cycle).
+    // Tapping UNDO should perform cross-cycle undo: pop empty Cycle #2 and return to Cycle #1!
+    await teleopUndoBtn.trigger('click')
+    expect(wrapper.findAll('.step-teleop .cycle-chip').length).toBe(1)
+    expect(wrapper.find('.step-teleop .cycle-chip').text()).toContain('1')
   })
 })

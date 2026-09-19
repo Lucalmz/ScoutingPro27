@@ -648,8 +648,8 @@ async function handleSubmit() {
       return {
         id: props.editRecord ? props.editRecord.id : (crypto.randomUUID?.() ?? `${Date.now()}-${Math.random().toString(36).slice(2)}`),
         eventId: props.eventId,
-        scoutId: props.scoutId,
-        scoutName: props.scoutName,
+        scoutId: props.editRecord ? (props.editRecord.scoutId || props.scoutId) : props.scoutId,
+        scoutName: props.editRecord ? (props.editRecord.scoutName || props.scoutName) : props.scoutName,
         matchNumber: parseInt(matchNumber.value),
         teamNumber: parseInt(team.teamNumber),
         autoScore: auto,
@@ -729,11 +729,11 @@ const recordStore = useRecordStore()
       <div v-if="isDraftRestored" class="assigned-task-banner draft-restored-banner" style="border-color: rgba(59, 130, 246, 0.4); background: rgba(59, 130, 246, 0.1);">
         <div class="task-info">
           <span class="material-icons task-icon" style="color: #60a5fa;">restore_page</span>
-          <span>{{ t('scouting.draft_restored', '已从息屏防丢草稿自动恢复') }}</span>
+          <span>{{ t('scouting.draft_restored') }}</span>
         </div>
         <button type="button" class="btn-load-task" @click="clearDraft">
           <span class="material-icons">close</span>
-          <span>{{ t('common.dismiss', '忽略') }}</span>
+          <span>{{ t('common.dismiss') }}</span>
         </button>
       </div>
 

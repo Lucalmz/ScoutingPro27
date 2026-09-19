@@ -98,6 +98,8 @@ class SimulateScoutingVerificationTest {
                 int claimedEndgame = ((Number) pit.get("claimed_endgame_score")).intValue();
                 int claimedTotal = ((Number) pit.get("claimed_total_score")).intValue();
                 assertThat(claimedTotal).isEqualTo(claimedAuto + claimedTeleop + claimedEndgame);
+                assertThat(pit.get("raw_data")).isNotNull();
+                assertThat(((Number) pit.get("host_seq")).intValue()).isGreaterThan(0);
             }
 
             // Verify pit_scouting_records contains only BIOBUZZ columns and NO legacy columns
@@ -106,7 +108,8 @@ class SimulateScoutingVerificationTest {
             List<String> upperCols = cols.stream().map(String::toUpperCase).toList();
             assertThat(upperCols).contains(
                     "BALL_COMPATIBILITY", "LAUNCHER_TYPE", "FLOWER_MECHANISM",
-                    "HAS_COLOR_SENSOR", "CLAIMED_AUTO_STRATEGY", "CLAIMED_TELEOP_CYCLES", "CLAIMED_ENDGAME_SCORE"
+                    "HAS_COLOR_SENSOR", "CLAIMED_AUTO_STRATEGY", "CLAIMED_TELEOP_CYCLES", "CLAIMED_ENDGAME_SCORE",
+                    "RAW_DATA", "HOST_SEQ"
             );
             assertThat(upperCols).doesNotContain(
                     "SIZING_PASSED", "MECHANISM_TYPE", "HANG_TYPE", "CLAIMED_AUTO_PIECES",
@@ -126,6 +129,18 @@ class SimulateScoutingVerificationTest {
                 assertThat(tag).doesNotContain(".");
                 assertThat((String) t.get("created_by")).isEqualTo(hostId);
             }
+
+            // 6. Verify Custom Field Definitions (V5 Architecture: 3 MATCH, 2 PIT)
+            List<Map<String, Object>> customFields = handle.createQuery("SELECT * FROM event_custom_fields WHERE event_id = 'EVENT_BIOBUZZ26' ORDER BY target, order_seq").mapToMap().list();
+            assertThat(customFields).hasSize(5);
+            long matchCfCount = customFields.stream().filter(cf -> "MATCH".equals(cf.get("target"))).count();
+            long pitCfCount = customFields.stream().filter(cf -> "PIT".equals(cf.get("target"))).count();
+            assertThat(matchCfCount).isEqualTo(3);
+            assertThat(pitCfCount).isEqualTo(2);
+
+            // 7. Verify Host ID is deterministic
+            String expectedHostId = com.bear27570.app.util.UserUtil.generateDeterministicUserId("Lucalmz");
+            assertThat(hostId).isEqualTo(expectedHostId);
         });
     }
 

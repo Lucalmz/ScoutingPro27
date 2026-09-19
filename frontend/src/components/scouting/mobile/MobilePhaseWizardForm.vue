@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref, computed, watch, onMounted } from 'vue'
+import { ref, computed, watch, onMounted, onUnmounted } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { useRecordStore } from '@/stores/records'
 import { useScheduleStore } from '@/stores/schedule'
@@ -156,8 +156,10 @@ let draftDebounceTimer: any = null
 
 function saveDraft() {
   if (props.editRecord) return
+  if (typeof localStorage === 'undefined') return
   clearTimeout(draftDebounceTimer)
   draftDebounceTimer = setTimeout(() => {
+    if (typeof localStorage === 'undefined') return
     if (!team.value.teamNumber && allianceColor.value === 'none' && team.value.autoCycles.length === 0 && team.value.teleopCycles.length === 0) {
       localStorage.removeItem(draftKey.value)
       return
@@ -176,6 +178,7 @@ function saveDraft() {
 
 function restoreDraft() {
   if (props.editRecord) return
+  if (typeof localStorage === 'undefined') return
   try {
     const raw = localStorage.getItem(draftKey.value)
     if (!raw) return
@@ -194,9 +197,18 @@ function restoreDraft() {
   }
 }
 
+onUnmounted(() => {
+  if (draftDebounceTimer) {
+    clearTimeout(draftDebounceTimer)
+    draftDebounceTimer = null
+  }
+})
+
 function clearDraft() {
   clearTimeout(draftDebounceTimer)
-  localStorage.removeItem(draftKey.value)
+  if (typeof localStorage !== 'undefined') {
+    localStorage.removeItem(draftKey.value)
+  }
   isDraftRestored.value = false
 }
 
@@ -814,8 +826,8 @@ async function handleSubmit() {
     const record: ScoutingRecord = {
       id: props.editRecord ? props.editRecord.id : (crypto.randomUUID?.() ?? `${Date.now()}-${Math.random().toString(36).slice(2)}`),
       eventId: props.eventId,
-      scoutId: props.scoutId,
-      scoutName: props.scoutName,
+      scoutId: props.editRecord ? (props.editRecord.scoutId || props.scoutId) : props.scoutId,
+      scoutName: props.editRecord ? (props.editRecord.scoutName || props.scoutName) : props.scoutName,
       matchNumber: matchNum,
       teamNumber: teamNum,
       autoScore: autoScore.value,
@@ -905,11 +917,11 @@ async function handleSubmit() {
         <div v-if="isDraftRestored" class="draft-restored-banner">
           <div class="draft-restored-content">
             <span class="material-icons" style="font-size: 16px;">restore</span>
-            <span>{{ t('scouting.draft_restored', '已从息屏防丢草稿自动恢复') }}</span>
+            <span>{{ t('scouting.draft_restored') }}</span>
           </div>
           <button type="button" class="btn-clear-draft" @click="clearDraft">
             <span class="material-icons" style="font-size: 14px;">close</span>
-            <span>{{ t('wizard.dismiss_draft', '忽略') }}</span>
+            <span>{{ t('wizard.dismiss_draft') }}</span>
           </button>
         </div>
 
@@ -945,7 +957,7 @@ async function handleSubmit() {
               :class="{ 'is-selected': allianceColor === 'red' }"
               @click="allianceColor = 'red'; hapticSelection()"
             >
-              <div class="alliance-tag">RED ALLIANCE</div>
+              <div class="alliance-tag">{{ t('schedule.red_alliance') }}</div>
               <div class="alliance-label-row">
                 <span class="alliance-dot red"></span>
                 <span class="alliance-name">{{ t('scouting.red') }}</span>
@@ -959,7 +971,7 @@ async function handleSubmit() {
               :class="{ 'is-selected': allianceColor === 'blue' }"
               @click="allianceColor = 'blue'; hapticSelection()"
             >
-              <div class="alliance-tag">BLUE ALLIANCE</div>
+              <div class="alliance-tag">{{ t('schedule.blue_alliance') }}</div>
               <div class="alliance-label-row">
                 <span class="alliance-dot blue"></span>
                 <span class="alliance-name">{{ t('scouting.blue') }}</span>
@@ -1092,7 +1104,7 @@ async function handleSubmit() {
             <span class="chip-idx">#{{ idx + 1 }}</span>
             <span class="chip-val">{{ balls }} {{ t('wizard.balls_unit') }}</span>
             <span v-if="(team.autoMissedCycles[idx] || 0) > 0" class="chip-miss-val text-red">
-              ({{ team.autoMissedCycles[idx] }}丢)
+              ({{ team.autoMissedCycles[idx] }}{{ t('wizard.missed_short', '丢') }})
             </span>
             <span class="material-icons chip-remove-icon" @click.stop="removeCycleAtIndex(idx, 'auto')">close</span>
           </button>
@@ -1271,7 +1283,7 @@ async function handleSubmit() {
             <span class="chip-idx">#{{ idx + 1 }}</span>
             <span class="chip-val">{{ balls }} {{ t('wizard.balls_unit') }}</span>
             <span v-if="(team.teleopMissedCycles[idx] || 0) > 0" class="chip-miss-val text-red">
-              ({{ team.teleopMissedCycles[idx] }}丢)
+              ({{ team.teleopMissedCycles[idx] }}{{ t('wizard.missed_short', '丢') }})
             </span>
             <span class="material-icons chip-remove-icon" @click.stop="removeCycleAtIndex(idx, 'teleop')">close</span>
           </button>

@@ -179,7 +179,7 @@ function handleExit() {
           <button type="button" class="sheet-tool-row" @click="handleOpenInbox">
             <div class="sheet-tool-left">
               <span class="material-icons sheet-tool-icon">inbox</span>
-              <span>Inbox</span>
+              <span>{{ t('inbox.title') }}</span>
             </div>
             <span v-if="inboxStore.unreadCount > 0" class="sheet-tool-badge">{{ inboxStore.unreadCount }}</span>
           </button>

@@ -125,7 +125,11 @@
     "ftc_event_code_label": "FTC Event Code",
     "ftc_event_code_placeholder": "e.g.: USUTSAS1",
     "standby_host_toast": "Active host detected for this event. Entered Standby Monitor Mode automatically.",
-    "sas_rejected_toast": "Safety code mismatch or connection disconnected: {reason}"
+    "sas_rejected_toast": "Safety code mismatch or connection disconnected: {reason}",
+    "remove_scout": "Remove from Event",
+    "remove_scout_confirm": "Are you sure you want to remove scout \"{name}\" from this event?",
+    "scout_removed_success": "Scout removed successfully",
+    "scout_removed_local": "Removed from local known list"
   },
   "confirm_dialog": {
     "title": "Confirmation",
@@ -207,7 +211,8 @@
     "teleop_park": "Endgame Park (+5 pts)",
     "balls_in": "{count} In",
     "balls_missed": "{count} Miss",
-    "balls_summary": "{inCount} In / {missCount} Miss"
+    "balls_summary": "{inCount} In / {missCount} Miss",
+    "draft_restored": "Draft automatically restored from background auto-save"
   },
   "history": {
     "loading": "Loading history...",
@@ -224,6 +229,7 @@
     "btn_cancel": "Cancel",
     "btn_save": "Save Changes",
     "scout_id": "Scout ID",
+    "anonymous_scout": "Anonymous",
     "btn_resync": "Re-sync",
     "resync_triggered": "Sync pushed to host",
     "resync_offline_queued": "Currently offline; marked as pending and will sync upon reconnect"
@@ -245,7 +251,8 @@
     "ban_team": "Ban Team",
     "avg_tips": "Balls Share",
     "avg_tips_desc": "Estimated net contribution rate allocated by ball scoring ratio",
-    "unban_team": "Unban Team"
+    "unban_team": "Unban Team",
+    "banned_badge": "BANNED"
   },
   "team_detail": {
     "title": "Team {team} Details",
@@ -309,7 +316,8 @@
     "transport": "Transport",
     "transport_type": "Connection Type",
     "host_topology": "Host Mesh Topology",
-    "sas_state": "Security Verification (SAS)"
+    "sas_state": "Security Verification (SAS)",
+    "sas_code_prompt": "Please verify in person or via voice whether the following security code matches exactly"
   },
   "diagnostics": {
     "modal_title": "WebRTC Connection & Link Diagnostics",
@@ -551,7 +559,8 @@
     "close": "Close",
     "saving": "Saving...",
     "edit": "Edit",
-    "delete": "Delete"
+    "delete": "Delete",
+    "dismiss": "Dismiss"
   },
   "user": {
     "edit_nickname": "Edit Profile & Password",
@@ -657,7 +666,17 @@
     "pill_sync_detail": "Successfully synced {files} files ({records} records)",
     "pill_dropped_detail": "Dropped {count} invalid/forged records",
     "pill_event_synced": "Imported event [{name}]",
-    "scout_names_placeholder": "e.g.: Alice, Bob"
+    "scout_names_placeholder": "e.g.: Alice, Bob",
+    "export_success": "Export successful!",
+    "scanning_hint": "Scanning and filtering sync packages...",
+    "records_count": "{count} records",
+    "files_count": "{count} files",
+    "selected_folder": "Folder [{folder}] ({count} files)",
+    "selected_files": "Selected {count} files",
+    "drag_imported_files": "Drop import ({count} files)",
+    "err_parse_failed": "Failed to parse data package",
+    "err_apply_failed": "Failed to apply sync package",
+    "btn_processing": "Processing..."
   },
   "schedule": {
     "title": "Match Schedule & Assignments",
@@ -952,7 +971,9 @@
       "sorting": "Sorting & Filtering",
       "pollen_only": "Pollen Only"
     },
-    "claimed_pts_unit": "{pts} pts"
+    "claimed_pts_unit": "{pts} pts",
+    "flower_verified": "Flower Verified",
+    "flower_pending_verify": "Flower Unverified"
   },
   "custom_fields": {
     "title": "Custom Fields Management",
@@ -1151,10 +1172,20 @@
     "preset_balls": "{count} Balls",
     "cap_reached_tip": "4 balls reached. Tap [+ Next Cycle] to continue",
     "cannot_start_empty_cycle": "Current cycle has no balls shot yet",
-    "dismiss_draft": "Dismiss"
+    "dismiss_draft": "Dismiss",
+    "missed_short": " Missed"
   },
   "webrtc": {
     "single_record_received": "Received match record for #{team} Match {match}",
     "batch_records_received": "Batch synchronized {count} match records"
+  },
+  "inbox": {
+    "title": "Inbox",
+    "mark_all_read": "Mark all read",
+    "clear_all": "Clear",
+    "no_messages": "No messages",
+    "mark_read": "Mark Read",
+    "delete": "Delete",
+    "enter_event_to_view_conflict": "Please enter the corresponding event to view conflict records"
   }
 }

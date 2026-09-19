@@ -125,7 +125,7 @@ function handleLeaveEvent() {
 
             <div class="sas-code-container">
               <div class="sas-code-label">
-                {{ t('connection.sas_code_prompt', '请当面或通过语音核对以下安全码是否完全一致') }}
+                {{ t('connection.sas_code_prompt') }}
               </div>
               <div class="sas-code-display">{{ pending.fingerprint }}</div>
 
@@ -133,15 +133,15 @@ function handleLeaveEvent() {
                 <span class="material-icons timeout-banner-icon">hourglass_empty</span>
                 <div class="timeout-banner-content">
                   <div class="timeout-banner-title">
-                    {{ t('connection.sas_timed_out_title', '核验等待已超时') }}
+                    {{ t('connection.sas_timed_out_title') }}
                   </div>
                   <div class="timeout-banner-desc">
-                    {{ isHost ? t('connection.sas_timed_out_host_desc', '对端可能未完成核对或人员暂时离开。点击【重新发起核验】可刷新安全码，也可直接点击【确认一致】完成接入。') : t('connection.sas_timed_out_client_desc', '主机人员可能暂时离开。点击【重新发起核验】可重新请求核验，也可在确认安全码一致后直接点击【确认一致】。') }}
+                    {{ isHost ? t('connection.sas_timed_out_host_desc') : t('connection.sas_timed_out_client_desc') }}
                   </div>
                 </div>
               </div>
               <div v-else class="sas-countdown">
-                {{ t('connection.sas_countdown', '等待核验') }}: <strong>{{ remainingSeconds }}s</strong>
+                {{ t('connection.sas_countdown') }}: <strong>{{ remainingSeconds }}s</strong>
               </div>
             </div>
           </div>

@@ -2,6 +2,7 @@ package com.bear27570.app.util;
 
 import com.bear27570.app.db.AppConfig;
 import com.bear27570.app.db.JdbiConfig;
+import com.bear27570.app.db.UserDeterministicIdMigrator;
 import com.google.gson.JsonArray;
 import com.google.gson.JsonElement;
 import com.google.gson.JsonObject;
@@ -9,6 +10,7 @@ import org.flywaydb.core.Flyway;
 import org.jdbi.v3.core.Jdbi;
 import org.mindrot.jbcrypt.BCrypt;
 
+import javax.sql.DataSource;
 import java.util.*;
 
 public class SimulateScouting {
@@ -51,9 +53,19 @@ public class SimulateScouting {
         }
 
         System.out.println("正在连接数据库并执行 Flyway 迁移: " + dbUrl);
-        Flyway.configure().dataSource(dbUrl, "sa", "").locations("classpath:db").load().migrate();
+        DataSource dataSource = JdbiConfig.getOrCreateDataSource(dbUrl, "sa", "");
+        Flyway flyway = Flyway.configure()
+                .dataSource(dataSource)
+                .locations("classpath:db")
+                .cleanDisabled(false)
+                .load();
+        flyway.repair();
+        flyway.migrate();
 
-        Jdbi jdbi = JdbiConfig.create(dbUrl, "sa", "");
+        Jdbi jdbi = JdbiConfig.create(dataSource);
+
+        // 执行用户确定性 ID 迁移与重名归并，确保底层用户模型架构大一统
+        UserDeterministicIdMigrator.migrate(jdbi);
 
         System.out.println("正在生成 2026 BIOBUZZ 本地独立仿真数据 (彻底脱钩外部网络请求)...");
 
@@ -65,33 +77,21 @@ public class SimulateScouting {
             final String inviteCode = "BIOBUZZ26".equalsIgnoreCase(finalEventCode) ? "BUZZ26" : (finalEventCode.length() > 6 ? finalEventCode.substring(0, 6) : finalEventCode);
             final String eventName = "2026 " + finalEventCode + " 锦标赛 (仿真测试)";
             final String defaultPasswordHash = BCrypt.hashpw("123456", BCrypt.gensalt());
+            final String hostUsername = "Lucalmz";
+            final String hId = UserUtil.generateDeterministicUserId(hostUsername);
             final String[] scouterIds = new String[4];
 
-            System.out.println("正在初始化 Host [Lucalmz] 和 4 名 Scouter 账号...");
+            System.out.println("正在初始化 Host [Lucalmz] 和 4 名 Scouter 账号 (确定性 ID 规范)...");
             jdbi.useTransaction(handle -> {
-                String hId = handle.createQuery("SELECT id FROM users WHERE username = 'Lucalmz'")
-                        .mapTo(String.class)
-                        .findOne()
-                        .orElseGet(() -> {
-                            String newId = UUID.randomUUID().toString();
-                            handle.execute("INSERT INTO users (id, username, password) VALUES (?, ?, ?)", newId, "Lucalmz", defaultPasswordHash);
-                            return newId;
-                        });
-
-                handle.execute("UPDATE users SET password = ? WHERE username = 'Lucalmz' AND (password IS NULL OR password = '')", defaultPasswordHash);
+                handle.execute("MERGE INTO users (id, username, password) KEY(id) VALUES (?, ?, ?)", hId, hostUsername, defaultPasswordHash);
+                handle.execute("UPDATE users SET password = ? WHERE id = ? AND (password IS NULL OR password = '')", defaultPasswordHash, hId);
 
                 for (int i = 0; i < 4; i++) {
                     String sName = "Scouter " + (char)('A' + i);
-                    scouterIds[i] = handle.createQuery("SELECT id FROM users WHERE username = ?")
-                            .bind(0, sName)
-                            .mapTo(String.class)
-                            .findOne()
-                            .orElseGet(() -> {
-                                String newId = UUID.randomUUID().toString();
-                                handle.execute("INSERT INTO users (id, username, password) VALUES (?, ?, ?)", newId, sName, defaultPasswordHash);
-                                return newId;
-                            });
-                    handle.execute("UPDATE users SET password = ? WHERE id = ? AND (password IS NULL OR password = '')", defaultPasswordHash, scouterIds[i]);
+                    String sId = UserUtil.generateDeterministicUserId(sName);
+                    scouterIds[i] = sId;
+                    handle.execute("MERGE INTO users (id, username, password) KEY(id) VALUES (?, ?, ?)", sId, sName, defaultPasswordHash);
+                    handle.execute("UPDATE users SET password = ? WHERE id = ? AND (password IS NULL OR password = '')", defaultPasswordHash, sId);
                 }
 
                 System.out.println("正在创建本地仿真赛事: " + eventName + " (InviteCode: " + inviteCode + ", 本地独立离线未绑定 FTC API)...");
@@ -114,6 +114,7 @@ public class SimulateScouting {
                 handle.execute("DELETE FROM banned_teams WHERE event_id = ?", eventId);
                 handle.execute("DELETE FROM ai_chat_sessions WHERE event_id = ?", eventId);
                 handle.execute("DELETE FROM event_official_teams WHERE event_id = ?", eventId);
+                handle.execute("DELETE FROM event_custom_fields WHERE event_id = ?", eventId);
 
                 // 1. 插入官方战队缓存
                 System.out.println("正在写入 16 支官方参赛战队...");
@@ -125,6 +126,33 @@ public class SimulateScouting {
                     """, eventId, t.get("teamNumber").getAsInt(), t.get("nameFull").getAsString(),
                          t.get("robotName").getAsString(), t.get("city").getAsString(), t.get("country").getAsString());
                 }
+
+                // 1b. 插入 2026 BIOBUZZ 自定义字段规范 (V5 架构对齐: Match & Pit)
+                System.out.println("正在为赛事生成 2026 BIOBUZZ 自定义字段规范 (Match & Pit)...");
+                handle.execute("""
+                    INSERT INTO event_custom_fields (id, event_id, target, phase, name, field_key, field_type, min_val, max_val, step_val, unit, order_seq, is_active)
+                    VALUES (?, ?, 'MATCH', 'teleop', '卡球次数', 'intake_jam', 'number', 0, 10, 1, '次', 1, TRUE)
+                """, UUID.randomUUID().toString(), eventId);
+
+                handle.execute("""
+                    INSERT INTO event_custom_fields (id, event_id, target, phase, name, field_key, field_type, options_json, order_seq, is_active)
+                    VALUES (?, ?, 'MATCH', 'teleop', '飞手抗压', 'driver_pressure', 'select', ?, 2, TRUE)
+                """, UUID.randomUUID().toString(), eventId, "[{\"label\":\"沉着冷静\",\"value\":\"calm\"},{\"label\":\"略有慌乱\",\"value\":\"nervous\"},{\"label\":\"严重失常\",\"value\":\"panicked\"}]");
+
+                handle.execute("""
+                    INSERT INTO event_custom_fields (id, event_id, target, phase, name, field_key, field_type, min_val, max_val, step_val, order_seq, is_active)
+                    VALUES (?, ?, 'MATCH', 'overall', '防守表现', 'defense_rating', 'level', 1, 5, 1, 3, TRUE)
+                """, UUID.randomUUID().toString(), eventId);
+
+                handle.execute("""
+                    INSERT INTO event_custom_fields (id, event_id, target, phase, name, field_key, field_type, options_json, order_seq, is_active)
+                    VALUES (?, ?, 'PIT', 'hardware', '吸球速率', 'intake_speed', 'select', ?, 1, TRUE)
+                """, UUID.randomUUID().toString(), eventId, "[{\"label\":\"瞬吸(<0.5s)\",\"value\":\"instant\"},{\"label\":\"顺畅(0.5~1s)\",\"value\":\"smooth\"},{\"label\":\"较慢(>1s)\",\"value\":\"slow\"}]");
+
+                handle.execute("""
+                    INSERT INTO event_custom_fields (id, event_id, target, phase, name, field_key, field_type, options_json, order_seq, is_active)
+                    VALUES (?, ?, 'PIT', 'strategy', '自主寻路方案', 'auto_pathing', 'select', ?, 2, TRUE)
+                """, UUID.randomUUID().toString(), eventId, "[{\"label\":\"纯纯里程计\",\"value\":\"pure_odom\"},{\"label\":\"视觉+里程计融合\",\"value\":\"vision_fusion\"},{\"label\":\"按时间硬走\",\"value\":\"time_based\"}]");
 
                 // 2. 插入赛程与侦察任务分配 (Match Schedules & Assignments)
                 System.out.println("正在生成 12 场排位赛赛程与工位分配...");
@@ -161,8 +189,10 @@ public class SimulateScouting {
                 String[] flowerMechanisms = {"垂直级联高升降", "地槽推球", "仰角抛射", "无"};
                 String[] drivetrains = {"swerve", "mecanum", "tank"};
                 String[] odometries = {"pinpoint", "sparkfun_otos", "three_wheel", "two_wheel", "none"};
+                int pitIndex = 0;
 
                 for (JsonElement tElem : teams) {
+                    pitIndex++;
                     JsonObject t = tElem.getAsJsonObject();
                     int teamNum = t.get("teamNumber").getAsInt();
                     String compat = teamNum == 27570 ? "universal" : compatibilities[rng.nextInt(compatibilities.length)];
@@ -182,6 +212,30 @@ public class SimulateScouting {
                     int claimedTotal = claimedAuto + claimedTeleop + claimedEndgame;
                     String strategy = teamNum == 27570 ? "预载进球+花园两球+快速停泊" : "预载直射 + 地面摄入 + 终局放花";
 
+                    JsonObject pitRawJson = new JsonObject();
+                    pitRawJson.addProperty("teamNumber", teamNum);
+                    pitRawJson.addProperty("robotName", t.get("robotName").getAsString());
+                    pitRawJson.addProperty("drivetrainType", dt);
+                    pitRawJson.addProperty("weightLbs", weight);
+                    pitRawJson.addProperty("odometryType", odom);
+                    pitRawJson.addProperty("ballCompatibility", compat);
+                    pitRawJson.addProperty("launcherType", launcher);
+                    pitRawJson.addProperty("flowerMechanism", flower);
+                    pitRawJson.addProperty("hasColorSensor", hasSensor);
+                    pitRawJson.addProperty("claimedAutoStrategy", strategy);
+                    pitRawJson.addProperty("claimedTeleopCycles", claimedCycles);
+                    pitRawJson.addProperty("claimedEndgameScore", claimedEndgame);
+                    pitRawJson.addProperty("claimedAutoScore", claimedAuto);
+                    pitRawJson.addProperty("claimedTeleopScore", claimedTeleop);
+                    pitRawJson.addProperty("claimedTotalScore", claimedTotal);
+
+                    JsonObject pitCustomFields = new JsonObject();
+                    String[] intakeSpeeds = {"instant", "smooth", "slow"};
+                    String[] pathings = {"pure_odom", "vision_fusion", "time_based"};
+                    pitCustomFields.addProperty("intake_speed", intakeSpeeds[rng.nextInt(intakeSpeeds.length)]);
+                    pitCustomFields.addProperty("auto_pathing", pathings[rng.nextInt(pathings.length)]);
+                    pitRawJson.add("customFields", pitCustomFields);
+
                     handle.createUpdate("""
                         INSERT INTO pit_scouting_records (
                             id, event_id, team_number, scout_id, scout_name, robot_name,
@@ -189,14 +243,14 @@ public class SimulateScouting {
                             ball_compatibility, launcher_type, flower_mechanism, has_color_sensor,
                             claimed_auto_strategy, claimed_teleop_cycles, claimed_endgame_score,
                             claimed_auto_score, claimed_teleop_score, claimed_total_score,
-                            photo_keys, version, is_deleted, created_at, updated_at
+                            photo_keys, version, host_seq, is_deleted, raw_data, created_at, updated_at
                         ) VALUES (
                             ?, ?, ?, ?, ?, ?,
                             ?, ?, ?,
                             ?, ?, ?, ?,
                             ?, ?, ?,
                             ?, ?, ?,
-                            '[]', 1, FALSE, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP
+                            '[]', 1, ?, FALSE, ?, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP
                         )
                     """)
                     .bind(0, UUID.randomUUID().toString())
@@ -218,6 +272,8 @@ public class SimulateScouting {
                     .bind(16, claimedAuto)
                     .bind(17, claimedTeleop)
                     .bind(18, claimedTotal)
+                    .bind(19, pitIndex)
+                    .bind(20, pitRawJson.toString())
                     .execute();
                 }
 
@@ -276,12 +332,36 @@ public class SimulateScouting {
                         rawJson.addProperty("autoLeave", autoLeave);
                         rawJson.addProperty("autoBalls", autoBalls);
                         rawJson.addProperty("autoPreload", autoBalls > 0);
+                        rawJson.addProperty("autoSecondary", !isBroken && rng.nextBoolean());
                         rawJson.addProperty("autoPark", autoPark);
+
+                        JsonArray autoCyclesArr = new JsonArray();
+                        JsonArray autoMissedCyclesArr = new JsonArray();
+                        if (autoBalls > 0) {
+                            autoCyclesArr.add(autoBalls);
+                            autoMissedCyclesArr.add(0);
+                        }
+                        rawJson.add("autoCycles", autoCyclesArr);
+                        rawJson.add("autoMissedCycles", autoMissedCyclesArr);
+
                         rawJson.add("teleopCycles", cyclesArr);
+                        JsonArray teleopMissedArr = new JsonArray();
+                        for (int c = 0; c < cycleCount; c++) {
+                            teleopMissedArr.add(rng.nextInt(10) < 3 ? 1 : 0);
+                        }
+                        rawJson.add("teleopMissedCycles", teleopMissedArr);
+
                         rawJson.addProperty("flowerPlaced", flowerPlaced);
                         rawJson.addProperty("flowerBottomBonus", flowerBottomBonus);
                         rawJson.addProperty("teleopPark", teleopPark);
                         rawJson.addProperty("isBroken", isBroken);
+
+                        JsonObject matchCustomFields = new JsonObject();
+                        matchCustomFields.addProperty("intake_jam", isBroken ? 2 + rng.nextInt(3) : (rng.nextInt(5) == 0 ? 1 : 0));
+                        String[] pressures = {"calm", "nervous", "panicked"};
+                        matchCustomFields.addProperty("driver_pressure", pressures[rng.nextInt(pressures.length)]);
+                        matchCustomFields.addProperty("defense_rating", 1 + rng.nextInt(5));
+                        rawJson.add("customFields", matchCustomFields);
 
                         handle.createUpdate("""
                             INSERT INTO scouting_records (
@@ -377,8 +457,8 @@ public class SimulateScouting {
                 System.out.println("绑定 FTC 代码: 无 (纯本地独立离线仿真)");
                 System.out.println("参赛队伍数   : " + teams.size() + " 支");
                 System.out.println("赛程场次数   : " + matches.size() + " 场排位赛");
-                System.out.println("展位档案数   : " + teams.size() + " 份 (含球型兼容与自述轮次)");
-                System.out.println("已生成打分记录: " + recordCount + " 条 (BIOBUZZ 轮次出球流)");
+                System.out.println("展位档案数   : " + teams.size() + " 份 (含球型兼容与自述轮次及自定义字段)");
+                System.out.println("已生成打分记录: " + recordCount + " 条 (BIOBUZZ 轮次出球流及自定义字段)");
                 System.out.println("已生成战术标签: " + totalTagCount + " 个 (含 5 类预置违规与自定义标签)");
                 System.out.println("--------------------------------------------------");
             });
@@ -386,6 +466,9 @@ public class SimulateScouting {
         } catch (Exception e) {
             System.err.println("模拟过程发生异常: " + e.getMessage());
             e.printStackTrace();
+            throw new RuntimeException("SimulateScouting failed", e);
+        } finally {
+            JdbiConfig.closeDataSources();
         }
     }
 }

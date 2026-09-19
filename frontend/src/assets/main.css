@@ -24,6 +24,13 @@
 }
 
 @font-face {
+  font-family: 'NotoSansSC';
+  src: url('/assets/NotoSansSC-VariableFont_wght.ttf') format('truetype');
+  font-weight: 100 900;
+  font-style: normal;
+}
+
+@font-face {
   font-family: 'ZCOOLXiaoWei';
   src: url('/assets/ZCOOLXiaoWei-Regular-BW1UGiix.ttf') format('truetype');
   font-weight: normal;
@@ -108,7 +115,7 @@
 html {
   font-family:
     'Manrope',
-    'ZCOOLXiaoWei',
+    'NotoSansSC',
     'Segoe UI',
     'Helvetica Neue',
     Arial,

@@ -95,11 +95,11 @@ describe('HistoryList.vue Component & Animations', () => {
     expect(cards.length).toBe(2)
     expect(wrapper.text()).toContain('120 history.pts')
     expect(wrapper.text()).toContain('140 history.pts')
-    expect(wrapper.text()).toContain('history.scout_id: scout-1')
-    expect(wrapper.text()).toContain('(Tester)')
+    expect(wrapper.text()).toContain('Tester')
+    expect(wrapper.text()).not.toContain('scout-1')
   })
 
-  it('displays submitter scoutId even when scoutName is absent', () => {
+  it('displays fallback username and never exposes raw scoutId when scoutName is absent', () => {
     const records = [
       createRecord({ id: 'r1', scoutId: 'usr_xyz999', scoutName: '' })
     ]
@@ -112,8 +112,29 @@ describe('HistoryList.vue Component & Animations', () => {
 
     const scoutBadge = wrapper.find('.card-scout-id')
     expect(scoutBadge.exists()).toBe(true)
-    expect(scoutBadge.text()).toContain('history.scout_id: usr_xyz999')
-    expect(scoutBadge.find('.scout-meta-name').exists()).toBe(false)
+    expect(scoutBadge.text()).toContain('history.anonymous_scout')
+    expect(scoutBadge.text()).not.toContain('usr_xyz999')
+  })
+
+  it('resolves current user username when scoutName is absent but scoutId matches currentUser', async () => {
+    const { useUserStore } = await import('../stores/user')
+    const userStore = useUserStore()
+    userStore.user = { id: 'usr_me', username: 'MySpecialUsername', token: 'tok' } as any
+
+    const records = [
+      createRecord({ id: 'r1', scoutId: 'usr_me', scoutName: '' })
+    ]
+    const wrapper = mount(HistoryList, {
+      props: {
+        records,
+        loading: false
+      }
+    })
+
+    const scoutBadge = wrapper.find('.card-scout-id')
+    expect(scoutBadge.exists()).toBe(true)
+    expect(scoutBadge.text()).toContain('MySpecialUsername')
+    expect(scoutBadge.text()).not.toContain('usr_me')
   })
 
   it('applies is-conflict-card class and displays conflict badge when isConflict is true', () => {
@@ -339,5 +360,76 @@ describe('HistoryList.vue Component & Animations', () => {
     expect(pushSpy).not.toHaveBeenCalled()
     expect(unconfirmed.syncStatus).toBe('PENDING')
     expect(toastSpy).toHaveBeenCalledWith('history.resync_offline_queued', 'warning')
+  })
+
+  it('allows Host to edit any synced record regardless of ownership', async () => {
+    const { useEventStore } = await import('../stores/events')
+    const { useUserStore } = await import('../stores/user')
+    const photoStorage = await import('../services/photoStorage')
+    vi.spyOn(photoStorage, 'isDesktopHost').mockReturnValue(true)
+
+    const eventStore = useEventStore()
+    const userStore = useUserStore()
+    userStore.user = { id: 'host-user', username: 'Host', token: 'tok' } as any
+    eventStore.currentEvent = { id: 'evt-1', hostId: 'host-user' } as any
+
+    const otherScoutRecord = createRecord({
+      id: 'r-other-scout',
+      scoutId: 'scout-different-user',
+      syncStatus: 'SYNCED',
+      hostSeq: 10,
+      isConflict: false
+    })
+
+    const wrapper = mount(HistoryList, {
+      props: {
+        records: [otherScoutRecord],
+        loading: false
+      }
+    })
+
+    const editBtn = wrapper.find('.btn-edit')
+    expect(editBtn.exists()).toBe(true)
+    await editBtn.trigger('click')
+    expect(wrapper.emitted('editRecord')).toBeTruthy()
+    expect(wrapper.emitted('editRecord')![0]).toEqual([otherScoutRecord])
+  })
+
+  it('allows normal scout to edit their own synced record but not others', async () => {
+    const { useEventStore } = await import('../stores/events')
+    const { useUserStore } = await import('../stores/user')
+    const eventStore = useEventStore()
+    const userStore = useUserStore()
+
+    eventStore.currentEvent = { id: 'evt-1', hostId: 'someone-else' } as any
+    userStore.user = { id: 'scout-alice', username: 'Alice', token: 'tok' } as any
+
+    const myRecord = createRecord({
+      id: 'r-my-synced',
+      scoutId: 'scout-alice',
+      syncStatus: 'SYNCED',
+      hostSeq: 11,
+      isConflict: false
+    })
+    const otherRecord = createRecord({
+      id: 'r-bob-synced',
+      scoutId: 'scout-bob',
+      syncStatus: 'SYNCED',
+      hostSeq: 12,
+      isConflict: false
+    })
+
+    const wrapper = mount(HistoryList, {
+      props: {
+        records: [myRecord, otherRecord],
+        loading: false
+      }
+    })
+
+    const cards = wrapper.findAll('.history-card')
+    // Alice can edit her own synced record
+    expect(cards[0].find('.btn-edit').exists()).toBe(true)
+    // Alice cannot edit Bob's synced record
+    expect(cards[1].find('.btn-edit').exists()).toBe(false)
   })
 })

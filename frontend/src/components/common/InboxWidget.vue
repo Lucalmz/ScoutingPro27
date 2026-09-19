@@ -1,10 +1,29 @@
 <script setup lang="ts">
 import { ref, computed } from 'vue'
+import { useI18n } from 'vue-i18n'
 import { useInboxStore } from '@/stores/inbox'
 import { useUserStore } from '@/stores/user'
 import { useToastStore } from '@/stores/toast'
 import { useRouter, useRoute } from 'vue-router'
 import type { SystemMessage } from '@/types'
+
+let t = (key: string): string => {
+  if (key === 'inbox.title') return '消息箱'
+  if (key === 'inbox.mark_all_read') return '全部标为已读'
+  if (key === 'inbox.clear_all') return '清空'
+  if (key === 'inbox.no_messages') return '暂无新消息'
+  if (key === 'inbox.mark_read') return '标为已读'
+  if (key === 'inbox.delete') return '删除'
+  if (key === 'inbox.enter_event_to_view_conflict') return '请先进入对应赛事以查看冲突记录'
+  return key
+}
+
+try {
+  const i18n = useI18n()
+  t = i18n.t
+} catch {
+  // Fallback for isolated unit tests mounted without i18n plugin
+}
 
 const inboxStore = useInboxStore()
 const userStore = useUserStore()
@@ -49,7 +68,7 @@ function handleMessageClick(msg: SystemMessage) {
       router.push(`/event/${eventId}?tab=history&highlightMatch=${msg.conflictMatchNumber}&highlightTeam=${msg.conflictTeamNumber}${levelQuery}`)
       inboxStore.setOpen(false)
     } else {
-      toastStore.showToast('请先进入对应赛事以查看冲突记录', 'warning')
+      toastStore.showToast(t('inbox.enter_event_to_view_conflict'), 'warning')
     }
   }
 }
@@ -76,16 +95,16 @@ function handleMessageClick(msg: SystemMessage) {
         <div v-if="isOpen" class="inbox-dropdown-content">
           <div class="inbox-header" style="display: flex; justify-content: space-between; align-items: center;">
             <div style="display: flex; align-items: center; gap: 8px;">
-              <h3 style="margin: 0;">Inbox</h3>
+              <h3 style="margin: 0;">{{ t('inbox.title') }}</h3>
               <span v-if="inboxStore.messages.length > 0" class="inbox-actions" style="display: flex; gap: 6px;">
-                <button type="button" class="action-btn" title="Mark all read" @click.stop="handleMarkAllRead" style="font-size: 11px; padding: 2px 6px; cursor: pointer; border-radius: 4px; border: 1px solid #444; background: #222; color: #aaa;">Mark all read</button>
-                <button type="button" class="action-btn" title="Clear all" @click.stop="handleClearAll" style="font-size: 11px; padding: 2px 6px; cursor: pointer; border-radius: 4px; border: 1px solid #444; background: #222; color: #e57373;">Clear</button>
+                <button type="button" class="action-btn" :title="t('inbox.mark_all_read')" @click.stop="handleMarkAllRead" style="font-size: 11px; padding: 2px 6px; cursor: pointer; border-radius: 4px; border: 1px solid #444; background: #222; color: #aaa;">{{ t('inbox.mark_all_read') }}</button>
+                <button type="button" class="action-btn" :title="t('inbox.clear_all')" @click.stop="handleClearAll" style="font-size: 11px; padding: 2px 6px; cursor: pointer; border-radius: 4px; border: 1px solid #444; background: #222; color: #e57373;">{{ t('inbox.clear_all') }}</button>
               </span>
             </div>
             <span class="material-icons close-btn" style="font-size: 20px; cursor: pointer;" @click.stop="toggleOpen">close</span>
           </div>
           <div class="inbox-list">
-            <div v-if="inboxStore.messages.length === 0" class="empty">No messages</div>
+            <div v-if="inboxStore.messages.length === 0" class="empty">{{ t('inbox.no_messages') }}</div>
             <div 
               v-for="msg in inboxStore.messages" 
               :key="msg.id" 
@@ -99,8 +118,8 @@ function handleMessageClick(msg: SystemMessage) {
               </div>
               <p>{{ msg.body }}</p>
               <div class="item-actions" style="display: flex; gap: 8px; align-items: center; margin-top: 6px;">
-                <button v-if="!msg.read" type="button" @click.stop="handleMarkRead(msg.id)" class="mark-read">Mark Read</button>
-                <button type="button" @click.stop="handleDelete(msg.id)" class="delete-msg-btn" style="background: none; border: none; color: #888; cursor: pointer; font-size: 11px; padding: 0;">Delete</button>
+                <button v-if="!msg.read" type="button" @click.stop="handleMarkRead(msg.id)" class="mark-read">{{ t('inbox.mark_read') }}</button>
+                <button type="button" @click.stop="handleDelete(msg.id)" class="delete-msg-btn" style="background: none; border: none; color: #888; cursor: pointer; font-size: 11px; padding: 0;">{{ t('inbox.delete') }}</button>
               </div>
             </div>
           </div>

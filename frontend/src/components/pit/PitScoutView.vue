@@ -22,6 +22,11 @@ const drawerOpen = ref(false)
 const selectedTeamNumber = ref<number | null>(null)
 const isSyncingRoster = ref(false)
 
+const searchedTeamNumber = computed(() => {
+  const q = pitStore.searchQuery.trim().replace(/^#/, '')
+  return /^\d+$/.test(q) ? parseInt(q, 10) : null
+})
+
 onMounted(() => {
   if (props.eventId) {
     pitStore.fetchPitData(props.eventId)
@@ -140,14 +145,28 @@ function handleSelectTeam(teamNumber: number) {
 
     <!-- 空状态 -->
     <div v-else class="empty-state">
-      <p class="empty-title">{{ t('pit_scout.empty_title') }}</p>
-      <p class="empty-desc">
-        {{
-          canSyncOfficial
-            ? t('pit_scout.empty_desc_sync')
-            : t('pit_scout.empty_desc_nosync')
-        }}
-      </p>
+      <template v-if="searchedTeamNumber">
+        <p class="empty-title">{{ t('pit_scout.not_in_roster_title', { teamNumber: searchedTeamNumber }) }}</p>
+        <p class="empty-desc">{{ t('pit_scout.not_in_roster_desc') }}</p>
+        <button
+          class="btn-create-pit-record"
+          type="button"
+          @click="handleSelectTeam(searchedTeamNumber)"
+        >
+          <span class="material-icons">add_circle_outline</span>
+          <span>{{ t('pit_scout.create_pit_record_for_team', { teamNumber: searchedTeamNumber }) }}</span>
+        </button>
+      </template>
+      <template v-else>
+        <p class="empty-title">{{ t('pit_scout.empty_title') }}</p>
+        <p class="empty-desc">
+          {{
+            canSyncOfficial
+              ? t('pit_scout.empty_desc_sync')
+              : t('pit_scout.empty_desc_nosync')
+          }}
+        </p>
+      </template>
     </div>
 
     <!-- 走访录入抽屉 -->
