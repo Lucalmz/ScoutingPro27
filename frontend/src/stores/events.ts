@@ -303,15 +303,25 @@ export const useEventStore = defineStore('events', () => {
 
   function migratePlaceholder(placeholderId: string, authoritativeEvent: ScoutingEvent) {
     if (!authoritativeEvent || !authoritativeEvent.id) return
-    const cleanList = events.value.filter(
-      (e) =>
-        e.id !== placeholderId &&
-        e.id !== authoritativeEvent.id &&
-        !(e.id.startsWith('evt-') && e.inviteCode && e.inviteCode === authoritativeEvent.inviteCode)
-    )
+    const targetPlaceholder = placeholderId.trim().toLowerCase()
+    const authInviteCode = (authoritativeEvent.inviteCode || '').trim().toUpperCase()
+
+    const cleanList = events.value.filter((e) => {
+      const eId = (e.id || '').trim().toLowerCase()
+      const eCode = (e.inviteCode || '').trim().toUpperCase()
+      if (eId === targetPlaceholder || e.id === authoritativeEvent.id) return false
+      if (eId.startsWith('evt-') && authInviteCode && eCode === authInviteCode) return false
+      return true
+    })
     cleanList.push(authoritativeEvent)
     events.value = sanitizeEventList(cleanList)
-    if (currentEvent.value?.id === placeholderId || currentEvent.value?.id === authoritativeEvent.id) {
+    if (
+      currentEvent.value &&
+      (currentEvent.value.id.trim().toLowerCase() === targetPlaceholder ||
+        currentEvent.value.id === authoritativeEvent.id ||
+        (currentEvent.value.inviteCode &&
+          currentEvent.value.inviteCode.trim().toUpperCase() === authInviteCode))
+    ) {
       currentEvent.value = authoritativeEvent
     }
     if (typeof localStorage !== 'undefined') {

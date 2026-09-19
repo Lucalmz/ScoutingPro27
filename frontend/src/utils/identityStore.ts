@@ -69,7 +69,7 @@ const STORE_PEERS = 'trusted_peers'
 
 // In-memory fallback cache if IndexedDB is unavailable
 let memDeviceIdentity: DeviceIdentity | null = null
-const memTrustedPeers = new Map<string, PeerTrustRecord>()
+export const memTrustedPeers = new Map<string, PeerTrustRecord>()
 
 /**
  * Open IndexedDB database with object stores
@@ -243,9 +243,19 @@ export async function getPeerTrustRecord(
   })
 }
 
-function isInvalidPseudoUser(userId?: string): boolean {
-  if (!userId) return false
-  return userId.trim().toLowerCase() === 'host'
+export function isInvalidPseudoUser(userId?: string): boolean {
+  if (!userId || !userId.trim()) return true
+  const lower = userId.trim().toLowerCase()
+  return (
+    lower === 'host' ||
+    lower === 'node' ||
+    lower === 'device_default' ||
+    lower.startsWith('device:') ||
+    lower.startsWith('peer:') ||
+    lower.startsWith('node_') ||
+    lower.startsWith('dev_pub_') ||
+    lower.startsWith('dev_')
+  )
 }
 
 /**
@@ -462,7 +472,12 @@ export async function evaluatePeerKeyTrust(params: {
   }
 
   // Case 1: Same device historically bound to a DIFFERENT real user!
-  if (latestDeviceRecord && latestDeviceRecord.userId !== userId) {
+  if (
+    latestDeviceRecord &&
+    !isInvalidPseudoUser(latestDeviceRecord.userId) &&
+    !isInvalidPseudoUser(userId) &&
+    latestDeviceRecord.userId !== userId
+  ) {
     if (!existingRecord || (latestDeviceRecord.lastSeenAt || 0) > (existingRecord.lastSeenAt || 0)) {
       return {
         status: 'MULTI_USER_DEVICE_SWITCH',
@@ -471,6 +486,26 @@ export async function evaluatePeerKeyTrust(params: {
         requestedUsername: username || userId,
         message: `检测到设备 [${deviceId}] 曾绑定侦察员 [${latestDeviceRecord.username || latestDeviceRecord.userId}]，当前请求用户为 [${username || userId}]。必须通过安全码核验重新绑定。`
       }
+    }
+  }
+
+  // Case 1b: Seamless binding when public key matches and either previous or incoming is pseudo/anonymous
+  if (
+    latestDeviceRecord &&
+    latestDeviceRecord.publicKeyHex.toLowerCase() === publicKeyHex.toLowerCase() &&
+    (isInvalidPseudoUser(latestDeviceRecord.userId) || isInvalidPseudoUser(userId))
+  ) {
+    latestDeviceRecord.lastSeenAt = Date.now()
+    if (userId && !isInvalidPseudoUser(userId)) {
+      latestDeviceRecord.userId = userId
+    }
+    if (username) {
+      latestDeviceRecord.username = username
+    }
+    await savePeerTrustRecord(latestDeviceRecord)
+    return {
+      status: 'TRUSTED_MATCH',
+      record: latestDeviceRecord
     }
   }
 

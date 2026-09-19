@@ -6,7 +6,9 @@ import {
   findPeerTrustRecordByDevice,
   listUserTrustedDevices,
   evaluatePeerKeyTrust,
-  clearSecurityStoreForTesting
+  clearSecurityStoreForTesting,
+  isInvalidPseudoUser,
+  memTrustedPeers
 } from '../utils/identityStore'
 import { generateEcdhKeyPair, exportEcdhPublicKey } from '../utils/crypto'
 
@@ -370,6 +372,112 @@ describe('identityStore - Persistent Device Identity & TOFU Engine', () => {
       publicKeyHex: pubHex
     })
     expect(evalResult.status).toBe('TOFU_FIRST_SEEN')
+  })
+
+  it('Guarantee 9: isInvalidPseudoUser comprehensively identifies and filters all pseudo-user patterns', () => {
+    expect(isInvalidPseudoUser('')).toBe(true)
+    expect(isInvalidPseudoUser('   ')).toBe(true)
+    expect(isInvalidPseudoUser('host')).toBe(true)
+    expect(isInvalidPseudoUser('HOST')).toBe(true)
+    expect(isInvalidPseudoUser('node')).toBe(true)
+    expect(isInvalidPseudoUser('device_default')).toBe(true)
+    expect(isInvalidPseudoUser('device:dev_xyz123')).toBe(true)
+    expect(isInvalidPseudoUser('peer:host_dev_xyz')).toBe(true)
+    expect(isInvalidPseudoUser('node_dev_456')).toBe(true)
+    expect(isInvalidPseudoUser('dev_pub_04abcdef')).toBe(true)
+    expect(isInvalidPseudoUser('dev_123456')).toBe(true)
+
+    // Real users must NOT be treated as pseudo-users
+    expect(isInvalidPseudoUser('user_lucalmz_83aa')).toBe(false)
+    expect(isInvalidPseudoUser('scout-m6abc-123')).toBe(false)
+    expect(isInvalidPseudoUser('4f74d081-3965-4fd2-8eb1-58fb3b342004')).toBe(false)
+    expect(isInvalidPseudoUser('alice_smith')).toBe(false)
+  })
+
+  it('Guarantee 10: Seamless purge and clean TOFU establishment when previous record was pseudo/anonymous', async () => {
+    const eventId = 'evt_seamless_2026'
+    const keyPair = await generateEcdhKeyPair()
+    const pubHex = await exportEcdhPublicKey(keyPair.publicKey)
+    const devId = 'dev_seamless_bind'
+
+    // Step 1: Simulate older anonymous or pseudo-session in store
+    memTrustedPeers.set(`${eventId}:device:${devId}:${devId}`, {
+      eventId,
+      userId: `device:${devId}`,
+      username: 'Host',
+      deviceId: devId,
+      publicKeyHex: pubHex,
+      firstSeenAt: 100,
+      lastSeenAt: 100,
+      trustedAt: 100,
+      trustLevel: 'TOFU_TRUSTED'
+    })
+
+    // Step 2: Real user logs in on this device with matching ECDH public key
+    const evalResult = await evaluatePeerKeyTrust({
+      eventId,
+      userId: 'user_lucalmz_83aa',
+      username: 'Lucalmz',
+      deviceId: devId,
+      publicKeyHex: pubHex
+    })
+
+    // Pseudo-user is purged; must establish clean TOFU_FIRST_SEEN, never false MULTI_USER_DEVICE_SWITCH!
+    expect(evalResult.status).toBe('TOFU_FIRST_SEEN')
+
+    // Step 3: Once saved, subsequent connection is instant TRUSTED_MATCH
+    await savePeerTrustRecord({
+      eventId,
+      userId: 'user_lucalmz_83aa',
+      username: 'Lucalmz',
+      deviceId: devId,
+      publicKeyHex: pubHex,
+      firstSeenAt: Date.now(),
+      lastSeenAt: Date.now(),
+      trustedAt: Date.now(),
+      trustLevel: 'TOFU_TRUSTED'
+    })
+
+    const reconnEval = await evaluatePeerKeyTrust({
+      eventId,
+      userId: 'user_lucalmz_83aa',
+      username: 'Lucalmz',
+      deviceId: devId,
+      publicKeyHex: pubHex
+    })
+    expect(reconnEval.status).toBe('TRUSTED_MATCH')
+  })
+
+  it('Guarantee 11: Unauthenticated/empty userId incoming connection does not trigger false MULTI_USER_DEVICE_SWITCH', async () => {
+    const eventId = 'evt_unauth_2026'
+    const keyPair = await generateEcdhKeyPair()
+    const pubHex = await exportEcdhPublicKey(keyPair.publicKey)
+    const devId = 'dev_unauth_test'
+
+    // Prior real user recorded on device
+    await savePeerTrustRecord({
+      eventId,
+      userId: 'user_lucalmz_83aa',
+      username: 'Lucalmz',
+      deviceId: devId,
+      publicKeyHex: pubHex,
+      firstSeenAt: 1000,
+      lastSeenAt: 1000,
+      trustedAt: 1000,
+      trustLevel: 'TOFU_TRUSTED'
+    })
+
+    // Client reconnects without userId (e.g. before login or anonymous mirror)
+    const evalResult = await evaluatePeerKeyTrust({
+      eventId,
+      userId: '',
+      username: '',
+      deviceId: devId,
+      publicKeyHex: pubHex
+    })
+
+    // Same key -> TRUSTED_MATCH, never false MULTI_USER_DEVICE_SWITCH
+    expect(evalResult.status).toBe('TRUSTED_MATCH')
   })
 })
 

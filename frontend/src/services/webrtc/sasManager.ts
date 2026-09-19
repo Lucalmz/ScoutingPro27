@@ -91,19 +91,21 @@ export class SasSecurityManager {
           )
         } catch {}
         const devId = this.clientHostDeviceId || `host_dev_${this.clientHostEcdhPubHex.slice(0, 16)}`
-        const effectiveHostUserId = this.clientHostUserId || `device:${devId}`
-        const effectiveHostUsername = this.clientHostUsername || 'Node'
-        savePeerTrustRecord({
-          eventId: currentInviteCode || 'default_event',
-          userId: effectiveHostUserId,
-          username: effectiveHostUsername,
-          deviceId: devId,
-          publicKeyHex: this.clientHostEcdhPubHex,
-          firstSeenAt: Date.now(),
-          lastSeenAt: Date.now(),
-          trustedAt: Date.now(),
-          trustLevel: 'MANUAL_VERIFIED'
-        }).catch((err) => console.warn('[confirmSas] Failed to save trust record in IndexedDB:', err))
+        const effectiveHostUserId = this.clientHostUserId || ''
+        const effectiveHostUsername = this.clientHostUsername || 'Host'
+        if (effectiveHostUserId) {
+          savePeerTrustRecord({
+            eventId: currentInviteCode || 'default_event',
+            userId: effectiveHostUserId,
+            username: effectiveHostUsername,
+            deviceId: devId,
+            publicKeyHex: this.clientHostEcdhPubHex,
+            firstSeenAt: Date.now(),
+            lastSeenAt: Date.now(),
+            trustedAt: Date.now(),
+            trustLevel: 'MANUAL_VERIFIED'
+          }).catch((err) => console.warn('[confirmSas] Failed to save trust record in IndexedDB:', err))
+        }
       }
       this.clientSasState = 'VERIFIED'
       console.log(`[WebRTC Client Security] SAS confirmed for host. Flushing gated queues.`)

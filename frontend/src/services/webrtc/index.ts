@@ -122,11 +122,11 @@ export function createWebRtcService(callbacks: WebRtcCallbacks): WebRtcService {
   let localUserName: string | undefined = undefined
 
   function resolveCurrentUserId(): string {
-    return callbacks.getCurrentUser?.()?.userId || currentUserId || localUserId || (localDeviceId ? `node_${localDeviceId}` : '')
+    return callbacks.getCurrentUser?.()?.userId || currentUserId || localUserId || ''
   }
 
   function resolveCurrentUsername(): string {
-    return callbacks.getCurrentUser?.()?.username || currentUsername || localUserName || (localDeviceId ? `Node ${localDeviceId.slice(0, 8)}` : '')
+    return callbacks.getCurrentUser?.()?.username || currentUsername || localUserName || ''
   }
 
   let hostSeqCounter = 0
@@ -576,8 +576,8 @@ export function createWebRtcService(callbacks: WebRtcCallbacks): WebRtcService {
     handleChannelMessage,
     rejectSas,
     confirmSas,
-    getUsername: () => currentUsername,
-    getUserId: () => currentUserId,
+    getUsername: resolveCurrentUsername,
+    getUserId: resolveCurrentUserId,
     callbacks
   })
 

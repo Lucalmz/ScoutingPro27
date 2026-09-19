@@ -222,13 +222,15 @@ export function createClientSession(ctx: ClientSessionContext) {
         }
       }
 
+      const isStandbyHost = Boolean(ctx.isStandbyHost?.())
       const rawOffer = {
         type: offer.type,
         sdp: optimizeSdpCandidates(pc?.localDescription?.sdp || offer.sdp || ''),
         ticket: handshakeTicket,
         deviceId: localDeviceId,
-        username: ctx.getUsername?.(),
-        userId: ctx.getUserId?.()
+        username: ctx.getUsername?.() || '',
+        userId: ctx.getUserId?.() || '',
+        isStandbyHost
       }
 
       let offerPayload: any = rawOffer
@@ -255,8 +257,9 @@ export function createClientSession(ctx: ClientSessionContext) {
         deviceId: localDeviceId,
         clientSessionId,
         hostSessionId: ctx.getCurrentHostSessionId(),
-        username: ctx.getUsername?.(),
-        userId: ctx.getUserId?.()
+        username: ctx.getUsername?.() || '',
+        userId: ctx.getUserId?.() || '',
+        isStandbyHost
       }, ctx.getClientHostSenderId())
     } catch (err) {
       log.error('Error creating offer:', err)
@@ -286,10 +289,10 @@ export function createClientSession(ctx: ClientSessionContext) {
     sas.clientSecurityFingerprint = await computeSecurityFingerprint(localEcdhPubHex, hostPubKey, currentInviteCode)
     log.info(`Computed SAS Fingerprint for Host: ${sas.clientSecurityFingerprint} (Device: ${effectiveHostDeviceId})`)
 
-    const effectiveHostUserId = hostUserId || (hostDeviceId ? `device:${hostDeviceId}` : `peer:${sas.clientHostDeviceId}`)
-    const effectiveHostUsername = hostUsername || (hostUserId ? `User ${hostUserId.slice(0, 8)}` : 'Node')
-    sas.clientHostUserId = effectiveHostUserId
-    sas.clientHostUsername = effectiveHostUsername
+    const effectiveHostUserId = hostUserId || sas.clientHostUserId || ''
+    const effectiveHostUsername = hostUsername || sas.clientHostUsername || (effectiveHostUserId ? `User ${effectiveHostUserId.slice(0, 8)}` : 'Host')
+    if (effectiveHostUserId) sas.clientHostUserId = effectiveHostUserId
+    if (effectiveHostUsername) sas.clientHostUsername = effectiveHostUsername
 
     const isFlapping = Boolean(
       previousHostPubHex &&

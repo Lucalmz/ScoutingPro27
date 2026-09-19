@@ -61,6 +61,10 @@ function extractInviteCode(raw: string): string {
   } catch {}
 
   // 2. Direct query regex match: join=XXXXXX or code=XXXXXX
+  const brokerMatch = trimmed.match(/[?&#](?:b|broker)=([a-zA-Z0-9_.:/-]+)/i)
+  if (brokerMatch && brokerMatch[1] && typeof sessionStorage !== 'undefined') {
+    sessionStorage.setItem('sp27-active-broker', brokerMatch[1])
+  }
   const match = trimmed.match(/[?&#](?:join|code)=([a-zA-Z0-9_-]{4,10})/i)
   if (match && match[1]) {
     return match[1].toUpperCase()

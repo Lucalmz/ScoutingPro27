@@ -92,7 +92,7 @@ export function createHostSignalingHandler(ctx: HostSessionContext) {
           ecdhPublicKey: localEcdhPubHex,
           deviceId: localDeviceId,
           username: ctx.getUsername?.() || '',
-          userId: ctx.getUserId?.() || (localDeviceId ? `node_${localDeviceId}` : '')
+          userId: ctx.getUserId?.() || ''
         },
         sender
       )
@@ -342,8 +342,9 @@ export function createHostSignalingHandler(ctx: HostSessionContext) {
         if (data.ecdhPublicKey) {
           const clientDeviceId = offerData?.deviceId || data.deviceId || 'device_default'
           sas.clientDeviceIds.set(sender, clientDeviceId)
+          const isStandbyHostOffer = Boolean(offerData?.isStandbyHost || data.isStandbyHost)
           const isTicketVerified = Boolean(verifiedUser)
-          const effectiveUserId = verifiedUser?.userId || offerData?.userId || data.userId || (clientDeviceId !== 'device_default' ? clientDeviceId : `dev_pub_${data.ecdhPublicKey.slice(0, 16)}`)
+          const effectiveUserId = verifiedUser?.userId || offerData?.userId || data.userId || ''
           const effectiveUsername = verifiedUser?.username || offerData?.username || data.username || sender
 
           sas.clientVerifiedIdentities.set(sender, {
@@ -366,8 +367,8 @@ export function createHostSignalingHandler(ctx: HostSessionContext) {
             isInSessionFlapping: isFlapping
           })
 
-          if (trustEval.status === 'TRUSTED_MATCH') {
-            log.info(`[TOFU] Trusted device match: ${clientDeviceId} (${effectiveUsername}). Auto-approving SAS.`)
+          if (isStandbyHostOffer || trustEval.status === 'TRUSTED_MATCH') {
+            log.info(`[TOFU] ${isStandbyHostOffer ? 'Standby Host mirror connected' : 'Trusted device match'}: ${clientDeviceId} (${effectiveUsername}). Auto-approving SAS.`)
             sas.clientSasStates.set(sender, 'VERIFIED')
             ctx.callbacks.onClientConnected?.(effectiveUserId, effectiveUsername)
 
@@ -510,7 +511,14 @@ export function createHostSignalingHandler(ctx: HostSessionContext) {
         })
 
         signaling.send(
-          { answer: answerPayload, hostSessionId, ecdhPublicKey: localEcdhPubHex, deviceId: localDeviceId },
+          {
+            answer: answerPayload,
+            hostSessionId,
+            ecdhPublicKey: localEcdhPubHex,
+            deviceId: localDeviceId,
+            username: ctx.getUsername?.() || '',
+            userId: ctx.getUserId?.() || ''
+          },
           sender
         )
 

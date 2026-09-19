@@ -186,6 +186,20 @@ describe('Events Store', () => {
       expect(store.currentEvent?.id).toBe('uuid-real-event-1')
     })
 
+    it('migratePlaceholder handles case-insensitive placeholder IDs (e.g. EVT-SPWNSH vs evt-spwnsh)', () => {
+      const store = useEventStore()
+      const placeholder = { id: 'EVT-SPWNSH', name: 'ScoutingPro 27', inviteCode: 'SPWNSH', hostId: 'remote-host' }
+      const authoritative = { id: 'uuid-authoritative-99', name: 'FTC Premier', inviteCode: 'SPWNSH', hostId: 'u1' }
+      store.events = [placeholder]
+      store.currentEvent = placeholder
+
+      store.migratePlaceholder('evt-spwnsh', authoritative)
+
+      expect(store.events).toHaveLength(1)
+      expect(store.events[0].id).toBe('uuid-authoritative-99')
+      expect(store.currentEvent?.id).toBe('uuid-authoritative-99')
+    })
+
     it('clearAllLocalCache wipes store events and all event-related localStorage keys while keeping user session', () => {
       const store = useEventStore()
       store.events = [{ id: 'evt-1', name: 'Test', inviteCode: 'TEST', hostId: 'u1' }]

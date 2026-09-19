@@ -145,12 +145,12 @@ onMounted(async () => {
       await eventStore.fetchEvents(userStore.userId)
       evt = eventStore.events.find((e) => e.id === eventId.value)
     }
-    if (!evt && eventId.value.startsWith('evt-')) {
-      const code = eventId.value.replace(/^evt-/, '')
+    if (!evt && eventId.value.toLowerCase().startsWith('evt-')) {
+      const code = eventId.value.replace(/^evt-/i, '')
       evt = {
         id: eventId.value,
-        name: `Event ${code}`,
-        inviteCode: code,
+        name: `Event ${code.toUpperCase()}`,
+        inviteCode: code.toUpperCase(),
         hostId: 'remote-host'
       }
       eventStore.events.push(evt)

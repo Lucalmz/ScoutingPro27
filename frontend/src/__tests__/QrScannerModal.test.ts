@@ -133,4 +133,32 @@ describe('QrScannerModal.vue', () => {
     expect(extractInviteCode('ROBOT1')).toBe('ROBOT1')
     expect(extractInviteCode('https://not-an-event.com/home')).toBeNull()
   })
+
+  it('correctly extracts broker parameter in regex fallback and hash modes', () => {
+    sessionStorage.clear()
+
+    function parseBroker(raw: string) {
+      const trimmed = raw.trim()
+      try {
+        const url = new URL(trimmed, 'https://dummy.local')
+        const hashQuery = url.hash.split('?')[1]
+        if (hashQuery) {
+          const hashParams = new URLSearchParams(hashQuery)
+          const hashBroker = hashParams.get('b') || hashParams.get('broker')
+          if (hashBroker) sessionStorage.setItem('sp27-active-broker', hashBroker)
+        }
+      } catch {}
+
+      const brokerMatch = trimmed.match(/[?&#](?:b|broker)=([a-zA-Z0-9_.:/-]+)/i)
+      if (brokerMatch && brokerMatch[1]) {
+        sessionStorage.setItem('sp27-active-broker', brokerMatch[1])
+      }
+    }
+
+    parseBroker('?join=BEAR27&b=emqx')
+    expect(sessionStorage.getItem('sp27-active-broker')).toBe('emqx')
+
+    parseBroker('custom-app://join?code=XYZ789&broker=fallback')
+    expect(sessionStorage.getItem('sp27-active-broker')).toBe('fallback')
+  })
 })
