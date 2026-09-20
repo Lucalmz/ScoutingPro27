@@ -15,7 +15,9 @@ import {
   optimizeCandidatePriority,
   optimizeSdpCandidates,
   sortCandidatesPreferIpv6,
-  probeLocalInterfaceIpv6
+  probeLocalInterfaceIpv6,
+  isGlobalIpv6Address,
+  cleanIpAddress
 } from './connectivity'
 import type { SignalingChannel } from './signaling'
 import { toSessionDescription, toIceCandidate } from './sdpUtil'
@@ -67,6 +69,7 @@ export function createClientSession(ctx: ClientSessionContext) {
   let lastOfferTimestamp = 0
   let lastHostIpv6: string | null = null
   let isDirectIpv6EligibleFlag = false
+  let directNicFailed = false
 
   function clearReconnectTimer() {
     if (reconnectTimer) {
@@ -167,7 +170,18 @@ export function createClientSession(ctx: ClientSessionContext) {
     try {
       localIpv6 = await probeLocalInterfaceIpv6()
     } catch {}
-    isDirectIpv6EligibleFlag = Boolean(lastHostIpv6 && localIpv6)
+    const hasValidGua = Boolean(
+      lastHostIpv6 &&
+      localIpv6 &&
+      isGlobalIpv6Address(lastHostIpv6) &&
+      isGlobalIpv6Address(localIpv6)
+    )
+    isDirectIpv6EligibleFlag = Boolean(
+      hasValidGua &&
+      !directNicFailed &&
+      !forceRelay &&
+      !ctx.getClientForceRelay()
+    )
 
     const pc = ctx.peerMgr.createPeerConnection(
       undefined,
@@ -382,10 +396,22 @@ export function createClientSession(ctx: ClientSessionContext) {
     const sas = ctx.sas
     const clientPc = ctx.getClientPc()
 
+    if (data.type === 'reconnect_request') {
+      log.warn(`Received reconnect_request from Host: reason=${data.reason}`)
+      if (data.reason === 'direct_nic_failed' || data.reason === 'direct_nic_fallback') {
+        directNicFailed = true
+        isDirectIpv6EligibleFlag = false
+      }
+      reconnectAttempts = 0
+      clearReconnectTimer()
+      setupClientConnection(data.reason === 'force_relay')
+      return
+    }
+
     if (data.type === 'host_hello') {
       log.info(`Received host_hello: hostSessionId=${data.hostSessionId}, deviceId=${data.deviceId}, sender=${data.sender}`)
-      if (data.hostIpv6) {
-        lastHostIpv6 = data.hostIpv6
+      if (data.hostIpv6 && isGlobalIpv6Address(data.hostIpv6)) {
+        lastHostIpv6 = cleanIpAddress(data.hostIpv6)
       }
       const previousHostSessionId = ctx.getCurrentHostSessionId()
       const isSameHostSession = Boolean(data.hostSessionId && data.hostSessionId === previousHostSessionId)
@@ -677,6 +703,30 @@ export function createClientSession(ctx: ClientSessionContext) {
     consecutiveFailedPings = 0
   }
 
+  function handleDirectNicFallback() {
+    if (directNicFailed) return
+    directNicFailed = true
+    isDirectIpv6EligibleFlag = false
+    log.warn('[Client] Direct NIC mode timed out or blocked by NAT/firewall. Forcefully tearing down and falling back to STUN/TURN...')
+    const oldDc = ctx.getClientDc()
+    if (oldDc) {
+      try { oldDc.close() } catch (_) {}
+      ctx.setClientDc(null)
+    }
+    const oldPc = ctx.getClientPc()
+    if (oldPc) {
+      oldPc.onicecandidate = null
+      oldPc.oniceconnectionstatechange = null
+      oldPc.onconnectionstatechange = null
+      oldPc.ondatachannel = null
+      try { oldPc.close() } catch (_) {}
+      ctx.setClientPc(null)
+    }
+    reconnectAttempts = 0
+    clearReconnectTimer()
+    setupClientConnection(false)
+  }
+
   return {
     setupClientConnection,
     handleClientSignalingMessage,
@@ -688,7 +738,11 @@ export function createClientSession(ctx: ClientSessionContext) {
     startDataChannelHeartbeat,
     stopDataChannelHeartbeat,
     resetOfferTimestamp,
-    isDirectIpv6Eligible: () => isDirectIpv6EligibleFlag
+    isDirectIpv6Eligible: () => isDirectIpv6EligibleFlag,
+    handleDirectNicFallback,
+    resetDirectNicState: () => {
+      directNicFailed = false
+    }
   }
 }
 

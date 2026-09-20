@@ -27,10 +27,10 @@ describe('Direct NIC IPv6 & STUN NAT Fallback', () => {
   })
 
   describe('DIRECT_NIC_CONFIG specification', () => {
-    it('defines zero iceServers and zero iceCandidatePoolSize for zero-STUN direct connection', () => {
+    it('defines zero iceServers for zero-STUN direct connection without pool size mismatch', () => {
       expect(DIRECT_NIC_CONFIG.iceServers).toBeDefined()
       expect(DIRECT_NIC_CONFIG.iceServers).toEqual([])
-      expect(DIRECT_NIC_CONFIG.iceCandidatePoolSize).toBe(0)
+      expect(DIRECT_NIC_CONFIG.iceCandidatePoolSize).toBeUndefined()
     })
   })
 
@@ -136,13 +136,15 @@ describe('Direct NIC IPv6 & STUN NAT Fallback', () => {
   describe('PeerConnectionManager NIC Direct Mode & Watchdog', () => {
     function createMockPeer() {
       const listeners: Record<string, Function[]> = {}
+      const closeSpy = vi.fn()
       const peer: any = {
         connectionState: 'new',
         iceConnectionState: 'new',
         signalingState: 'stable',
         setConfiguration: vi.fn(),
         restartIce: vi.fn(),
-        close: vi.fn(),
+        close: closeSpy,
+        closeSpy,
         createDataChannel: vi.fn().mockReturnValue({ readyState: 'connecting' }),
         addEventListener: vi.fn((event: string, fn: Function) => {
           if (!listeners[event]) listeners[event] = []
@@ -181,7 +183,7 @@ describe('Direct NIC IPv6 & STUN NAT Fallback', () => {
 
       expect(passedConfig).toBeDefined()
       expect(passedConfig.iceServers).toEqual([])
-      expect(passedConfig.iceCandidatePoolSize).toBe(0)
+      expect(passedConfig.iceCandidatePoolSize).toBeUndefined()
     })
 
     it('initializes with STUN_SERVERS when direct IPv6 is not eligible', () => {
@@ -198,34 +200,33 @@ describe('Direct NIC IPv6 & STUN NAT Fallback', () => {
       expect(passedConfig.iceServers).toEqual(STUN_SERVERS.iceServers)
     })
 
-    it('triggers STUN/TURN fallback and restartIce after 1500ms when direct connection is blocked by NAT/firewall', async () => {
+    it('forcefully tears down direct-NIC connection and calls onDirectNicFallback after 1500ms when direct connection is blocked by NAT/firewall', async () => {
       const mockPeer = createMockPeer()
       global.RTCPeerConnection = vi.fn().mockImplementation(() => mockPeer) as any
 
-      const manager = new PeerConnectionManager(createMockOptions(true))
-      const pc = manager.createPeerConnection()
+      const mockOptions = createMockOptions(true)
+      mockOptions.onDirectNicFallback = vi.fn()
+      const manager = new PeerConnectionManager(mockOptions)
+      const pc = manager.createPeerConnection('target-client')
 
       // Before 1500ms, no fallback
       await vi.advanceTimersByTimeAsync(1400)
-      expect(mockPeer.setConfiguration).not.toHaveBeenCalled()
-      expect(mockPeer.restartIce).not.toHaveBeenCalled()
+      expect(mockPeer.closeSpy).not.toHaveBeenCalled()
+      expect(mockOptions.onDirectNicFallback).not.toHaveBeenCalled()
 
       // At 1500ms, watchdog fires
       await vi.advanceTimersByTimeAsync(150)
-      expect(mockPeer.setConfiguration).toHaveBeenCalledWith(STUN_SERVERS)
-      expect(mockPeer.restartIce).toHaveBeenCalledTimes(1)
-
-      // Later connected state reflects fallback
-      mockPeer.connectionState = 'connected'
-      mockPeer.onconnectionstatechange()
-      // Does not throw and cancels timer cleanly
+      expect(mockPeer.closeSpy).toHaveBeenCalledTimes(1)
+      expect(mockOptions.onDirectNicFallback).toHaveBeenCalledWith('target-client')
     })
 
-    it('race protection: cancels watchdog when connected within 1500ms without triggering STUN fallback', async () => {
+    it('race protection: cancels watchdog when connected within 1500ms without triggering fallback', async () => {
       const mockPeer = createMockPeer()
       global.RTCPeerConnection = vi.fn().mockImplementation(() => mockPeer) as any
 
-      const manager = new PeerConnectionManager(createMockOptions(true))
+      const mockOptions = createMockOptions(true)
+      mockOptions.onDirectNicFallback = vi.fn()
+      const manager = new PeerConnectionManager(mockOptions)
       manager.createPeerConnection()
 
       // Connects at 400ms via direct IPv6
@@ -237,15 +238,17 @@ describe('Direct NIC IPv6 & STUN NAT Fallback', () => {
       await vi.advanceTimersByTimeAsync(2000)
 
       // Crucial: fallback must NOT have been called
-      expect(mockPeer.setConfiguration).not.toHaveBeenCalled()
-      expect(mockPeer.restartIce).not.toHaveBeenCalled()
+      expect(mockPeer.closeSpy).not.toHaveBeenCalled()
+      expect(mockOptions.onDirectNicFallback).not.toHaveBeenCalled()
     })
 
     it('cancels watchdog cleanly when peer connection is closed before 1500ms', async () => {
       const mockPeer = createMockPeer()
       global.RTCPeerConnection = vi.fn().mockImplementation(() => mockPeer) as any
 
-      const manager = new PeerConnectionManager(createMockOptions(true))
+      const mockOptions = createMockOptions(true)
+      mockOptions.onDirectNicFallback = vi.fn()
+      const manager = new PeerConnectionManager(mockOptions)
       const pc = manager.createPeerConnection()
 
       // Peer closed at 500ms (e.g., user navigates away or host disconnects)
@@ -255,8 +258,23 @@ describe('Direct NIC IPv6 & STUN NAT Fallback', () => {
       // Advance past 1500ms
       await vi.advanceTimersByTimeAsync(2000)
 
-      expect(mockPeer.setConfiguration).not.toHaveBeenCalled()
-      expect(mockPeer.restartIce).not.toHaveBeenCalled()
+      expect(mockOptions.onDirectNicFallback).not.toHaveBeenCalled()
+    })
+
+    it('immediately triggers onDirectNicFallback and closes peer when connection fails before connected', () => {
+      const mockPeer = createMockPeer()
+      global.RTCPeerConnection = vi.fn().mockImplementation(() => mockPeer) as any
+
+      const mockOptions = createMockOptions(true)
+      mockOptions.onDirectNicFallback = vi.fn()
+      const manager = new PeerConnectionManager(mockOptions)
+      manager.createPeerConnection('target-client')
+
+      mockPeer.connectionState = 'failed'
+      mockPeer.onconnectionstatechange()
+
+      expect(mockPeer.closeSpy).toHaveBeenCalledTimes(1)
+      expect(mockOptions.onDirectNicFallback).toHaveBeenCalledWith('target-client')
     })
   })
 })

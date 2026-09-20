@@ -16,7 +16,9 @@ import {
   optimizeCandidatePriority,
   optimizeSdpCandidates,
   sortCandidatesPreferIpv6,
-  probeLocalInterfaceIpv6
+  probeLocalInterfaceIpv6,
+  isGlobalIpv6Address,
+  cleanIpAddress
 } from './connectivity'
 import type { SignalingChannel } from './signaling'
 import { toSessionDescription, toIceCandidate } from './sdpUtil'
@@ -66,10 +68,11 @@ function extractTicketPayload(ticket: string): Record<string, any> | null {
 export function createHostSignalingHandler(ctx: HostSessionContext) {
   let cachedHostIpv6: string | null = null
   const clientIpv6s = new Map<string, string>()
+  const failedDirectNicPeers = new Set<string>()
 
   probeLocalInterfaceIpv6()
     .then((ip) => {
-      if (ip) cachedHostIpv6 = ip
+      if (ip && isGlobalIpv6Address(ip)) cachedHostIpv6 = cleanIpAddress(ip)
     })
     .catch(() => {})
 
@@ -139,8 +142,8 @@ export function createHostSignalingHandler(ctx: HostSessionContext) {
 
     if (data.offer) {
       const clientIpv6 = data.clientIpv6 || data.offer?.clientIpv6
-      if (clientIpv6) {
-        clientIpv6s.set(sender, clientIpv6)
+      if (clientIpv6 && isGlobalIpv6Address(clientIpv6)) {
+        clientIpv6s.set(sender, cleanIpAddress(clientIpv6))
       }
       log.info(`Received WebRTC offer from ${sender}`, {
         clientSessionId: data.clientSessionId,
@@ -201,6 +204,29 @@ export function createHostSignalingHandler(ctx: HostSessionContext) {
           existing.sessionId === data.clientSessionId
         )
 
+        const makeOnDisconnect = (targetPc: RTCPeerConnection) => () => {
+          log.warn(`Host peer connection for ${sender} stalled or closed. Cleaning up peer resources...`)
+          const curActive = clients.get(sender)
+          if (curActive && curActive.pc === targetPc) {
+            if (curActive.dc) curActive.dc.onclose = null
+            curActive.pc.onconnectionstatechange = null
+            curActive.pc.oniceconnectionstatechange = null
+            try { curActive.dc?.close() } catch {}
+            try { curActive.pc.close() } catch {}
+            clients.delete(sender)
+          }
+          const curStaged = stagedClients.get(sender)
+          if (curStaged && curStaged.pc === targetPc) {
+            if (curStaged.dc) curStaged.dc.onclose = null
+            curStaged.pc.onconnectionstatechange = null
+            curStaged.pc.oniceconnectionstatechange = null
+            try { curStaged.dc?.close() } catch {}
+            try { curStaged.pc.close() } catch {}
+            stagedClients.delete(sender)
+          }
+          ctx.updateHostStatus()
+        }
+
         if (isIceRestart && existing) {
           log.info(`Performing in-place ICE restart renegotiation for existing peer ${sender}`)
           clientData = existing
@@ -214,7 +240,12 @@ export function createHostSignalingHandler(ctx: HostSessionContext) {
             existing.pc.close()
             clients.delete(sender)
           }
-          const pc = ctx.peerMgr.createPeerConnection(sender)
+          let pcRef: RTCPeerConnection
+          const onDisconnect = () => {
+            if (pcRef) makeOnDisconnect(pcRef)()
+          }
+          const pc = ctx.peerMgr.createPeerConnection(sender, onDisconnect)
+          pcRef = pc
           setupDcHandler(pc)
           clientData = { pc, sessionId: data.clientSessionId, pendingCandidates: [] }
           clients.set(sender, clientData)
@@ -228,7 +259,12 @@ export function createHostSignalingHandler(ctx: HostSessionContext) {
             existingStaged.dc?.close()
             existingStaged.pc.close()
           }
-          const pc = ctx.peerMgr.createPeerConnection(sender)
+          let pcRef: RTCPeerConnection
+          const onDisconnect = () => {
+            if (pcRef) makeOnDisconnect(pcRef)()
+          }
+          const pc = ctx.peerMgr.createPeerConnection(sender, onDisconnect)
+          pcRef = pc
           setupDcHandler(pc)
           clientData = { pc, sessionId: data.clientSessionId, pendingCandidates: [] }
           stagedClients.set(sender, clientData)
@@ -613,8 +649,49 @@ export function createHostSignalingHandler(ctx: HostSessionContext) {
   }
 
   handler.isPeerDirectIpv6Eligible = (targetSender?: string) => {
-    return Boolean(cachedHostIpv6 && targetSender && clientIpv6s.has(targetSender))
+    if (!targetSender || failedDirectNicPeers.has(targetSender)) return false
+    const clientIp = clientIpv6s.get(targetSender)
+    return Boolean(
+      cachedHostIpv6 &&
+      clientIp &&
+      isGlobalIpv6Address(cachedHostIpv6) &&
+      isGlobalIpv6Address(clientIp)
+    )
   }
+
+  handler.handleDirectNicFallback = (targetSender?: string) => {
+    if (!targetSender) return
+    failedDirectNicPeers.add(targetSender)
+    log.warn(`[Host] Direct NIC connection timed out or blocked by NAT/firewall for peer ${targetSender}. Forcefully tearing down and requesting STUN/TURN reconnect...`)
+    const active = ctx.clients.get(targetSender)
+    if (active) {
+      if (active.dc) active.dc.onclose = null
+      active.pc.onconnectionstatechange = null
+      active.pc.oniceconnectionstatechange = null
+      try { active.dc?.close() } catch {}
+      try { active.pc.close() } catch {}
+      ctx.clients.delete(targetSender)
+    }
+    const staged = ctx.stagedClients.get(targetSender)
+    if (staged) {
+      if (staged.dc) staged.dc.onclose = null
+      staged.pc.onconnectionstatechange = null
+      staged.pc.oniceconnectionstatechange = null
+      try { staged.dc?.close() } catch {}
+      try { staged.pc.close() } catch {}
+      ctx.stagedClients.delete(targetSender)
+    }
+    ctx.updateHostStatus()
+    ctx.getSignaling()?.send(
+      {
+        type: 'reconnect_request',
+        reason: 'direct_nic_failed',
+        hostSessionId: ctx.getHostSessionId()
+      },
+      targetSender
+    )
+  }
+
   handler.getHostIpv6 = () => cachedHostIpv6
   return handler
 }

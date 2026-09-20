@@ -31,6 +31,7 @@ export interface PeerConnectionFactoryOptions {
   getClientPc?: () => RTCPeerConnection | null
   isExplicitlyClosed?: () => boolean
   isDirectIpv6Eligible?: (targetSender?: string) => boolean
+  onDirectNicFallback?: (targetSender?: string) => void
 }
 
 export class PeerConnectionManager {
@@ -226,7 +227,7 @@ export class PeerConnectionManager {
       }
     }
 
-    // 若当前为免 STUN 网卡直连模式，启动 1500ms 看门狗；若因路由防火墙/NAT 阻断未能连通，静默降级为 STUN/TURN
+    // 若当前为免 STUN 网卡直连模式，启动 1500ms 看门狗；若因路由防火墙/NAT 阻断未能连通，强制打掉当前直连并降级为 STUN/TURN
     if (isDirectNicMode) {
       natFallbackTimer = setTimeout(() => {
         natFallbackTimer = null
@@ -241,18 +242,14 @@ export class PeerConnectionManager {
         }
         isUpgradingToStun = true
         log.warn(
-          `[WebRTC Watchdog] Direct NIC connection did not reach connected within 1500ms (NAT/firewall detected). Upgrading to STUN/TURN fallback...`
+          `[WebRTC Watchdog] Direct NIC connection did not reach connected within 1500ms (NAT/firewall detected). Forcefully tearing down direct-NIC peer and falling back to STUN/TURN...`
         )
         try {
-          if (typeof (peer as any).setConfiguration === 'function') {
-            ;(peer as any).setConfiguration(STUN_SERVERS)
-          }
-          if (typeof (peer as any).restartIce === 'function') {
-            ;(peer as any).restartIce()
-          }
-        } catch (err) {
-          log.error('Failed to upgrade configuration for STUN fallback:', err)
+          peer.close()
+        } catch (closeErr) {
+          log.warn('[WebRTC Watchdog] Error closing stalled direct-NIC peer:', closeErr)
         }
+        this.options.onDirectNicFallback?.(targetSender)
       }, 1500)
     }
 
@@ -285,6 +282,14 @@ export class PeerConnectionManager {
       }
       if (['disconnected', 'failed', 'closed'].includes(peer.connectionState)) {
         cancelNatFallback()
+        if (isDirectNicMode && !hasConnected && !isUpgradingToStun && peer.connectionState !== 'closed') {
+          isUpgradingToStun = true
+          log.warn(
+            `[WebRTC Watchdog] Direct NIC connection reached ${peer.connectionState} before connecting. Forcefully tearing down and falling back to STUN/TURN...`
+          )
+          try { peer.close() } catch {}
+          this.options.onDirectNicFallback?.(targetSender)
+        }
         if (iceTimeout) {
           clearTimeout(iceTimeout)
           iceTimeout = null
@@ -428,12 +433,16 @@ export class PeerConnectionManager {
                   clearTimeout(stallRestartWatchdog)
                   stallRestartWatchdog = null
                 }
+                try { peer.close() } catch {}
                 if (!isHost) {
                   this.options.onClientRebuildRelay?.()
                 } else if (onDisconnect) {
                   onDisconnect()
                 } else {
                   this.options.setStatus('degraded')
+                  if (targetSender) {
+                    this.options.onHostClientClosed?.(targetSender)
+                  }
                 }
               }
             }
@@ -444,6 +453,16 @@ export class PeerConnectionManager {
           scheduleStallRestart()
         }
       } else if (peer.iceConnectionState === 'disconnected' || peer.iceConnectionState === 'failed') {
+        cancelNatFallback()
+        if (isDirectNicMode && !hasConnected && !isUpgradingToStun && peer.iceConnectionState === 'failed') {
+          isUpgradingToStun = true
+          log.warn(
+            `[WebRTC Watchdog] Direct NIC ICE failed. Forcefully tearing down and falling back to STUN/TURN...`
+          )
+          try { peer.close() } catch {}
+          this.options.onDirectNicFallback?.(targetSender)
+          return
+        }
         if (checkingWatchdog) {
           clearTimeout(checkingWatchdog)
           checkingWatchdog = null

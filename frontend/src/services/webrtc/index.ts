@@ -262,6 +262,13 @@ export function createWebRtcService(callbacks: WebRtcCallbacks): WebRtcService {
       } else {
         return Boolean(clientSession?.isDirectIpv6Eligible?.())
       }
+    },
+    onDirectNicFallback: (targetSender?: string) => {
+      if (isHostMode) {
+        ;(hostSignalingHandler as any)?.handleDirectNicFallback?.(targetSender)
+      } else {
+        clientSession?.handleDirectNicFallback?.()
+      }
     }
   })
 

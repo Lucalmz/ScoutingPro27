@@ -132,8 +132,7 @@ export const STUN_SERVERS: RTCConfiguration = {
  * 依靠操作系统网络栈提取 host 候选（用于 IPv6 全球单播或 LAN 私网端到端直连）
  */
 export const DIRECT_NIC_CONFIG: RTCConfiguration = {
-  iceServers: [],
-  iceCandidatePoolSize: 0
+  iceServers: []
 }
 
 let cachedLocalIpv6: string | null = null
