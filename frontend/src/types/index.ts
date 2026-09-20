@@ -211,6 +211,7 @@ export type WebRtcMessage =
   | WebRtcRequestPitSync
   | WebRtcOfficialRosterSync
   | WebRtcPitPhotoUpload
+  | WebRtcPitPhotoChunk
   | WebRtcPitPhotoAck
   | WebRtcMergeAccountRequest
   | WebRtcMergeAccountResponse
@@ -229,6 +230,18 @@ export interface WebRtcPong {
   type: 'PONG'
   timestamp: number
   authCode?: string
+}
+
+export interface WebRtcPitPhotoChunk {
+  type: 'PIT_PHOTO_CHUNK'
+  transferId: string
+  eventId: string
+  key: string
+  chunkIndex: number
+  totalChunks: number
+  chunkData: string
+  authCode?: string
+  senderId?: string
 }
 
 export interface WebRtcPitPhotoUpload {

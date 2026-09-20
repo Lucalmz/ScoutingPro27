@@ -3,6 +3,7 @@ import { computed, ref, onMounted, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import type { UnifiedTeamItem } from '@/types'
 import { getPhotoUrl } from '@/services/photoStorage'
+import ImagePreviewModal from '@/components/common/ImagePreviewModal.vue'
 import PitStatusIndicator from './PitStatusIndicator.vue'
 import { LAUNCHER_PRESETS } from '@/constants/pitScoutPresets'
 
@@ -17,13 +18,22 @@ const emit = defineEmits<{
 
 const { t } = useI18n()
 const photoUrl = ref<string | null>(null)
+const allPhotoUrls = ref<string[]>([])
+const isPreviewOpen = ref(false)
 
 async function loadPhoto() {
   const keys = props.team.pitRecord?.photoKeys
   const eventId = props.team.pitRecord?.eventId || ''
-  if (keys && keys.length > 0 && keys[0]) {
-    photoUrl.value = await getPhotoUrl(keys[0], eventId)
+  if (keys && keys.length > 0) {
+    const urls: string[] = []
+    for (const key of keys) {
+      const u = await getPhotoUrl(key, eventId)
+      if (u) urls.push(u)
+    }
+    allPhotoUrls.value = urls
+    photoUrl.value = urls[0] || null
   } else {
+    allPhotoUrls.value = []
     photoUrl.value = null
   }
 }
@@ -154,8 +164,17 @@ const bragLabel = computed(() => {
     </div>
 
     <!-- 照片预览图 (若有) -->
-    <div v-if="photoUrl" class="card-thumbnail">
+    <div
+      v-if="photoUrl"
+      class="card-thumbnail"
+      @click.stop="isPreviewOpen = true"
+      title="点击查看机器人大图"
+    >
       <img :src="photoUrl" alt="Robot Photo" loading="lazy" />
+      <div class="thumbnail-overlay">
+        <span class="material-icons zoom-icon">zoom_in</span>
+        <span v-if="allPhotoUrls.length > 1" class="photo-count-badge">{{ allPhotoUrls.length }} 张</span>
+      </div>
     </div>
 
     <!-- 底部操作提示 -->
@@ -164,6 +183,14 @@ const bragLabel = computed(() => {
         {{ team.hasPitRecord ? t('pit_scout.btn_view_edit') : t('pit_scout.btn_add_record') }}
       </button>
     </div>
+
+    <!-- 全屏大图查看弹窗 -->
+    <ImagePreviewModal
+      v-model="isPreviewOpen"
+      :images="allPhotoUrls"
+      :image-url="photoUrl"
+      :title="`${team.teamNumber} ${team.name ? team.name + ' ' : ''}机器人照片`"
+    />
   </div>
 </template>
 
@@ -372,12 +399,56 @@ const bragLabel = computed(() => {
   overflow: hidden;
   background: #000;
   border: 1px solid var(--border, #262626);
+  position: relative;
+  cursor: zoom-in;
 }
 
 .card-thumbnail img {
   width: 100%;
   height: 100%;
   object-fit: cover;
+  transition: transform 0.2s ease;
+}
+
+.card-thumbnail:hover img {
+  transform: scale(1.04);
+}
+
+.thumbnail-overlay {
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  background: rgba(0, 0, 0, 0.35);
+  opacity: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: opacity 0.2s ease;
+  pointer-events: none;
+}
+
+.card-thumbnail:hover .thumbnail-overlay {
+  opacity: 1;
+}
+
+.zoom-icon {
+  font-size: 28px;
+  color: #fff;
+  filter: drop-shadow(0 2px 4px rgba(0, 0, 0, 0.8));
+}
+
+.photo-count-badge {
+  position: absolute;
+  bottom: 6px;
+  right: 6px;
+  background: rgba(0, 0, 0, 0.7);
+  color: #fff;
+  font-size: 10px;
+  padding: 2px 6px;
+  border-radius: 10px;
+  border: 1px solid rgba(255, 255, 255, 0.2);
 }
 
 .card-footer {

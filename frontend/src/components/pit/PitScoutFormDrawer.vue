@@ -6,6 +6,7 @@ import { useUserStore } from '@/stores/user'
 import { useToastStore } from '@/stores/toast'
 import { useCustomFieldsStore } from '@/stores/customFields'
 import DynamicFieldsRenderer from '@/components/customFields/DynamicFieldsRenderer.vue'
+import ImagePreviewModal from '@/components/common/ImagePreviewModal.vue'
 import { savePhoto, getPhotoUrl, deletePhoto, flushOfflinePhotos } from '@/services/photoStorage'
 import { hapticLight, hapticMedium, hapticSuccess } from '@/utils/haptics'
 import { useBumpAnimation } from '@/composables/useBumpAnimation'
@@ -293,6 +294,14 @@ function removePhoto(key: string) {
   deletePhoto(key, pitStore.currentEventId || '')
   photoKeys.value = photoKeys.value.filter((k) => k !== key)
   photoPreviews.value = photoPreviews.value.filter((p) => p.key !== key)
+}
+
+const isPreviewOpen = ref(false)
+const previewIndex = ref(0)
+
+function openPhotoPreview(index: number) {
+  previewIndex.value = index
+  isPreviewOpen.value = true
 }
 
 function compressImageToWebP(file: File): Promise<string> {
@@ -775,9 +784,20 @@ onUnmounted(() => {
         <div class="form-section">
           <h4 class="section-title">{{ t('pit_scout.drawer.sec_photos') }}</h4>
           <div class="photos-grid">
-            <div v-for="p in photoPreviews" :key="p.key" class="photo-item">
+            <div
+              v-for="(p, idx) in photoPreviews"
+              :key="p.key"
+              class="photo-item"
+              @click="openPhotoPreview(idx)"
+              title="点击查看高清大图"
+            >
               <img :src="p.url" alt="Preview" />
-              <button type="button" class="photo-del-btn" @click="removePhoto(p.key)">×</button>
+              <button
+                type="button"
+                class="photo-del-btn"
+                @click.stop="removePhoto(p.key)"
+                title="删除此照片"
+              >×</button>
             </div>
             <label class="photo-upload-box">
               <span>{{ t('pit_scout.drawer.btn_upload_photo') }}</span>
@@ -813,4 +833,12 @@ onUnmounted(() => {
   </div>
   </Transition>
   </Teleport>
+
+  <!-- 全屏大图查看弹窗 -->
+  <ImagePreviewModal
+    v-model="isPreviewOpen"
+    :images="photoPreviews.map((p) => p.url)"
+    :initial-index="previewIndex"
+    :title="teamNumber ? `${teamNumber} 展位特写照片` : '展位特写照片'"
+  />
 </template>

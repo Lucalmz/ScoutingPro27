@@ -22,6 +22,44 @@ export function isDesktopHost(): boolean {
   return host === 'localhost' || host === '127.0.0.1' || host === '::1'
 }
 
+/**
+ * 通过 WebRTC DataChannel 分片发送照片（每片 24KB，规避 64KB 硬限制与通道拥塞）
+ */
+export async function uploadPhotoViaWebRtcChunks(
+  eventId: string,
+  key: string,
+  dataUrl: string
+): Promise<boolean> {
+  try {
+    const { useConnectionStore } = await import('@/stores/connection')
+    const connStore = useConnectionStore()
+    if (connStore.status !== 'connected' || !connStore.rtcService) {
+      return false
+    }
+
+    const CHUNK_SIZE = 24 * 1024
+    const totalChunks = Math.max(1, Math.ceil(dataUrl.length / CHUNK_SIZE))
+    const transferId = `photo_${key}_${Date.now()}`
+
+    for (let i = 0; i < totalChunks; i++) {
+      const chunkData = dataUrl.slice(i * CHUNK_SIZE, (i + 1) * CHUNK_SIZE)
+      await connStore.rtcService.sendMessage({
+        type: 'PIT_PHOTO_CHUNK',
+        transferId,
+        eventId,
+        key,
+        chunkIndex: i,
+        totalChunks,
+        chunkData
+      })
+    }
+    return true
+  } catch (err) {
+    console.warn('[photoStorage] WebRTC chunk upload failed:', err)
+    return false
+  }
+}
+
 async function uploadPhotoViaRtcOrHttp(eventId: string, key: string, dataUrl: string): Promise<boolean> {
   try {
     await uploadPitPhoto(eventId, key, dataUrl)
@@ -29,22 +67,8 @@ async function uploadPhotoViaRtcOrHttp(eventId: string, key: string, dataUrl: st
     return true
   } catch (httpErr) {
     // HTTP API 失败（如 502 Bad Gateway 或蜂窝网络拦截），无缝回退 WebRTC DataChannel 直传
-    try {
-      const { useConnectionStore } = await import('@/stores/connection')
-      const connStore = useConnectionStore()
-      if (connStore.status === 'connected' && connStore.rtcService) {
-        await connStore.rtcService.sendMessage({
-          type: 'PIT_PHOTO_UPLOAD',
-          eventId,
-          key,
-          dataUrl
-        })
-        return true
-      }
-    } catch (rtcErr) {
-      console.warn('[photoStorage] WebRTC fallback upload failed:', rtcErr)
-    }
-    return false
+    const sent = await uploadPhotoViaWebRtcChunks(eventId, key, dataUrl)
+    return sent
   }
 }
 
@@ -68,26 +92,13 @@ export async function savePhoto(key: string, dataUrl: string, eventId: string): 
   // 手机端：写入专属离线安全缓冲区
   await saveMobileCachedPhoto(key, dataUrl, eventId, 'PENDING')
 
-  // 若当前连网，即刻触发静默后台上传（失败时回退 WebRTC）
+  // 若当前连网，即刻触发静默后台上传（失败时回退 WebRTC 分片）
   if (typeof navigator !== 'undefined' && navigator.onLine !== false) {
     uploadPitPhoto(eventId, key, dataUrl)
       .then(() => markMobilePhotoSynced(key))
       .catch(async (err) => {
         console.warn('[photoStorage Mobile] HTTP upload deferred, trying WebRTC fallback:', err)
-        try {
-          const { useConnectionStore } = await import('@/stores/connection')
-          const connStore = useConnectionStore()
-          if (connStore.status === 'connected' && connStore.rtcService) {
-            await connStore.rtcService.sendMessage({
-              type: 'PIT_PHOTO_UPLOAD',
-              eventId,
-              key,
-              dataUrl
-            })
-          }
-        } catch (rtcErr) {
-          console.warn('[photoStorage Mobile] WebRTC fallback failed:', rtcErr)
-        }
+        await uploadPhotoViaWebRtcChunks(eventId, key, dataUrl)
       })
   }
 

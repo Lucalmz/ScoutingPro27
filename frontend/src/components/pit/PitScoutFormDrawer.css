@@ -297,6 +297,13 @@
   position: relative;
   background: #000;
   border: 1px solid var(--border, #262626);
+  cursor: pointer;
+  transition: transform 0.18s ease, border-color 0.18s ease;
+}
+
+.photo-item:hover {
+  transform: translateY(-2px);
+  border-color: var(--primary, #39ff14);
 }
 
 .photo-item img {

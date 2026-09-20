@@ -49,6 +49,18 @@ export interface ChannelMessageHandlerContext {
   onPongReceived?: (timestamp: number) => void
 }
 
+interface PhotoChunkBuffer {
+  transferId: string
+  eventId: string
+  key: string
+  totalChunks: number
+  chunks: string[]
+  receivedCount: number
+  updatedAt: number
+}
+
+const photoChunkBuffers = new Map<string, PhotoChunkBuffer>()
+
 export function createChannelMessageHandler(ctx: ChannelMessageHandlerContext) {
   const OFFLINE_MSG_TTL_MS = 10 * 60 * 1000
 
@@ -933,6 +945,75 @@ export function createChannelMessageHandler(ctx: ChannelMessageHandlerContext) {
                 type: 'PIT_PHOTO_ACK',
                 eventId: msg.eventId,
                 key: msg.key,
+                success: false,
+                authCode: currentInviteCode
+              },
+              senderId
+            )
+          }
+        }
+        break
+      }
+
+      case 'PIT_PHOTO_CHUNK': {
+        if (!isHostMode) break
+        const { transferId, eventId, key, chunkIndex, totalChunks, chunkData } = msg
+        if (!transferId || !eventId || !key || typeof chunkIndex !== 'number' || typeof totalChunks !== 'number') {
+          break
+        }
+
+        // 清理超过 5 分钟未完成的过期分片缓冲
+        const now = Date.now()
+        for (const [tId, buf] of photoChunkBuffers.entries()) {
+          if (now - buf.updatedAt > 300000) {
+            photoChunkBuffers.delete(tId)
+          }
+        }
+
+        let buffer = photoChunkBuffers.get(transferId)
+        if (!buffer) {
+          buffer = {
+            transferId,
+            eventId,
+            key,
+            totalChunks,
+            chunks: new Array(totalChunks),
+            receivedCount: 0,
+            updatedAt: now
+          }
+          photoChunkBuffers.set(transferId, buffer)
+        }
+
+        if (!buffer.chunks[chunkIndex]) {
+          buffer.chunks[chunkIndex] = chunkData
+          buffer.receivedCount++
+          buffer.updatedAt = now
+        }
+
+        if (buffer.receivedCount === buffer.totalChunks) {
+          photoChunkBuffers.delete(transferId)
+          const assembledDataUrl = buffer.chunks.join('')
+          try {
+            const { uploadPitPhoto } = await import('@/services/api')
+            await uploadPitPhoto(buffer.eventId, buffer.key, assembledDataUrl)
+            console.log(`[WebRTC Host] Successfully assembled and saved pit photo ${buffer.key} (${buffer.totalChunks} chunks)`)
+            await ctx.sendMessage(
+              {
+                type: 'PIT_PHOTO_ACK',
+                eventId: buffer.eventId,
+                key: buffer.key,
+                success: true,
+                authCode: currentInviteCode
+              },
+              senderId
+            )
+          } catch (err) {
+            console.error(`[WebRTC Host] Failed to save assembled pit photo ${buffer.key}:`, err)
+            await ctx.sendMessage(
+              {
+                type: 'PIT_PHOTO_ACK',
+                eventId: buffer.eventId,
+                key: buffer.key,
                 success: false,
                 authCode: currentInviteCode
               },

@@ -404,19 +404,28 @@ export function createClientSession(ctx: ClientSessionContext) {
         curDc &&
         curDc.readyState === 'open'
       )
-      const isOfferInFlight = Boolean(
+      const isConnectingOrChecking = Boolean(
         curPc &&
-        curPc.signalingState === 'have-local-offer' &&
-        Date.now() - lastOfferTimestamp < 3000
+        (curPc.connectionState === 'connecting' || curPc.iceConnectionState === 'checking')
+      )
+      const isHandshakeInFlight = Boolean(
+        curPc &&
+        curPc.connectionState !== 'closed' &&
+        curPc.connectionState !== 'failed' &&
+        (curPc.signalingState === 'have-local-offer' || Date.now() - lastOfferTimestamp < 8000)
       )
 
-      if (hostSessionChanged || (!isAlreadyConnected && !isOfferInFlight)) {
-        log.info(`Setting up client connection on host_hello (isAlreadyConnected: ${isAlreadyConnected}, isOfferInFlight: ${isOfferInFlight}, hostSessionChanged: ${hostSessionChanged})`)
+      if (hostSessionChanged || (!isAlreadyConnected && !isConnectingOrChecking && !isHandshakeInFlight)) {
+        log.info(
+          `Setting up client connection on host_hello (isAlreadyConnected: ${isAlreadyConnected}, isConnecting: ${isConnectingOrChecking}, isHandshakeInFlight: ${isHandshakeInFlight}, hostSessionChanged: ${hostSessionChanged})`
+        )
         clearReconnectTimer()
         reconnectAttempts = 0
         await setupClientConnection()
       } else {
-        log.info(`Preserving existing peer connection on host_hello (alreadyConnected: ${isAlreadyConnected}, offerInFlight: ${isOfferInFlight})`)
+        log.info(
+          `Preserving existing peer connection on host_hello (alreadyConnected: ${isAlreadyConnected}, connecting: ${isConnectingOrChecking}, handshakeInFlight: ${isHandshakeInFlight})`
+        )
       }
     } else if (data.type === 'host_takeover') {
       log.info(`Received host_takeover by new host session: ${data.newHostSessionId} (from ${data.sender})`)

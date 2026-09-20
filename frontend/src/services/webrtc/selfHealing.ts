@@ -13,6 +13,28 @@ export interface SelfHealingOptions {
 }
 
 export function setupSelfHealing(options: SelfHealingOptions): { dispose: () => void } {
+  let isReconnecting = false
+  let lastTriggerTime = 0
+  const THROTTLE_MS = 1200
+
+  const safeReconnect = async (reason: string) => {
+    const now = Date.now()
+    if (isReconnecting || now - lastTriggerTime < THROTTLE_MS) {
+      log.info(`Suppressing duplicate reconnect trigger (${reason}) within debounce window`)
+      return
+    }
+    isReconnecting = true
+    lastTriggerTime = now
+    try {
+      log.info(`Executing self-healing reconnect: ${reason}`)
+      await options.reconnectNow(true)
+    } finally {
+      setTimeout(() => {
+        isReconnecting = false
+      }, 500)
+    }
+  }
+
   const handleOnline = async () => {
     if (options.isConflictActive?.()) {
       log.info('Device network came online, but session conflict is active; suppressing reconnect.')
@@ -22,7 +44,7 @@ export function setupSelfHealing(options: SelfHealingOptions): { dispose: () => 
     const canReachPublic = await probePublicConnectivity(2500)
     if (canReachPublic) {
       log.info('Public connectivity confirmed, reconnecting immediately with fresh signaling.')
-      await options.reconnectNow(true)
+      await safeReconnect('network-online')
     } else {
       log.warn('Public connectivity probe failed; remaining in offline state.')
     }
@@ -49,7 +71,7 @@ export function setupSelfHealing(options: SelfHealingOptions): { dispose: () => 
       status === 'degraded'
     ) {
       log.info(`App resumed with unhealthy/pending status (${status}); performing fresh hard reconnect...`)
-      await options.reconnectNow(true)
+      await safeReconnect(`app-resume-${status}`)
       return
     }
 
@@ -65,7 +87,7 @@ export function setupSelfHealing(options: SelfHealingOptions): { dispose: () => 
 
     if (!isAlive) {
       log.warn('Active ping probe failed on resume (zombie connection detected); forcing fresh reconnect.')
-      await options.reconnectNow(true)
+      await safeReconnect('app-resume-zombie-probe-failed')
     } else {
       log.info('Active ping probe succeeded on resume; peer connection is healthy.')
     }
