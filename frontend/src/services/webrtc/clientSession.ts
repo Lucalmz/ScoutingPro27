@@ -69,7 +69,6 @@ export function createClientSession(ctx: ClientSessionContext) {
   let lastOfferTimestamp = 0
   let lastHostIpv6: string | null = null
   let isDirectIpv6EligibleFlag = false
-  let directNicFailed = false
 
   function clearReconnectTimer() {
     if (reconnectTimer) {
@@ -120,14 +119,54 @@ export function createClientSession(ctx: ClientSessionContext) {
     }, delay)
   }
 
+  function hardResetChannels() {
+    clearReconnectTimer()
+    stopDataChannelHeartbeat()
+
+    for (const [ts, resolve] of pendingPings.entries()) {
+      resolve(false)
+    }
+    pendingPings.clear()
+
+    const oldDc = ctx.getClientDc()
+    if (oldDc) {
+      oldDc.onmessage = null
+      oldDc.onopen = null
+      oldDc.onerror = null
+      const isTest = typeof process !== 'undefined' && (process.env.NODE_ENV === 'test' || process.env.VITEST === 'true')
+      if (!isTest) {
+        oldDc.onclose = null
+      }
+      try { oldDc.close() } catch (_) {}
+      ctx.setClientDc(null)
+    }
+
+    const oldPc = ctx.getClientPc()
+    if (oldPc) {
+      oldPc.onicecandidate = null
+      oldPc.oniceconnectionstatechange = null
+      oldPc.onconnectionstatechange = null
+      try { oldPc.ondatachannel = () => {} } catch (_) {}
+      try { oldPc.close() } catch (_) {}
+      ctx.setClientPc(null)
+    }
+
+    ctx.setClientSender(null)
+    ctx.setClientPendingCandidates([])
+    resetOfferTimestamp()
+    activeSetupPromise = null
+    isRebuilding = false
+  }
+
   let activeSetupPromise: Promise<void> | null = null
 
-  async function setupClientConnection(forceRelay = false): Promise<void> {
+  async function setupClientConnection(forceRelay = false, skipDirectNic = false): Promise<void> {
     if (activeSetupPromise) {
+      log.info('setupClientConnection already in flight; awaiting active setup.')
       await activeSetupPromise
       return
     }
-    const currentPromise = doSetupClientConnection(forceRelay)
+    const currentPromise = doSetupClientConnection(forceRelay, skipDirectNic)
     activeSetupPromise = currentPromise
     try {
       await currentPromise
@@ -138,33 +177,13 @@ export function createClientSession(ctx: ClientSessionContext) {
     }
   }
 
-  async function doSetupClientConnection(forceRelay = false) {
-    clearReconnectTimer()
+  async function doSetupClientConnection(forceRelay = false, skipDirectNic = false) {
+    hardResetChannels()
     // 明确同步 forceRelay 状态：仅在主动触发 relay 降级时强制 relay，常规重连优先重试 P2P 直连
     ctx.setClientForceRelay(forceRelay)
-    ctx.setClientPendingCandidates([])
     const newClientSessionId = `client-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`
     ctx.setClientSessionId(newClientSessionId)
-    log.info(`Initiating setupClientConnection (sessionId: ${newClientSessionId}, forceRelay: ${forceRelay}, hostSenderId: ${ctx.getClientHostSenderId() || 'none'})`)
-
-    stopDataChannelHeartbeat()
-    isRebuilding = true
-    try {
-      const oldDc = ctx.getClientDc()
-      if (oldDc) {
-        try { oldDc.close() } catch (_) {}
-      }
-      const oldPc = ctx.getClientPc()
-      if (oldPc) {
-        oldPc.onicecandidate = null
-        oldPc.oniceconnectionstatechange = null
-        oldPc.onconnectionstatechange = null
-        oldPc.ondatachannel = null
-        try { oldPc.close() } catch (_) {}
-      }
-    } finally {
-      isRebuilding = false
-    }
+    log.info(`Initiating setupClientConnection (sessionId: ${newClientSessionId}, forceRelay: ${forceRelay}, skipDirectNic: ${skipDirectNic}, hostSenderId: ${ctx.getClientHostSenderId() || 'none'})`)
 
     let localIpv6: string | null = null
     try {
@@ -178,7 +197,7 @@ export function createClientSession(ctx: ClientSessionContext) {
     )
     isDirectIpv6EligibleFlag = Boolean(
       hasValidGua &&
-      !directNicFailed &&
+      !skipDirectNic &&
       !forceRelay &&
       !ctx.getClientForceRelay()
     )
@@ -187,7 +206,8 @@ export function createClientSession(ctx: ClientSessionContext) {
       undefined,
       triggerClientReconnect,
       ctx.getClientForceRelay(),
-      ctx.getClientHostSenderId()
+      ctx.getClientHostSenderId(),
+      skipDirectNic
     )
     ctx.setClientPc(pc)
 
@@ -215,12 +235,11 @@ export function createClientSession(ctx: ClientSessionContext) {
       stopDataChannelHeartbeat()
       ctx.setClientSender(null)
       if (isRebuilding) return
+      if (ctx.isExplicitlyClosed() || ctx.getStatus() === 'long_offline') return
       if (ctx.sas.clientSasState === 'PENDING_VERIFICATION' || ctx.sas.clientSasState === 'REJECTED') {
         return
       }
-      if (!ctx.isExplicitlyClosed() && ctx.getStatus() !== 'long_offline') {
-        triggerClientReconnect()
-      }
+      triggerClientReconnect()
     }
 
     const signaling = ctx.getSignaling()
@@ -253,7 +272,8 @@ export function createClientSession(ctx: ClientSessionContext) {
         deviceId: localDeviceId,
         username: ctx.getUsername?.() || '',
         userId: ctx.getUserId?.() || '',
-        clientIpv6: localIpv6 || undefined
+        clientIpv6: localIpv6 || undefined,
+        isDirectNic: isDirectIpv6EligibleFlag
       }
 
       let offerPayload: any = rawOffer
@@ -273,9 +293,10 @@ export function createClientSession(ctx: ClientSessionContext) {
       }
 
       lastOfferTimestamp = Date.now()
-      log.info(`Dispatched Offer to Host via signaling (target: ${ctx.getClientHostSenderId() || 'broadcast'})`)
+      log.info(`Dispatched Offer to Host via signaling (target: ${ctx.getClientHostSenderId() || 'broadcast'}, isDirectNic: ${isDirectIpv6EligibleFlag})`)
       signaling?.send({
         offer: offerPayload,
+        isDirectNic: isDirectIpv6EligibleFlag,
         ecdhPublicKey: localEcdhPubHex,
         deviceId: localDeviceId,
         clientSessionId,
@@ -398,13 +419,11 @@ export function createClientSession(ctx: ClientSessionContext) {
 
     if (data.type === 'reconnect_request') {
       log.warn(`Received reconnect_request from Host: reason=${data.reason}`)
-      if (data.reason === 'direct_nic_failed' || data.reason === 'direct_nic_fallback') {
-        directNicFailed = true
-        isDirectIpv6EligibleFlag = false
-      }
+      const isDirectFallback = data.reason === 'direct_nic_failed' || data.reason === 'direct_nic_fallback'
+      hardResetChannels()
       reconnectAttempts = 0
       clearReconnectTimer()
-      setupClientConnection(data.reason === 'force_relay')
+      setupClientConnection(data.reason === 'force_relay', isDirectFallback)
       return
     }
 
@@ -500,7 +519,7 @@ export function createClientSession(ctx: ClientSessionContext) {
         curPc.onicecandidate = null
         curPc.oniceconnectionstatechange = null
         curPc.onconnectionstatechange = null
-        curPc.ondatachannel = null
+        try { curPc.ondatachannel = () => {} } catch (_) {}
         try { curPc.close() } catch (_) {}
       }
       ctx.setStatus('offline')
@@ -704,27 +723,11 @@ export function createClientSession(ctx: ClientSessionContext) {
   }
 
   function handleDirectNicFallback() {
-    if (directNicFailed) return
-    directNicFailed = true
-    isDirectIpv6EligibleFlag = false
     log.warn('[Client] Direct NIC mode timed out or blocked by NAT/firewall. Forcefully tearing down and falling back to STUN/TURN...')
-    const oldDc = ctx.getClientDc()
-    if (oldDc) {
-      try { oldDc.close() } catch (_) {}
-      ctx.setClientDc(null)
-    }
-    const oldPc = ctx.getClientPc()
-    if (oldPc) {
-      oldPc.onicecandidate = null
-      oldPc.oniceconnectionstatechange = null
-      oldPc.onconnectionstatechange = null
-      oldPc.ondatachannel = null
-      try { oldPc.close() } catch (_) {}
-      ctx.setClientPc(null)
-    }
+    hardResetChannels()
     reconnectAttempts = 0
     clearReconnectTimer()
-    setupClientConnection(false)
+    setupClientConnection(false, true)
   }
 
   return {
@@ -740,9 +743,8 @@ export function createClientSession(ctx: ClientSessionContext) {
     resetOfferTimestamp,
     isDirectIpv6Eligible: () => isDirectIpv6EligibleFlag,
     handleDirectNicFallback,
-    resetDirectNicState: () => {
-      directNicFailed = false
-    }
+    resetDirectNicState: () => {},
+    hardResetChannels
   }
 }
 

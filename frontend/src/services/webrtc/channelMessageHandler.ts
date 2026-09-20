@@ -85,6 +85,31 @@ export function createChannelMessageHandler(ctx: ChannelMessageHandlerContext) {
     const isHostMode = ctx.isHostMode()
     const callbacks = ctx.callbacks
 
+    if (isHostMode && senderId && ctx.stagedClients?.has(senderId)) {
+      const staged = ctx.stagedClients.get(senderId)
+      if (staged) {
+        const oldActive = ctx.clients.get(senderId)
+        if (oldActive && oldActive !== staged) {
+          if (oldActive.dc) {
+            oldActive.dc.onmessage = null
+            oldActive.dc.onopen = null
+            oldActive.dc.onclose = null
+            oldActive.dc.onerror = null
+            try { oldActive.dc.close() } catch {}
+          }
+          if (oldActive.pc) {
+            oldActive.pc.onicecandidate = null
+            oldActive.pc.onconnectionstatechange = null
+            oldActive.pc.oniceconnectionstatechange = null
+            try { oldActive.pc.ondatachannel = () => {} } catch {}
+            try { oldActive.pc.close() } catch {}
+          }
+        }
+        ctx.clients.set(senderId, staged)
+        ctx.stagedClients.delete(senderId)
+      }
+    }
+
     switch (msg.type) {
       case 'PING' as any: {
         if (isHostMode) {

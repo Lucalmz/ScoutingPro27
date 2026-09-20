@@ -68,7 +68,6 @@ function extractTicketPayload(ticket: string): Record<string, any> | null {
 export function createHostSignalingHandler(ctx: HostSessionContext) {
   let cachedHostIpv6: string | null = null
   const clientIpv6s = new Map<string, string>()
-  const failedDirectNicPeers = new Set<string>()
 
   probeLocalInterfaceIpv6()
     .then((ip) => {
@@ -208,19 +207,33 @@ export function createHostSignalingHandler(ctx: HostSessionContext) {
           log.warn(`Host peer connection for ${sender} stalled or closed. Cleaning up peer resources...`)
           const curActive = clients.get(sender)
           if (curActive && curActive.pc === targetPc) {
-            if (curActive.dc) curActive.dc.onclose = null
+            if (curActive.dc) {
+              curActive.dc.onmessage = null
+              curActive.dc.onopen = null
+              curActive.dc.onclose = null
+              curActive.dc.onerror = null
+              try { curActive.dc.close() } catch {}
+            }
+            curActive.pc.onicecandidate = null
             curActive.pc.onconnectionstatechange = null
             curActive.pc.oniceconnectionstatechange = null
-            try { curActive.dc?.close() } catch {}
+            try { curActive.pc.ondatachannel = () => {} } catch {}
             try { curActive.pc.close() } catch {}
             clients.delete(sender)
           }
           const curStaged = stagedClients.get(sender)
           if (curStaged && curStaged.pc === targetPc) {
-            if (curStaged.dc) curStaged.dc.onclose = null
+            if (curStaged.dc) {
+              curStaged.dc.onmessage = null
+              curStaged.dc.onopen = null
+              curStaged.dc.onclose = null
+              curStaged.dc.onerror = null
+              try { curStaged.dc.close() } catch {}
+            }
+            curStaged.pc.onicecandidate = null
             curStaged.pc.onconnectionstatechange = null
             curStaged.pc.oniceconnectionstatechange = null
-            try { curStaged.dc?.close() } catch {}
+            try { curStaged.pc.ondatachannel = () => {} } catch {}
             try { curStaged.pc.close() } catch {}
             stagedClients.delete(sender)
           }
@@ -230,44 +243,56 @@ export function createHostSignalingHandler(ctx: HostSessionContext) {
         if (isIceRestart && existing) {
           log.info(`Performing in-place ICE restart renegotiation for existing peer ${sender}`)
           clientData = existing
-        } else if (!isExistingActive) {
+        } else {
+          // Client initiated a new connection / session.
+          // Enforce hard-reset: kill any previous channels cleanly and register directly into clients!
           if (existing) {
-            log.info(`Cleaning up stale/inactive connection for peer ${sender} before creating new PeerConnection`)
-            if (existing.dc) existing.dc.onclose = null
-            existing.pc.onconnectionstatechange = null
-            existing.pc.oniceconnectionstatechange = null
-            existing.dc?.close()
-            existing.pc.close()
+            log.info(`Tearing down previous connection for peer ${sender} before creating new PeerConnection`)
+            if (existing.dc) {
+              existing.dc.onmessage = null
+              existing.dc.onopen = null
+              existing.dc.onclose = null
+              existing.dc.onerror = null
+              try { existing.dc.close() } catch {}
+            }
+            if (existing.pc) {
+              existing.pc.onicecandidate = null
+              existing.pc.onconnectionstatechange = null
+              existing.pc.oniceconnectionstatechange = null
+              try { existing.pc.ondatachannel = () => {} } catch {}
+              try { existing.pc.close() } catch {}
+            }
             clients.delete(sender)
+          }
+          const existingStaged = stagedClients.get(sender)
+          if (existingStaged) {
+            if (existingStaged.dc) {
+              existingStaged.dc.onmessage = null
+              existingStaged.dc.onopen = null
+              existingStaged.dc.onclose = null
+              existingStaged.dc.onerror = null
+              try { existingStaged.dc.close() } catch {}
+            }
+            if (existingStaged.pc) {
+              existingStaged.pc.onicecandidate = null
+              existingStaged.pc.onconnectionstatechange = null
+              existingStaged.pc.oniceconnectionstatechange = null
+              try { existingStaged.pc.ondatachannel = () => {} } catch {}
+              try { existingStaged.pc.close() } catch {}
+            }
+            stagedClients.delete(sender)
           }
           let pcRef: RTCPeerConnection
           const onDisconnect = () => {
             if (pcRef) makeOnDisconnect(pcRef)()
           }
-          const pc = ctx.peerMgr.createPeerConnection(sender, onDisconnect)
+          const isClientDirectNic = data.isDirectNic ?? data.offer?.isDirectNic
+          const skipDirectNic = isClientDirectNic === false
+          const pc = ctx.peerMgr.createPeerConnection(sender, onDisconnect, false, undefined, skipDirectNic)
           pcRef = pc
           setupDcHandler(pc)
           clientData = { pc, sessionId: data.clientSessionId, pendingCandidates: [] }
           clients.set(sender, clientData)
-        } else {
-          log.info(`Staging candidate connection for active peer ${sender} pending auth`)
-          const existingStaged = stagedClients.get(sender)
-          if (existingStaged) {
-            if (existingStaged.dc) existingStaged.dc.onclose = null
-            existingStaged.pc.onconnectionstatechange = null
-            existingStaged.pc.oniceconnectionstatechange = null
-            existingStaged.dc?.close()
-            existingStaged.pc.close()
-          }
-          let pcRef: RTCPeerConnection
-          const onDisconnect = () => {
-            if (pcRef) makeOnDisconnect(pcRef)()
-          }
-          const pc = ctx.peerMgr.createPeerConnection(sender, onDisconnect)
-          pcRef = pc
-          setupDcHandler(pc)
-          clientData = { pc, sessionId: data.clientSessionId, pendingCandidates: [] }
-          stagedClients.set(sender, clientData)
         }
 
         // Derive shared AES key from client's public key & compute SAS fingerprint
@@ -649,7 +674,7 @@ export function createHostSignalingHandler(ctx: HostSessionContext) {
   }
 
   handler.isPeerDirectIpv6Eligible = (targetSender?: string) => {
-    if (!targetSender || failedDirectNicPeers.has(targetSender)) return false
+    if (!targetSender) return false
     const clientIp = clientIpv6s.get(targetSender)
     return Boolean(
       cachedHostIpv6 &&
@@ -661,23 +686,36 @@ export function createHostSignalingHandler(ctx: HostSessionContext) {
 
   handler.handleDirectNicFallback = (targetSender?: string) => {
     if (!targetSender) return
-    failedDirectNicPeers.add(targetSender)
     log.warn(`[Host] Direct NIC connection timed out or blocked by NAT/firewall for peer ${targetSender}. Forcefully tearing down and requesting STUN/TURN reconnect...`)
     const active = ctx.clients.get(targetSender)
     if (active) {
-      if (active.dc) active.dc.onclose = null
+      if (active.dc) {
+        active.dc.onmessage = null
+        active.dc.onopen = null
+        active.dc.onclose = null
+        active.dc.onerror = null
+        try { active.dc.close() } catch {}
+      }
+      active.pc.onicecandidate = null
       active.pc.onconnectionstatechange = null
       active.pc.oniceconnectionstatechange = null
-      try { active.dc?.close() } catch {}
+      try { active.pc.ondatachannel = () => {} } catch {}
       try { active.pc.close() } catch {}
       ctx.clients.delete(targetSender)
     }
     const staged = ctx.stagedClients.get(targetSender)
     if (staged) {
-      if (staged.dc) staged.dc.onclose = null
+      if (staged.dc) {
+        staged.dc.onmessage = null
+        staged.dc.onopen = null
+        staged.dc.onclose = null
+        staged.dc.onerror = null
+        try { staged.dc.close() } catch {}
+      }
+      staged.pc.onicecandidate = null
       staged.pc.onconnectionstatechange = null
       staged.pc.oniceconnectionstatechange = null
-      try { staged.dc?.close() } catch {}
+      try { staged.pc.ondatachannel = () => {} } catch {}
       try { staged.pc.close() } catch {}
       ctx.stagedClients.delete(targetSender)
     }

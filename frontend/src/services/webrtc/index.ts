@@ -1198,9 +1198,11 @@ export function createWebRtcService(callbacks: WebRtcCallbacks): WebRtcService {
       return true
     }
 
-    clientSession.clearReconnectTimer()
+    // 关键硬复位：重连时彻底清除 forceRelay 锁死状态与所有残留旧信道
+    clientForceRelay = false
+    clientSession.hardResetChannels()
+    clientSession.resetDirectNicState()
     clientSession.resetReconnectAttempts()
-    clientSession.resetOfferTimestamp()
     setStatus('connecting')
 
     const needsFreshSignaling = forceFreshSignaling || !signaling || !signaling.isConnected()
@@ -1226,7 +1228,7 @@ export function createWebRtcService(callbacks: WebRtcCallbacks): WebRtcService {
           ) {
             return
           }
-          await clientSession.setupClientConnection(clientForceRelay)
+          await clientSession.setupClientConnection(false)
         },
         onError: () => {
           if (status !== 'connected' && (!clientPc || clientPc.connectionState !== 'connected')) {
@@ -1241,7 +1243,7 @@ export function createWebRtcService(callbacks: WebRtcCallbacks): WebRtcService {
       if (signaling && localEcdhPubHex) {
         signaling.send({ type: 'client_hello', ecdhPublicKey: localEcdhPubHex, deviceId: localDeviceId })
       }
-      await clientSession.setupClientConnection(clientForceRelay)
+      await clientSession.setupClientConnection(false)
     }
     return true
   }
@@ -1315,13 +1317,8 @@ export function createWebRtcService(callbacks: WebRtcCallbacks): WebRtcService {
       finishTakeoverReconciliation('closed')
     } else {
       clientSender = null
-      if (clientDc) clientDc.onclose = null
-      if (clientPc) {
-        clientPc.onconnectionstatechange = null
-        clientPc.oniceconnectionstatechange = null
-      }
-      clientDc?.close()
-      clientPc?.close()
+      clientSession?.hardResetChannels()
+      clientSession?.resetDirectNicState()
       clientDc = null
       clientPc = null
     }

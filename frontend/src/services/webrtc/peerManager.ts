@@ -153,11 +153,12 @@ export class PeerConnectionManager {
     targetSender?: string,
     onDisconnect?: () => void,
     forceRelay = false,
-    clientHostSenderId?: string
+    clientHostSenderId?: string,
+    skipDirectNic = false
   ): RTCPeerConnection {
     const isHost = this.options.isHostMode()
     const callbacks = this.options.callbacks
-    const directIpv6Available = Boolean(this.options.isDirectIpv6Eligible?.(targetSender))
+    const directIpv6Available = !skipDirectNic && Boolean(this.options.isDirectIpv6Eligible?.(targetSender))
     const isDirectNicMode = directIpv6Available && !forceRelay
 
     const config: RTCConfiguration = isDirectNicMode
@@ -268,6 +269,12 @@ export class PeerConnectionManager {
         clearTimeout(stallRestartWatchdog)
         stallRestartWatchdog = null
       }
+      try {
+        peer.onicecandidate = null
+        peer.oniceconnectionstatechange = null
+        peer.onconnectionstatechange = null
+        peer.ondatachannel = () => {}
+      } catch {}
       origClose()
     }
 

@@ -372,9 +372,9 @@ export function optimizeCandidatePriority(candidateStr: string): string {
       }
     }
 
-    // 3. 公网 IPv4 STUN 穿透候选 (srflx / prflx)
-    if (candType === 'srflx') {
-      const typePref = 90
+    // 3. 公网 IPv4 STUN / 对端反射穿透候选 (srflx / prflx)
+    if (candType === 'srflx' || candType === 'prflx') {
+      const typePref = candType === 'prflx' ? 85 : 90
       const localPref = 32768
       const boostedPriority = typePref * 16777216 + localPref * 256 + (256 - component)
       parts[3] = String(boostedPriority)

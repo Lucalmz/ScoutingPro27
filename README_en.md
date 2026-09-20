@@ -20,7 +20,7 @@
 > 💡 **This project was independently conceived, architected, and full-stack developed by middle and high school students of FIRST Tech Challenge (FTC) Team 27570 B.E.A.R.**  
 > Born directly out of front-line competition demands, it redefines the scouting and match collaboration experience across global FIRST events through hardcore modern engineering practices.
 > 
-> 📌 **Release Positioning & Season Commitment (v1.0.3 MVP)**:  
+> 📌 **Release Positioning & Season Commitment (v1.0.4 MVP)**:  
 > This release marks our **first battle-tested Production-Ready MVP for the new season**.  
 > **We solemnly commit: Before the first official qualifier kicks off, our team will deliver a major update**, incorporating rule clarifications and real-world field feedback to bring even deeper tactical insights and collaboration tools!
 
