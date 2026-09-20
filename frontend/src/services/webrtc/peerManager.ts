@@ -1,6 +1,6 @@
 import type { ConnectionTransportInfo, ConnectionStatus } from '@/types'
 import { encryptSignalingData } from '@/utils/crypto'
-import { STUN_SERVERS, isIpv6Address, optimizeCandidatePriority, optimizeSdpCandidates, classifyCandidatePair } from './connectivity'
+import { STUN_SERVERS, DIRECT_NIC_CONFIG, isIpv6Address, optimizeCandidatePriority, optimizeSdpCandidates, classifyCandidatePair } from './connectivity'
 import type { SignalingChannel } from './signaling'
 import type { WebRtcCallbacks } from './types'
 import { createLogger } from '@/utils/logger'
@@ -10,7 +10,10 @@ const log = createLogger('WebRTC:Peer')
 export interface PeerConnectionFactoryOptions {
   getSignaling: () => SignalingChannel | null
   isHostMode: () => boolean
-  callbacks: WebRtcCallbacks
+  callbacks: WebRtcCallbacks & {
+    onIceStalled?: (isStalled: boolean) => void
+    onTransportSelected?: (info: ConnectionTransportInfo) => void
+  }
   setStatus: (s: ConnectionStatus) => void
   onHostDisconnected?: () => void
   onClientRebuildRelay?: () => void
@@ -27,6 +30,7 @@ export interface PeerConnectionFactoryOptions {
   getClientDcState?: () => RTCDataChannelState | undefined
   getClientPc?: () => RTCPeerConnection | null
   isExplicitlyClosed?: () => boolean
+  isDirectIpv6Eligible?: (targetSender?: string) => boolean
 }
 
 export class PeerConnectionManager {
@@ -152,11 +156,18 @@ export class PeerConnectionManager {
   ): RTCPeerConnection {
     const isHost = this.options.isHostMode()
     const callbacks = this.options.callbacks
-    const config: RTCConfiguration = {
-      ...STUN_SERVERS,
-      iceTransportPolicy: forceRelay ? 'relay' : 'all'
-    }
-    log.info(`Creating RTCPeerConnection (isHost: ${isHost}, targetSender: ${targetSender || 'default'}, forceRelay: ${forceRelay}, icePolicy: ${config.iceTransportPolicy})`)
+    const directIpv6Available = Boolean(this.options.isDirectIpv6Eligible?.(targetSender))
+    const isDirectNicMode = directIpv6Available && !forceRelay
+
+    const config: RTCConfiguration = isDirectNicMode
+      ? { ...DIRECT_NIC_CONFIG }
+      : {
+          ...STUN_SERVERS,
+          iceTransportPolicy: forceRelay ? 'relay' : 'all'
+        }
+    log.info(
+      `Creating RTCPeerConnection (isHost: ${isHost}, targetSender: ${targetSender || 'default'}, forceRelay: ${forceRelay}, isDirectNicMode: ${isDirectNicMode}, icePolicy: ${config.iceTransportPolicy || 'all'})`
+    )
     if (!isHost) {
       this.clientIceRestartAttempts = 0
     } else if (targetSender) {
@@ -199,13 +210,55 @@ export class PeerConnectionManager {
       }
     }
 
+    const createTime = Date.now()
     let iceTimeout: NodeJS.Timeout | null = null
     let checkingWatchdog: NodeJS.Timeout | null = null
     let stallRestartWatchdog: NodeJS.Timeout | null = null
+    let natFallbackTimer: NodeJS.Timeout | null = null
     let isRestartingIce = false
+    let hasConnected = false
+    let isUpgradingToStun = false
+
+    const cancelNatFallback = () => {
+      if (natFallbackTimer) {
+        clearTimeout(natFallbackTimer)
+        natFallbackTimer = null
+      }
+    }
+
+    // 若当前为免 STUN 网卡直连模式，启动 1500ms 看门狗；若因路由防火墙/NAT 阻断未能连通，静默降级为 STUN/TURN
+    if (isDirectNicMode) {
+      natFallbackTimer = setTimeout(() => {
+        natFallbackTimer = null
+        // 关键防竞态保护：若已连通、连接已关闭或已在升级，绝不打断正常连接
+        if (
+          hasConnected ||
+          peer.connectionState === 'connected' ||
+          peer.connectionState === 'closed' ||
+          isUpgradingToStun
+        ) {
+          return
+        }
+        isUpgradingToStun = true
+        log.warn(
+          `[WebRTC Watchdog] Direct NIC connection did not reach connected within 1500ms (NAT/firewall detected). Upgrading to STUN/TURN fallback...`
+        )
+        try {
+          if (typeof (peer as any).setConfiguration === 'function') {
+            ;(peer as any).setConfiguration(STUN_SERVERS)
+          }
+          if (typeof (peer as any).restartIce === 'function') {
+            ;(peer as any).restartIce()
+          }
+        } catch (err) {
+          log.error('Failed to upgrade configuration for STUN fallback:', err)
+        }
+      }, 1500)
+    }
 
     const origClose = peer.close.bind(peer)
     peer.close = () => {
+      cancelNatFallback()
       if (iceTimeout) {
         clearTimeout(iceTimeout)
         iceTimeout = null
@@ -223,7 +276,15 @@ export class PeerConnectionManager {
 
     peer.onconnectionstatechange = () => {
       log.info(`PeerConnection state changed: ${peer.connectionState} (targetSender: ${targetSender || 'host'})`)
+      if (peer.connectionState === 'connected') {
+        hasConnected = true
+        cancelNatFallback()
+        const duration = Date.now() - createTime
+        const strategy = isUpgradingToStun ? 'stun_nat_fallback' : (isDirectNicMode ? 'direct_nic_ipv6' : 'stun_direct')
+        log.info(`[WebRTC Metric] Successfully connected in ${duration}ms (Strategy: ${strategy})`)
+      }
       if (['disconnected', 'failed', 'closed'].includes(peer.connectionState)) {
+        cancelNatFallback()
         if (iceTimeout) {
           clearTimeout(iceTimeout)
           iceTimeout = null

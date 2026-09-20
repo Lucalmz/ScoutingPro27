@@ -15,7 +15,8 @@ import type { ClientEntry, WebRtcCallbacks } from './types'
 import {
   optimizeCandidatePriority,
   optimizeSdpCandidates,
-  sortCandidatesPreferIpv6
+  sortCandidatesPreferIpv6,
+  probeLocalInterfaceIpv6
 } from './connectivity'
 import type { SignalingChannel } from './signaling'
 import { toSessionDescription, toIceCandidate } from './sdpUtil'
@@ -63,7 +64,16 @@ function extractTicketPayload(ticket: string): Record<string, any> | null {
 }
 
 export function createHostSignalingHandler(ctx: HostSessionContext) {
-  return (data: any) => {
+  let cachedHostIpv6: string | null = null
+  const clientIpv6s = new Map<string, string>()
+
+  probeLocalInterfaceIpv6()
+    .then((ip) => {
+      if (ip) cachedHostIpv6 = ip
+    })
+    .catch(() => {})
+
+  const handler = (data: any) => {
     const sender = data.sender
     if (!sender) return
 
@@ -89,6 +99,7 @@ export function createHostSignalingHandler(ctx: HostSessionContext) {
         {
           type: 'host_hello',
           hostSessionId,
+          hostIpv6: cachedHostIpv6 || undefined,
           ecdhPublicKey: localEcdhPubHex,
           deviceId: localDeviceId,
           username: ctx.getUsername?.() || '',
@@ -127,8 +138,13 @@ export function createHostSignalingHandler(ctx: HostSessionContext) {
     }
 
     if (data.offer) {
+      const clientIpv6 = data.clientIpv6 || data.offer?.clientIpv6
+      if (clientIpv6) {
+        clientIpv6s.set(sender, clientIpv6)
+      }
       log.info(`Received WebRTC offer from ${sender}`, {
         clientSessionId: data.clientSessionId,
+        clientIpv6: clientIpv6 || undefined,
         hasTicket: Boolean(data.ticket || data.offer?.ticket),
         hasToken: Boolean(data.token),
         hasEcdhPub: Boolean(data.ecdhPublicKey),
@@ -595,4 +611,10 @@ export function createHostSignalingHandler(ctx: HostSessionContext) {
       ctx.rejectSas(sender, data.reason || 'Rejected by peer')
     }
   }
+
+  handler.isPeerDirectIpv6Eligible = (targetSender?: string) => {
+    return Boolean(cachedHostIpv6 && targetSender && clientIpv6s.has(targetSender))
+  }
+  handler.getHostIpv6 = () => cachedHostIpv6
+  return handler
 }

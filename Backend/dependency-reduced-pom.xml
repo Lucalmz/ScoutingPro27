@@ -3,7 +3,7 @@
   <modelVersion>4.0.0</modelVersion>
   <groupId>io.github.bear27570.scoutingpro27</groupId>
   <artifactId>Backend</artifactId>
-  <version>1.0.1</version>
+  <version>1.0.2</version>
   <build>
     <finalName>ScoutingPro27</finalName>
     <plugins>

@@ -93,4 +93,77 @@ describe('ImagePreviewModal', () => {
 
     wrapper.unmount()
   })
+
+  it('converts data: URL to Blob and opens via URL.createObjectURL to bypass browser security restrictions', async () => {
+    const originalOpen = window.open
+    const originalCreateObjectURL = URL.createObjectURL
+    const originalRevokeObjectURL = URL.revokeObjectURL
+
+    const mockOpen = vi.fn()
+    const mockCreateObjectURL = vi.fn().mockReturnValue('blob:http://localhost/mock-blob-uuid')
+    const mockRevokeObjectURL = vi.fn()
+
+    window.open = mockOpen
+    URL.createObjectURL = mockCreateObjectURL
+    URL.revokeObjectURL = mockRevokeObjectURL
+
+    try {
+      const dataUrl = 'data:image/webp;base64,AAAA'
+      const wrapper = mount(ImagePreviewModal, {
+        props: {
+          modelValue: true,
+          imageUrl: dataUrl
+        },
+        attachTo: document.body
+      })
+
+      const openBtn = document.querySelector('button[title="查看原图"]') as HTMLButtonElement
+      expect(openBtn).not.toBeNull()
+      openBtn.click()
+
+      expect(mockCreateObjectURL).toHaveBeenCalledTimes(1)
+      const passedBlob = mockCreateObjectURL.mock.calls[0][0]
+      expect(passedBlob).toBeInstanceOf(Blob)
+      expect(passedBlob.type).toBe('image/webp')
+
+      expect(mockOpen).toHaveBeenCalledWith('blob:http://localhost/mock-blob-uuid', '_blank')
+      wrapper.unmount()
+    } finally {
+      window.open = originalOpen
+      URL.createObjectURL = originalCreateObjectURL
+      URL.revokeObjectURL = originalRevokeObjectURL
+    }
+  })
+
+  it('opens standard http/https image URL directly without Blob conversion', async () => {
+    const originalOpen = window.open
+    const originalCreateObjectURL = URL.createObjectURL
+
+    const mockOpen = vi.fn()
+    const mockCreateObjectURL = vi.fn()
+
+    window.open = mockOpen
+    URL.createObjectURL = mockCreateObjectURL
+
+    try {
+      const wrapper = mount(ImagePreviewModal, {
+        props: {
+          modelValue: true,
+          imageUrl: 'https://example.com/robot-hd.jpg'
+        },
+        attachTo: document.body
+      })
+
+      const openBtn = document.querySelector('button[title="查看原图"]') as HTMLButtonElement
+      expect(openBtn).not.toBeNull()
+      openBtn.click()
+
+      expect(mockCreateObjectURL).not.toHaveBeenCalled()
+      expect(mockOpen).toHaveBeenCalledWith('https://example.com/robot-hd.jpg', '_blank')
+      wrapper.unmount()
+    } finally {
+      window.open = originalOpen
+      URL.createObjectURL = originalCreateObjectURL
+    }
+  })
 })

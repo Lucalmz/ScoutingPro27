@@ -75,9 +75,36 @@ function onKeyDown(e: KeyboardEvent) {
 }
 
 function openOriginal() {
-  if (currentDisplayUrl.value && typeof window !== 'undefined') {
-    window.open(currentDisplayUrl.value, '_blank')
+  const url = currentDisplayUrl.value
+  if (!url || typeof window === 'undefined') return
+
+  if (url.startsWith('data:')) {
+    try {
+      const parts = url.split(',')
+      const mimeMatch = parts[0]?.match(/:(.*?);/)
+      const mime = mimeMatch ? mimeMatch[1] : 'image/webp'
+      const base64Data = parts[1] || ''
+      const binaryStr = atob(base64Data)
+      const len = binaryStr.length
+      const bytes = new Uint8Array(len)
+      for (let i = 0; i < len; i++) {
+        bytes[i] = binaryStr.charCodeAt(i)
+      }
+      const blob = new Blob([bytes], { type: mime })
+      const blobUrl = URL.createObjectURL(blob)
+      window.open(blobUrl, '_blank')
+      setTimeout(() => {
+        try {
+          URL.revokeObjectURL(blobUrl)
+        } catch {}
+      }, 60000)
+      return
+    } catch (err) {
+      console.warn('[ImagePreviewModal] Failed to convert dataUrl to blobUrl:', err)
+    }
   }
+
+  window.open(url, '_blank')
 }
 
 onMounted(() => {

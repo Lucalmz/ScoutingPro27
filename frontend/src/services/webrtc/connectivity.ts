@@ -128,6 +128,98 @@ export const STUN_SERVERS: RTCConfiguration = {
 }
 
 /**
+ * 纯本地网卡模式配置：零 STUN/TURN 服务器，完全不向公网发出任何探测请求
+ * 依靠操作系统网络栈提取 host 候选（用于 IPv6 全球单播或 LAN 私网端到端直连）
+ */
+export const DIRECT_NIC_CONFIG: RTCConfiguration = {
+  iceServers: [],
+  iceCandidatePoolSize: 0
+}
+
+let cachedLocalIpv6: string | null = null
+let lastIpv6ProbeTime = 0
+
+/**
+ * 重置网卡 IPv6 缓存（供单元测试或网络切换时使用）
+ */
+export function resetLocalIpv6ProbeCache(): void {
+  cachedLocalIpv6 = null
+  lastIpv6ProbeTime = 0
+}
+
+/**
+ * 优先从本机网卡探测公网全球单播 IPv6 (GUA, 2000::/3)
+ * 1. 电脑端 Host：尝试直接调用 Java 后端系统接口，100% 准确读取物理网卡
+ * 2. 手机/浏览器端：使用空 iceServers 在本地 30ms 提取 host 候选，零 STUN 网络请求
+ */
+export async function probeLocalInterfaceIpv6(): Promise<string | null> {
+  const isTestEnv =
+    typeof process !== 'undefined' &&
+    (process.env.NODE_ENV === 'test' || process.env.VITEST === 'true')
+  if (isTestEnv && !(globalThis as any).__TEST_ALLOW_NIC_PROBE__) {
+    return null
+  }
+
+  const now = Date.now()
+  if (cachedLocalIpv6 && now - lastIpv6ProbeTime < 30000) {
+    return cachedLocalIpv6
+  }
+
+  // 1. 电脑端 Host：尝试直接调用 Java 后端系统接口读取物理网卡 GUA IPv6
+  try {
+    const { getNetworkInfo } = await import('@/services/api')
+    const net = await getNetworkInfo()
+    if (net?.primaryIpv6 && isGlobalIpv6Address(net.primaryIpv6)) {
+      cachedLocalIpv6 = cleanIpAddress(net.primaryIpv6)
+      lastIpv6ProbeTime = now
+      return cachedLocalIpv6
+    }
+  } catch {}
+
+  // 2. 手机/浏览器端：利用空 iceServers 极速提取 host 候选
+  if (typeof RTCPeerConnection === 'undefined') return null
+  return new Promise<string | null>((resolve) => {
+    try {
+      const pc = new RTCPeerConnection({ iceServers: [] })
+      pc.createDataChannel('probe_nic')
+
+      const timer = setTimeout(() => {
+        try { pc.close() } catch {}
+        resolve(cachedLocalIpv6)
+      }, 300)
+
+      pc.onicecandidate = (e) => {
+        if (!e.candidate) {
+          clearTimeout(timer)
+          try { pc.close() } catch {}
+          resolve(cachedLocalIpv6)
+          return
+        }
+        const parts = e.candidate.candidate.split(/\s+/)
+        const addr = cleanIpAddress(parts[4] || '')
+        if (isGlobalIpv6Address(addr)) {
+          cachedLocalIpv6 = addr
+          lastIpv6ProbeTime = Date.now()
+          clearTimeout(timer)
+          try { pc.close() } catch {}
+          resolve(addr)
+        }
+      }
+
+      pc.createOffer()
+        .then((offer) => pc.setLocalDescription(offer))
+        .catch(() => {
+          clearTimeout(timer)
+          try { pc.close() } catch {}
+          resolve(cachedLocalIpv6)
+        })
+    } catch {
+      resolve(null)
+    }
+  })
+}
+
+/**
  * 统一清洗 IP 地址：剥除中括号、附带的端口号以及 IPv6 作用域标识 (scope id)
  */
 export function cleanIpAddress(ip: string): string {

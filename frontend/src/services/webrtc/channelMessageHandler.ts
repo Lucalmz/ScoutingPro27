@@ -958,7 +958,20 @@ export function createChannelMessageHandler(ctx: ChannelMessageHandlerContext) {
       case 'PIT_PHOTO_CHUNK': {
         if (!isHostMode) break
         const { transferId, eventId, key, chunkIndex, totalChunks, chunkData } = msg
-        if (!transferId || !eventId || !key || typeof chunkIndex !== 'number' || typeof totalChunks !== 'number') {
+        if (
+          !transferId ||
+          !eventId ||
+          !key ||
+          typeof chunkIndex !== 'number' ||
+          typeof totalChunks !== 'number' ||
+          !Number.isInteger(chunkIndex) ||
+          !Number.isInteger(totalChunks) ||
+          totalChunks <= 0 ||
+          totalChunks > 500 ||
+          chunkIndex < 0 ||
+          chunkIndex >= totalChunks ||
+          typeof chunkData !== 'string'
+        ) {
           break
         }
 
@@ -984,7 +997,7 @@ export function createChannelMessageHandler(ctx: ChannelMessageHandlerContext) {
           photoChunkBuffers.set(transferId, buffer)
         }
 
-        if (!buffer.chunks[chunkIndex]) {
+        if (buffer.chunks[chunkIndex] === undefined) {
           buffer.chunks[chunkIndex] = chunkData
           buffer.receivedCount++
           buffer.updatedAt = now

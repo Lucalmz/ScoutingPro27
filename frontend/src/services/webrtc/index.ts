@@ -255,7 +255,14 @@ export function createWebRtcService(callbacks: WebRtcCallbacks): WebRtcService {
     updateHostStatus,
     getClientDcState: () => clientDc?.readyState,
     getClientPc: () => clientPc,
-    isExplicitlyClosed: () => isExplicitlyClosed
+    isExplicitlyClosed: () => isExplicitlyClosed,
+    isDirectIpv6Eligible: (targetSender?: string) => {
+      if (isHostMode) {
+        return Boolean((hostSignalingHandler as any)?.isPeerDirectIpv6Eligible?.(targetSender))
+      } else {
+        return Boolean(clientSession?.isDirectIpv6Eligible?.())
+      }
+    }
   })
 
   const dispatcher = createMessageDispatcher({
@@ -817,6 +824,7 @@ export function createWebRtcService(callbacks: WebRtcCallbacks): WebRtcService {
     await signaling?.send({
       type: 'host_hello',
       hostSessionId: newHostSessionId,
+      hostIpv6: (hostSignalingHandler as any)?.getHostIpv6?.() || undefined,
       ecdhPublicKey: localEcdhPubHex,
       deviceId: localDeviceId,
       hostEpoch: nextEpoch,
@@ -1097,6 +1105,7 @@ export function createWebRtcService(callbacks: WebRtcCallbacks): WebRtcService {
             signaling!.send({
               type: 'host_hello',
               hostSessionId,
+              hostIpv6: (hostSignalingHandler as any)?.getHostIpv6?.() || undefined,
               ecdhPublicKey: localEcdhPubHex,
               deviceId: localDeviceId,
               hostEpoch: localEpoch,

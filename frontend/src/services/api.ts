@@ -541,6 +541,8 @@ export function deleteCustomField(eventId: string, id: string): Promise<{ succes
 export async function getNetworkInfo(): Promise<{
   primaryIp: string
   allIps: string[]
+  primaryIpv6?: string | null
+  allIpv6s?: string[]
   port: number
   joinBaseUrl: string
   joinBaseUrlIpv6?: string

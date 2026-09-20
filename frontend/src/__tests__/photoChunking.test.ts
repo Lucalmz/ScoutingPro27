@@ -154,4 +154,159 @@ describe('Photo WebRTC Chunking & Assembly', () => {
       'client-sender-1'
     )
   })
+
+  it('rejects malformed PIT_PHOTO_CHUNK payloads (negative index, out-of-bounds, non-integer, totalChunks > 500)', async () => {
+    const hostSendMessage = vi.fn().mockResolvedValue(undefined)
+    const mockCtx: any = {
+      isHostMode: () => true,
+      currentInviteCode: () => 'INVITE-1234',
+      getHostSessionId: () => 'host-sess-1',
+      getCurrentHostSessionId: () => 'host-sess-1',
+      sendMessage: hostSendMessage,
+      clientIdToScoutName: new Map(),
+      clientIdToScoutId: new Map(),
+      takeoverCooldowns: new Map()
+    }
+
+    const handler = createChannelMessageHandler(mockCtx)
+
+    // 1. Negative chunkIndex
+    await handler(
+      {
+        data: JSON.stringify({
+          type: 'PIT_PHOTO_CHUNK',
+          transferId: 't-neg',
+          eventId: 'e1',
+          key: 'k1',
+          chunkIndex: -1,
+          totalChunks: 2,
+          chunkData: 'data'
+        })
+      } as MessageEvent,
+      'client-sender'
+    )
+
+    // 2. chunkIndex >= totalChunks
+    await handler(
+      {
+        data: JSON.stringify({
+          type: 'PIT_PHOTO_CHUNK',
+          transferId: 't-oob',
+          eventId: 'e1',
+          key: 'k1',
+          chunkIndex: 2,
+          totalChunks: 2,
+          chunkData: 'data'
+        })
+      } as MessageEvent,
+      'client-sender'
+    )
+
+    // 3. totalChunks > 500
+    await handler(
+      {
+        data: JSON.stringify({
+          type: 'PIT_PHOTO_CHUNK',
+          transferId: 't-oversized',
+          eventId: 'e1',
+          key: 'k1',
+          chunkIndex: 0,
+          totalChunks: 501,
+          chunkData: 'data'
+        })
+      } as MessageEvent,
+      'client-sender'
+    )
+
+    // 4. Non-integer chunkIndex
+    await handler(
+      {
+        data: JSON.stringify({
+          type: 'PIT_PHOTO_CHUNK',
+          transferId: 't-float',
+          eventId: 'e1',
+          key: 'k1',
+          chunkIndex: 1.5,
+          totalChunks: 2,
+          chunkData: 'data'
+        })
+      } as MessageEvent,
+      'client-sender'
+    )
+
+    // None of these invalid chunks should trigger uploadPitPhoto or crash with RangeError
+    expect(api.uploadPitPhoto).not.toHaveBeenCalled()
+    expect(hostSendMessage).not.toHaveBeenCalled()
+  })
+
+  it('safely handles duplicate chunk delivery without incrementing count or causing premature assembly', async () => {
+    const hostSendMessage = vi.fn().mockResolvedValue(undefined)
+    const mockCtx: any = {
+      isHostMode: () => true,
+      currentInviteCode: () => 'INVITE-1234',
+      getHostSessionId: () => 'host-sess-1',
+      getCurrentHostSessionId: () => 'host-sess-1',
+      sendMessage: hostSendMessage,
+      clientIdToScoutName: new Map(),
+      clientIdToScoutId: new Map(),
+      takeoverCooldowns: new Map()
+    }
+
+    const handler = createChannelMessageHandler(mockCtx)
+    const transferId = 't-dup'
+    const eventId = 'e-dup'
+    const key = 'k-dup'
+
+    // Send chunk 0 twice
+    await handler(
+      {
+        data: JSON.stringify({
+          type: 'PIT_PHOTO_CHUNK',
+          transferId,
+          eventId,
+          key,
+          chunkIndex: 0,
+          totalChunks: 2,
+          chunkData: 'part0'
+        })
+      } as MessageEvent,
+      'client-sender'
+    )
+
+    await handler(
+      {
+        data: JSON.stringify({
+          type: 'PIT_PHOTO_CHUNK',
+          transferId,
+          eventId,
+          key,
+          chunkIndex: 0,
+          totalChunks: 2,
+          chunkData: 'part0'
+        })
+      } as MessageEvent,
+      'client-sender'
+    )
+
+    // Should NOT have assembled yet because chunk 1 hasn't arrived
+    expect(api.uploadPitPhoto).not.toHaveBeenCalled()
+
+    // Now send chunk 1
+    await handler(
+      {
+        data: JSON.stringify({
+          type: 'PIT_PHOTO_CHUNK',
+          transferId,
+          eventId,
+          key,
+          chunkIndex: 1,
+          totalChunks: 2,
+          chunkData: 'part1'
+        })
+      } as MessageEvent,
+      'client-sender'
+    )
+
+    expect(api.uploadPitPhoto).toHaveBeenCalledWith(eventId, key, 'part0part1')
+  })
 })

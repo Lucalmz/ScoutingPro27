@@ -14,7 +14,8 @@ import type { WebRtcCallbacks } from './types'
 import {
   optimizeCandidatePriority,
   optimizeSdpCandidates,
-  sortCandidatesPreferIpv6
+  sortCandidatesPreferIpv6,
+  probeLocalInterfaceIpv6
 } from './connectivity'
 import type { SignalingChannel } from './signaling'
 import { toSessionDescription, toIceCandidate } from './sdpUtil'
@@ -64,6 +65,8 @@ export function createClientSession(ctx: ClientSessionContext) {
   let reconnectTimer: any = null
   let isRebuilding = false
   let lastOfferTimestamp = 0
+  let lastHostIpv6: string | null = null
+  let isDirectIpv6EligibleFlag = false
 
   function clearReconnectTimer() {
     if (reconnectTimer) {
@@ -117,10 +120,9 @@ export function createClientSession(ctx: ClientSessionContext) {
   let activeSetupPromise: Promise<void> | null = null
 
   async function setupClientConnection(forceRelay = false): Promise<void> {
-    while (activeSetupPromise) {
-      try {
-        await activeSetupPromise
-      } catch (_) {}
+    if (activeSetupPromise) {
+      await activeSetupPromise
+      return
     }
     const currentPromise = doSetupClientConnection(forceRelay)
     activeSetupPromise = currentPromise
@@ -160,6 +162,12 @@ export function createClientSession(ctx: ClientSessionContext) {
     } finally {
       isRebuilding = false
     }
+
+    let localIpv6: string | null = null
+    try {
+      localIpv6 = await probeLocalInterfaceIpv6()
+    } catch {}
+    isDirectIpv6EligibleFlag = Boolean(lastHostIpv6 && localIpv6)
 
     const pc = ctx.peerMgr.createPeerConnection(
       undefined,
@@ -230,7 +238,8 @@ export function createClientSession(ctx: ClientSessionContext) {
         ticket: handshakeTicket,
         deviceId: localDeviceId,
         username: ctx.getUsername?.() || '',
-        userId: ctx.getUserId?.() || ''
+        userId: ctx.getUserId?.() || '',
+        clientIpv6: localIpv6 || undefined
       }
 
       let offerPayload: any = rawOffer
@@ -375,6 +384,9 @@ export function createClientSession(ctx: ClientSessionContext) {
 
     if (data.type === 'host_hello') {
       log.info(`Received host_hello: hostSessionId=${data.hostSessionId}, deviceId=${data.deviceId}, sender=${data.sender}`)
+      if (data.hostIpv6) {
+        lastHostIpv6 = data.hostIpv6
+      }
       const previousHostSessionId = ctx.getCurrentHostSessionId()
       const isSameHostSession = Boolean(data.hostSessionId && data.hostSessionId === previousHostSessionId)
       const hostSessionChanged = Boolean(
@@ -409,10 +421,12 @@ export function createClientSession(ctx: ClientSessionContext) {
         (curPc.connectionState === 'connecting' || curPc.iceConnectionState === 'checking')
       )
       const isHandshakeInFlight = Boolean(
-        curPc &&
-        curPc.connectionState !== 'closed' &&
-        curPc.connectionState !== 'failed' &&
-        (curPc.signalingState === 'have-local-offer' || Date.now() - lastOfferTimestamp < 8000)
+        activeSetupPromise ||
+        (curPc &&
+          curPc.connectionState !== 'closed' &&
+          curPc.connectionState !== 'failed' &&
+          lastOfferTimestamp > 0 &&
+          Date.now() - lastOfferTimestamp < 8000)
       )
 
       if (hostSessionChanged || (!isAlreadyConnected && !isConnectingOrChecking && !isHandshakeInFlight)) {
@@ -673,7 +687,8 @@ export function createClientSession(ctx: ClientSessionContext) {
     handlePong,
     startDataChannelHeartbeat,
     stopDataChannelHeartbeat,
-    resetOfferTimestamp
+    resetOfferTimestamp,
+    isDirectIpv6Eligible: () => isDirectIpv6EligibleFlag
   }
 }
 
