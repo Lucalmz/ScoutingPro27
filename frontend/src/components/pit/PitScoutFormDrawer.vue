@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref, computed, watch } from 'vue'
+import { ref, computed, watch, onUnmounted } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { usePitScoutStore } from '@/stores/pitScout'
 import { useUserStore } from '@/stores/user'
@@ -14,10 +14,16 @@ import type { PitScoutingRecord } from '@/types'
 import { LAUNCHER_PRESETS, FLOWER_PRESETS, type PresetOption } from '@/constants/pitScoutPresets'
 import './PitScoutFormDrawer.css'
 
-const props = defineProps<{
-  modelValue: boolean
-  teamNumber: number | null
-}>()
+const props = withDefaults(
+  defineProps<{
+    modelValue: boolean
+    teamNumber: number | null
+    teleportDisabled?: boolean
+  }>(),
+  {
+    teleportDisabled: () => typeof import.meta !== 'undefined' && Boolean(import.meta.env?.TEST)
+  }
+)
 
 const emit = defineEmits<{
   (e: 'update:modelValue', value: boolean): void
@@ -373,11 +379,41 @@ function handleSave() {
   emit('saved', record)
   emit('update:modelValue', false)
 }
+
+function onGlobalKeyDown(e: KeyboardEvent) {
+  if (e.key === 'Escape' && props.modelValue) {
+    requestClose()
+  }
+}
+
+watch(
+  () => props.modelValue,
+  (isOpen) => {
+    if (typeof document !== 'undefined') {
+      if (isOpen) {
+        document.body.style.overflow = 'hidden'
+        window.addEventListener('keydown', onGlobalKeyDown)
+      } else {
+        document.body.style.overflow = ''
+        window.removeEventListener('keydown', onGlobalKeyDown)
+      }
+    }
+  },
+  { immediate: true }
+)
+
+onUnmounted(() => {
+  if (typeof document !== 'undefined') {
+    document.body.style.overflow = ''
+    window.removeEventListener('keydown', onGlobalKeyDown)
+  }
+})
 </script>
 
 <template>
-  <Transition name="pit-drawer">
-    <div v-if="modelValue" class="drawer-overlay" @click.self="requestClose">
+  <Teleport to="body" :disabled="teleportDisabled">
+    <Transition name="pit-drawer">
+      <div v-if="modelValue" class="drawer-overlay" @click.self="requestClose">
       <div class="drawer-panel">
       <!-- 头部 -->
       <div class="drawer-header">
@@ -776,4 +812,5 @@ function handleSave() {
     </div>
   </div>
   </Transition>
+  </Teleport>
 </template>

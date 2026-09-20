@@ -214,8 +214,10 @@ export const useConnectionStore = defineStore('connection', () => {
   }
 
   // --- helpers ---
-  function pushRecords(records: ScoutingRecord[], targetId?: string) {
-    rtcService.value?.pushRecords(records, targetId)
+  async function pushRecords(records: ScoutingRecord[], targetId?: string): Promise<void> {
+    if (rtcService.value) {
+      await rtcService.value.pushRecords(records, targetId)
+    }
   }
 
   function pushIfNeeded(records: ScoutingRecord[] | undefined | null, targetId?: string) {

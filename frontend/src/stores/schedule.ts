@@ -631,6 +631,32 @@ export const useScheduleStore = defineStore('schedule', () => {
     }
   }
 
+  function applyScheduleBatchSync(
+    incomingSchedules: MatchScheduleItem[],
+    incomingAssignments: ScoutAssignment[],
+    batchIndex: number,
+    totalBatches: number
+  ) {
+    if (batchIndex === 0) {
+      schedules.value = deduplicateSchedules(incomingSchedules || [])
+      const assignMap: Record<string, ScoutAssignment> = {}
+      for (const a of incomingAssignments || []) {
+        assignMap[getAssignmentKey(Number(a.matchNumber), a.station, a.tournamentLevel)] = a
+      }
+      assignments.value = assignMap
+    } else {
+      schedules.value = deduplicateSchedules([...schedules.value, ...(incomingSchedules || [])])
+      const assignMap = { ...assignments.value }
+      for (const a of incomingAssignments || []) {
+        assignMap[getAssignmentKey(Number(a.matchNumber), a.station, a.tournamentLevel)] = a
+      }
+      assignments.value = assignMap
+    }
+    if (currentEventId.value && (batchIndex === totalBatches - 1 || totalBatches <= 1)) {
+      saveToLocalStorage(currentEventId.value)
+    }
+  }
+
   function applyAssignmentUpdate(incomingAssignment: ScoutAssignment) {
     if (!incomingAssignment) return
     const key = getAssignmentKey(incomingAssignment.matchNumber, incomingAssignment.station, incomingAssignment.tournamentLevel)
@@ -707,6 +733,7 @@ export const useScheduleStore = defineStore('schedule', () => {
     broadcastScheduleSync,
     broadcastAssignmentUpdate,
     applyScheduleFullSync,
+    applyScheduleBatchSync,
     applyAssignmentUpdate,
     migrateScoutId,
     migrateEventId

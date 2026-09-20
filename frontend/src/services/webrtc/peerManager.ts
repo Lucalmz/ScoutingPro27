@@ -157,6 +157,11 @@ export class PeerConnectionManager {
       iceTransportPolicy: forceRelay ? 'relay' : 'all'
     }
     log.info(`Creating RTCPeerConnection (isHost: ${isHost}, targetSender: ${targetSender || 'default'}, forceRelay: ${forceRelay}, icePolicy: ${config.iceTransportPolicy})`)
+    if (!isHost) {
+      this.clientIceRestartAttempts = 0
+    } else if (targetSender) {
+      this.hostIceRestartAttempts.delete(targetSender)
+    }
     const peer = new RTCPeerConnection(config)
 
     peer.onicecandidate = async (ev) => {
@@ -173,30 +178,20 @@ export class PeerConnectionManager {
           candObj.candidate = optimizeCandidatePriority(candObj.candidate)
         }
         log.info(
-          `Generated ICE Candidate: type=${ev.candidate.type}, protocol=${ev.candidate.protocol}, address=${ev.candidate.address}, isIPv6=${isIpv6Address(
-            ev.candidate.address || ''
-          )}`,
-          { candidate: candObj.candidate }
+          `Local ICE Candidate generated: ${candObj.candidate ? candObj.candidate.trim() : 'null'} (target: ${targetSender || 'host'})`
         )
+
+        const sharedKey = isHost ? this.options.getClientSharedKey(targetSender || '') : this.options.getClientSharedAesKey()
+        let candPayload: any = candObj
+        if (sharedKey) {
+          try {
+            candPayload = await encryptSignalingData(sharedKey, JSON.stringify(candObj))
+          } catch {}
+        }
+
         const signaling = this.options.getSignaling()
         if (signaling) {
-          const target = isHost ? targetSender : clientHostSenderId
-          let candPayload: any = candObj
-          try {
-            if (isHost && targetSender) {
-              const sharedKey = this.options.getClientSharedKey(targetSender)
-              if (sharedKey) {
-                candPayload = await encryptSignalingData(sharedKey, JSON.stringify(candObj))
-              }
-            } else if (!isHost) {
-              const sharedKey = this.options.getClientSharedAesKey()
-              if (sharedKey) {
-                candPayload = await encryptSignalingData(sharedKey, JSON.stringify(candObj))
-              }
-            }
-          } catch (err) {
-            log.warn('Failed to encrypt candidate, sending plaintext fallback:', err)
-          }
+          const target = isHost ? targetSender : clientHostSenderId || undefined
           signaling.send({ candidate: candPayload }, target)
         }
       } else {
@@ -207,6 +202,7 @@ export class PeerConnectionManager {
     let iceTimeout: NodeJS.Timeout | null = null
     let checkingWatchdog: NodeJS.Timeout | null = null
     let stallRestartWatchdog: NodeJS.Timeout | null = null
+    let isRestartingIce = false
 
     const origClose = peer.close.bind(peer)
     peer.close = () => {
@@ -289,11 +285,11 @@ export class PeerConnectionManager {
             checkingWatchdog = null
             if (peer.iceConnectionState === 'checking') {
               log.warn(
-                '[Watchdog] ICE check taking longer than 3500ms (possible IPv6 blackhole / middlebox UDP drop).'
+                '[Watchdog] ICE check taking longer than 3000ms (possible IPv6 blackhole / middlebox UDP drop).'
               )
               callbacks.onIceStalled?.(true)
             }
-          }, 3500)
+          }, 3000)
         }
         const scheduleStallRestart = () => {
           if (stallRestartWatchdog) clearTimeout(stallRestartWatchdog)
@@ -306,7 +302,11 @@ export class PeerConnectionManager {
                   : 0
                 : this.clientIceRestartAttempts
 
-              if (currentAttempts < 2) {
+              if (currentAttempts < 1) {
+                if (isRestartingIce) {
+                  log.info('[Watchdog] ICE restart already in progress, skipping duplicate trigger.')
+                  return
+                }
                 const nextAttempts = currentAttempts + 1
                 if (isHost && targetSender) {
                   this.hostIceRestartAttempts.set(targetSender, nextAttempts)
@@ -314,8 +314,9 @@ export class PeerConnectionManager {
                   this.clientIceRestartAttempts = nextAttempts
                 }
                 log.warn(
-                  `[Watchdog] ICE checking stalled at 5500ms. Triggering restartIce (Attempt ${nextAttempts}/2, target: ${targetSender || 'host'})`
+                  `[Watchdog] ICE checking stalled at 4000ms. Triggering restartIce (Attempt ${nextAttempts}/1, target: ${targetSender || 'host'})`
                 )
+                isRestartingIce = true
                 try {
                   if (typeof (peer as any).restartIce === 'function') {
                     ;(peer as any).restartIce()
@@ -346,14 +347,16 @@ export class PeerConnectionManager {
                   }
                 } catch (restartErr) {
                   log.error('[Watchdog] Failed to restart ICE:', restartErr)
+                } finally {
+                  isRestartingIce = false
                 }
-                // 递归重试调度：若网络持续停滞在 checking，确保自动调度下一轮检查直至达到上限
+                // 递归重试调度：若网络持续停滞在 checking，4000ms 后再次触发进入 relay 降级 (总计 8s)
                 if (peer.iceConnectionState === 'checking') {
                   scheduleStallRestart()
                 }
               } else {
                 log.warn(
-                  '[Watchdog] Max restartIce attempts (2) exceeded. Actively triggering relay-only fallback with iceTransportPolicy: "relay".'
+                  '[Watchdog] ICE checking stalled after 8000ms. Actively triggering relay-only fallback with iceTransportPolicy: "relay".'
                 )
                 callbacks.onIceStalled?.(true)
                 if (checkingWatchdog) {
@@ -373,7 +376,7 @@ export class PeerConnectionManager {
                 }
               }
             }
-          }, 5500)
+          }, 4000)
         }
 
         if (!stallRestartWatchdog) {

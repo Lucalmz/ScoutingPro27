@@ -318,4 +318,64 @@ describe('PitScoutFormDrawer.vue', () => {
     expect(otosBtn.classes()).toContain('is-active')
     expect(pinpointBtn.classes()).not.toContain('is-active')
   })
+
+  it('teleports to document.body and renders drawer-footer with Save Record button when teleportDisabled is false', async () => {
+    document.body.innerHTML = ''
+    const wrapper = mount(PitScoutFormDrawer, {
+      props: {
+        ...defaultProps,
+        teleportDisabled: false
+      },
+      attachTo: document.body
+    })
+    await wrapper.vm.$nextTick()
+    await new Promise((r) => setTimeout(r, 20))
+
+    const overlay = document.body.querySelector('.drawer-overlay')
+    expect(overlay).not.toBeNull()
+
+    const footer = document.body.querySelector('.drawer-footer')
+    expect(footer).not.toBeNull()
+
+    const saveBtn = footer!.querySelector('.btn-primary') as HTMLButtonElement
+    expect(saveBtn).not.toBeNull()
+    expect(saveBtn.textContent).toContain('pit_scout.drawer.btn_save')
+
+    const cancelBtn = footer!.querySelector('.btn-cancel') as HTMLButtonElement
+    expect(cancelBtn).not.toBeNull()
+
+    wrapper.unmount()
+    expect(document.body.querySelector('.drawer-overlay')).toBeNull()
+  })
+
+  it('locks body overflow when opened and unlocks when unmounted or closed', async () => {
+    document.body.style.overflow = ''
+    const wrapper = mount(PitScoutFormDrawer, {
+      props: defaultProps
+    })
+    await wrapper.vm.$nextTick()
+
+    expect(document.body.style.overflow).toBe('hidden')
+
+    await wrapper.setProps({ modelValue: false })
+    await wrapper.vm.$nextTick()
+    expect(document.body.style.overflow).toBe('')
+
+    await wrapper.setProps({ modelValue: true })
+    await wrapper.vm.$nextTick()
+    expect(document.body.style.overflow).toBe('hidden')
+
+    wrapper.unmount()
+    expect(document.body.style.overflow).toBe('')
+  })
+
+  it('handles Escape key to requestClose when drawer is open', async () => {
+    const wrapper = mount(PitScoutFormDrawer, { props: defaultProps })
+    await wrapper.vm.$nextTick()
+
+    window.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape' }))
+    expect(wrapper.emitted('update:modelValue')?.[0]).toEqual([false])
+
+    wrapper.unmount()
+  })
 })

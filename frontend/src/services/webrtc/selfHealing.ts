@@ -9,10 +9,15 @@ export interface SelfHealingOptions {
   reconnectNow: (forceFreshSignaling?: boolean) => Promise<boolean>
   isHealthy?: () => boolean
   pingPeer?: () => Promise<boolean>
+  isConflictActive?: () => boolean
 }
 
 export function setupSelfHealing(options: SelfHealingOptions): { dispose: () => void } {
   const handleOnline = async () => {
+    if (options.isConflictActive?.()) {
+      log.info('Device network came online, but session conflict is active; suppressing reconnect.')
+      return
+    }
     log.info('Device network came online, probing public connectivity...')
     const canReachPublic = await probePublicConnectivity(2500)
     if (canReachPublic) {
@@ -25,6 +30,10 @@ export function setupSelfHealing(options: SelfHealingOptions): { dispose: () => 
 
   const handleResume = async () => {
     if (typeof document !== 'undefined' && document.visibilityState !== 'visible') {
+      return
+    }
+    if (options.isConflictActive?.()) {
+      log.info('App resumed, but session conflict is active; suppressing reconnect.')
       return
     }
     const status = options.getStatus()

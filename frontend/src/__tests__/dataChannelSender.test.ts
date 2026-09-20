@@ -57,7 +57,7 @@ describe('DataChannelSender', () => {
   })
 
   it('should wait on backpressure until bufferedamountlow fires', async () => {
-    const dc = createMockDataChannel('open', 70 * 1024) // 70 KiB > 64 KiB
+    const dc = createMockDataChannel('open', 40 * 1024) // 40 KiB > 32 KiB
     const congestionCb = vi.fn()
     const sender = new DataChannelSender(dc, congestionCb)
 
@@ -71,7 +71,7 @@ describe('DataChannelSender', () => {
     expect(dc.send).not.toHaveBeenCalled()
 
     // Drain buffer and trigger low event
-    ;(dc as any).bufferedAmount = 20 * 1024
+    ;(dc as any).bufferedAmount = 10 * 1024
     ;(dc as any)._triggerEvent('bufferedamountlow')
 
     await sendPromise
@@ -79,8 +79,42 @@ describe('DataChannelSender', () => {
     expect(dc.send).toHaveBeenCalledWith('large_payload')
   })
 
+  it('should reject payloads exceeding MAX_PAYLOAD_SIZE (64 KiB)', async () => {
+    const dc = createMockDataChannel('open', 0)
+    const sender = new DataChannelSender(dc)
+    const oversizedPayload = 'x'.repeat(65 * 1024)
+
+    await expect(sender.enqueueSend(oversizedPayload)).rejects.toThrow('exceeds MAX_PAYLOAD_SIZE')
+    expect(dc.send).not.toHaveBeenCalled()
+  })
+
+  it('should trigger pre-flight backpressure when bufferedAmount + payload > BUFFER_HIGH_WATERMARK', async () => {
+    // 20 KiB current buffer (> 16 KiB low watermark) + 15 KiB payload = 35 KiB > 32 KiB high watermark
+    const dc = createMockDataChannel('open', 20 * 1024)
+    const congestionCb = vi.fn()
+    const sender = new DataChannelSender(dc, congestionCb)
+    const payload = 'x'.repeat(15 * 1024)
+
+    let sendFinished = false
+    const sendPromise = sender.enqueueSend(payload).then(() => {
+      sendFinished = true
+    })
+
+    expect(congestionCb).toHaveBeenCalledWith(true)
+    expect(sendFinished).toBe(false)
+    expect(dc.send).not.toHaveBeenCalled()
+
+    // Drain buffer below 16 KiB low watermark
+    ;(dc as any).bufferedAmount = 8 * 1024
+    ;(dc as any)._triggerEvent('bufferedamountlow')
+
+    await sendPromise
+    expect(sendFinished).toBe(true)
+    expect(dc.send).toHaveBeenCalledWith(payload)
+  })
+
   it('should trigger fail-fast when backpressure times out after 5000ms', async () => {
-    const dc = createMockDataChannel('open', 80 * 1024)
+    const dc = createMockDataChannel('open', 50 * 1024)
     const congestionCb = vi.fn()
     const sender = new DataChannelSender(dc, congestionCb)
 

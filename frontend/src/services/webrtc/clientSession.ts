@@ -82,6 +82,10 @@ export function createClientSession(ctx: ClientSessionContext) {
 
   function triggerClientReconnect() {
     if (ctx.isExplicitlyClosed() || ctx.getStatus() === 'long_offline') return
+    if (ctx.callbacks.isConflictActive?.()) {
+      log.info('Session conflict is active; suppressing auto-reconnect.')
+      return
+    }
     if (ctx.sas.clientSasState === 'PENDING_VERIFICATION') {
       log.info('SAS verification pending; pausing auto-reconnect.')
       return

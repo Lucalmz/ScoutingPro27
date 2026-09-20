@@ -22,8 +22,9 @@ export class DataChannelSender {
   }> = []
   private isProcessing = false
 
-  public readonly BUFFER_HIGH_WATERMARK = 64 * 1024 // 64 KiB
-  public readonly BUFFER_LOW_WATERMARK = 32 * 1024  // 32 KiB
+  public readonly BUFFER_HIGH_WATERMARK = 32 * 1024 // 32 KiB
+  public readonly BUFFER_LOW_WATERMARK = 16 * 1024  // 16 KiB
+  public readonly MAX_PAYLOAD_SIZE = 64 * 1024      // 64 KiB
   public readonly MAX_BACKPRESSURE_TIMEOUT = 5000   // 5s 超时熔断
 
   constructor(
@@ -38,6 +39,13 @@ export class DataChannelSender {
   public enqueueSend(payload: string): Promise<void> {
     if (this.dc.readyState === 'closed' || this.dc.readyState === 'closing') {
       return Promise.reject(new Error(`DataChannel is not open (state: ${this.dc.readyState})`))
+    }
+    if (payload.length > this.MAX_PAYLOAD_SIZE) {
+      return Promise.reject(
+        new Error(
+          `Payload size ${payload.length} bytes exceeds MAX_PAYLOAD_SIZE (${this.MAX_PAYLOAD_SIZE} bytes). Message must be chunked at application layer.`
+        )
+      )
     }
     return new Promise<void>((resolve, reject) => {
       this.queue.push({ payload, resolve, reject })
@@ -95,8 +103,21 @@ export class DataChannelSender {
       throw new Error(`DataChannel is not open (state: ${this.dc.readyState})`)
     }
 
-    if (this.dc.bufferedAmount > this.BUFFER_HIGH_WATERMARK) {
-      log.warn(`DataChannel buffer exceeded high watermark (${this.dc.bufferedAmount} bytes > ${this.BUFFER_HIGH_WATERMARK}). Pausing sender for backpressure relief.`)
+    if (payload.length > this.MAX_PAYLOAD_SIZE) {
+      throw new Error(
+        `Payload size ${payload.length} bytes exceeds MAX_PAYLOAD_SIZE (${this.MAX_PAYLOAD_SIZE} bytes). Message must be chunked at application layer.`
+      )
+    }
+
+    const needsWait =
+      this.dc.bufferedAmount > this.BUFFER_HIGH_WATERMARK ||
+      (this.dc.bufferedAmount > this.BUFFER_LOW_WATERMARK &&
+        this.dc.bufferedAmount + payload.length > this.BUFFER_HIGH_WATERMARK)
+
+    if (needsWait) {
+      log.warn(
+        `DataChannel buffer pressure detected (${this.dc.bufferedAmount} bytes + payload ${payload.length} > ${this.BUFFER_HIGH_WATERMARK}). Pausing sender for backpressure relief.`
+      )
       this.onCongestion?.(true)
       await new Promise<void>((resolve, reject) => {
         let finished = false
@@ -145,7 +166,7 @@ export class DataChannelSender {
           } else if (this.dc.bufferedAmount <= this.BUFFER_LOW_WATERMARK) {
             done()
           }
-        }, 100)
+        }, 50)
 
         timeoutId = setTimeout(() => {
           if (!finished) {
@@ -162,5 +183,9 @@ export class DataChannelSender {
     }
 
     this.dc.send(payload)
+
+    if (this.dc.bufferedAmount > this.BUFFER_HIGH_WATERMARK) {
+      this.onCongestion?.(true)
+    }
   }
 }

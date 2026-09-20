@@ -520,6 +520,17 @@ export function createChannelMessageHandler(ctx: ChannelMessageHandlerContext) {
         }
         break
 
+      case 'SCHEDULE_BATCH_SYNC':
+        if (!isHostMode && Array.isArray(msg.schedules)) {
+          callbacks.onScheduleBatchSyncReceived?.(
+            msg.schedules,
+            msg.assignments || [],
+            msg.batchIndex ?? 0,
+            msg.totalBatches ?? 1
+          )
+        }
+        break
+
       case 'ASSIGNMENT_UPDATE':
         if (msg.assignment) {
           callbacks.onAssignmentUpdateReceived?.(msg.assignment)

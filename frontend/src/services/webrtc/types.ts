@@ -26,6 +26,12 @@ export type WebRtcCallbacks = {
   onTagsFullSyncReceived?: (tags: TeamTagItem[], eventId: string) => void
   onRequestScheduleSync?: (senderId?: string) => void
   onScheduleFullSyncReceived?: (schedules: import('@/types').MatchScheduleItem[], assignments: import('@/types').ScoutAssignment[]) => void
+  onScheduleBatchSyncReceived?: (
+    schedules: import('@/types').MatchScheduleItem[],
+    assignments: import('@/types').ScoutAssignment[],
+    batchIndex: number,
+    totalBatches: number
+  ) => void
   onAssignmentUpdateReceived?: (assignment: import('@/types').ScoutAssignment) => void
   onPitScoutUpdateReceived?: (record: import('@/types').PitScoutingRecord) => void
   onPitScoutFullSyncReceived?: (records: import('@/types').PitScoutingRecord[]) => void
@@ -45,6 +51,7 @@ export type WebRtcCallbacks = {
   ) => void
   onTakeoverPrompt?: (requesterUsername: string, timeoutSeconds: number) => void
   onTakeoverSuccess?: () => void
+  isConflictActive?: () => boolean
   onSessionKicked?: (reason: string) => void
   onIdentityMigration?: (eventId: string, oldScoutId: string, newScoutId: string, newScoutName: string) => Promise<void> | void
   onEventMetadataReceived?: (event: ScoutingEvent) => void

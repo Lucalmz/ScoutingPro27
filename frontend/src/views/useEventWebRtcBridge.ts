@@ -167,21 +167,56 @@ export function useEventWebRtcBridge({
         }
       },
 
-      onRequestScheduleSync: (senderId) => {
+      onRequestScheduleSync: async (senderId) => {
         if (eventStore.isHost && connStore.rtcService) {
-          connStore.rtcService.sendMessage(
-            {
-              type: 'SCHEDULE_FULL_SYNC',
-              schedules: scheduleStore.schedules,
-              assignments: Object.values(scheduleStore.assignments)
-            },
-            senderId
-          )
+          const allSchedules = scheduleStore.schedules
+          const allAssignments = Object.values(scheduleStore.assignments)
+          const CHUNK_SIZE = 20
+          if (allSchedules.length <= CHUNK_SIZE) {
+            await connStore.rtcService.sendMessage(
+              {
+                type: 'SCHEDULE_FULL_SYNC',
+                schedules: allSchedules,
+                assignments: allAssignments
+              },
+              senderId
+            )
+          } else {
+            const totalBatches = Math.ceil(allSchedules.length / CHUNK_SIZE)
+            const syncId = `sched-${Date.now()}`
+            const allMatchNums = new Set(allSchedules.map((s) => Number(s.matchNumber)))
+            for (let i = 0; i < totalBatches; i++) {
+              const batchSchedules = allSchedules.slice(i * CHUNK_SIZE, (i + 1) * CHUNK_SIZE)
+              const batchMatchNums = new Set(batchSchedules.map((s) => Number(s.matchNumber)))
+              const batchAssignments =
+                i === totalBatches - 1
+                  ? allAssignments.filter(
+                      (a) => batchMatchNums.has(Number(a.matchNumber)) || !allMatchNums.has(Number(a.matchNumber))
+                    )
+                  : allAssignments.filter((a) => batchMatchNums.has(Number(a.matchNumber)))
+
+              await connStore.rtcService.sendMessage(
+                {
+                  type: 'SCHEDULE_BATCH_SYNC',
+                  batchIndex: i,
+                  totalBatches,
+                  schedules: batchSchedules,
+                  assignments: batchAssignments,
+                  syncId
+                },
+                senderId
+              )
+            }
+          }
         }
       },
 
       onScheduleFullSyncReceived: (incomingSchedules, incomingAssignments) => {
         scheduleStore.applyScheduleFullSync(incomingSchedules, incomingAssignments)
+      },
+
+      onScheduleBatchSyncReceived: (incomingSchedules, incomingAssignments, batchIndex, totalBatches) => {
+        scheduleStore.applyScheduleBatchSync(incomingSchedules, incomingAssignments, batchIndex, totalBatches)
       },
 
       onAssignmentUpdateReceived: (incomingAssignment) => {
@@ -209,15 +244,30 @@ export function useEventWebRtcBridge({
         pitStore.applyFullSync(incomingRecords)
       },
 
-      onRequestPitSync: (senderId) => {
+      onRequestPitSync: async (senderId) => {
         if (eventStore.isHost && connStore.rtcService) {
-          connStore.rtcService.sendMessage(
-            {
-              type: 'PIT_SCOUT_FULL_SYNC',
-              records: pitStore.records
-            },
-            senderId
-          )
+          const allRecords = pitStore.records
+          const CHUNK_SIZE = 15
+          if (allRecords.length <= CHUNK_SIZE) {
+            await connStore.rtcService.sendMessage(
+              {
+                type: 'PIT_SCOUT_FULL_SYNC',
+                records: allRecords
+              },
+              senderId
+            )
+          } else {
+            for (let i = 0; i < allRecords.length; i += CHUNK_SIZE) {
+              const chunk = allRecords.slice(i, i + CHUNK_SIZE)
+              await connStore.rtcService.sendMessage(
+                {
+                  type: 'PIT_SCOUT_BATCH_SYNC',
+                  records: chunk
+                },
+                senderId
+              )
+            }
+          }
         }
       },
 
@@ -294,6 +344,8 @@ export function useEventWebRtcBridge({
         connStore.clearSessionConflict()
         toastStore.showToast(t('conflict.takeover_success') || '会话接管成功！', 'success')
       },
+
+      isConflictActive: () => Boolean(connStore.sessionConflict),
 
       onSessionKicked: (reason: string) => {
         connStore.setIsKicked({ reason })
@@ -412,11 +464,39 @@ export function useEventWebRtcBridge({
         // 升迁为主机后，主动向所有 Peer 广播最新排班、标签与自定义字段基准包
         if (connStore.rtcService && eventStore.currentEvent?.id) {
           const evId = eventStore.currentEvent.id
-          connStore.rtcService.sendMessage({
-            type: 'SCHEDULE_FULL_SYNC',
-            schedules: scheduleStore.schedules,
-            assignments: Object.values(scheduleStore.assignments)
-          })
+          const allSchedules = scheduleStore.schedules
+          const allAssignments = Object.values(scheduleStore.assignments)
+          const CHUNK_SIZE = 20
+          if (allSchedules.length <= CHUNK_SIZE) {
+            connStore.rtcService.sendMessage({
+              type: 'SCHEDULE_FULL_SYNC',
+              schedules: allSchedules,
+              assignments: allAssignments
+            })
+          } else {
+            const totalBatches = Math.ceil(allSchedules.length / CHUNK_SIZE)
+            const syncId = `sched-${Date.now()}`
+            const allMatchNums = new Set(allSchedules.map((s) => Number(s.matchNumber)))
+            for (let i = 0; i < totalBatches; i++) {
+              const batchSchedules = allSchedules.slice(i * CHUNK_SIZE, (i + 1) * CHUNK_SIZE)
+              const batchMatchNums = new Set(batchSchedules.map((s) => Number(s.matchNumber)))
+              const batchAssignments =
+                i === totalBatches - 1
+                  ? allAssignments.filter(
+                      (a) => batchMatchNums.has(Number(a.matchNumber)) || !allMatchNums.has(Number(a.matchNumber))
+                    )
+                  : allAssignments.filter((a) => batchMatchNums.has(Number(a.matchNumber)))
+
+              connStore.rtcService.sendMessage({
+                type: 'SCHEDULE_BATCH_SYNC',
+                batchIndex: i,
+                totalBatches,
+                schedules: batchSchedules,
+                assignments: batchAssignments,
+                syncId
+              })
+            }
+          }
           connStore.rtcService.sendTagsFullSync(recordStore.teamTags, evId)
           connStore.rtcService.sendMessage({
             type: 'CUSTOM_FIELDS_FULL_SYNC',
@@ -525,7 +605,7 @@ export function useEventWebRtcBridge({
 
   watch(
     () => connStore.status,
-    (status, oldStatus) => {
+    async (status, oldStatus) => {
       const evt = eventStore.currentEvent
       console.log(`[EventView] connStore.status changed: ${oldStatus} -> ${status}`)
 
@@ -542,7 +622,7 @@ export function useEventWebRtcBridge({
           const curCounter = connStore.rtcService?.getHostSeqCounter?.() || 0
           const outgoingMaxSeq = Math.max(maxDbSeq, curCounter, lastHostSeq.value)
 
-          connStore.rtcService?.sendHostHandoffBatch({
+          await connStore.rtcService?.sendHostHandoffBatch({
             eventId: evt.id,
             incomingMaxSeq: outgoingMaxSeq,
             hostEpoch: 0,
@@ -572,7 +652,7 @@ export function useEventWebRtcBridge({
             lastConnectedHostSessionId.value = curHostSessionId
           }
 
-          // Client 连接／重连：若为主机接管则以 sinceVersion=0 全量对齐最新基线；否则按 lastHostSeq 增量对齐
+          // Client 连接／重连：按序发起同步流水线，避免并发数据风暴
           connStore.requestSync(
             isHostTakeover ? 0 : lastHostSeq.value,
             undefined,
@@ -591,31 +671,31 @@ export function useEventWebRtcBridge({
           )
           if (myRecs.length > 0) {
             console.log(`[EventView] Auto self-healing: pushing ${myRecs.length} unconfirmed/pending records to host...`)
-            connStore.pushRecords(myRecs)
+            await connStore.pushRecords(myRecs)
           }
 
           // 移动端重连核心自愈 1：主动出清离线期间录入的 Pit 展位记录
-          pitStore.flushPendingPitRecords(evt.id)
+          await pitStore.flushPendingPitRecords(evt.id)
 
           // 移动端重连核心自愈 2：主动出清离线照片队列，确保特写照片落盘到 Host
           flushOfflinePhotos(evt.id)
 
-          // 向 Host 请求最新的赛程与排班、展位侦察记录、以及战队标签
+          // 顺序向 Host 请求最新的赛程与排班、展位侦察记录、以及战队标签
           if (connStore.rtcService) {
-            connStore.rtcService.sendMessage({
+            await connStore.rtcService.sendMessage({
               type: 'REQUEST_SCHEDULE_SYNC'
             })
-            connStore.rtcService.sendMessage({
+            await connStore.rtcService.sendMessage({
               type: 'REQUEST_PIT_SYNC'
             })
-            connStore.rtcService.sendMessage({
+            await connStore.rtcService.sendMessage({
               type: 'REQUEST_CUSTOM_FIELDS_SYNC',
               eventId: evt.id
             })
             customFieldsStore.fetchFields(evt.id).catch((e: any) => {
               console.warn('[EventView] Failed to fetch custom fields:', e)
             })
-            connStore.rtcService.requestTagsSync(evt.id).catch((e: any) => {
+            await connStore.rtcService.requestTagsSync(evt.id).catch((e: any) => {
               console.warn('[EventView] Failed to request tags sync:', e)
             })
           }

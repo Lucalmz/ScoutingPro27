@@ -1240,7 +1240,8 @@ export function createWebRtcService(callbacks: WebRtcCallbacks): WebRtcService {
     pingPeer: async () => {
       if (isHostMode) return true
       return await clientSession.pingHost(800)
-    }
+    },
+    isConflictActive: () => Boolean(callbacks.isConflictActive?.())
   })
 
   function setEventMetadata(meta: ScoutingEvent) {

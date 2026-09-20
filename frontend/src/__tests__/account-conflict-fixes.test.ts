@@ -231,4 +231,122 @@ describe('Account Conflict & Takeover Fixes', () => {
 
     expect(isEditingOriginalMatchAndTeam).toBe(true)
   })
+
+  it('Host messageDispatcher sends SESSION_CONFLICT to stagedClients before promotion', async () => {
+    const mockDc = {
+      readyState: 'open',
+      send: vi.fn(),
+      addEventListener: vi.fn(),
+      removeEventListener: vi.fn(),
+      bufferedAmount: 0,
+      bufferedAmountLowThreshold: 0
+    } as any
+
+    const stagedClients = new Map()
+    stagedClients.set('staged_client_phone', {
+      pc: {} as any,
+      dc: mockDc,
+      pendingCandidates: []
+    })
+
+    const { createMessageDispatcher } = await import('@/services/webrtc/messageDispatcher')
+    const dispatcher = createMessageDispatcher({
+      isHostMode: () => true,
+      getCurrentInviteCode: () => 'ABC123',
+      getHostSessionId: () => 'host-sess',
+      clients: new Map(),
+      stagedClients,
+      scoutIdToClientIds: new Map(),
+      offlineMessages: {} as any,
+      sas: {
+        clientSasStates: new Map(),
+        hostPendingOutgoing: new Map()
+      } as any,
+      getClientDc: () => null,
+      getClientSender: () => null,
+      setClientSender: () => {},
+      setStatus: () => {},
+      getLocalUserId: () => 'host-user',
+      setLocalUserId: () => {},
+      getLocalUserName: () => 'Host',
+      setLocalUserName: () => {},
+      getHostSeqCounter: () => 0,
+      setHostSeqCounter: () => {}
+    })
+
+    await dispatcher.sendMessage(
+      {
+        type: 'SESSION_CONFLICT',
+        conflictingUsername: 'Alice',
+        conflictingUserId: 'alice_1',
+        conflictType: 'SAME_USER'
+      },
+      'staged_client_phone'
+    )
+
+    expect(mockDc.send).toHaveBeenCalledTimes(1)
+    expect(mockDc.send).toHaveBeenCalledWith(expect.stringContaining('"type":"SESSION_CONFLICT"'))
+  })
+
+  it('selfHealing suppresses auto-reconnect when isConflictActive returns true', async () => {
+    const { setupSelfHealing } = await import('@/services/webrtc/selfHealing')
+    const reconnectNow = vi.fn().mockResolvedValue(true)
+    let conflictActive = true
+
+    const healing = setupSelfHealing({
+      getStatus: () => 'unstable',
+      reconnectNow,
+      isConflictActive: () => conflictActive
+    })
+
+    // Simulate page resume while conflict active
+    window.dispatchEvent(new Event('focus'))
+    await new Promise((r) => setTimeout(r, 10))
+    expect(reconnectNow).not.toHaveBeenCalled()
+
+    // Now user resolves conflict
+    conflictActive = false
+    window.dispatchEvent(new Event('focus'))
+    await new Promise((r) => setTimeout(r, 10))
+    expect(reconnectNow).toHaveBeenCalledTimes(1)
+
+    healing.dispose()
+  })
+
+  it('scheduleStore.applyScheduleBatchSync correctly merges multiple batches', async () => {
+    const { useScheduleStore } = await import('@/stores/schedule')
+    const scheduleStore = useScheduleStore()
+
+    // Batch 0: Matches 1 and 2
+    scheduleStore.applyScheduleBatchSync(
+      [
+        { matchNumber: 1, tournamentLevel: 'QUALIFICATION', red1: 101, red2: 102, blue1: 201, blue2: 202 } as any,
+        { matchNumber: 2, tournamentLevel: 'QUALIFICATION', red1: 103, red2: 104, blue1: 203, blue2: 204 } as any
+      ],
+      [
+        { matchNumber: 1, station: 'Red 1', tournamentLevel: 'QUALIFICATION', scoutId: 's1', scoutName: 'Scout 1' } as any
+      ],
+      0,
+      2
+    )
+
+    expect(scheduleStore.schedules).toHaveLength(2)
+    expect(Object.keys(scheduleStore.assignments)).toHaveLength(1)
+
+    // Batch 1: Matches 3 and 4
+    scheduleStore.applyScheduleBatchSync(
+      [
+        { matchNumber: 3, tournamentLevel: 'QUALIFICATION', red1: 105, red2: 106, blue1: 205, blue2: 206 } as any,
+        { matchNumber: 4, tournamentLevel: 'QUALIFICATION', red1: 107, red2: 108, blue1: 207, blue2: 208 } as any
+      ],
+      [
+        { matchNumber: 3, station: 'Blue 2', tournamentLevel: 'QUALIFICATION', scoutId: 's2', scoutName: 'Scout 2' } as any
+      ],
+      1,
+      2
+    )
+
+    expect(scheduleStore.schedules).toHaveLength(4)
+    expect(Object.keys(scheduleStore.assignments)).toHaveLength(2)
+  })
 })

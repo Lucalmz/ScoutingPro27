@@ -202,6 +202,7 @@ export type WebRtcMessage =
   | WebRtcEventMetadata
   | WebRtcRequestScheduleSync
   | WebRtcScheduleFullSync
+  | WebRtcScheduleBatchSync
   | WebRtcAssignmentUpdate
   | WebRtcPitScoutUpdate
   | WebRtcPitFullSync
@@ -258,6 +259,16 @@ export interface WebRtcScheduleFullSync {
   schedules: MatchScheduleItem[]
   assignments: ScoutAssignment[]
   authCode?: string
+}
+
+export interface WebRtcScheduleBatchSync {
+  type: 'SCHEDULE_BATCH_SYNC'
+  batchIndex: number
+  totalBatches: number
+  schedules: MatchScheduleItem[]
+  assignments: ScoutAssignment[]
+  authCode?: string
+  syncId?: string
 }
 
 export interface WebRtcAssignmentUpdate {

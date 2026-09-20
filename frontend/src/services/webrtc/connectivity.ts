@@ -74,25 +74,29 @@ export async function probePublicConnectivity(timeoutMs = 2500, bypassThrottle =
 
 export const STUN_SERVERS: RTCConfiguration = {
   iceServers: [
-    // 1. Cloudflare Anycast STUN（全球 Anycast、低延迟双栈，优先使用）
+    // 1. 国内主流高可用双栈 STUN（湖南广电/中国移动 HiTV，极速探测、支持 IPv4/IPv6 双栈，免受海外代理污染）
     {
-      urls: ['stun:stun.cloudflare.com:3478', 'stun:stun.cloudflare.com:53']
+      urls: [
+        'stun:stun.hitv.com:3478',
+        'stun:[2409:8c50:e00::1]:3478',
+        'stun:[2409:8c50:e00::4]:3478',
+        'stun:111.8.3.78:3478'
+      ]
     },
-    // 2. Google STUN（全球 Anycast 冗余节点）
+    // 2. Cloudflare Anycast STUN（全球 Anycast、低延迟双栈）
+    {
+      urls: ['stun:stun.cloudflare.com:3478']
+    },
+    // 3. Google STUN（全球 Anycast 冗余节点）
     {
       urls: ['stun:stun.l.google.com:19302', 'stun:stun1.l.google.com:19302']
     },
-    // 3. 直连 IPv6 Anycast STUN（免 DNS 解析，彻底绕过国内 ISP DNS 缺失 AAAA 记录的问题）
+    // 4. 直连国际 IPv6 Anycast STUN（免 DNS 解析，彻底绕过国内 ISP DNS 缺失 AAAA 记录的问题）
     {
       urls: [
         'stun:[2606:4700:49::]:3478',
-        'stun:[2001:4860:4864:5:8000::1]:19302',
-        'stun:[2409:8c50:e00::4]:3478'
+        'stun:[2001:4860:4864:5:8000::1]:19302'
       ]
-    },
-    // 4. 国内主流 STUN（湖南广电/中国移动 HiTV，低延迟、支持 IPv4/IPv6 双栈）
-    {
-      urls: ['stun:stun.hitv.com:3478']
     },
     // 5. Metered STUN
     {

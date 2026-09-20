@@ -225,6 +225,7 @@ export class SignalingChannel {
       'TAGS_FULL_SYNC',
       'REQUEST_SCHEDULE_SYNC',
       'SCHEDULE_FULL_SYNC',
+      'SCHEDULE_BATCH_SYNC',
       'ASSIGNMENT_UPDATE',
       'PIT_SCOUT_UPDATE',
       'PIT_SCOUT_FULL_SYNC',

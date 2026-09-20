@@ -1366,19 +1366,18 @@ describe('IPv6 Priority & Transport Diagnostics', () => {
     vi.clearAllMocks()
   })
 
-  it('configures Cloudflare Anycast STUN as the primary STUN servers and excludes non-IPv6 domestic STUNs in favor of HiTV', () => {
+  it('configures HiTV domestic dual-stack STUN as the primary STUN servers and excludes non-IPv6 domestic STUNs', () => {
     const iceServers = STUN_SERVERS.iceServers || []
     expect(iceServers.length).toBeGreaterThanOrEqual(3)
     const firstServer = iceServers[0]
     expect(firstServer.urls).toEqual([
-      'stun:stun.cloudflare.com:3478',
-      'stun:stun.cloudflare.com:53'
+      'stun:stun.hitv.com:3478',
+      'stun:[2409:8c50:e00::1]:3478',
+      'stun:[2409:8c50:e00::4]:3478',
+      'stun:111.8.3.78:3478'
     ])
-    // Secondary Google STUN
-    expect(iceServers[1].urls).toEqual([
-      'stun:stun.l.google.com:19302',
-      'stun:stun1.l.google.com:19302'
-    ])
+    // Secondary Cloudflare STUN
+    expect(iceServers[1].urls).toEqual(['stun:stun.cloudflare.com:3478'])
 
     // Flatten all configured STUN URLs to verify presence of HiTV and removal of non-IPv6 servers
     const allUrls = iceServers.flatMap((server) =>
@@ -1950,7 +1949,9 @@ describe('WebRTC Security Hardening & SAS Gating (v2)', () => {
       connectionState: 'connected',
       iceConnectionState: 'connected',
       set ondatachannel(fn: any) {
-        setTimeout(() => fn({ channel: mockDc }), 10)
+        if (typeof fn === 'function') {
+          setTimeout(() => fn({ channel: mockDc }), 10)
+        }
       }
     })) as any
 
@@ -1990,7 +1991,7 @@ describe('WebRTC Security Hardening & SAS Gating (v2)', () => {
     service.disconnect()
   })
 
-  it('ICE watchdog notifies stall at 3500ms and triggers restartIce up to 2 times', async () => {
+  it('ICE watchdog notifies stall at 3000ms and triggers restartIce at 4000ms', async () => {
     vi.useFakeTimers()
     const callbacks = {
       onStatusChange: vi.fn(),
@@ -2014,19 +2015,13 @@ describe('WebRTC Security Hardening & SAS Gating (v2)', () => {
     pcInstance.iceConnectionState = 'checking'
     pcInstance.oniceconnectionstatechange()
 
-    // Advance 3500ms -> should alert stall
-    vi.advanceTimersByTime(3500)
+    // Advance 3000ms -> should alert stall
+    vi.advanceTimersByTime(3000)
     expect(callbacks.onIceStalled).toHaveBeenCalledWith(true)
 
-    // Advance to 5500ms -> restartIce attempt 1
-    await vi.advanceTimersByTimeAsync(2000)
+    // Advance to 4000ms -> restartIce attempt 1
+    await vi.advanceTimersByTimeAsync(1000)
     expect(pcInstance.restartIce).toHaveBeenCalledTimes(1)
-
-    // Advance another 5500ms -> restartIce attempt 2
-    pcInstance.iceConnectionState = 'checking'
-    pcInstance.oniceconnectionstatechange()
-    await vi.advanceTimersByTimeAsync(5500)
-    expect(pcInstance.restartIce).toHaveBeenCalledTimes(2)
 
     // Simulate ICE recovering to 'connected'
     pcInstance.iceConnectionState = 'connected'
@@ -2037,7 +2032,7 @@ describe('WebRTC Security Hardening & SAS Gating (v2)', () => {
     vi.useRealTimers()
   })
 
-  it('ICE watchdog actively tears down connection and rebuilds RTCPeerConnection with iceTransportPolicy: "relay" when restart attempts exceed 2', async () => {
+  it('ICE watchdog actively tears down connection and rebuilds RTCPeerConnection with iceTransportPolicy: "relay" after 8000ms stalled', async () => {
     vi.useFakeTimers()
     const callbacks = {
       onStatusChange: vi.fn(),
@@ -2059,22 +2054,15 @@ describe('WebRTC Security Hardening & SAS Gating (v2)', () => {
     const pcInstance = vi.mocked(global.RTCPeerConnection).mock.results[0]?.value
     expect(pcInstance).toBeDefined()
 
-    // Attempt 1 at 5500ms
+    // Attempt 1 at 4000ms
     pcInstance.iceConnectionState = 'checking'
     pcInstance.oniceconnectionstatechange()
-    await vi.advanceTimersByTimeAsync(5500)
+    await vi.advanceTimersByTimeAsync(4000)
     expect(pcInstance.restartIce).toHaveBeenCalledTimes(1)
 
-    // Attempt 2 at 5500ms
+    // Stalled persists past 8000ms -> Watchdog actively triggers relay-only fallback
     pcInstance.iceConnectionState = 'checking'
-    pcInstance.oniceconnectionstatechange()
-    await vi.advanceTimersByTimeAsync(5500)
-    expect(pcInstance.restartIce).toHaveBeenCalledTimes(2)
-
-    // Exceeding 2 attempts -> Watchdog actively triggers relay-only fallback
-    pcInstance.iceConnectionState = 'checking'
-    pcInstance.oniceconnectionstatechange()
-    await vi.advanceTimersByTimeAsync(5500)
+    await vi.advanceTimersByTimeAsync(4000)
 
     // Verify a new RTCPeerConnection was instantiated with iceTransportPolicy: 'relay'
     const calls = vi.mocked(global.RTCPeerConnection).mock.calls

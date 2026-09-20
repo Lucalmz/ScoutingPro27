@@ -77,7 +77,7 @@ export function createMessageDispatcher(ctx: MessageDispatcherContext) {
           console.warn(`[WebRTC Security Gating] Dropping message to rejected peer ${targetId}.`)
           return Promise.resolve()
         }
-        const c = ctx.clients.get(targetId)
+        const c = ctx.clients.get(targetId) || ctx.stagedClients?.get(targetId)
         if (c && c.dc && c.dc.readyState === 'open') {
           if (!c.sender) c.sender = new DataChannelSender(c.dc)
           return c.sender.enqueueSend(payload)
