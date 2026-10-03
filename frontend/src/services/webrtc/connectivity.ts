@@ -128,11 +128,46 @@ export const STUN_SERVERS: RTCConfiguration = {
 }
 
 /**
- * 纯本地网卡模式配置：零 STUN/TURN 服务器，完全不向公网发出任何探测请求
- * 依靠操作系统网络栈提取 host 候选（用于 IPv6 全球单播或 LAN 私网端到端直连）
+ * 统一 ICE 配置构造器（单 PeerConnection 并行打洞策略）：
+ * - 'all'：同一个 PeerConnection 内并行检查 LAN host / IPv6 (host、srflx、prflx) / IPv4 NAT srflx / TURN relay，
+ *   由 ICE 按优先级自然择优，绝不为“升级/降级”而拆除重建连接（拆除重建是旧版逻辑自锁的根源）。
+ * - 'relay'：仅在连续失败后的升级尝试中使用，绕过异常中间设备导致的错误提名路径。
+ * 注意：浏览器默认对 host 候选做 mDNS 混淆（xxx.local），跨网段 IPv6 直连必须依赖 STUN 反射出的
+ * 真实 IPv6 srflx / 对端 prflx 候选，因此 IPv6 场景同样不能省略 STUN。
  */
-export const DIRECT_NIC_CONFIG: RTCConfiguration = {
-  iceServers: []
+export function buildIceConfiguration(forceRelay = false): RTCConfiguration {
+  return {
+    ...STUN_SERVERS,
+    iceTransportPolicy: forceRelay ? 'relay' : 'all'
+  }
+}
+
+/**
+ * 建联时序常量（单一决策者原则）：
+ * - 只有 Client（Offerer / ICE controlling）负责超时判定与重建升级；
+ * - Host 只做被动应答与资源回收，且其回收时限严格大于 Client 的建联超时，
+ *   保证双方计时器不会互相“抢拆”对方正在进行的握手。
+ */
+export const CONNECTION_TIMING = {
+  /** Client：从 Offer 发出到 DataChannel open 的最长等待时间，超时即判定本次尝试失败 */
+  CLIENT_CONNECT_TIMEOUT_MS: 15000,
+  /** Client：connectionState=disconnected 后等待 ICE 自愈的宽限期 */
+  CLIENT_DISCONNECT_GRACE_MS: 3000,
+  /** Host：从未连通的 PeerConnection 的回收时限（必须大于 CLIENT_CONNECT_TIMEOUT_MS） */
+  HOST_PENDING_GC_MS: 45000,
+  /** ICE checking 停滞 UI 提示阈值（仅提示，不触发任何拆除动作） */
+  ICE_STALL_NOTICE_MS: 3000,
+  /** Client：收到 Host 心跳触发自动恢复的最小间隔 */
+  HOST_PRESENCE_RECOVERY_THROTTLE_MS: 20000
+} as const
+
+/**
+ * 根据重试序号（1 起）决定该次尝试是否走纯中继：
+ * 第 1 次重试仍走 'all'（直连 + 中继并行），第 2/4/6 次升级为 'relay'，奇数次回到 'all'，
+ * 避免旧版“8 秒强制 relay 后被锁死在中继”的问题，同时保证对称 NAT 场景最终能落到 TURN。
+ */
+export function shouldForceRelayForAttempt(attemptNumber: number): boolean {
+  return attemptNumber >= 2 && attemptNumber % 2 === 0
 }
 
 let cachedLocalIpv6: string | null = null
@@ -343,6 +378,11 @@ export function optimizeCandidatePriority(candidateStr: string): string {
 
     const compStr = parts[1] || '1'
     const component = parseInt(compStr, 10) || 1
+    const protocol = (parts[2] || '').toLowerCase()
+    // TCP 候选（tcptype active/passive）保留浏览器原生优先级，避免被提升到与 UDP 同级后抢先提名高延迟 TCP 路径
+    if (protocol && protocol !== 'udp') {
+      return candidateStr
+    }
     const address = parts[4] || ''
     const cleanAddr = cleanIpAddress(address)
     const typeIndex = parts.indexOf('typ')

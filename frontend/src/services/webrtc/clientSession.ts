@@ -15,9 +15,10 @@ import {
   optimizeCandidatePriority,
   optimizeSdpCandidates,
   sortCandidatesPreferIpv6,
-  probeLocalInterfaceIpv6,
   isGlobalIpv6Address,
-  cleanIpAddress
+  cleanIpAddress,
+  shouldForceRelayForAttempt,
+  CONNECTION_TIMING
 } from './connectivity'
 import type { SignalingChannel } from './signaling'
 import { toSessionDescription, toIceCandidate } from './sdpUtil'
@@ -26,6 +27,13 @@ import type { PeerConnectionManager } from './peerManager'
 import { createLogger } from '@/utils/logger'
 
 const log = createLogger('WebRTC:Client')
+
+/** 连续失败多少次后进入 long_offline（之后仅由 Host 心跳 / 自愈事件唤醒） */
+const MAX_RECONNECT_ATTEMPTS = 6
+/** DataChannel 心跳：连续丢失多少次判定为“降级”（仅 UI 提示，持续观察） */
+const HEARTBEAT_DEGRADE_MISSES = 2
+/** DataChannel 心跳：连续丢失多少次判定为 SCTP 僵死，触发重建（ICE consent 仍存活但通道卡死的兜底） */
+const HEARTBEAT_REBUILD_MISSES = 8
 
 export interface ClientSessionContext {
   peerMgr: PeerConnectionManager
@@ -51,6 +59,8 @@ export interface ClientSessionContext {
   getClientForceRelay: () => boolean
   setClientForceRelay: (force: boolean) => void
   isExplicitlyClosed: () => boolean
+  /** 当前是否处于 Active Host 模式（Host 模式下绝不允许 Client 建连逻辑运行） */
+  isHostMode?: () => boolean
   getStatus: () => string
   setStatus: (s: any) => void
   sendMessage: (msg: WebRtcMessage, targetId?: string) => Promise<void>
@@ -62,18 +72,41 @@ export interface ClientSessionContext {
   callbacks: WebRtcCallbacks
 }
 
+/**
+ * Client 会话（建联状态机的唯一决策者）
+ *
+ * 防自锁设计要点：
+ * 1. 尝试纪元（attemptEpoch）：每次重建都会递增纪元，所有异步续体、DataChannel/PeerConnection 回调、
+ *    计时器都绑定创建时的纪元，过期回调一律静默丢弃，杜绝“旧尝试的失败回调拆掉新连接”的连锁反应。
+ * 2. 每个纪元的失败只处理一次（failedEpoch），DataChannel close / PC failed / 建联超时同时触发也只调度一次重连。
+ * 3. 信令消息串行处理（signalingQueue），Answer 与 Candidate 不再并发竞争，pending 候选不会丢失。
+ * 4. Answer / Candidate 按 clientSessionId 校验，过期会话的应答与候选直接丢弃。
+ * 5. 重试阶梯：'all'（IPv6 + LAN + IPv4 打洞 + TURN 并行）→ 'all' → 'relay' → 'all' → 'relay' …，指数退避，
+ *    达到上限进入 long_offline；Host 心跳 / host_hello / 系统自愈事件会重新开启阶梯，不会永久卡死。
+ */
 export function createClientSession(ctx: ClientSessionContext) {
   let reconnectAttempts = 0
-  let reconnectTimer: any = null
-  let isRebuilding = false
+  let reconnectTimer: ReturnType<typeof setTimeout> | null = null
+  let connectWatchdog: ReturnType<typeof setTimeout> | null = null
   let lastOfferTimestamp = 0
   let lastHostIpv6: string | null = null
-  let isDirectIpv6EligibleFlag = false
+  let attemptEpoch = 0
+  let failedEpoch = -1
+  let activeSetupPromise: Promise<void> | null = null
+  let lastPresenceRecoveryAt = 0
+  let signalingQueue: Promise<void> = Promise.resolve()
 
   function clearReconnectTimer() {
     if (reconnectTimer) {
       clearTimeout(reconnectTimer)
       reconnectTimer = null
+    }
+  }
+
+  function clearConnectWatchdog() {
+    if (connectWatchdog) {
+      clearTimeout(connectWatchdog)
+      connectWatchdog = null
     }
   }
 
@@ -85,45 +118,79 @@ export function createClientSession(ctx: ClientSessionContext) {
     lastOfferTimestamp = 0
   }
 
-  function triggerClientReconnect() {
-    if (ctx.isExplicitlyClosed() || ctx.getStatus() === 'long_offline') return
+  /**
+   * 是否允许自动重连（显式断开、会话冲突、SAS 待核验/已拒绝、Host 模式下一律禁止）
+   */
+  function canAutoReconnect(): boolean {
+    if (ctx.isExplicitlyClosed()) return false
+    if (ctx.isHostMode?.()) return false
     if (ctx.callbacks.isConflictActive?.()) {
       log.info('Session conflict is active; suppressing auto-reconnect.')
-      return
+      return false
     }
     if (ctx.sas.clientSasState === 'PENDING_VERIFICATION') {
       log.info('SAS verification pending; pausing auto-reconnect.')
-      return
+      return false
     }
     if (ctx.sas.clientSasState === 'REJECTED') {
       log.warn('SAS verification rejected; suppressing auto-reconnect.')
-      return
+      return false
     }
+    return true
+  }
+
+  function triggerClientReconnect(reason = 'unspecified') {
+    if (ctx.getStatus() === 'long_offline') return
+    if (!canAutoReconnect()) return
 
     clearReconnectTimer()
 
-    if (reconnectAttempts >= 6) {
-      log.warn('Max reconnect attempts (6) reached. Moving to long_offline.')
+    if (reconnectAttempts >= MAX_RECONNECT_ATTEMPTS) {
+      log.warn(`Max reconnect attempts (${MAX_RECONNECT_ATTEMPTS}) reached. Moving to long_offline (will resume on host presence / app resume).`)
+      clearConnectWatchdog()
       ctx.setStatus('long_offline')
       return
     }
 
     const delay = reconnectAttempts === 0 ? 1000 : Math.min(32000, Math.pow(2, reconnectAttempts) * 1000)
     reconnectAttempts++
+    const attemptNumber = reconnectAttempts
+    const forceRelay = shouldForceRelayForAttempt(attemptNumber)
 
-    log.info(`Scheduling reconnect in ${delay}ms (Attempt ${reconnectAttempts}/6)...`)
+    log.info(
+      `Scheduling reconnect in ${delay}ms (Attempt ${attemptNumber}/${MAX_RECONNECT_ATTEMPTS}, reason: ${reason}, icePolicy: ${forceRelay ? 'relay' : 'all'})...`
+    )
     ctx.setStatus('connecting')
 
-    reconnectTimer = setTimeout(async () => {
-      await setupClientConnection()
+    reconnectTimer = setTimeout(() => {
+      reconnectTimer = null
+      void restartClientConnection(forceRelay)
     }, delay)
   }
 
+  /**
+   * 一次性失败处理：仅当前纪元、且该纪元尚未处理过失败时才调度重连。
+   */
+  function failAttempt(epoch: number, reason: string) {
+    if (epoch !== attemptEpoch) {
+      log.info(`Ignoring stale failure signal (reason: ${reason}, epoch: ${epoch}, current: ${attemptEpoch})`)
+      return
+    }
+    if (failedEpoch === epoch) return
+    failedEpoch = epoch
+    clearConnectWatchdog()
+    log.warn(`Connection attempt failed (reason: ${reason}, epoch: ${epoch}, attempts so far: ${reconnectAttempts})`)
+    triggerClientReconnect(reason)
+  }
+
   function hardResetChannels() {
+    // 递增纪元：所有旧尝试的异步续体与回调从此刻起全部失效
+    attemptEpoch++
     clearReconnectTimer()
+    clearConnectWatchdog()
     stopDataChannelHeartbeat()
 
-    for (const [ts, resolve] of pendingPings.entries()) {
+    for (const [, resolve] of pendingPings.entries()) {
       resolve(false)
     }
     pendingPings.clear()
@@ -133,10 +200,7 @@ export function createClientSession(ctx: ClientSessionContext) {
       oldDc.onmessage = null
       oldDc.onopen = null
       oldDc.onerror = null
-      const isTest = typeof process !== 'undefined' && (process.env.NODE_ENV === 'test' || process.env.VITEST === 'true')
-      if (!isTest) {
-        oldDc.onclose = null
-      }
+      oldDc.onclose = null
       try { oldDc.close() } catch (_) {}
       ctx.setClientDc(null)
     }
@@ -155,59 +219,73 @@ export function createClientSession(ctx: ClientSessionContext) {
     ctx.setClientPendingCandidates([])
     resetOfferTimestamp()
     activeSetupPromise = null
-    isRebuilding = false
   }
 
-  let activeSetupPromise: Promise<void> | null = null
+  function startSetup(forceRelay: boolean): Promise<void> {
+    // doSetupClientConnection 的同步前缀会执行 hardResetChannels（递增纪元、清空 activeSetupPromise）
+    const p = doSetupClientConnection(forceRelay)
+    activeSetupPromise = p
+    const clear = () => {
+      if (activeSetupPromise === p) activeSetupPromise = null
+    }
+    p.then(clear, clear)
+    return p
+  }
 
-  async function setupClientConnection(forceRelay = false, skipDirectNic = false): Promise<void> {
+  /**
+   * 确保建连：若已有进行中的建连尝试则复用，不重复拆建。
+   */
+  function setupClientConnection(forceRelay = false): Promise<void> {
     if (activeSetupPromise) {
       log.info('setupClientConnection already in flight; awaiting active setup.')
-      await activeSetupPromise
-      return
+      return activeSetupPromise
     }
-    const currentPromise = doSetupClientConnection(forceRelay, skipDirectNic)
-    activeSetupPromise = currentPromise
-    try {
-      await currentPromise
-    } finally {
-      if (activeSetupPromise === currentPromise) {
-        activeSetupPromise = null
-      }
-    }
+    return startSetup(forceRelay)
   }
 
-  async function doSetupClientConnection(forceRelay = false, skipDirectNic = false) {
+  /**
+   * 强制重建：作废任何进行中的尝试（纪元递增），以新会话重新握手。用于重试阶梯、Host 会话切换等场景。
+   */
+  function restartClientConnection(forceRelay = false): Promise<void> {
+    return startSetup(forceRelay)
+  }
+
+  function armConnectWatchdog(epoch: number, dc: RTCDataChannel) {
+    clearConnectWatchdog()
+    connectWatchdog = setTimeout(() => {
+      connectWatchdog = null
+      if (epoch !== attemptEpoch) return
+      if (dc.readyState === 'open') return
+      log.warn(
+        `DataChannel not open within ${CONNECTION_TIMING.CLIENT_CONNECT_TIMEOUT_MS}ms after offer dispatch (offer lost / all ICE pairs blocked).`
+      )
+      failAttempt(epoch, 'connect_timeout')
+    }, CONNECTION_TIMING.CLIENT_CONNECT_TIMEOUT_MS)
+  }
+
+  async function doSetupClientConnection(forceRelay = false) {
     hardResetChannels()
-    // 明确同步 forceRelay 状态：仅在主动触发 relay 降级时强制 relay，常规重连优先重试 P2P 直连
+    const epoch = attemptEpoch
+    if (ctx.isHostMode?.()) {
+      log.info('Skipping client setup: service is in active host mode.')
+      return
+    }
     ctx.setClientForceRelay(forceRelay)
     const newClientSessionId = `client-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`
     ctx.setClientSessionId(newClientSessionId)
-    log.info(`Initiating setupClientConnection (sessionId: ${newClientSessionId}, forceRelay: ${forceRelay}, skipDirectNic: ${skipDirectNic}, hostSenderId: ${ctx.getClientHostSenderId() || 'none'})`)
-
-    let localIpv6: string | null = null
-    try {
-      localIpv6 = await probeLocalInterfaceIpv6()
-    } catch {}
-    const hasValidGua = Boolean(
-      lastHostIpv6 &&
-      localIpv6 &&
-      isGlobalIpv6Address(lastHostIpv6) &&
-      isGlobalIpv6Address(localIpv6)
-    )
-    isDirectIpv6EligibleFlag = Boolean(
-      hasValidGua &&
-      !skipDirectNic &&
-      !forceRelay &&
-      !ctx.getClientForceRelay()
+    if (ctx.getStatus() !== 'connected' && ctx.getStatus() !== 'connecting') {
+      ctx.setStatus('connecting')
+    }
+    log.info(
+      `Initiating setupClientConnection (sessionId: ${newClientSessionId}, epoch: ${epoch}, icePolicy: ${forceRelay ? 'relay' : 'all'}, hostSenderId: ${ctx.getClientHostSenderId() || 'none'}, hostIpv6: ${lastHostIpv6 || 'unknown'})`
     )
 
     const pc = ctx.peerMgr.createPeerConnection(
       undefined,
-      triggerClientReconnect,
-      ctx.getClientForceRelay(),
+      (reason?: string) => failAttempt(epoch, reason || 'peer_failure'),
+      forceRelay,
       ctx.getClientHostSenderId(),
-      skipDirectNic
+      { sessionTag: newClientSessionId, holdLocalCandidates: true }
     )
     ctx.setClientPc(pc)
 
@@ -224,32 +302,37 @@ export function createClientSession(ctx: ClientSessionContext) {
 
     dc.onmessage = (e) => ctx.handleChannelMessage(e)
     dc.onopen = () => {
-      log.info(`DataChannel 'scoutingpro-data' OPENED! Client successfully connected to Host.`)
-      ctx.setStatus('connected')
-      reconnectAttempts = 0
+      if (epoch !== attemptEpoch) return
+      log.info(`DataChannel 'scoutingpro-data' OPENED! Client successfully connected to Host (epoch: ${epoch}).`)
+      // 若该纪元曾因超时被判失败但随后迟到连通，撤销失败标记，确保之后的真实断开仍能触发重连
+      if (failedEpoch === epoch) failedEpoch = -1
+      clearConnectWatchdog()
       clearReconnectTimer()
+      reconnectAttempts = 0
+      ctx.setStatus('connected')
       startDataChannelHeartbeat()
     }
     dc.onclose = () => {
-      log.warn(`DataChannel 'scoutingpro-data' CLOSED. isRebuilding=${isRebuilding}, sasState=${ctx.sas.clientSasState}`)
+      if (epoch !== attemptEpoch) return
+      log.warn(`DataChannel 'scoutingpro-data' CLOSED (epoch: ${epoch}, sasState: ${ctx.sas.clientSasState})`)
       stopDataChannelHeartbeat()
       ctx.setClientSender(null)
-      if (isRebuilding) return
       if (ctx.isExplicitlyClosed() || ctx.getStatus() === 'long_offline') return
       if (ctx.sas.clientSasState === 'PENDING_VERIFICATION' || ctx.sas.clientSasState === 'REJECTED') {
         return
       }
-      triggerClientReconnect()
+      failAttempt(epoch, 'datachannel_closed')
     }
 
-    const signaling = ctx.getSignaling()
     const localEcdhPubHex = ctx.getLocalEcdhPubHex()
     const currentInviteCode = ctx.getCurrentInviteCode()
     const localDeviceId = ctx.getLocalDeviceId()
 
     try {
       const offer = await pc.createOffer()
+      if (epoch !== attemptEpoch) return
       await pc.setLocalDescription(offer)
+      if (epoch !== attemptEpoch) return
       log.info(`Client local offer created (SDP length: ${offer.sdp?.length || 0} bytes)`)
 
       let handshakeTicket: string | undefined = undefined
@@ -263,17 +346,17 @@ export function createClientSession(ctx: ClientSessionContext) {
         } catch (ticketErr) {
           log.warn('Failed to obtain handshake ticket:', ticketErr)
         }
+        if (epoch !== attemptEpoch) return
       }
 
       const rawOffer = {
         type: offer.type,
+        // 读取 localDescription 以携带 ticket 请求期间已收集到的候选（与后续 trickle 候选互为冗余）
         sdp: optimizeSdpCandidates(pc?.localDescription?.sdp || offer.sdp || ''),
         ticket: handshakeTicket,
         deviceId: localDeviceId,
         username: ctx.getUsername?.() || '',
-        userId: ctx.getUserId?.() || '',
-        clientIpv6: localIpv6 || undefined,
-        isDirectNic: isDirectIpv6EligibleFlag
+        userId: ctx.getUserId?.() || ''
       }
 
       let offerPayload: any = rawOffer
@@ -284,29 +367,32 @@ export function createClientSession(ctx: ClientSessionContext) {
         } catch (err) {
           log.warn('Failed to encrypt offer, sending plaintext fallback:', err)
         }
+        if (epoch !== attemptEpoch) return
       }
 
-      let clientSessionId = ctx.getClientSessionId()
-      if (!clientSessionId) {
-        clientSessionId = `client-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`
-        ctx.setClientSessionId(clientSessionId)
-      }
-
+      const signaling = ctx.getSignaling()
       lastOfferTimestamp = Date.now()
-      log.info(`Dispatched Offer to Host via signaling (target: ${ctx.getClientHostSenderId() || 'broadcast'}, isDirectNic: ${isDirectIpv6EligibleFlag})`)
+      log.info(`Dispatched Offer to Host via signaling (target: ${ctx.getClientHostSenderId() || 'broadcast'}, sessionId: ${newClientSessionId})`)
       signaling?.send({
         offer: offerPayload,
-        isDirectNic: isDirectIpv6EligibleFlag,
         ecdhPublicKey: localEcdhPubHex,
         deviceId: localDeviceId,
-        clientSessionId,
+        clientSessionId: newClientSessionId,
         hostSessionId: ctx.getCurrentHostSessionId(),
         username: ctx.getUsername?.() || '',
         userId: ctx.getUserId?.() || ''
       }, ctx.getClientHostSenderId())
+
+      // Offer 已发出：放行暂存的本地候选（保证 Host 先建 PeerConnection 再收候选），并启动建联超时
+      ctx.peerMgr.releaseLocalCandidates(pc)
+      armConnectWatchdog(epoch, dc)
     } catch (err) {
+      if (epoch !== attemptEpoch) {
+        log.info('Offer creation aborted by a newer connection attempt.')
+        return
+      }
       log.error('Error creating offer:', err)
-      triggerClientReconnect()
+      failAttempt(epoch, 'offer_failed')
     }
   }
 
@@ -412,28 +498,55 @@ export function createClientSession(ctx: ClientSessionContext) {
     }
   }
 
-  async function handleClientSignalingMessage(data: any) {
+  /**
+   * 信令入口：所有 Client 侧信令严格串行处理，杜绝 Answer 与 Candidate 并发导致的 pending 候选丢失。
+   */
+  function handleClientSignalingMessage(data: any): Promise<void> {
+    const run = signalingQueue.then(() => processClientSignalingMessage(data))
+    signalingQueue = run.catch((err) => {
+      log.error('Unhandled error while processing client signaling message:', err)
+    })
+    return signalingQueue
+  }
+
+  /**
+   * Host 存在感知恢复：处于 long_offline / offline / degraded 且没有进行中的尝试时，
+   * 收到 Host 心跳即重新开启重试阶梯（节流），解决“重试耗尽后永久离线”的自锁。
+   */
+  function maybeRecoverOnHostPresence(data: any) {
+    const status = ctx.getStatus()
+    if (status !== 'long_offline' && status !== 'offline' && status !== 'degraded') return
+    if (activeSetupPromise || reconnectTimer) return
+    if (!canAutoReconnect()) return
+    const now = Date.now()
+    if (now - lastPresenceRecoveryAt < CONNECTION_TIMING.HOST_PRESENCE_RECOVERY_THROTTLE_MS) return
+    lastPresenceRecoveryAt = now
+
+    log.info(`Host presence detected (hostSessionId: ${data.hostSessionId || 'unknown'}) while ${status}; restarting connection ladder.`)
+    reconnectAttempts = 0
+    const localEcdhPubHex = ctx.getLocalEcdhPubHex()
+    if (localEcdhPubHex) {
+      ctx.getSignaling()?.send({ type: 'client_hello', ecdhPublicKey: localEcdhPubHex, deviceId: ctx.getLocalDeviceId() })
+    }
+    ctx.setStatus('connecting')
+    void restartClientConnection(false)
+  }
+
+  async function processClientSignalingMessage(data: any) {
     const localEcdhKeyPair = ctx.getLocalEcdhKeyPair()
     const sas = ctx.sas
-    const clientPc = ctx.getClientPc()
 
-    if (data.type === 'reconnect_request') {
-      log.warn(`Received reconnect_request from Host: reason=${data.reason}`)
-      const isDirectFallback = data.reason === 'direct_nic_failed' || data.reason === 'direct_nic_fallback'
-      hardResetChannels()
-      reconnectAttempts = 0
-      clearReconnectTimer()
-      setupClientConnection(data.reason === 'force_relay', isDirectFallback)
+    if (data.type === 'host_heartbeat') {
+      maybeRecoverOnHostPresence(data)
       return
     }
 
     if (data.type === 'host_hello') {
-      log.info(`Received host_hello: hostSessionId=${data.hostSessionId}, deviceId=${data.deviceId}, sender=${data.sender}`)
+      log.info(`Received host_hello: hostSessionId=${data.hostSessionId}, deviceId=${data.deviceId}, sender=${data.sender}, hostIpv6=${data.hostIpv6 || 'n/a'}`)
       if (data.hostIpv6 && isGlobalIpv6Address(data.hostIpv6)) {
         lastHostIpv6 = cleanIpAddress(data.hostIpv6)
       }
       const previousHostSessionId = ctx.getCurrentHostSessionId()
-      const isSameHostSession = Boolean(data.hostSessionId && data.hostSessionId === previousHostSessionId)
       const hostSessionChanged = Boolean(
         data.hostSessionId &&
         previousHostSessionId &&
@@ -474,19 +587,27 @@ export function createClientSession(ctx: ClientSessionContext) {
           Date.now() - lastOfferTimestamp < 8000)
       )
 
-      if (hostSessionChanged || (!isAlreadyConnected && !isConnectingOrChecking && !isHandshakeInFlight)) {
+      if (hostSessionChanged) {
+        log.info(`Host session changed (${previousHostSessionId} -> ${data.hostSessionId}); restarting handshake with new host.`)
+        clearReconnectTimer()
+        reconnectAttempts = 0
+        void restartClientConnection(false)
+      } else if (!isAlreadyConnected && !isConnectingOrChecking && !isHandshakeInFlight) {
         log.info(
-          `Setting up client connection on host_hello (isAlreadyConnected: ${isAlreadyConnected}, isConnecting: ${isConnectingOrChecking}, isHandshakeInFlight: ${isHandshakeInFlight}, hostSessionChanged: ${hostSessionChanged})`
+          `Setting up client connection on host_hello (isAlreadyConnected: ${isAlreadyConnected}, isConnecting: ${isConnectingOrChecking}, isHandshakeInFlight: ${isHandshakeInFlight})`
         )
         clearReconnectTimer()
         reconnectAttempts = 0
-        await setupClientConnection()
+        void setupClientConnection()
       } else {
         log.info(
           `Preserving existing peer connection on host_hello (alreadyConnected: ${isAlreadyConnected}, connecting: ${isConnectingOrChecking}, handshakeInFlight: ${isHandshakeInFlight})`
         )
       }
-    } else if (data.type === 'host_takeover') {
+      return
+    }
+
+    if (data.type === 'host_takeover') {
       log.info(`Received host_takeover by new host session: ${data.newHostSessionId} (from ${data.sender})`)
       if (data.newHostSessionId) {
         ctx.setCurrentHostSessionId(data.newHostSessionId)
@@ -502,29 +623,32 @@ export function createClientSession(ctx: ClientSessionContext) {
       }
       clearReconnectTimer()
       reconnectAttempts = 0
-      await setupClientConnection()
-    } else if (data.type === 'HOST_LEAVING') {
+      void restartClientConnection(false)
+      return
+    }
+
+    if (data.type === 'HOST_LEAVING') {
       log.warn(`Host explicitly left the room: hostSessionId=${data.hostSessionId}`)
-      clearReconnectTimer()
-      const curPc = ctx.getClientPc()
-      const curDc = ctx.getClientDc()
-      if (curDc) {
-        curDc.onmessage = null
-        curDc.onopen = null
-        curDc.onclose = null
-        curDc.onerror = null
-        try { curDc.close() } catch (_) {}
-      }
-      if (curPc) {
-        curPc.onicecandidate = null
-        curPc.oniceconnectionstatechange = null
-        curPc.onconnectionstatechange = null
-        try { curPc.ondatachannel = () => {} } catch (_) {}
-        try { curPc.close() } catch (_) {}
-      }
+      // 彻底复位（递增纪元、清理所有计时器），等待 Host 心跳再次出现时由存在感知自动恢复
+      hardResetChannels()
       ctx.setStatus('offline')
       ctx.callbacks.onActiveHostLeft?.()
-    } else if (data.answer && clientPc) {
+      return
+    }
+
+    if (data.answer) {
+      const clientPc = ctx.getClientPc()
+      if (!clientPc) return
+      const currentSessionId = ctx.getClientSessionId()
+      if (data.clientSessionId && currentSessionId && data.clientSessionId !== currentSessionId) {
+        log.info(`Dropping stale Answer for session ${data.clientSessionId} (current: ${currentSessionId})`)
+        return
+      }
+      if (clientPc.signalingState === 'stable' || clientPc.signalingState === 'closed') {
+        log.info(`Dropping duplicate/unsolicited Answer (signalingState: ${clientPc.signalingState})`)
+        return
+      }
+      const epoch = attemptEpoch
       try {
         log.info(`Processing Host Answer from ${data.sender || 'Active Host'}`)
         ctx.setClientHostSenderId(data.sender)
@@ -553,9 +677,21 @@ export function createClientSession(ctx: ClientSessionContext) {
           }
         }
 
-        await clientPc.setRemoteDescription(toSessionDescription(answerData))
+        if (epoch !== attemptEpoch || ctx.getClientPc() !== clientPc) {
+          log.info('Answer arrived for a superseded connection attempt; ignoring.')
+          return
+        }
+
+        try {
+          await clientPc.setRemoteDescription(toSessionDescription(answerData))
+        } catch (sdpErr) {
+          log.error('Host Answer rejected by PeerConnection; failing attempt for fast rebuild:', sdpErr)
+          failAttempt(epoch, 'answer_rejected')
+          return
+        }
         log.info('Applied remote Host Answer to client PeerConnection.')
         const sortedPending = sortCandidatesPreferIpv6(ctx.getClientPendingCandidates())
+        ctx.setClientPendingCandidates([])
         for (const c of sortedPending) {
           try {
             let candidateObj: any = c
@@ -576,11 +712,20 @@ export function createClientSession(ctx: ClientSessionContext) {
             log.warn('Failed to add pending candidate:', candidateErr)
           }
         }
-        ctx.setClientPendingCandidates([])
       } catch (err) {
-        log.error('Error setting remote description for Host Answer:', err)
+        log.error('Error processing Host Answer:', err)
       }
-    } else if (data.candidate && clientPc) {
+      return
+    }
+
+    if (data.candidate) {
+      const clientPc = ctx.getClientPc()
+      if (!clientPc) return
+      const currentSessionId = ctx.getClientSessionId()
+      if (data.clientSessionId && currentSessionId && data.clientSessionId !== currentSessionId) {
+        // 过期会话候选，或其他 Client 在广播阶段发出的候选
+        return
+      }
       const clientHostSenderId = ctx.getClientHostSenderId()
       if (clientHostSenderId && data.sender !== clientHostSenderId) {
         return
@@ -600,14 +745,23 @@ export function createClientSession(ctx: ClientSessionContext) {
         candidateData.candidate = optimizeCandidatePriority(candidateData.candidate)
       }
 
+      if (ctx.getClientPc() !== clientPc) return
       try {
         await clientPc.addIceCandidate(toIceCandidate(candidateData))
-      } catch {
-        const pending = ctx.getClientPendingCandidates()
-        pending.push(candidateData)
-        ctx.setClientPendingCandidates(pending)
+      } catch (addErr) {
+        if (!clientPc.remoteDescription) {
+          // Answer 尚未应用：暂存，待 Answer 应用后按优先级统一注入
+          const pending = ctx.getClientPendingCandidates()
+          pending.push(candidateData)
+          ctx.setClientPendingCandidates(pending)
+        } else {
+          log.warn('Dropping remote candidate rejected by PeerConnection:', addErr)
+        }
       }
-    } else if (data.type === 'sas_challenge') {
+      return
+    }
+
+    if (data.type === 'sas_challenge') {
       log.warn(`Host issued SAS security challenge. Fingerprint: ${data.fingerprint}`)
       if (sas.clientSasState === 'VERIFIED') {
         log.info('Host issued SAS challenge but client is already verified; ignoring.')
@@ -677,37 +831,49 @@ export function createClientSession(ctx: ClientSessionContext) {
     })
   }
 
-  let dataChannelHeartbeatTimer: any = null
+  let dataChannelHeartbeatTimer: ReturnType<typeof setInterval> | null = null
   let consecutiveFailedPings = 0
 
   function startDataChannelHeartbeat() {
     stopDataChannelHeartbeat()
     consecutiveFailedPings = 0
+    const epoch = attemptEpoch
     const intervalMs = (globalThis as any).__TEST_HEARTBEAT_INTERVAL_MS__ ?? 2000
     const pingTimeoutMs = (globalThis as any).__TEST_PING_TIMEOUT_MS__ ?? 1000
 
     dataChannelHeartbeatTimer = setInterval(async () => {
+      if (epoch !== attemptEpoch) {
+        stopDataChannelHeartbeat()
+        return
+      }
       const dc = ctx.getClientDc()
       const pc = ctx.getClientPc()
       if (!dc || dc.readyState !== 'open' || !pc || pc.connectionState !== 'connected') {
         return
       }
       const isAlive = await pingHost(pingTimeoutMs)
+      if (epoch !== attemptEpoch) return
       if (!isAlive) {
         consecutiveFailedPings++
-        log.warn(`DataChannel heartbeat ping timeout (${consecutiveFailedPings}/2 missed)`)
-        if (consecutiveFailedPings >= 2) {
-          log.warn('Active host unresponsiveness confirmed via DataChannel heartbeat. Autonomous degradation triggered.')
-          stopDataChannelHeartbeat()
+        log.warn(`DataChannel heartbeat ping timeout (${consecutiveFailedPings} consecutive misses)`)
+        if (consecutiveFailedPings === HEARTBEAT_DEGRADE_MISSES) {
+          // 仅降级提示并持续观察：Host 主线程短暂繁忙时 PONG 恢复后自动回到 connected，避免重建风暴
+          log.warn('Active host unresponsive via DataChannel heartbeat. Marking degraded and continuing to probe.')
           ctx.peerMgr.resetTransportInfo()
           ctx.setStatus('degraded')
           ctx.callbacks.onHostDisconnected?.()
           ctx.callbacks.onActiveHostLeft?.()
+        } else if (consecutiveFailedPings >= HEARTBEAT_REBUILD_MISSES) {
+          log.warn('DataChannel heartbeat dead for an extended period (SCTP wedged). Forcing connection rebuild.')
+          stopDataChannelHeartbeat()
+          failAttempt(epoch, 'heartbeat_timeout')
         }
       } else {
         if (consecutiveFailedPings > 0 && ctx.getStatus() === 'degraded') {
           log.info('DataChannel heartbeat restored, updating status to connected.')
           ctx.setStatus('connected')
+          const pc2 = ctx.getClientPc()
+          if (pc2) void ctx.peerMgr.updateTransportInfo(pc2)
         }
         consecutiveFailedPings = 0
       }
@@ -722,16 +888,9 @@ export function createClientSession(ctx: ClientSessionContext) {
     consecutiveFailedPings = 0
   }
 
-  function handleDirectNicFallback() {
-    log.warn('[Client] Direct NIC mode timed out or blocked by NAT/firewall. Forcefully tearing down and falling back to STUN/TURN...')
-    hardResetChannels()
-    reconnectAttempts = 0
-    clearReconnectTimer()
-    setupClientConnection(false, true)
-  }
-
   return {
     setupClientConnection,
+    restartClientConnection,
     handleClientSignalingMessage,
     triggerClientReconnect,
     clearReconnectTimer,
@@ -741,10 +900,6 @@ export function createClientSession(ctx: ClientSessionContext) {
     startDataChannelHeartbeat,
     stopDataChannelHeartbeat,
     resetOfferTimestamp,
-    isDirectIpv6Eligible: () => isDirectIpv6EligibleFlag,
-    handleDirectNicFallback,
-    resetDirectNicState: () => {},
     hardResetChannels
   }
 }
-

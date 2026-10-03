@@ -576,7 +576,8 @@ describe('webrtc service', () => {
 
       // Trigger 7 consecutive disconnects (6 retries exhausted -> long_offline)
       for (let i = 0; i < 7; i++) {
-        dc.onclose?.()
+        const curDc = service.getDataChannel()
+        curDc?.onclose?.({} as any)
         await vi.runAllTimersAsync()
       }
 
@@ -1659,6 +1660,27 @@ describe('WebRTC Security Hardening & SAS Gating (v2)', () => {
       end: vi.fn()
     }
     vi.mocked(mqtt.connect).mockReturnValue(mockMqttClient)
+
+    global.RTCPeerConnection = vi.fn().mockImplementation(() => {
+      return {
+        createDataChannel: vi.fn().mockReturnValue({
+          send: vi.fn(),
+          readyState: 'open',
+          close: vi.fn(),
+        }),
+        createOffer: vi.fn().mockResolvedValue({ type: 'offer', sdp: 'offer-sdp' }),
+        createAnswer: vi.fn().mockResolvedValue({ type: 'answer', sdp: 'answer-sdp' }),
+        setLocalDescription: vi.fn().mockResolvedValue(undefined),
+        setRemoteDescription: vi.fn().mockResolvedValue(undefined),
+        addIceCandidate: vi.fn().mockResolvedValue(undefined),
+        restartIce: vi.fn(),
+        close: vi.fn(),
+        connectionState: 'new',
+      }
+    }) as any
+
+    global.RTCSessionDescription = vi.fn().mockImplementation((init) => init) as any
+    global.RTCIceCandidate = vi.fn().mockImplementation((init) => init) as any
   })
 
   afterEach(() => {
@@ -1991,7 +2013,7 @@ describe('WebRTC Security Hardening & SAS Gating (v2)', () => {
     service.disconnect()
   })
 
-  it('ICE watchdog notifies stall at 3000ms and triggers restartIce at 4000ms', async () => {
+  it('ICE watchdog notifies stall at 3000ms and recovers without premature restartIce', async () => {
     vi.useFakeTimers()
     const callbacks = {
       onStatusChange: vi.fn(),
@@ -2015,13 +2037,14 @@ describe('WebRTC Security Hardening & SAS Gating (v2)', () => {
     pcInstance.iceConnectionState = 'checking'
     pcInstance.oniceconnectionstatechange()
 
-    // Advance 3000ms -> should alert stall
+    // Advance 3000ms -> should alert stall without destroying or restarting connection
     vi.advanceTimersByTime(3000)
     expect(callbacks.onIceStalled).toHaveBeenCalledWith(true)
+    expect(pcInstance.restartIce).not.toHaveBeenCalled()
 
-    // Advance to 4000ms -> restartIce attempt 1
+    // Advance another 1000ms -> still does NOT disrupt parallel ICE checks
     await vi.advanceTimersByTimeAsync(1000)
-    expect(pcInstance.restartIce).toHaveBeenCalledTimes(1)
+    expect(pcInstance.restartIce).not.toHaveBeenCalled()
 
     // Simulate ICE recovering to 'connected'
     pcInstance.iceConnectionState = 'connected'
@@ -2032,8 +2055,25 @@ describe('WebRTC Security Hardening & SAS Gating (v2)', () => {
     vi.useRealTimers()
   })
 
-  it('ICE watchdog actively tears down connection and rebuilds RTCPeerConnection with iceTransportPolicy: "relay" after 8000ms stalled', async () => {
+  it('connect watchdog times out at 15000ms and escalates retry ladder to iceTransportPolicy: "relay" on attempt 2', async () => {
     vi.useFakeTimers()
+
+    global.RTCPeerConnection = vi.fn().mockImplementation(() => ({
+      createDataChannel: vi.fn().mockReturnValue({
+        send: vi.fn(),
+        readyState: 'connecting',
+        close: vi.fn(),
+      }),
+      createOffer: vi.fn().mockResolvedValue({ type: 'offer', sdp: 'offer-sdp' }),
+      createAnswer: vi.fn().mockResolvedValue({ type: 'answer', sdp: 'answer-sdp' }),
+      setLocalDescription: vi.fn().mockResolvedValue(undefined),
+      setRemoteDescription: vi.fn().mockResolvedValue(undefined),
+      addIceCandidate: vi.fn().mockResolvedValue(undefined),
+      restartIce: vi.fn(),
+      close: vi.fn(),
+      connectionState: 'new',
+    })) as any
+
     const callbacks = {
       onStatusChange: vi.fn(),
       onRecordsReceived: vi.fn(),
@@ -2051,22 +2091,16 @@ describe('WebRTC Security Hardening & SAS Gating (v2)', () => {
     const firstCallConfig = vi.mocked(global.RTCPeerConnection).mock.calls[0]?.[0]
     expect(firstCallConfig?.iceTransportPolicy).toBe('all')
 
-    const pcInstance = vi.mocked(global.RTCPeerConnection).mock.results[0]?.value
-    expect(pcInstance).toBeDefined()
+    // Advance 15000ms (connect timeout) + 1000ms (attempt 1 backoff) -> Attempt 1 (policy: 'all')
+    await vi.advanceTimersByTimeAsync(16000)
+    const secondCallConfig = vi.mocked(global.RTCPeerConnection).mock.calls[1]?.[0]
+    expect(secondCallConfig?.iceTransportPolicy).toBe('all')
 
-    // Attempt 1 at 4000ms
-    pcInstance.iceConnectionState = 'checking'
-    pcInstance.oniceconnectionstatechange()
-    await vi.advanceTimersByTimeAsync(4000)
-    expect(pcInstance.restartIce).toHaveBeenCalledTimes(1)
+    // Advance 15000ms (connect timeout) + 2000ms (attempt 2 backoff) -> Attempt 2 escalates to 'relay'
+    await vi.advanceTimersByTimeAsync(17000)
 
-    // Stalled persists past 8000ms -> Watchdog actively triggers relay-only fallback
-    pcInstance.iceConnectionState = 'checking'
-    await vi.advanceTimersByTimeAsync(4000)
-
-    // Verify a new RTCPeerConnection was instantiated with iceTransportPolicy: 'relay'
     const calls = vi.mocked(global.RTCPeerConnection).mock.calls
-    expect(calls.length).toBeGreaterThan(1)
+    expect(calls.length).toBeGreaterThanOrEqual(3)
     const lastCallConfig = calls[calls.length - 1]?.[0]
     expect(lastCallConfig?.iceTransportPolicy).toBe('relay')
 

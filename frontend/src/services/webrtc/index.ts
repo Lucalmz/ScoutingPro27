@@ -225,18 +225,19 @@ export function createWebRtcService(callbacks: WebRtcCallbacks): WebRtcService {
       console.log('[WebRTC] Host connection degraded (timeout)')
       setStatus('degraded')
     },
-    onClientRebuildRelay: () => {
-      clientSession.setupClientConnection(true)
-    },
-    getLocalEcdhPubHex: () => localEcdhPubHex,
-    getCurrentHostSessionId: () => currentHostSessionId,
-    getClientSessionId: () => currentClientSessionId,
     getClientSharedAesKey: () => sas.clientSharedAesKey,
     getClientSharedKey: (senderId: string) => sas.clientSharedKeys.get(senderId) || null,
     getClientFingerprint: (senderId?: string) =>
       senderId ? sas.clientFingerprints.get(senderId) : Array.from(sas.clientFingerprints.values())[0],
     getClientSecurityFingerprint: () => sas.clientSecurityFingerprint,
-    onHostClientClosed: (targetSender: string) => {
+    getClientHostSenderId: () => clientHostSenderId,
+    onHostClientClosed: (targetSender: string, peer?: RTCPeerConnection) => {
+      // 身份校验：若该 sender 已被新 Offer 替换为新的 PeerConnection，旧连接的终止事件不得清理新连接的状态
+      const current = clients.get(targetSender)
+      if (peer && current && current.pc !== peer) {
+        log.info(`Ignoring closure of superseded PeerConnection for ${targetSender}`)
+        return
+      }
       clients.delete(targetSender)
       sas.cleanupPeerResources(targetSender)
       hostQueues.delete(targetSender)
@@ -254,22 +255,7 @@ export function createWebRtcService(callbacks: WebRtcCallbacks): WebRtcService {
     },
     updateHostStatus,
     getClientDcState: () => clientDc?.readyState,
-    getClientPc: () => clientPc,
-    isExplicitlyClosed: () => isExplicitlyClosed,
-    isDirectIpv6Eligible: (targetSender?: string) => {
-      if (isHostMode) {
-        return Boolean((hostSignalingHandler as any)?.isPeerDirectIpv6Eligible?.(targetSender))
-      } else {
-        return Boolean(clientSession?.isDirectIpv6Eligible?.())
-      }
-    },
-    onDirectNicFallback: (targetSender?: string) => {
-      if (isHostMode) {
-        ;(hostSignalingHandler as any)?.handleDirectNicFallback?.(targetSender)
-      } else {
-        clientSession?.handleDirectNicFallback?.()
-      }
-    }
+    isExplicitlyClosed: () => isExplicitlyClosed
   })
 
   const dispatcher = createMessageDispatcher({
@@ -640,6 +626,7 @@ export function createWebRtcService(callbacks: WebRtcCallbacks): WebRtcService {
       clientForceRelay = force
     },
     isExplicitlyClosed: () => isExplicitlyClosed,
+    isHostMode: () => isHostMode,
     getStatus: () => status,
     setStatus,
     sendMessage,
@@ -809,15 +796,8 @@ export function createWebRtcService(callbacks: WebRtcCallbacks): WebRtcService {
       userId: resolveCurrentUserId()
     })
 
-    if (clientDc) {
-      clientDc.onclose = null
-      clientDc.close()
-      clientDc = null
-    }
-    if (clientPc) {
-      clientPc.close()
-      clientPc = null
-    }
+    clientSession.hardResetChannels()
+    clientSender = null
 
     scoutIdToClientIds.clear()
     clientIdToScoutId.clear()
@@ -1201,7 +1181,6 @@ export function createWebRtcService(callbacks: WebRtcCallbacks): WebRtcService {
     // 关键硬复位：重连时彻底清除 forceRelay 锁死状态与所有残留旧信道
     clientForceRelay = false
     clientSession.hardResetChannels()
-    clientSession.resetDirectNicState()
     clientSession.resetReconnectAttempts()
     setStatus('connecting')
 
@@ -1318,14 +1297,11 @@ export function createWebRtcService(callbacks: WebRtcCallbacks): WebRtcService {
     } else {
       clientSender = null
       clientSession?.hardResetChannels()
-      clientSession?.resetDirectNicState()
       clientDc = null
       clientPc = null
     }
 
     sas.clear()
-    peerMgr.clientIceRestartAttempts = 0
-    peerMgr.hostIceRestartAttempts.clear()
     clientForceRelay = false
 
     for (const [, req] of pendingMergeRequests) {

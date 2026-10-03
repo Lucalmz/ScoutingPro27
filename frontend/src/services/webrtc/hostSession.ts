@@ -28,10 +28,18 @@ import { createLogger } from '@/utils/logger'
 
 const log = createLogger('WebRTC:Host')
 
+/**
+ * 尚未找到匹配会话 PeerConnection 的远端候选（payload 可能仍是加密体，注入前再解密）
+ */
+export interface PreOfferCandidate {
+  sessionTag?: string
+  payload: any
+}
+
 export interface HostSessionContext {
   clients: Map<string, ClientEntry>
   stagedClients: Map<string, ClientEntry>
-  preOfferCandidates: Map<string, RTCIceCandidateInit[]>
+  preOfferCandidates: Map<string, PreOfferCandidate[]>
   enqueueHostTask: (sender: string, task: () => Promise<void>) => Promise<void>
   updateHostStatus: () => void
   peerMgr: PeerConnectionManager
@@ -65,9 +73,12 @@ function extractTicketPayload(ticket: string): Record<string, any> | null {
   return null
 }
 
+/** 每个 sender 最多缓存的“尚无匹配 PeerConnection”的候选数，防止异常对端撑爆内存 */
+const MAX_PRE_OFFER_CANDIDATES = 64
+
 export function createHostSignalingHandler(ctx: HostSessionContext) {
+  // 仅用于 host_hello 诊断展示（真实 IPv6 直连依赖 ICE 的 STUN srflx / prflx 候选，不依赖此值）
   let cachedHostIpv6: string | null = null
-  const clientIpv6s = new Map<string, string>()
 
   probeLocalInterfaceIpv6()
     .then((ip) => {
@@ -140,13 +151,8 @@ export function createHostSignalingHandler(ctx: HostSessionContext) {
     }
 
     if (data.offer) {
-      const clientIpv6 = data.clientIpv6 || data.offer?.clientIpv6
-      if (clientIpv6 && isGlobalIpv6Address(clientIpv6)) {
-        clientIpv6s.set(sender, cleanIpAddress(clientIpv6))
-      }
       log.info(`Received WebRTC offer from ${sender}`, {
         clientSessionId: data.clientSessionId,
-        clientIpv6: clientIpv6 || undefined,
         hasTicket: Boolean(data.ticket || data.offer?.ticket),
         hasToken: Boolean(data.token),
         hasEcdhPub: Boolean(data.ecdhPublicKey),
@@ -286,9 +292,9 @@ export function createHostSignalingHandler(ctx: HostSessionContext) {
           const onDisconnect = () => {
             if (pcRef) makeOnDisconnect(pcRef)()
           }
-          const isClientDirectNic = data.isDirectNic ?? data.offer?.isDirectNic
-          const skipDirectNic = isClientDirectNic === false
-          const pc = ctx.peerMgr.createPeerConnection(sender, onDisconnect, false, undefined, skipDirectNic)
+          const pc = ctx.peerMgr.createPeerConnection(sender, onDisconnect, false, undefined, {
+            sessionTag: data.clientSessionId
+          })
           pcRef = pc
           setupDcHandler(pc)
           clientData = { pc, sessionId: data.clientSessionId, pendingCandidates: [] }
@@ -562,8 +568,12 @@ export function createHostSignalingHandler(ctx: HostSessionContext) {
 
         const pc = clientData.pc
         const cached = preOfferCandidates.get(sender) || []
-        clientData.pendingCandidates.push(...cached)
         preOfferCandidates.delete(sender)
+        for (const entry of cached) {
+          if (!entry.sessionTag || !data.clientSessionId || entry.sessionTag === data.clientSessionId) {
+            clientData.pendingCandidates.push(entry.payload)
+          }
+        }
 
         await pc.setRemoteDescription(toSessionDescription(offerData))
         const answer = await pc.createAnswer()
@@ -589,12 +599,15 @@ export function createHostSignalingHandler(ctx: HostSessionContext) {
 
         log.info(`Sending WebRTC answer to ${sender}`, {
           encrypted: isAnswerEncrypted,
-          hasSessionDescription: Boolean(answer.sdp)
+          hasSessionDescription: Boolean(answer.sdp),
+          clientSessionId: data.clientSessionId
         })
 
         signaling.send(
           {
             answer: answerPayload,
+            // 回显 clientSessionId：Client 据此丢弃针对旧 Offer 的过期 Answer
+            clientSessionId: data.clientSessionId,
             hostSessionId,
             ecdhPublicKey: localEcdhPubHex,
             deviceId: localDeviceId,
@@ -605,6 +618,7 @@ export function createHostSignalingHandler(ctx: HostSessionContext) {
         )
 
         const sortedPending = sortCandidatesPreferIpv6(clientData.pendingCandidates)
+        clientData.pendingCandidates = []
         for (const c of sortedPending) {
           try {
             let candidateObj: any = c
@@ -625,10 +639,10 @@ export function createHostSignalingHandler(ctx: HostSessionContext) {
             console.warn('[WebRTC Host] Error adding pending ICE candidate:', err)
           }
         }
-        clientData.pendingCandidates = []
       })
     } else if (data.candidate) {
       ctx.enqueueHostTask(sender, async () => {
+        const candidateSessionTag: string | undefined = data.clientSessionId || undefined
         let candidateData = data.candidate
         if (data.candidate && data.candidate.ciphertext && sas.clientSharedKeys.has(sender)) {
           try {
@@ -644,13 +658,23 @@ export function createHostSignalingHandler(ctx: HostSessionContext) {
         }
 
         const targetHolder = stagedClients.get(sender) || clients.get(sender)
-        if (!targetHolder) {
-          const cached = preOfferCandidates.get(sender) || []
-          cached.push(candidateData)
-          preOfferCandidates.set(sender, cached)
+        const isSessionMismatch = Boolean(
+          targetHolder &&
+          candidateSessionTag &&
+          targetHolder.sessionId &&
+          targetHolder.sessionId !== candidateSessionTag
+        )
+        if (!targetHolder || isSessionMismatch) {
+          // 尚无对应会话的 PeerConnection（Offer 未到 / 旧会话 PC 仍在）：按会话标签暂存，Offer 到达时只注入匹配会话的候选
+          const cachedList = preOfferCandidates.get(sender) || []
+          cachedList.push({ sessionTag: candidateSessionTag, payload: candidateData })
+          if (cachedList.length > MAX_PRE_OFFER_CANDIDATES) {
+            cachedList.splice(0, cachedList.length - MAX_PRE_OFFER_CANDIDATES)
+          }
+          preOfferCandidates.set(sender, cachedList)
           return
         }
-        if (targetHolder && targetHolder.pc) {
+        if (targetHolder.pc) {
           try {
             await targetHolder.pc.addIceCandidate(toIceCandidate(candidateData))
           } catch {
@@ -671,63 +695,6 @@ export function createHostSignalingHandler(ctx: HostSessionContext) {
       log.warn(`Peer ${sender} rejected SAS verification. Reason: ${data.reason || 'Rejected by peer'}`)
       ctx.rejectSas(sender, data.reason || 'Rejected by peer')
     }
-  }
-
-  handler.isPeerDirectIpv6Eligible = (targetSender?: string) => {
-    if (!targetSender) return false
-    const clientIp = clientIpv6s.get(targetSender)
-    return Boolean(
-      cachedHostIpv6 &&
-      clientIp &&
-      isGlobalIpv6Address(cachedHostIpv6) &&
-      isGlobalIpv6Address(clientIp)
-    )
-  }
-
-  handler.handleDirectNicFallback = (targetSender?: string) => {
-    if (!targetSender) return
-    log.warn(`[Host] Direct NIC connection timed out or blocked by NAT/firewall for peer ${targetSender}. Forcefully tearing down and requesting STUN/TURN reconnect...`)
-    const active = ctx.clients.get(targetSender)
-    if (active) {
-      if (active.dc) {
-        active.dc.onmessage = null
-        active.dc.onopen = null
-        active.dc.onclose = null
-        active.dc.onerror = null
-        try { active.dc.close() } catch {}
-      }
-      active.pc.onicecandidate = null
-      active.pc.onconnectionstatechange = null
-      active.pc.oniceconnectionstatechange = null
-      try { active.pc.ondatachannel = () => {} } catch {}
-      try { active.pc.close() } catch {}
-      ctx.clients.delete(targetSender)
-    }
-    const staged = ctx.stagedClients.get(targetSender)
-    if (staged) {
-      if (staged.dc) {
-        staged.dc.onmessage = null
-        staged.dc.onopen = null
-        staged.dc.onclose = null
-        staged.dc.onerror = null
-        try { staged.dc.close() } catch {}
-      }
-      staged.pc.onicecandidate = null
-      staged.pc.onconnectionstatechange = null
-      staged.pc.oniceconnectionstatechange = null
-      try { staged.pc.ondatachannel = () => {} } catch {}
-      try { staged.pc.close() } catch {}
-      ctx.stagedClients.delete(targetSender)
-    }
-    ctx.updateHostStatus()
-    ctx.getSignaling()?.send(
-      {
-        type: 'reconnect_request',
-        reason: 'direct_nic_failed',
-        hostSessionId: ctx.getHostSessionId()
-      },
-      targetSender
-    )
   }
 
   handler.getHostIpv6 = () => cachedHostIpv6

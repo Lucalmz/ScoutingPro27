@@ -1,6 +1,11 @@
 import type { ConnectionTransportInfo, ConnectionStatus } from '@/types'
 import { encryptSignalingData } from '@/utils/crypto'
-import { STUN_SERVERS, DIRECT_NIC_CONFIG, isIpv6Address, optimizeCandidatePriority, optimizeSdpCandidates, classifyCandidatePair } from './connectivity'
+import {
+  buildIceConfiguration,
+  optimizeCandidatePriority,
+  classifyCandidatePair,
+  CONNECTION_TIMING
+} from './connectivity'
 import type { SignalingChannel } from './signaling'
 import type { WebRtcCallbacks } from './types'
 import { createLogger } from '@/utils/logger'
@@ -16,29 +21,45 @@ export interface PeerConnectionFactoryOptions {
   }
   setStatus: (s: ConnectionStatus) => void
   onHostDisconnected?: () => void
-  onClientRebuildRelay?: () => void
-  getLocalEcdhPubHex: () => string
-  getCurrentHostSessionId: () => string
-  getClientSessionId?: () => string
   getClientSharedAesKey: () => CryptoKey | null
   getClientSharedKey: (senderId: string) => CryptoKey | null
   getClientFingerprint: (senderId?: string) => string | undefined
   getClientSecurityFingerprint: () => string
-  onCandidateEncrypted?: (target: string | undefined, payload: any) => void
-  onHostClientClosed?: (targetSender: string) => void
+  /** 动态解析 Client 侧候选的发送目标（Host 的信令 clientId），避免捕获建连瞬间的旧值 */
+  getClientHostSenderId?: () => string | undefined
+  /** Host 侧：某个 Client 的 PeerConnection 已终止。附带 peer 用于身份校验，防止误删已被替换的新连接 */
+  onHostClientClosed?: (targetSender: string, peer?: RTCPeerConnection) => void
   updateHostStatus?: () => void
   getClientDcState?: () => RTCDataChannelState | undefined
-  getClientPc?: () => RTCPeerConnection | null
   isExplicitlyClosed?: () => boolean
-  isDirectIpv6Eligible?: (targetSender?: string) => boolean
-  onDirectNicFallback?: (targetSender?: string) => void
+}
+
+/**
+ * 创建 PeerConnection 的附加参数
+ */
+export interface CreatePeerConnectionExtras {
+  /**
+   * 会话标签（= clientSessionId）。随每个本地候选一起发送，对端据此丢弃过期会话的候选，
+   * 杜绝“旧会话候选被注入新连接 / 新会话候选被挂到旧连接”导致的打洞失败。
+   */
+  sessionTag?: string
+  /**
+   * 是否在 Offer 发出前暂存本地候选。Client 必须开启：Offer 需等待 ticket 请求，
+   * 若候选先于 Offer 到达 Host，会被挂到 Host 侧仍存在的旧 PeerConnection 上而丢失。
+   */
+  holdLocalCandidates?: boolean
+}
+
+interface CandidateGate {
+  open: boolean
+  queue: RTCIceCandidateInit[]
+  release: () => void
 }
 
 export class PeerConnectionManager {
   private options: PeerConnectionFactoryOptions
   currentTransportInfo: ConnectionTransportInfo | null = null
-  clientIceRestartAttempts = 0
-  readonly hostIceRestartAttempts = new Map<string, number>()
+  private readonly candidateGates = new WeakMap<RTCPeerConnection, CandidateGate>()
 
   constructor(options: PeerConnectionFactoryOptions) {
     this.options = options
@@ -149,37 +170,83 @@ export class PeerConnectionManager {
     })
   }
 
+  /**
+   * 放行此前暂存的本地候选（Client 在 Offer 发出后调用），保证对端收到的顺序为 Offer → Candidates。
+   */
+  releaseLocalCandidates(peer: RTCPeerConnection | null | undefined): void {
+    if (!peer) return
+    this.candidateGates.get(peer)?.release()
+  }
+
+  /**
+   * 创建 PeerConnection（单一配置、并行打洞）。
+   * 设计约束（防止逻辑自锁）：
+   * 1. 不再存在“免 STUN 直连 → 超时拆除 → STUN 重建”的串行升级链；IPv6 / LAN / IPv4 NAT / TURN 在同一个 ICE 会话内并行检查。
+   * 2. PeerConnection 层不做 restartIce、不做 relay 重建、不发送任何重连指令；只负责“一次性”上报失败。
+   *    重试与升级策略由 Client 会话层（唯一决策者）统一调度。
+   * 3. Host 侧对从未连通的连接执行兜底回收，时限（HOST_PENDING_GC_MS）严格大于 Client 建联超时，避免双方抢拆。
+   */
   createPeerConnection(
     targetSender?: string,
-    onDisconnect?: () => void,
+    onDisconnect?: (reason?: string) => void,
     forceRelay = false,
     clientHostSenderId?: string,
-    skipDirectNic = false
+    extras: CreatePeerConnectionExtras = {}
   ): RTCPeerConnection {
     const isHost = this.options.isHostMode()
     const callbacks = this.options.callbacks
-    const directIpv6Available = !skipDirectNic && Boolean(this.options.isDirectIpv6Eligible?.(targetSender))
-    const isDirectNicMode = directIpv6Available && !forceRelay
-
-    const config: RTCConfiguration = isDirectNicMode
-      ? { ...DIRECT_NIC_CONFIG }
-      : {
-          ...STUN_SERVERS,
-          iceTransportPolicy: forceRelay ? 'relay' : 'all'
-        }
+    const sessionTag = extras.sessionTag
+    const config = buildIceConfiguration(forceRelay)
     log.info(
-      `Creating RTCPeerConnection (isHost: ${isHost}, targetSender: ${targetSender || 'default'}, forceRelay: ${forceRelay}, isDirectNicMode: ${isDirectNicMode}, icePolicy: ${config.iceTransportPolicy || 'all'})`
+      `Creating RTCPeerConnection (isHost: ${isHost}, targetSender: ${targetSender || 'default'}, forceRelay: ${forceRelay}, icePolicy: ${config.iceTransportPolicy}, sessionTag: ${sessionTag || 'none'})`
     )
-    if (!isHost) {
-      this.clientIceRestartAttempts = 0
-    } else if (targetSender) {
-      this.hostIceRestartAttempts.delete(targetSender)
-    }
     const peer = new RTCPeerConnection(config)
 
-    peer.onicecandidate = async (ev) => {
+    // ---------------- 本地候选发送（顺序化 + 会话标签 + 可选暂存闸门） ----------------
+    let sendChain: Promise<void> = Promise.resolve()
+    const sendLocalCandidate = (candObj: RTCIceCandidateInit) => {
+      sendChain = sendChain
+        .then(async () => {
+          const sharedKey = isHost ? this.options.getClientSharedKey(targetSender || '') : this.options.getClientSharedAesKey()
+          let candPayload: any = candObj
+          if (sharedKey) {
+            try {
+              candPayload = await encryptSignalingData(sharedKey, JSON.stringify(candObj))
+            } catch {}
+          }
+          const signaling = this.options.getSignaling()
+          if (signaling) {
+            const target = isHost
+              ? targetSender
+              : this.options.getClientHostSenderId?.() || clientHostSenderId || targetSender || undefined
+            const envelope: Record<string, unknown> = { candidate: candPayload }
+            if (sessionTag) envelope.clientSessionId = sessionTag
+            signaling.send(envelope, target)
+          }
+        })
+        .catch((err) => {
+          log.warn('Failed to send local ICE candidate:', err)
+        })
+    }
+
+    const gate: CandidateGate = {
+      open: !extras.holdLocalCandidates,
+      queue: [],
+      release: () => {
+        if (gate.open) return
+        gate.open = true
+        const queued = gate.queue.splice(0)
+        if (queued.length > 0) {
+          log.info(`Releasing ${queued.length} held local ICE candidates after offer dispatch (target: ${targetSender || 'host'})`)
+        }
+        for (const c of queued) sendLocalCandidate(c)
+      }
+    }
+    this.candidateGates.set(peer, gate)
+
+    peer.onicecandidate = (ev) => {
       if (ev.candidate) {
-        let candObj = ev.candidate.toJSON
+        const candObj: RTCIceCandidateInit = ev.candidate.toJSON
           ? ev.candidate.toJSON()
           : {
               candidate: ev.candidate.candidate,
@@ -191,84 +258,46 @@ export class PeerConnectionManager {
           candObj.candidate = optimizeCandidatePriority(candObj.candidate)
         }
         log.info(
-          `Local ICE Candidate generated: ${candObj.candidate ? candObj.candidate.trim() : 'null'} (target: ${targetSender || 'host'})`
+          `Local ICE Candidate generated: ${candObj.candidate ? candObj.candidate.trim() : 'null'} (target: ${targetSender || 'host'}, held: ${!gate.open})`
         )
-
-        const sharedKey = isHost ? this.options.getClientSharedKey(targetSender || '') : this.options.getClientSharedAesKey()
-        let candPayload: any = candObj
-        if (sharedKey) {
-          try {
-            candPayload = await encryptSignalingData(sharedKey, JSON.stringify(candObj))
-          } catch {}
-        }
-
-        const signaling = this.options.getSignaling()
-        if (signaling) {
-          const target = isHost ? targetSender : clientHostSenderId || undefined
-          signaling.send({ candidate: candPayload }, target)
+        if (gate.open) {
+          sendLocalCandidate(candObj)
+        } else {
+          gate.queue.push(candObj)
         }
       } else {
         log.info(`ICE Gathering Complete (null candidate received)`)
       }
     }
 
+    // ---------------- 生命周期与计时器 ----------------
     const createTime = Date.now()
-    let iceTimeout: NodeJS.Timeout | null = null
-    let checkingWatchdog: NodeJS.Timeout | null = null
-    let stallRestartWatchdog: NodeJS.Timeout | null = null
-    let natFallbackTimer: NodeJS.Timeout | null = null
-    let isRestartingIce = false
     let hasConnected = false
-    let isUpgradingToStun = false
+    let failureReported = false
+    let stallNoticeTimer: ReturnType<typeof setTimeout> | null = null
+    let disconnectGraceTimer: ReturnType<typeof setTimeout> | null = null
+    let hostPendingGcTimer: ReturnType<typeof setTimeout> | null = null
 
-    const cancelNatFallback = () => {
-      if (natFallbackTimer) {
-        clearTimeout(natFallbackTimer)
-        natFallbackTimer = null
+    const clearTimers = () => {
+      if (stallNoticeTimer) {
+        clearTimeout(stallNoticeTimer)
+        stallNoticeTimer = null
       }
-    }
-
-    // 若当前为免 STUN 网卡直连模式，启动 1500ms 看门狗；若因路由防火墙/NAT 阻断未能连通，强制打掉当前直连并降级为 STUN/TURN
-    if (isDirectNicMode) {
-      natFallbackTimer = setTimeout(() => {
-        natFallbackTimer = null
-        // 关键防竞态保护：若已连通、连接已关闭或已在升级，绝不打断正常连接
-        if (
-          hasConnected ||
-          peer.connectionState === 'connected' ||
-          peer.connectionState === 'closed' ||
-          isUpgradingToStun
-        ) {
-          return
-        }
-        isUpgradingToStun = true
-        log.warn(
-          `[WebRTC Watchdog] Direct NIC connection did not reach connected within 1500ms (NAT/firewall detected). Forcefully tearing down direct-NIC peer and falling back to STUN/TURN...`
-        )
-        try {
-          peer.close()
-        } catch (closeErr) {
-          log.warn('[WebRTC Watchdog] Error closing stalled direct-NIC peer:', closeErr)
-        }
-        this.options.onDirectNicFallback?.(targetSender)
-      }, 1500)
+      if (disconnectGraceTimer) {
+        clearTimeout(disconnectGraceTimer)
+        disconnectGraceTimer = null
+      }
+      if (hostPendingGcTimer) {
+        clearTimeout(hostPendingGcTimer)
+        hostPendingGcTimer = null
+      }
     }
 
     const origClose = peer.close.bind(peer)
     peer.close = () => {
-      cancelNatFallback()
-      if (iceTimeout) {
-        clearTimeout(iceTimeout)
-        iceTimeout = null
-      }
-      if (checkingWatchdog) {
-        clearTimeout(checkingWatchdog)
-        checkingWatchdog = null
-      }
-      if (stallRestartWatchdog) {
-        clearTimeout(stallRestartWatchdog)
-        stallRestartWatchdog = null
-      }
+      clearTimers()
+      gate.open = true
+      gate.queue.length = 0
       try {
         peer.onicecandidate = null
         peer.oniceconnectionstatechange = null
@@ -278,255 +307,145 @@ export class PeerConnectionManager {
       origClose()
     }
 
-    peer.onconnectionstatechange = () => {
-      log.info(`PeerConnection state changed: ${peer.connectionState} (targetSender: ${targetSender || 'host'})`)
-      if (peer.connectionState === 'connected') {
-        hasConnected = true
-        cancelNatFallback()
-        const duration = Date.now() - createTime
-        const strategy = isUpgradingToStun ? 'stun_nat_fallback' : (isDirectNicMode ? 'direct_nic_ipv6' : 'stun_direct')
-        log.info(`[WebRTC Metric] Successfully connected in ${duration}ms (Strategy: ${strategy})`)
-      }
-      if (['disconnected', 'failed', 'closed'].includes(peer.connectionState)) {
-        cancelNatFallback()
-        if (isDirectNicMode && !hasConnected && !isUpgradingToStun && peer.connectionState !== 'closed') {
-          isUpgradingToStun = true
-          log.warn(
-            `[WebRTC Watchdog] Direct NIC connection reached ${peer.connectionState} before connecting. Forcefully tearing down and falling back to STUN/TURN...`
-          )
-          try { peer.close() } catch {}
-          this.options.onDirectNicFallback?.(targetSender)
-        }
-        if (iceTimeout) {
-          clearTimeout(iceTimeout)
-          iceTimeout = null
-        }
-        if (checkingWatchdog) {
-          clearTimeout(checkingWatchdog)
-          checkingWatchdog = null
-        }
-        if (stallRestartWatchdog) {
-          clearTimeout(stallRestartWatchdog)
-          stallRestartWatchdog = null
-        }
-      }
+    /**
+     * 一次性失败上报：同一个 PeerConnection 无论经由 connectionState / iceConnectionState / 计时器
+     * 哪条路径判定失败，都只会触发一次后续动作，杜绝重复重连风暴。
+     */
+    const reportFailure = (reason: string) => {
+      if (failureReported) return
+      failureReported = true
+      clearTimers()
+      log.warn(`PeerConnection failure reported (reason: ${reason}, target: ${targetSender || 'host'}, connectedBefore: ${hasConnected})`)
       if (isHost) {
-        if (['disconnected', 'failed', 'closed'].includes(peer.connectionState) && targetSender) {
-          peer.close()
-          this.options.onHostClientClosed?.(targetSender)
+        try { peer.close() } catch {}
+        if (targetSender) {
+          this.options.onHostClientClosed?.(targetSender, peer)
         }
+        if (onDisconnect) onDisconnect(reason)
         this.options.updateHostStatus?.()
       } else {
-        switch (peer.connectionState) {
-          case 'connected':
-            if (this.options.getClientDcState?.() === 'open') {
-              this.options.setStatus('connected')
-            }
-            break
-          case 'disconnected':
-          case 'failed':
-            this.options.setStatus('unstable')
-            if (onDisconnect) {
-              onDisconnect()
-            } else {
-              this.options.setStatus('offline')
-            }
-            break
-          case 'closed':
-            if (this.options.isExplicitlyClosed?.()) {
-              this.options.setStatus('offline')
-            } else {
-              this.options.setStatus('unstable')
-              if (onDisconnect) onDisconnect()
-            }
-            break
-          case 'new':
-            this.options.setStatus('connecting')
-            break
-          default:
-            this.options.setStatus('connecting')
+        this.options.setStatus('unstable')
+        if (onDisconnect) {
+          onDisconnect(reason)
+        } else {
+          this.options.setStatus('offline')
         }
       }
     }
 
-    peer.oniceconnectionstatechange = async () => {
-      log.info(`ICE Connection state changed: ${peer.iceConnectionState} (targetSender: ${targetSender || 'host'})`)
-
-      if (peer.iceConnectionState === 'checking') {
-        if (!checkingWatchdog) {
-          checkingWatchdog = setTimeout(() => {
-            checkingWatchdog = null
-            if (peer.iceConnectionState === 'checking') {
-              log.warn(
-                '[Watchdog] ICE check taking longer than 3000ms (possible IPv6 blackhole / middlebox UDP drop).'
-              )
-              callbacks.onIceStalled?.(true)
-            }
-          }, 3000)
+    if (isHost) {
+      // Host 兜底回收：从未连通的 PeerConnection 在 HOST_PENDING_GC_MS 后释放（Client 早已在 15s 时自行重建）
+      hostPendingGcTimer = setTimeout(() => {
+        hostPendingGcTimer = null
+        if (!hasConnected && peer.connectionState !== 'connected') {
+          reportFailure('host_handshake_gc')
         }
-        const scheduleStallRestart = () => {
-          if (stallRestartWatchdog) clearTimeout(stallRestartWatchdog)
-          stallRestartWatchdog = setTimeout(async () => {
-            stallRestartWatchdog = null
-            if (peer.iceConnectionState === 'checking') {
-              const currentAttempts = isHost
-                ? targetSender
-                  ? this.hostIceRestartAttempts.get(targetSender) || 0
-                  : 0
-                : this.clientIceRestartAttempts
+      }, CONNECTION_TIMING.HOST_PENDING_GC_MS)
+    }
 
-              if (currentAttempts < 1) {
-                if (isRestartingIce) {
-                  log.info('[Watchdog] ICE restart already in progress, skipping duplicate trigger.')
-                  return
-                }
-                const nextAttempts = currentAttempts + 1
-                if (isHost && targetSender) {
-                  this.hostIceRestartAttempts.set(targetSender, nextAttempts)
-                } else {
-                  this.clientIceRestartAttempts = nextAttempts
-                }
-                log.warn(
-                  `[Watchdog] ICE checking stalled at 4000ms. Triggering restartIce (Attempt ${nextAttempts}/1, target: ${targetSender || 'host'})`
-                )
-                isRestartingIce = true
-                try {
-                  if (typeof (peer as any).restartIce === 'function') {
-                    ;(peer as any).restartIce()
-                  }
-                  if (!isHost) {
-                    const clientPc = this.options.getClientPc?.()
-                    if (clientPc) {
-                      const newOffer = await clientPc.createOffer({ iceRestart: true })
-                      await clientPc.setLocalDescription(newOffer)
-                      const optimizedOffer = {
-                        type: newOffer.type,
-                        sdp: optimizeSdpCandidates(clientPc?.localDescription?.sdp || newOffer.sdp || '')
-                      }
-                      let payload: any = optimizedOffer
-                      const sharedKey = this.options.getClientSharedAesKey()
-                      if (sharedKey) {
-                        try {
-                          payload = await encryptSignalingData(sharedKey, JSON.stringify(optimizedOffer))
-                        } catch {}
-                      }
-                      this.options.getSignaling()?.send({
-                        offer: payload,
-                        ecdhPublicKey: this.options.getLocalEcdhPubHex(),
-                        clientSessionId: this.options.getClientSessionId?.() || `client-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
-                        hostSessionId: this.options.getCurrentHostSessionId()
-                      })
-                    }
-                  }
-                } catch (restartErr) {
-                  log.error('[Watchdog] Failed to restart ICE:', restartErr)
-                } finally {
-                  isRestartingIce = false
-                }
-                // 递归重试调度：若网络持续停滞在 checking，4000ms 后再次触发进入 relay 降级 (总计 8s)
-                if (peer.iceConnectionState === 'checking') {
-                  scheduleStallRestart()
-                }
-              } else {
-                log.warn(
-                  '[Watchdog] ICE checking stalled after 8000ms. Actively triggering relay-only fallback with iceTransportPolicy: "relay".'
-                )
-                callbacks.onIceStalled?.(true)
-                if (checkingWatchdog) {
-                  clearTimeout(checkingWatchdog)
-                  checkingWatchdog = null
-                }
-                if (stallRestartWatchdog) {
-                  clearTimeout(stallRestartWatchdog)
-                  stallRestartWatchdog = null
-                }
-                try { peer.close() } catch {}
-                if (!isHost) {
-                  this.options.onClientRebuildRelay?.()
-                } else if (onDisconnect) {
-                  onDisconnect()
-                } else {
-                  this.options.setStatus('degraded')
-                  if (targetSender) {
-                    this.options.onHostClientClosed?.(targetSender)
-                  }
-                }
-              }
-            }
-          }, 4000)
-        }
+    peer.onconnectionstatechange = () => {
+      const state = peer.connectionState
+      log.info(`PeerConnection state changed: ${state} (targetSender: ${targetSender || 'host'})`)
 
-        if (!stallRestartWatchdog) {
-          scheduleStallRestart()
+      if (state === 'connected') {
+        hasConnected = true
+        if (disconnectGraceTimer) {
+          clearTimeout(disconnectGraceTimer)
+          disconnectGraceTimer = null
         }
-      } else if (peer.iceConnectionState === 'disconnected' || peer.iceConnectionState === 'failed') {
-        cancelNatFallback()
-        if (isDirectNicMode && !hasConnected && !isUpgradingToStun && peer.iceConnectionState === 'failed') {
-          isUpgradingToStun = true
-          log.warn(
-            `[WebRTC Watchdog] Direct NIC ICE failed. Forcefully tearing down and falling back to STUN/TURN...`
-          )
-          try { peer.close() } catch {}
-          this.options.onDirectNicFallback?.(targetSender)
+        if (hostPendingGcTimer) {
+          clearTimeout(hostPendingGcTimer)
+          hostPendingGcTimer = null
+        }
+        log.info(`[WebRTC Metric] Successfully connected in ${Date.now() - createTime}ms (policy: ${config.iceTransportPolicy})`)
+      }
+
+      if (isHost) {
+        if (state === 'disconnected' || state === 'failed' || state === 'closed') {
+          reportFailure(`connection_${state}`)
           return
         }
-        if (checkingWatchdog) {
-          clearTimeout(checkingWatchdog)
-          checkingWatchdog = null
-        }
-        if (stallRestartWatchdog) {
-          clearTimeout(stallRestartWatchdog)
-          stallRestartWatchdog = null
-        }
-        callbacks.onIceStalled?.(false)
-        this.options.setStatus('unstable')
-        if (!iceTimeout) {
-          iceTimeout = setTimeout(() => {
-            if (peer.iceConnectionState === 'disconnected' || peer.iceConnectionState === 'failed') {
-              if (onDisconnect) {
-                onDisconnect()
-              } else {
-                console.log('[WebRTC] Connection degraded (timeout)')
-                this.options.setStatus('degraded')
-              }
-            }
-          }, 15000)
-        }
-      } else if (peer.iceConnectionState === 'connected' || peer.iceConnectionState === 'completed') {
-        if (checkingWatchdog) {
-          clearTimeout(checkingWatchdog)
-          checkingWatchdog = null
-        }
-        if (stallRestartWatchdog) {
-          clearTimeout(stallRestartWatchdog)
-          stallRestartWatchdog = null
-        }
-        callbacks.onIceStalled?.(false)
-        if (!isHost) {
-          this.clientIceRestartAttempts = 0
-        } else if (targetSender) {
-          this.hostIceRestartAttempts.set(targetSender, 0)
-        }
-        if (iceTimeout) {
-          clearTimeout(iceTimeout)
-          iceTimeout = null
-        }
-        if (isHost) {
-          this.options.updateHostStatus?.()
-        } else {
+        this.options.updateHostStatus?.()
+        return
+      }
+
+      switch (state) {
+        case 'connected':
           if (this.options.getClientDcState?.() === 'open') {
             this.options.setStatus('connected')
           }
-        }
+          break
+        case 'disconnected':
+          // 给 ICE 一个短暂自愈窗口（如 Wi-Fi 漫游），超时仍未恢复再判定失败
+          this.options.setStatus('unstable')
+          if (!disconnectGraceTimer) {
+            disconnectGraceTimer = setTimeout(() => {
+              disconnectGraceTimer = null
+              if (peer.connectionState !== 'connected') {
+                reportFailure('connection_disconnected')
+              }
+            }, CONNECTION_TIMING.CLIENT_DISCONNECT_GRACE_MS)
+          }
+          break
+        case 'failed':
+          reportFailure('connection_failed')
+          break
+        case 'closed':
+          if (this.options.isExplicitlyClosed?.()) {
+            this.options.setStatus('offline')
+          } else {
+            reportFailure('connection_closed')
+          }
+          break
+        default:
+          this.options.setStatus('connecting')
+      }
+    }
 
+    peer.oniceconnectionstatechange = () => {
+      const iceState = peer.iceConnectionState
+      log.info(`ICE Connection state changed: ${iceState} (targetSender: ${targetSender || 'host'})`)
+
+      if (iceState === 'checking') {
+        // 仅做 UI 提示：ICE 检查在 IPv6 黑洞 / UDP 丢弃时可能较慢，但绝不在此拆除连接
+        if (!stallNoticeTimer) {
+          stallNoticeTimer = setTimeout(() => {
+            stallNoticeTimer = null
+            if (peer.iceConnectionState === 'checking') {
+              log.warn(`[Watchdog] ICE check taking longer than ${CONNECTION_TIMING.ICE_STALL_NOTICE_MS}ms (possible IPv6 blackhole / middlebox UDP drop). Waiting for parallel srflx/relay pairs.`)
+              callbacks.onIceStalled?.(true)
+            }
+          }, CONNECTION_TIMING.ICE_STALL_NOTICE_MS)
+        }
+        return
+      }
+
+      if (stallNoticeTimer) {
+        clearTimeout(stallNoticeTimer)
+        stallNoticeTimer = null
+      }
+
+      if (iceState === 'connected' || iceState === 'completed') {
+        callbacks.onIceStalled?.(false)
+        if (isHost) {
+          this.options.updateHostStatus?.()
+        } else if (this.options.getClientDcState?.() === 'open') {
+          this.options.setStatus('connected')
+        }
         this.updateTransportInfo(peer, targetSender)
         setTimeout(() => this.updateTransportInfo(peer, targetSender), 1200)
         setTimeout(() => this.updateTransportInfo(peer, targetSender), 3000)
+      } else if (iceState === 'disconnected') {
+        callbacks.onIceStalled?.(false)
+        this.options.setStatus('unstable')
+      } else if (iceState === 'failed') {
+        callbacks.onIceStalled?.(false)
+        reportFailure('ice_failed')
       }
     }
 
     peer.onicegatheringstatechange = () => {
-      console.log(`[WebRTC] ICE Gathering state: ${peer.iceGatheringState}`)
+      log.info(`ICE Gathering state: ${peer.iceGatheringState} (targetSender: ${targetSender || 'host'})`)
     }
 
     return peer

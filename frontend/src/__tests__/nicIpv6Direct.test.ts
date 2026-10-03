@@ -2,9 +2,11 @@ import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
 import {
   probeLocalInterfaceIpv6,
   resetLocalIpv6ProbeCache,
-  DIRECT_NIC_CONFIG,
+  buildIceConfiguration,
   STUN_SERVERS,
-  isGlobalIpv6Address
+  isGlobalIpv6Address,
+  CONNECTION_TIMING,
+  shouldForceRelayForAttempt
 } from '@/services/webrtc/connectivity'
 import { PeerConnectionManager, type PeerConnectionFactoryOptions } from '@/services/webrtc/peerManager'
 import * as api from '@/services/api'
@@ -13,7 +15,7 @@ vi.mock('@/services/api', () => ({
   getNetworkInfo: vi.fn().mockResolvedValue(null)
 }))
 
-describe('Direct NIC IPv6 & STUN NAT Fallback', () => {
+describe('Parallel Dual-Stack ICE & Non-Locking Hole Punching Architecture', () => {
   beforeEach(() => {
     vi.clearAllMocks()
     resetLocalIpv6ProbeCache()
@@ -26,11 +28,27 @@ describe('Direct NIC IPv6 & STUN NAT Fallback', () => {
     vi.useRealTimers()
   })
 
-  describe('DIRECT_NIC_CONFIG specification', () => {
-    it('defines zero iceServers for zero-STUN direct connection without pool size mismatch', () => {
-      expect(DIRECT_NIC_CONFIG.iceServers).toBeDefined()
-      expect(DIRECT_NIC_CONFIG.iceServers).toEqual([])
-      expect(DIRECT_NIC_CONFIG.iceCandidatePoolSize).toBeUndefined()
+  describe('buildIceConfiguration specification', () => {
+    it('initializes single-PC with all STUN/TURN servers under iceTransportPolicy: "all" by default', () => {
+      const config = buildIceConfiguration(false)
+      expect(config.iceServers).toEqual(STUN_SERVERS.iceServers)
+      expect(config.iceTransportPolicy).toBe('all')
+      expect(config.iceCandidatePoolSize).toBe(2)
+    })
+
+    it('builds relay-only config when forceRelay is specified for escalation attempts', () => {
+      const config = buildIceConfiguration(true)
+      expect(config.iceServers).toEqual(STUN_SERVERS.iceServers)
+      expect(config.iceTransportPolicy).toBe('relay')
+    })
+
+    it('shouldForceRelayForAttempt implements escalation ladder: all -> all -> relay -> all -> relay', () => {
+      expect(shouldForceRelayForAttempt(1)).toBe(false)
+      expect(shouldForceRelayForAttempt(2)).toBe(true)
+      expect(shouldForceRelayForAttempt(3)).toBe(false)
+      expect(shouldForceRelayForAttempt(4)).toBe(true)
+      expect(shouldForceRelayForAttempt(5)).toBe(false)
+      expect(shouldForceRelayForAttempt(6)).toBe(true)
     })
   })
 
@@ -133,7 +151,7 @@ describe('Direct NIC IPv6 & STUN NAT Fallback', () => {
     })
   })
 
-  describe('PeerConnectionManager NIC Direct Mode & Watchdog', () => {
+  describe('PeerConnectionManager Parallel ICE Architecture', () => {
     function createMockPeer() {
       const listeners: Record<string, Function[]> = {}
       const closeSpy = vi.fn()
@@ -155,126 +173,138 @@ describe('Direct NIC IPv6 & STUN NAT Fallback', () => {
       return peer
     }
 
-    function createMockOptions(directEligible: boolean): PeerConnectionFactoryOptions {
+    function createMockOptions(): PeerConnectionFactoryOptions {
       return {
         getSignaling: () => null,
         isHostMode: () => false,
-        callbacks: {},
+        callbacks: {
+          onStatusChange: vi.fn(),
+          onRecordsReceived: vi.fn(),
+          onAckReceived: vi.fn(),
+          onRequestSync: vi.fn(),
+          onIceStalled: vi.fn()
+        },
         setStatus: vi.fn(),
-        getLocalEcdhPubHex: () => 'deadbeef',
-        getCurrentHostSessionId: () => 'sess-1',
         getClientSharedAesKey: () => null,
         getClientSharedKey: () => null,
         getClientFingerprint: () => 'fp-1',
-        getClientSecurityFingerprint: () => 'sec-fp-1',
-        isDirectIpv6Eligible: () => directEligible
+        getClientSecurityFingerprint: () => 'sec-fp-1'
       }
     }
 
-    it('initializes with DIRECT_NIC_CONFIG (empty iceServers) when direct IPv6 is eligible', () => {
+    it('initializes with parallel "all" ICE configuration without pool size mismatch', () => {
       let passedConfig: any = null
       global.RTCPeerConnection = vi.fn().mockImplementation((cfg) => {
         passedConfig = cfg
         return createMockPeer()
       }) as any
 
-      const manager = new PeerConnectionManager(createMockOptions(true))
-      manager.createPeerConnection()
-
-      expect(passedConfig).toBeDefined()
-      expect(passedConfig.iceServers).toEqual([])
-      expect(passedConfig.iceCandidatePoolSize).toBeUndefined()
-    })
-
-    it('initializes with STUN_SERVERS when direct IPv6 is not eligible', () => {
-      let passedConfig: any = null
-      global.RTCPeerConnection = vi.fn().mockImplementation((cfg) => {
-        passedConfig = cfg
-        return createMockPeer()
-      }) as any
-
-      const manager = new PeerConnectionManager(createMockOptions(false))
+      const manager = new PeerConnectionManager(createMockOptions())
       manager.createPeerConnection()
 
       expect(passedConfig).toBeDefined()
       expect(passedConfig.iceServers).toEqual(STUN_SERVERS.iceServers)
+      expect(passedConfig.iceTransportPolicy).toBe('all')
+      expect(passedConfig.iceCandidatePoolSize).toBe(2)
     })
 
-    it('forcefully tears down direct-NIC connection and calls onDirectNicFallback after 1500ms when direct connection is blocked by NAT/firewall', async () => {
+    it('does NOT prematurely tear down connection at 1500ms (eliminates NAT/firewall premature teardown deadlock)', async () => {
       const mockPeer = createMockPeer()
       global.RTCPeerConnection = vi.fn().mockImplementation(() => mockPeer) as any
 
-      const mockOptions = createMockOptions(true)
-      mockOptions.onDirectNicFallback = vi.fn()
-      const manager = new PeerConnectionManager(mockOptions)
-      const pc = manager.createPeerConnection('target-client')
-
-      // Before 1500ms, no fallback
-      await vi.advanceTimersByTimeAsync(1400)
-      expect(mockPeer.closeSpy).not.toHaveBeenCalled()
-      expect(mockOptions.onDirectNicFallback).not.toHaveBeenCalled()
-
-      // At 1500ms, watchdog fires
-      await vi.advanceTimersByTimeAsync(150)
-      expect(mockPeer.closeSpy).toHaveBeenCalledTimes(1)
-      expect(mockOptions.onDirectNicFallback).toHaveBeenCalledWith('target-client')
-    })
-
-    it('race protection: cancels watchdog when connected within 1500ms without triggering fallback', async () => {
-      const mockPeer = createMockPeer()
-      global.RTCPeerConnection = vi.fn().mockImplementation(() => mockPeer) as any
-
-      const mockOptions = createMockOptions(true)
-      mockOptions.onDirectNicFallback = vi.fn()
-      const manager = new PeerConnectionManager(mockOptions)
-      manager.createPeerConnection()
-
-      // Connects at 400ms via direct IPv6
-      await vi.advanceTimersByTimeAsync(400)
-      mockPeer.connectionState = 'connected'
-      mockPeer.onconnectionstatechange()
-
-      // Advance past 1500ms
-      await vi.advanceTimersByTimeAsync(2000)
-
-      // Crucial: fallback must NOT have been called
-      expect(mockPeer.closeSpy).not.toHaveBeenCalled()
-      expect(mockOptions.onDirectNicFallback).not.toHaveBeenCalled()
-    })
-
-    it('cancels watchdog cleanly when peer connection is closed before 1500ms', async () => {
-      const mockPeer = createMockPeer()
-      global.RTCPeerConnection = vi.fn().mockImplementation(() => mockPeer) as any
-
-      const mockOptions = createMockOptions(true)
-      mockOptions.onDirectNicFallback = vi.fn()
-      const manager = new PeerConnectionManager(mockOptions)
-      const pc = manager.createPeerConnection()
-
-      // Peer closed at 500ms (e.g., user navigates away or host disconnects)
-      await vi.advanceTimersByTimeAsync(500)
-      pc.close()
-
-      // Advance past 1500ms
-      await vi.advanceTimersByTimeAsync(2000)
-
-      expect(mockOptions.onDirectNicFallback).not.toHaveBeenCalled()
-    })
-
-    it('immediately triggers onDirectNicFallback and closes peer when connection fails before connected', () => {
-      const mockPeer = createMockPeer()
-      global.RTCPeerConnection = vi.fn().mockImplementation(() => mockPeer) as any
-
-      const mockOptions = createMockOptions(true)
-      mockOptions.onDirectNicFallback = vi.fn()
+      const mockOptions = createMockOptions()
       const manager = new PeerConnectionManager(mockOptions)
       manager.createPeerConnection('target-client')
+
+      // Advance past 1500ms and 5000ms: connection must NOT be closed by any premature watchdog
+      await vi.advanceTimersByTimeAsync(1500)
+      expect(mockPeer.closeSpy).not.toHaveBeenCalled()
+
+      await vi.advanceTimersByTimeAsync(5000)
+      expect(mockPeer.closeSpy).not.toHaveBeenCalled()
+    })
+
+    it('holds local candidates until releaseLocalCandidates is called, preserving Offer -> Candidate order', async () => {
+      const mockPeer = createMockPeer()
+      global.RTCPeerConnection = vi.fn().mockImplementation(() => mockPeer) as any
+
+      const mockSignaling = { send: vi.fn() }
+      const mockOptions = createMockOptions()
+      mockOptions.getSignaling = () => mockSignaling as any
+
+      const manager = new PeerConnectionManager(mockOptions)
+      const pc = manager.createPeerConnection('host-target', undefined, false, undefined, {
+        sessionTag: 'sess-abc',
+        holdLocalCandidates: true
+      })
+
+      // Simulate local ICE candidate generated before Offer is sent
+      mockPeer.onicecandidate({
+        candidate: {
+          candidate: 'candidate:1 1 UDP 2122260223 2409:8a00:abcd::1 54321 typ host',
+          toJSON: () => ({ candidate: 'candidate:1 1 UDP 2122260223 2409:8a00:abcd::1 54321 typ host' })
+        }
+      })
+
+      // Candidate must be held (not sent over signaling yet)
+      expect(mockSignaling.send).not.toHaveBeenCalled()
+
+      // Release gate (e.g. after Offer was dispatched)
+      manager.releaseLocalCandidates(pc)
+      await Promise.resolve()
+
+      // Candidate is now dispatched with sessionTag
+      expect(mockSignaling.send).toHaveBeenCalledTimes(1)
+      expect(mockSignaling.send).toHaveBeenCalledWith(
+        expect.objectContaining({
+          clientSessionId: 'sess-abc',
+          candidate: expect.anything()
+        }),
+        'host-target'
+      )
+    })
+
+    it('notifies onIceStalled(true) at 3000ms checking without tearing down parallel ICE checking', async () => {
+      const mockPeer = createMockPeer()
+      global.RTCPeerConnection = vi.fn().mockImplementation(() => mockPeer) as any
+
+      const mockOptions = createMockOptions()
+      const manager = new PeerConnectionManager(mockOptions)
+      manager.createPeerConnection('target')
+
+      mockPeer.iceConnectionState = 'checking'
+      mockPeer.oniceconnectionstatechange()
+
+      await vi.advanceTimersByTimeAsync(3000)
+      expect(mockOptions.callbacks.onIceStalled).toHaveBeenCalledWith(true)
+      // PC is not torn down
+      expect(mockPeer.closeSpy).not.toHaveBeenCalled()
+
+      // When state becomes connected, stall notification is cleared
+      mockPeer.iceConnectionState = 'connected'
+      mockPeer.oniceconnectionstatechange()
+      expect(mockOptions.callbacks.onIceStalled).toHaveBeenCalledWith(false)
+    })
+
+    it('reports failure once on connection failure without infinite retry loops', () => {
+      const mockPeer = createMockPeer()
+      global.RTCPeerConnection = vi.fn().mockImplementation(() => mockPeer) as any
+
+      const mockOptions = createMockOptions()
+      const onDisconnect = vi.fn()
+      const manager = new PeerConnectionManager(mockOptions)
+      manager.createPeerConnection('target-client', onDisconnect)
 
       mockPeer.connectionState = 'failed'
       mockPeer.onconnectionstatechange()
 
-      expect(mockPeer.closeSpy).toHaveBeenCalledTimes(1)
-      expect(mockOptions.onDirectNicFallback).toHaveBeenCalledWith('target-client')
+      expect(onDisconnect).toHaveBeenCalledTimes(1)
+      expect(mockOptions.setStatus).toHaveBeenCalledWith('unstable')
+
+      // Further state changes on the same peer do not duplicate failure calls
+      mockPeer.connectionState = 'closed'
+      mockPeer.onconnectionstatechange()
+      expect(onDisconnect).toHaveBeenCalledTimes(1)
     })
   })
 })
