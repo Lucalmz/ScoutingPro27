@@ -265,6 +265,20 @@ export const useCustomFieldsStore = defineStore('customFields', () => {
     saveToLocalStorage(eventId)
   }
 
+  function migrateEventId(oldId: string, newId: string) {
+    if (!oldId || !newId || oldId === newId) return
+    const existing = fieldsByEvent.value[oldId]
+    if (existing && existing.length > 0) {
+      const migrated = existing.map((f) => ({ ...f, eventId: newId }))
+      fieldsByEvent.value[newId] = migrated
+      delete fieldsByEvent.value[oldId]
+      saveToLocalStorage(newId)
+      try {
+        localStorage.removeItem(`${STORAGE_PREFIX}${oldId}`)
+      } catch {}
+    }
+  }
+
   return {
     fieldsByEvent,
     loading,
@@ -280,6 +294,7 @@ export const useCustomFieldsStore = defineStore('customFields', () => {
     toggleFieldActive,
     moveFieldOrder,
     applyFullSync,
-    applyRemoteUpdate
+    applyRemoteUpdate,
+    migrateEventId
   }
 })

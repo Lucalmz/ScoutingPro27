@@ -75,13 +75,12 @@ export const usePitScoutStore = defineStore('pitScout', () => {
       if ((!targetEventId || !t.eventId || t.eventId === targetEventId) && t.teamNumber > 0) teamNumberSet.add(t.teamNumber)
     })
 
+    // 3. 收集赛程中的战队（严格校验 eventId 防止跨赛事串台）
     scheduleStore.schedules.forEach((s) => {
-      if (!targetEventId || !s.eventId || s.eventId === targetEventId) {
-        if (s.red1 > 0) teamNumberSet.add(s.red1)
-        if (s.red2 > 0) teamNumberSet.add(s.red2)
-        if (s.blue1 > 0) teamNumberSet.add(s.blue1)
-        if (s.blue2 > 0) teamNumberSet.add(s.blue2)
-      }
+      if (targetEventId && s.eventId && s.eventId !== targetEventId) return
+      ;[s.red1, s.red2, s.blue1, s.blue2].forEach((num) => {
+        if (num && num > 0) teamNumberSet.add(num)
+      })
     })
 
     recordStore.teamTags.forEach((t) => {

@@ -15,12 +15,13 @@ import {
   generateEcdhKeyPair,
   exportEcdhPublicKey,
   importEcdhPublicKey,
-  generateNonce
+  generateNonce,
+  deriveFallbackPublicKeyHex
 } from './crypto'
 
 export interface DeviceIdentity {
   deviceId: string
-  keyPair: CryptoKeyPair
+  keyPair: CryptoKeyPair | null
   publicKeyHex: string
   createdAt: number
 }
@@ -146,12 +147,20 @@ export async function getOrCreateDeviceIdentity(): Promise<DeviceIdentity> {
         req.onerror = () => resolve(null)
       })
 
-      if (existing && existing.privateKeyJwk && existing.publicKeyHex && existing.deviceId) {
-        const privateKey = await importPrivateKeyJwk(existing.privateKeyJwk)
-        const publicKey = await importEcdhPublicKey(existing.publicKeyHex)
+      if (existing && existing.publicKeyHex && existing.deviceId) {
+        let keyPair: any = null
+        if (existing.privateKeyJwk) {
+          try {
+            const privateKey = await importPrivateKeyJwk(existing.privateKeyJwk)
+            const publicKey = await importEcdhPublicKey(existing.publicKeyHex)
+            keyPair = { privateKey, publicKey }
+          } catch {
+            keyPair = null
+          }
+        }
         memDeviceIdentity = {
           deviceId: existing.deviceId,
-          keyPair: { privateKey, publicKey },
+          keyPair,
           publicKeyHex: existing.publicKeyHex,
           createdAt: existing.createdAt || Date.now()
         }
@@ -175,7 +184,10 @@ export async function getOrCreateDeviceIdentity(): Promise<DeviceIdentity> {
       privateKeyJwk = await exportPrivateKeyJwk(keyPair.privateKey)
     }
   } catch (err) {
-    console.warn('[Security Store] ECDH key generation unavailable in insecure context:', err)
+    console.warn('[Security Store] ECDH key generation unavailable in insecure context, using deterministic identity key:', err)
+  }
+  if (!publicKeyHex) {
+    publicKeyHex = deriveFallbackPublicKeyHex(deviceId)
   }
   const createdAt = Date.now()
 
@@ -255,6 +267,21 @@ export function isInvalidPseudoUser(userId?: string): boolean {
     lower.startsWith('node_') ||
     lower.startsWith('dev_pub_') ||
     lower.startsWith('dev_')
+  )
+}
+
+/**
+ * 判断是否为临时匿名/过渡期侦察员账号（如 scout-xxx, anon-xxx, temp-xxx）或伪造用户。
+ * 过渡账号在与正式账号合并或登录切换时，若公钥匹配可平滑认领，不触发多真人串机 SAS 报警。
+ */
+export function isTemporaryPseudoUser(userId?: string): boolean {
+  if (!userId || !userId.trim()) return true
+  const lower = userId.trim().toLowerCase()
+  return (
+    isInvalidPseudoUser(userId) ||
+    lower.startsWith('scout-') ||
+    lower.startsWith('anon-') ||
+    lower.startsWith('temp-')
   )
 }
 
@@ -471,11 +498,14 @@ export async function evaluatePeerKeyTrust(params: {
     latestDeviceRecord = await findPeerTrustRecordByDevice(eventId, deviceId)
   }
 
+  const isPreviousPseudo = isTemporaryPseudoUser(latestDeviceRecord?.userId)
+  const isIncomingPseudo = isTemporaryPseudoUser(userId)
+
   // Case 1: Same device historically bound to a DIFFERENT real user!
   if (
     latestDeviceRecord &&
-    !isInvalidPseudoUser(latestDeviceRecord.userId) &&
-    !isInvalidPseudoUser(userId) &&
+    !isPreviousPseudo &&
+    !isIncomingPseudo &&
     latestDeviceRecord.userId !== userId
   ) {
     if (!existingRecord || (latestDeviceRecord.lastSeenAt || 0) > (existingRecord.lastSeenAt || 0)) {
@@ -489,11 +519,11 @@ export async function evaluatePeerKeyTrust(params: {
     }
   }
 
-  // Case 1b: Seamless binding when public key matches and either previous or incoming is pseudo/anonymous
+  // Case 1b: Seamless binding when public key matches and either previous or incoming is pseudo/anonymous (e.g. temporary scout-xxx upgraded to real account)
   if (
     latestDeviceRecord &&
     latestDeviceRecord.publicKeyHex.toLowerCase() === publicKeyHex.toLowerCase() &&
-    (isInvalidPseudoUser(latestDeviceRecord.userId) || isInvalidPseudoUser(userId))
+    (isPreviousPseudo || isIncomingPseudo)
   ) {
     latestDeviceRecord.lastSeenAt = Date.now()
     if (userId && !isInvalidPseudoUser(userId)) {

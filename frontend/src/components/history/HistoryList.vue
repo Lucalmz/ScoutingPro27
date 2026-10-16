@@ -87,12 +87,31 @@ function syncTooltip(rec: ScoutingRecord): string {
 function canEditRecord(rec: ScoutingRecord): boolean {
   // 1. Host 账户：拥有最高管理权限，可以更改任何一个人的记录（无论是否已同步）
   if (eventStore.isHost) return true
-  // 2. 普通 Scout 账户：每个用户可以更改属于自己的记录（无论是否已同步）
-  if (userStore.userId && rec.scoutId === userStore.userId) return true
-  // 3. 尚未权威同步/落库的记录（本地待确认记录）：允许编辑修正
-  if (!isRecordSynced(rec)) return true
-  // 4. 冲突记录：发生冲突时允许发起纠错编辑
-  if (rec.isConflict) return true
+
+  // 获取当前登录用户 ID（优先 store，备选 localStorage）
+  const currentUserId = userStore.userId || (() => {
+    try {
+      const cached = localStorage.getItem('scoutingpro-user')
+      return cached ? (JSON.parse(cached)?.id || '') : ''
+    } catch {
+      return ''
+    }
+  })()
+
+  // 2. 如果存在当前用户 ID，且记录明确属于其他人，普通 Scout 绝不允许编辑（包括冲突记录）！
+  if (currentUserId && rec.scoutId && rec.scoutId !== currentUserId) {
+    return false
+  }
+
+  // 3. 普通 Scout 账户只能编辑属于自己的记录（无论是否已同步或是否冲突）
+  if (currentUserId && rec.scoutId === currentUserId) return true
+
+  // 4. 无用户态环境（如未设用户状态的轻量单测）：尚未权威同步的记录或冲突记录允许编辑
+  if (!currentUserId) {
+    if (!isRecordSynced(rec)) return true
+    if (rec.isConflict) return true
+  }
+
   return false
 }
 
@@ -209,6 +228,7 @@ function enter(el: Element, done: () => void) {
         v-for="(rec, index) in sortedRecords"
         :key="rec.id"
         :data-index="index"
+        :data-scout-id="rec.scoutId"
         :id="'history-card-' + rec.id"
         class="history-card"
         :class="{ 

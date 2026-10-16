@@ -14,6 +14,13 @@ export class BackpressureTimeoutError extends Error {
   }
 }
 
+export class SenderAbortedError extends Error {
+  constructor(msg: string) {
+    super(msg)
+    this.name = 'SenderAbortedError'
+  }
+}
+
 export class DataChannelSender {
   private queue: Array<{
     payload: string
@@ -21,6 +28,9 @@ export class DataChannelSender {
     reject: (err: any) => void
   }> = []
   private isProcessing = false
+  private aborted = false
+  /** 当前正在背压等待中的任务的取消句柄（abort 时需要一并拒绝，否则会遗留一个无人观察的 pending 任务） */
+  private cancelBackpressureWait: ((err: Error) => void) | null = null
 
   public readonly BUFFER_HIGH_WATERMARK = 32 * 1024 // 32 KiB
   public readonly BUFFER_LOW_WATERMARK = 16 * 1024  // 16 KiB
@@ -36,7 +46,14 @@ export class DataChannelSender {
     return this.queue.length
   }
 
+  public isAborted(): boolean {
+    return this.aborted
+  }
+
   public enqueueSend(payload: string): Promise<void> {
+    if (this.aborted) {
+      return Promise.reject(new SenderAbortedError('DataChannel sender aborted'))
+    }
     if (this.dc.readyState === 'closed' || this.dc.readyState === 'closing') {
       return Promise.reject(new Error(`DataChannel is not open (state: ${this.dc.readyState})`))
     }
@@ -53,8 +70,31 @@ export class DataChannelSender {
     })
   }
 
+  /**
+   * 发后即忘（fire-and-forget）专用：永不 reject。对端中途断开 / 队列被中止 / 背压超时都只记录日志并返回 false，
+   * 杜绝 “Uncaught (in promise) DataChannel closed while waiting for backpressure relief”。
+   */
+  public enqueueSendQuiet(payload: string, label = 'message'): Promise<boolean> {
+    return this.enqueueSend(payload).then(
+      () => true,
+      (err) => {
+        log.warn(`Dropped ${label}: ${err instanceof Error ? err.message : String(err)}`)
+        return false
+      }
+    )
+  }
+
+  /**
+   * 终止发送器：拒绝队列中所有待发任务，并取消当前正在背压等待中的任务。之后该发送器不再接受新任务。
+   * 通道被拆毁 / 重置 / 被新连接取代时必须调用。
+   */
   public abort(reason = 'DataChannel sender aborted'): void {
-    this.failFastRemaining(new Error(reason))
+    this.aborted = true
+    const error = new SenderAbortedError(reason)
+    this.failFastRemaining(error)
+    const cancel = this.cancelBackpressureWait
+    this.cancelBackpressureWait = null
+    cancel?.(error)
   }
 
   private async processQueue(): Promise<void> {
@@ -70,8 +110,17 @@ export class DataChannelSender {
         task.resolve()
         this.onCongestion?.(false)
       } catch (err) {
-        log.error('Send task failed:', err)
+        if (err instanceof SenderAbortedError) {
+          log.info(`Send task cancelled: ${err.message}`)
+        } else {
+          log.error('Send task failed:', err)
+        }
         task.reject(err)
+
+        if (err instanceof SenderAbortedError) {
+          this.failFastRemaining(err)
+          break
+        }
 
         if (err instanceof BackpressureTimeoutError) {
           log.warn('Backpressure timeout reached. Signaling congestion and aborting remaining queued tasks.')
@@ -127,9 +176,18 @@ export class DataChannelSender {
         const cleanup = () => {
           if (intervalId) clearInterval(intervalId)
           if (timeoutId) clearTimeout(timeoutId)
+          this.cancelBackpressureWait = null
           this.dc.removeEventListener('bufferedamountlow', onLow)
           this.dc.removeEventListener('close', onClose)
           this.dc.removeEventListener('error', onClose)
+        }
+
+        this.cancelBackpressureWait = (err: Error) => {
+          if (!finished) {
+            finished = true
+            cleanup()
+            reject(err)
+          }
         }
 
         const done = () => {

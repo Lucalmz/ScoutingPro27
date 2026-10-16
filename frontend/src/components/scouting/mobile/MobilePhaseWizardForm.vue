@@ -155,7 +155,7 @@ const isDraftRestored = ref(false)
 let draftDebounceTimer: any = null
 
 function saveDraft() {
-  if (props.editRecord) return
+  if (props.editRecord || props.assignedTask) return
   if (typeof localStorage === 'undefined') return
   clearTimeout(draftDebounceTimer)
   draftDebounceTimer = setTimeout(() => {
@@ -177,7 +177,7 @@ function saveDraft() {
 }
 
 function restoreDraft() {
-  if (props.editRecord) return
+  if (props.editRecord || props.assignedTask) return
   if (typeof localStorage === 'undefined') return
   try {
     const raw = localStorage.getItem(draftKey.value)
@@ -262,6 +262,14 @@ const pitSummary = computed(() => {
     autoScore: r.claimedAutoScore ?? 0,
     teleopCycles: r.claimedTeleopCycles ?? 0
   }
+})
+
+const autoCustomDefinitions = computed(() => {
+  return customFieldsStore.getActiveFields?.(props.eventId, 'MATCH', 'auto') || []
+})
+
+const teleopCustomDefinitions = computed(() => {
+  return customFieldsStore.getActiveFields?.(props.eventId, 'MATCH', 'teleop') || []
 })
 
 const customDefinitions = computed(() => {
@@ -1229,6 +1237,11 @@ async function handleSubmit() {
             </div>
           </button>
         </div>
+
+        <!-- Custom Fields (Auto) -->
+        <div v-if="autoCustomDefinitions.length > 0" class="custom-fields-box">
+          <DynamicFieldsRenderer :definitions="autoCustomDefinitions" v-model="team.customFields" />
+        </div>
       </section>
 
       <!-- STEP 2: TELEOP (120s - 盲操核心) -->
@@ -1370,6 +1383,11 @@ async function handleSubmit() {
             <span class="new-cycle-text">{{ t('wizard.next_cycle_btn') }}</span>
             <span class="new-cycle-hint">({{ t('wizard.next_cycle_sub') }})</span>
           </button>
+        </div>
+
+        <!-- Custom Fields (TeleOp) -->
+        <div v-if="teleopCustomDefinitions.length > 0" class="custom-fields-box">
+          <DynamicFieldsRenderer :definitions="teleopCustomDefinitions" v-model="team.customFields" />
         </div>
       </section>
 

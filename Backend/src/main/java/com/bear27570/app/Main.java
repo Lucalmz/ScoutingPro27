@@ -460,11 +460,20 @@ public class Main {
                 frame.addWindowListener(new WindowAdapter() {
                     @Override
                     public void windowClosing(WindowEvent e) {
-                        CefApp.getInstance().dispose();
-                        app.stop();
+                        try {
+                            cefApp.dispose();
+                        } catch (Exception ignored) {}
                         frame.dispose();
-                        // 尝试清理临时缓存目录
-                        deleteDir(cacheDir);
+                        try {
+                            app.stop();
+                        } catch (Exception ignored) {}
+                        // 1. 先释放 JCEF 实例文件锁与数据库连接池
+                        releaseProfileLock();
+                        com.bear27570.app.db.JdbiConfig.closeDataSources();
+                        // 2. 仅清理多开降级产生的临时目录，绝不删除持久化主目录 jcef_profile！
+                        if (cacheDir != null && cacheDir.getName().startsWith("scoutingpro-jcef-")) {
+                            deleteDir(cacheDir);
+                        }
                         System.exit(0);
                     }
                 });

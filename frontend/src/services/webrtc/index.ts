@@ -471,6 +471,23 @@ export function createWebRtcService(callbacks: WebRtcCallbacks): WebRtcService {
 
   function confirmSas(peerId = 'host'): void {
     log.info(`Confirming SAS verification for peer ${peerId}`)
+    if (isHostMode && peerId && peerId !== 'host') {
+      const identity = sas.clientVerifiedIdentities.get(peerId)
+      const effectiveUserId = identity?.userId || peerId
+      const effectiveUsername = identity?.username || peerId
+      if (effectiveUserId) {
+        clientIdToScoutId.set(peerId, effectiveUserId)
+        if (effectiveUsername) {
+          clientIdToScoutName.set(peerId, effectiveUsername)
+        }
+        let cSet = scoutIdToClientIds.get(effectiveUserId)
+        if (!cSet) {
+          cSet = new Set()
+          scoutIdToClientIds.set(effectiveUserId, cSet)
+        }
+        cSet.add(peerId)
+      }
+    }
     sas.confirmSas(peerId, isHostMode, currentInviteCode, callbacks, sendMessage, handleChannelMessage)
     if (isHostMode && peerId && peerId !== 'host') {
       signaling?.send({ type: 'sas_verified', hostSessionId }, peerId)
@@ -583,7 +600,10 @@ export function createWebRtcService(callbacks: WebRtcCallbacks): WebRtcService {
     confirmSas,
     getUsername: resolveCurrentUsername,
     getUserId: resolveCurrentUserId,
-    callbacks
+    callbacks,
+    clientIdToScoutId,
+    clientIdToScoutName,
+    scoutIdToClientIds
   })
 
   const clientSession = createClientSession({
@@ -614,6 +634,7 @@ export function createWebRtcService(callbacks: WebRtcCallbacks): WebRtcService {
     setClientDc: (dc) => {
       clientDc = dc
     },
+    getClientSender: () => clientSender,
     setClientSender: (sender) => {
       clientSender = sender
     },
@@ -1148,8 +1169,13 @@ export function createWebRtcService(callbacks: WebRtcCallbacks): WebRtcService {
         if (localEcdhPubHex) {
           signaling!.send({ type: 'client_hello', ecdhPublicKey: localEcdhPubHex, deviceId: localDeviceId })
         }
-        const isConnectedAndOpen = clientPc && clientPc.connectionState === 'connected' && clientDc && clientDc.readyState === 'open'
-        if (!isConnectedAndOpen) {
+        const isHandshakeActive =
+          (clientPc &&
+            (clientPc.connectionState === 'connected' ||
+              clientPc.connectionState === 'connecting' ||
+              clientPc.iceConnectionState === 'checking')) ||
+          (clientDc && clientDc.readyState === 'open')
+        if (!isHandshakeActive) {
           await clientSession.setupClientConnection()
         }
       },
@@ -1198,16 +1224,16 @@ export function createWebRtcService(callbacks: WebRtcCallbacks): WebRtcService {
           if (localEcdhPubHex) {
             signaling!.send({ type: 'client_hello', ecdhPublicKey: localEcdhPubHex, deviceId: localDeviceId })
           }
-          if (
+          const isHandshakeActive =
             !forceFreshSignaling &&
-            clientPc &&
-            clientPc.connectionState === 'connected' &&
-            clientDc &&
-            clientDc.readyState === 'open'
-          ) {
-            return
+            (((clientPc &&
+              (clientPc.connectionState === 'connected' ||
+                clientPc.connectionState === 'connecting' ||
+                clientPc.iceConnectionState === 'checking')) ||
+              (clientDc && clientDc.readyState === 'open')))
+          if (!isHandshakeActive) {
+            await clientSession.setupClientConnection(false)
           }
-          await clientSession.setupClientConnection(false)
         },
         onError: () => {
           if (status !== 'connected' && (!clientPc || clientPc.connectionState !== 'connected')) {
@@ -1295,6 +1321,9 @@ export function createWebRtcService(callbacks: WebRtcCallbacks): WebRtcService {
       takeoverCooldowns.clear()
       finishTakeoverReconciliation('closed')
     } else {
+      if (clientSender) {
+        try { clientSender.abort('Service disconnected') } catch (_) {}
+      }
       clientSender = null
       clientSession?.hardResetChannels()
       clientDc = null
@@ -1350,6 +1379,7 @@ export function createWebRtcService(callbacks: WebRtcCallbacks): WebRtcService {
     getTransportInfo: () => peerMgr.currentTransportInfo,
     getDataChannel: () => (isHostMode ? clients.values().next().value?.dc || null : clientDc),
     isHostMode: () => isHostMode,
+    isQuarantinedPeer: (peerId: string) => rawHandleChannelMessage.isQuarantinedPeer(peerId),
     requestAccountMerge,
     updateCallbacks: (newCallbacks: Partial<WebRtcCallbacks>) => {
       Object.assign(callbacks, newCallbacks)

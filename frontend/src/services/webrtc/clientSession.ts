@@ -17,7 +17,12 @@ import {
   sortCandidatesPreferIpv6,
   isGlobalIpv6Address,
   cleanIpAddress,
+  shouldAllowTurnForAttempt,
   shouldForceRelayForAttempt,
+  getSilentUpgradeDelayMs,
+  getTransportTier,
+  SILENT_UPGRADE,
+  probeLocalInterfaceIpv6,
   CONNECTION_TIMING
 } from './connectivity'
 import type { SignalingChannel } from './signaling'
@@ -53,6 +58,7 @@ export interface ClientSessionContext {
   setClientPc: (pc: RTCPeerConnection | null) => void
   getClientDc: () => RTCDataChannel | null
   setClientDc: (dc: RTCDataChannel | null) => void
+  getClientSender?: () => DataChannelSender | null
   setClientSender: (sender: DataChannelSender | null) => void
   getClientPendingCandidates: () => any[]
   setClientPendingCandidates: (cands: any[]) => void
@@ -183,12 +189,41 @@ export function createClientSession(ctx: ClientSessionContext) {
     triggerClientReconnect(reason)
   }
 
+  let silentUpgradeTimer: ReturnType<typeof setTimeout> | null = null
+  let silentUpgradeSettleTimer: ReturnType<typeof setTimeout> | null = null
+  let silentUpgradeSettlePollTimer: ReturnType<typeof setInterval> | null = null
+  let silentUpgradeProbeCount = 0
+  let isSilentUpgradeInFlight = false
+
+  function clearSilentUpgradeTimers() {
+    if (silentUpgradeTimer) {
+      clearTimeout(silentUpgradeTimer)
+      silentUpgradeTimer = null
+    }
+    if (silentUpgradeSettleTimer) {
+      clearTimeout(silentUpgradeSettleTimer)
+      silentUpgradeSettleTimer = null
+    }
+    if (silentUpgradeSettlePollTimer) {
+      clearInterval(silentUpgradeSettlePollTimer)
+      silentUpgradeSettlePollTimer = null
+    }
+  }
+
   function hardResetChannels() {
     // 递增纪元：所有旧尝试的异步续体与回调从此刻起全部失效
     attemptEpoch++
     clearReconnectTimer()
     clearConnectWatchdog()
+    clearSilentUpgradeTimers()
     stopDataChannelHeartbeat()
+    silentUpgradeProbeCount = 0
+    isSilentUpgradeInFlight = false
+
+    const oldSender = ctx.getClientSender?.()
+    if (oldSender) {
+      try { oldSender.abort('Client channels hard-reset') } catch (_) {}
+    }
 
     for (const [, resolve] of pendingPings.entries()) {
       resolve(false)
@@ -263,6 +298,178 @@ export function createClientSession(ctx: ClientSessionContext) {
     }, CONNECTION_TIMING.CLIENT_CONNECT_TIMEOUT_MS)
   }
 
+  async function checkAndScheduleSilentUpgrade(immediate = false) {
+    if (ctx.isHostMode?.() || ctx.isExplicitlyClosed()) return
+    const pc = ctx.getClientPc()
+    const dc = ctx.getClientDc()
+    if (!pc || pc.connectionState !== 'connected' || !dc || dc.readyState !== 'open') return
+    if (isSilentUpgradeInFlight) return
+
+    const curInfo = ctx.peerMgr.currentTransportInfo
+    const curType = curInfo?.type
+    const curTier = getTransportTier(curType)
+    // 已经处于最优直连链路（lan_p2p / ipv6_p2p），无需升级
+    if (curTier >= 2) {
+      clearSilentUpgradeTimers()
+      return
+    }
+
+    let hasLocalIpv6 = false
+    try {
+      const localIpv6 = await probeLocalInterfaceIpv6()
+      hasLocalIpv6 = Boolean(localIpv6 && isGlobalIpv6Address(localIpv6))
+    } catch {}
+
+    const delayMs = immediate ? 0 : getSilentUpgradeDelayMs(curType, silentUpgradeProbeCount, hasLocalIpv6)
+    if (delayMs === null) {
+      return
+    }
+
+    if (silentUpgradeTimer) {
+      clearTimeout(silentUpgradeTimer)
+      silentUpgradeTimer = null
+    }
+
+    log.info(
+      `[WebRTC Client] Scheduling silent upgrade probe #${silentUpgradeProbeCount + 1} in ${delayMs}ms (current: ${curType || 'unknown'})`
+    )
+    silentUpgradeTimer = setTimeout(() => {
+      silentUpgradeTimer = null
+      void executeSilentUpgrade()
+    }, delayMs)
+  }
+
+  async function executeSilentUpgrade() {
+    if (isSilentUpgradeInFlight) return
+    const pc = ctx.getClientPc()
+    const dc = ctx.getClientDc()
+    if (!pc || pc.connectionState !== 'connected' || !dc || dc.readyState !== 'open') return
+
+    const curInfo = ctx.peerMgr.currentTransportInfo
+    const baselineTier = getTransportTier(curInfo?.type)
+    if (baselineTier >= 2) return
+
+    isSilentUpgradeInFlight = true
+    silentUpgradeProbeCount++
+    const probeSeq = silentUpgradeProbeCount
+    log.info(
+      `[WebRTC Client] Executing silent in-place ICE restart probe #${probeSeq} (baseline transport: ${curInfo?.type || 'unknown'})`
+    )
+
+    ctx.peerMgr.beginSilentUpgrade(pc)
+    ctx.peerMgr.holdLocalCandidates(pc)
+
+    const epoch = attemptEpoch
+    const currentSessionId = ctx.getClientSessionId()
+
+    try {
+      // 纯直连试探：静默升级彻底不带 TURN，仅依赖 LAN、IPv6 与 IPv4 NAT 候选
+      const offer = await pc.createOffer({ iceRestart: true })
+      if (epoch !== attemptEpoch || ctx.getClientPc() !== pc) {
+        ctx.peerMgr.endSilentUpgrade(pc)
+        isSilentUpgradeInFlight = false
+        return
+      }
+
+      await pc.setLocalDescription(offer)
+      if (epoch !== attemptEpoch || ctx.getClientPc() !== pc) {
+        ctx.peerMgr.endSilentUpgrade(pc)
+        isSilentUpgradeInFlight = false
+        return
+      }
+
+      const rawOffer = {
+        type: offer.type,
+        sdp: optimizeSdpCandidates(pc?.localDescription?.sdp || offer.sdp || ''),
+        deviceId: ctx.getLocalDeviceId(),
+        username: ctx.getUsername?.() || '',
+        userId: ctx.getUserId?.() || '',
+        allowTurn: false,
+        forceRelay: false,
+        iceRestart: true
+      }
+
+      let offerPayload: any = rawOffer
+      if (ctx.sas.clientSharedAesKey) {
+        try {
+          offerPayload = await encryptSignalingData(ctx.sas.clientSharedAesKey, JSON.stringify(rawOffer))
+        } catch (err) {
+          log.warn('Failed to encrypt silent upgrade offer, sending plaintext fallback:', err)
+        }
+      }
+
+      ctx.getSignaling()?.send(
+        {
+          offer: offerPayload,
+          ecdhPublicKey: ctx.getLocalEcdhPubHex(),
+          deviceId: ctx.getLocalDeviceId(),
+          clientSessionId: currentSessionId,
+          hostSessionId: ctx.getCurrentHostSessionId(),
+          username: ctx.getUsername?.() || '',
+          userId: ctx.getUserId?.() || '',
+          allowTurn: false,
+          forceRelay: false,
+          iceRestart: true
+        },
+        ctx.getClientHostSenderId()
+      )
+
+      ctx.peerMgr.releaseLocalCandidates(pc)
+
+      const startTime = Date.now()
+      let upgradeFinished = false
+
+      const finishUpgrade = (succeeded: boolean, newType?: string) => {
+        if (upgradeFinished) return
+        upgradeFinished = true
+        if (silentUpgradeSettleTimer) {
+          clearTimeout(silentUpgradeSettleTimer)
+          silentUpgradeSettleTimer = null
+        }
+        if (silentUpgradeSettlePollTimer) {
+          clearInterval(silentUpgradeSettlePollTimer)
+          silentUpgradeSettlePollTimer = null
+        }
+        ctx.peerMgr.endSilentUpgrade(pc)
+        isSilentUpgradeInFlight = false
+
+        if (succeeded) {
+          log.info(`[WebRTC Client] Silent upgrade SUCCEEDED! Upgraded to ${newType} (in ${Date.now() - startTime}ms)`)
+          if (getTransportTier(newType as any) >= 2) {
+            clearSilentUpgradeTimers()
+          } else {
+            void checkAndScheduleSilentUpgrade()
+          }
+        } else {
+          log.info(`[WebRTC Client] Silent upgrade #${probeSeq} finished without path improvement. Maintaining existing transport.`)
+          void checkAndScheduleSilentUpgrade()
+        }
+      }
+
+      silentUpgradeSettlePollTimer = setInterval(async () => {
+        if (epoch !== attemptEpoch || ctx.getClientPc() !== pc) {
+          finishUpgrade(false)
+          return
+        }
+        await ctx.peerMgr.updateTransportInfo(pc)
+        const newInfo = ctx.peerMgr.currentTransportInfo
+        const newTier = getTransportTier(newInfo?.type)
+        if (newTier > baselineTier) {
+          finishUpgrade(true, newInfo?.type)
+        }
+      }, SILENT_UPGRADE.SETTLE_POLL_MS)
+
+      silentUpgradeSettleTimer = setTimeout(() => {
+        finishUpgrade(false)
+      }, SILENT_UPGRADE.SETTLE_MS)
+    } catch (err) {
+      log.warn(`[WebRTC Client] Silent upgrade offer creation failed:`, err)
+      ctx.peerMgr.endSilentUpgrade(pc)
+      isSilentUpgradeInFlight = false
+      void checkAndScheduleSilentUpgrade()
+    }
+  }
+
   async function doSetupClientConnection(forceRelay = false) {
     hardResetChannels()
     const epoch = attemptEpoch
@@ -276,8 +483,10 @@ export function createClientSession(ctx: ClientSessionContext) {
     if (ctx.getStatus() !== 'connected' && ctx.getStatus() !== 'connecting') {
       ctx.setStatus('connecting')
     }
+
+    const allowTurn = shouldAllowTurnForAttempt(reconnectAttempts) || forceRelay
     log.info(
-      `Initiating setupClientConnection (sessionId: ${newClientSessionId}, epoch: ${epoch}, icePolicy: ${forceRelay ? 'relay' : 'all'}, hostSenderId: ${ctx.getClientHostSenderId() || 'none'}, hostIpv6: ${lastHostIpv6 || 'unknown'})`
+      `Initiating setupClientConnection (sessionId: ${newClientSessionId}, epoch: ${epoch}, allowTurn: ${allowTurn}, icePolicy: ${forceRelay ? 'relay' : 'all'}, hostSenderId: ${ctx.getClientHostSenderId() || 'none'}, hostIpv6: ${lastHostIpv6 || 'unknown'})`
     )
 
     const pc = ctx.peerMgr.createPeerConnection(
@@ -285,7 +494,7 @@ export function createClientSession(ctx: ClientSessionContext) {
       (reason?: string) => failAttempt(epoch, reason || 'peer_failure'),
       forceRelay,
       ctx.getClientHostSenderId(),
-      { sessionTag: newClientSessionId, holdLocalCandidates: true }
+      { sessionTag: newClientSessionId, holdLocalCandidates: true, allowTurn }
     )
     ctx.setClientPc(pc)
 
@@ -311,11 +520,16 @@ export function createClientSession(ctx: ClientSessionContext) {
       reconnectAttempts = 0
       ctx.setStatus('connected')
       startDataChannelHeartbeat()
+      void checkAndScheduleSilentUpgrade()
     }
     dc.onclose = () => {
       if (epoch !== attemptEpoch) return
       log.warn(`DataChannel 'scoutingpro-data' CLOSED (epoch: ${epoch}, sasState: ${ctx.sas.clientSasState})`)
       stopDataChannelHeartbeat()
+      clearSilentUpgradeTimers()
+      isSilentUpgradeInFlight = false
+      const curSender = ctx.getClientSender?.()
+      curSender?.abort('DataChannel closed')
       ctx.setClientSender(null)
       if (ctx.isExplicitlyClosed() || ctx.getStatus() === 'long_offline') return
       if (ctx.sas.clientSasState === 'PENDING_VERIFICATION' || ctx.sas.clientSasState === 'REJECTED') {
@@ -337,14 +551,22 @@ export function createClientSession(ctx: ClientSessionContext) {
 
       let handshakeTicket: string | undefined = undefined
       if (localEcdhPubHex && currentInviteCode) {
+        let ticketTimer: ReturnType<typeof setTimeout> | null = null
         try {
-          const ticketRes = await createWebRtcTicket(currentInviteCode, localEcdhPubHex)
+          const ticketRes = await Promise.race([
+            createWebRtcTicket(currentInviteCode, localEcdhPubHex),
+            new Promise<null>((resolve) => {
+              ticketTimer = setTimeout(() => resolve(null), 1500)
+            })
+          ])
           if (ticketRes && ticketRes.ticket) {
             handshakeTicket = ticketRes.ticket
             log.info('Acquired scoped handshake ticket with pkHash binding.')
           }
         } catch (ticketErr) {
           log.warn('Failed to obtain handshake ticket:', ticketErr)
+        } finally {
+          if (ticketTimer) clearTimeout(ticketTimer)
         }
         if (epoch !== attemptEpoch) return
       }
@@ -356,7 +578,9 @@ export function createClientSession(ctx: ClientSessionContext) {
         ticket: handshakeTicket,
         deviceId: localDeviceId,
         username: ctx.getUsername?.() || '',
-        userId: ctx.getUserId?.() || ''
+        userId: ctx.getUserId?.() || '',
+        allowTurn,
+        forceRelay
       }
 
       let offerPayload: any = rawOffer
@@ -380,7 +604,9 @@ export function createClientSession(ctx: ClientSessionContext) {
         clientSessionId: newClientSessionId,
         hostSessionId: ctx.getCurrentHostSessionId(),
         username: ctx.getUsername?.() || '',
-        userId: ctx.getUserId?.() || ''
+        userId: ctx.getUserId?.() || '',
+        allowTurn,
+        forceRelay
       }, ctx.getClientHostSenderId())
 
       // Offer 已发出：放行暂存的本地候选（保证 Host 先建 PeerConnection 再收候选），并启动建联超时
@@ -537,6 +763,35 @@ export function createClientSession(ctx: ClientSessionContext) {
     const sas = ctx.sas
 
     if (data.type === 'host_heartbeat') {
+      if (data.hostSessionId && !ctx.getCurrentHostSessionId()) {
+        ctx.setCurrentHostSessionId(data.hostSessionId)
+      }
+      if (data.sender && !ctx.getClientHostSenderId()) {
+        ctx.setClientHostSenderId(data.sender)
+      }
+      if (data.ecdhPublicKey && !sas.clientSharedAesKey && localEcdhKeyPair) {
+        try {
+          const hostPub = await importEcdhPublicKey(data.ecdhPublicKey)
+          sas.clientSharedAesKey = await deriveSharedAesKey(localEcdhKeyPair.privateKey, hostPub)
+          await evaluateAndApplyClientTrust(data.ecdhPublicKey, data.deviceId, data.username, data.userId)
+        } catch {}
+      }
+      // 若从机发出的首包 Offer 因订阅时序或无线丢包未被主机收到（卡在 have-local-offer 超过 3.5s），借主机心跳立即重发握手
+      const curPc = ctx.getClientPc()
+      const curDc = ctx.getClientDc()
+      if (
+        ctx.getStatus() === 'connecting' &&
+        !activeSetupPromise &&
+        (!curDc || curDc.readyState !== 'open') &&
+        curPc &&
+        curPc.signalingState === 'have-local-offer' &&
+        lastOfferTimestamp > 0 &&
+        Date.now() - lastOfferTimestamp >= 3500
+      ) {
+        log.info('Host heartbeat received while Offer has been unacknowledged for >3.5s; re-initiating handshake immediately.')
+        void restartClientConnection(ctx.getClientForceRelay())
+        return
+      }
       maybeRecoverOnHostPresence(data)
       return
     }
@@ -888,6 +1143,15 @@ export function createClientSession(ctx: ClientSessionContext) {
     consecutiveFailedPings = 0
   }
 
+  if (typeof window !== 'undefined') {
+    window.addEventListener('online', () => {
+      if (ctx.isHostMode?.() || ctx.isExplicitlyClosed()) return
+      log.info('[WebRTC Client] Network online detected; re-evaluating silent upgrade')
+      silentUpgradeProbeCount = 0
+      void checkAndScheduleSilentUpgrade(true)
+    })
+  }
+
   return {
     setupClientConnection,
     restartClientConnection,
@@ -900,6 +1164,8 @@ export function createClientSession(ctx: ClientSessionContext) {
     startDataChannelHeartbeat,
     stopDataChannelHeartbeat,
     resetOfferTimestamp,
-    hardResetChannels
+    hardResetChannels,
+    checkAndScheduleSilentUpgrade,
+    clearSilentUpgradeTimers
   }
 }

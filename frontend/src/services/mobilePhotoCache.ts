@@ -205,3 +205,37 @@ export async function clearAllMobileCachedPhotos(): Promise<void> {
   })
 }
 
+export async function migrateMobilePhotosEventId(oldEventId: string, newEventId: string): Promise<void> {
+  if (!oldEventId || !newEventId || oldEventId === newEventId) return
+  for (const item of memoryCache.values()) {
+    if (item.eventId === oldEventId) {
+      item.eventId = newEventId
+    }
+  }
+
+  const db = await getDb()
+  if (!db) return
+
+  return new Promise((resolve) => {
+    try {
+      const tx = db.transaction(STORE_NAME, 'readwrite')
+      const store = tx.objectStore(STORE_NAME)
+      const req = store.getAll()
+      req.onsuccess = () => {
+        const all = (req.result || []) as CachedPhotoItem[]
+        for (const item of all) {
+          if (item && item.eventId === oldEventId) {
+            item.eventId = newEventId
+            store.put(item)
+          }
+        }
+        resolve()
+      }
+      req.onerror = () => resolve()
+    } catch {
+      resolve()
+    }
+  })
+}
+
+

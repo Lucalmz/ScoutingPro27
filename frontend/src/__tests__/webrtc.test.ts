@@ -2055,7 +2055,7 @@ describe('WebRTC Security Hardening & SAS Gating (v2)', () => {
     vi.useRealTimers()
   })
 
-  it('connect watchdog times out at 15000ms and escalates retry ladder to iceTransportPolicy: "relay" on attempt 2', async () => {
+  it('connect watchdog times out at 15000ms and preserves pure P2P during attempts 0-2, falls back to TURN on attempt 3, and escalates to relay on attempt 4', async () => {
     vi.useFakeTimers()
 
     global.RTCPeerConnection = vi.fn().mockImplementation(() => ({
@@ -2087,22 +2087,36 @@ describe('WebRTC Security Hardening & SAS Gating (v2)', () => {
     const connectCb = mockMqttClient.on.mock.calls.find((c: any) => c[0] === 'connect')?.[1]
     await connectCb?.()
 
-    // 1st PeerConnection created with default 'all' policy
+    // Attempt 0: 1st PeerConnection created with default 'all' policy, zero TURN
     const firstCallConfig = vi.mocked(global.RTCPeerConnection).mock.calls[0]?.[0]
     expect(firstCallConfig?.iceTransportPolicy).toBe('all')
+    expect(JSON.stringify(firstCallConfig?.iceServers).includes('turn:')).toBe(false)
 
-    // Advance 15000ms (connect timeout) + 1000ms (attempt 1 backoff) -> Attempt 1 (policy: 'all')
+    // Advance 15000ms (connect timeout) + 1000ms (attempt 1 backoff) -> Attempt 1 (policy: 'all', zero TURN)
     await vi.advanceTimersByTimeAsync(16000)
     const secondCallConfig = vi.mocked(global.RTCPeerConnection).mock.calls[1]?.[0]
     expect(secondCallConfig?.iceTransportPolicy).toBe('all')
+    expect(JSON.stringify(secondCallConfig?.iceServers).includes('turn:')).toBe(false)
 
-    // Advance 15000ms (connect timeout) + 2000ms (attempt 2 backoff) -> Attempt 2 escalates to 'relay'
+    // Advance 15000ms (connect timeout) + 2000ms (attempt 2 backoff) -> Attempt 2 (policy: 'all', zero TURN)
     await vi.advanceTimersByTimeAsync(17000)
+    const thirdCallConfig = vi.mocked(global.RTCPeerConnection).mock.calls[2]?.[0]
+    expect(thirdCallConfig?.iceTransportPolicy).toBe('all')
+    expect(JSON.stringify(thirdCallConfig?.iceServers).includes('turn:')).toBe(false)
 
+    // Advance 15000ms (connect timeout) + 4000ms (attempt 3 backoff: 2^2 * 1000) -> Attempt 3 (TURN fallback, policy: 'all')
+    await vi.advanceTimersByTimeAsync(19000)
+    const fourthCallConfig = vi.mocked(global.RTCPeerConnection).mock.calls[3]?.[0]
+    expect(fourthCallConfig?.iceTransportPolicy).toBe('all')
+    expect(JSON.stringify(fourthCallConfig?.iceServers).includes('turn:global.relay.metered.ca')).toBe(true)
+
+    // Advance 15000ms (connect timeout) + 8000ms (attempt 4 backoff: 2^3 * 1000) -> Attempt 4 escalates to 'relay'
+    await vi.advanceTimersByTimeAsync(23000)
     const calls = vi.mocked(global.RTCPeerConnection).mock.calls
-    expect(calls.length).toBeGreaterThanOrEqual(3)
+    expect(calls.length).toBeGreaterThanOrEqual(5)
     const lastCallConfig = calls[calls.length - 1]?.[0]
     expect(lastCallConfig?.iceTransportPolicy).toBe('relay')
+    expect(JSON.stringify(lastCallConfig?.iceServers).includes('turn:global.relay.metered.ca')).toBe(true)
 
     service.disconnect()
     vi.useRealTimers()

@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
-import { DataChannelSender, BackpressureTimeoutError } from '@/services/dataChannelSender'
+import { DataChannelSender, BackpressureTimeoutError, SenderAbortedError } from '@/services/dataChannelSender'
 
 function createMockDataChannel(initialState: RTCDataChannelState = 'open', initialBufferedAmount = 0) {
   const listeners: Record<string, Function[]> = {}
@@ -122,13 +122,50 @@ describe('DataChannelSender', () => {
     const p2 = sender.enqueueSend('payload2')
     const p3 = sender.enqueueSend('payload3')
 
+    const p1Expect = expect(p1).rejects.toThrow(BackpressureTimeoutError)
+    const p2Expect = expect(p2).rejects.toThrow('Queue aborted due to network congestion')
+    const p3Expect = expect(p3).rejects.toThrow('Queue aborted due to network congestion')
+
     // Advance time by 5000ms to trigger backpressure timeout
     vi.advanceTimersByTime(5000)
 
-    await expect(p1).rejects.toThrow(BackpressureTimeoutError)
-    await expect(p2).rejects.toThrow('Queue aborted due to network congestion')
-    await expect(p3).rejects.toThrow('Queue aborted due to network congestion')
-
+    await Promise.all([p1Expect, p2Expect, p3Expect])
     expect(sender.getQueueLength()).toBe(0)
+  })
+
+  it('should cleanly abort active backpressure wait and queued items with SenderAbortedError', async () => {
+    const dc = createMockDataChannel('open', 50 * 1024)
+    const sender = new DataChannelSender(dc)
+
+    const p1 = sender.enqueueSend('payload_in_backpressure')
+    const p2 = sender.enqueueSend('payload_in_queue')
+
+    const p1Expect = expect(p1).rejects.toThrow(SenderAbortedError)
+    const p2Expect = expect(p2).rejects.toThrow(SenderAbortedError)
+
+    expect(sender.isAborted()).toBe(false)
+    sender.abort('Connection torn down')
+    expect(sender.isAborted()).toBe(true)
+
+    await Promise.all([p1Expect, p2Expect])
+    expect(sender.getQueueLength()).toBe(0)
+
+    // After abort, any new enqueueSend rejects immediately
+    await expect(sender.enqueueSend('payload_after_abort')).rejects.toThrow(SenderAbortedError)
+  })
+
+  it('enqueueSendQuiet should never throw or reject on abort or error', async () => {
+    const dc = createMockDataChannel('open', 50 * 1024)
+    const sender = new DataChannelSender(dc)
+
+    const quietPromise = sender.enqueueSendQuiet('quiet_payload', 'test-broadcast')
+    sender.abort('Channel destroyed')
+
+    const result = await quietPromise
+    expect(result).toBe(false)
+
+    // Call after abort
+    const postAbortResult = await sender.enqueueSendQuiet('after_abort')
+    expect(postAbortResult).toBe(false)
   })
 })

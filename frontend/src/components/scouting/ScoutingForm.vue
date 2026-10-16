@@ -773,11 +773,22 @@ const recordStore = useRecordStore()
       <!-- Match Info (Shared) -->
       <section class="form-section">
         <h3><span class="material-icons">push_pin</span> {{ t('scouting.match_info') }}</h3>
-        <div class="field-row">
-          <label class="field">
+        <div class="field-row" style="display: flex; gap: 12px; align-items: flex-end; flex-wrap: wrap;">
+          <label class="field" style="flex: 1; min-width: 140px;">
             <span>{{ t('scouting.match_number') }}</span>
             <input v-model="matchNumber" type="text" inputmode="numeric" placeholder="1-999" :class="{ 'invalid-field': isInvalidFormat(matchNumber) }" />
           </label>
+          <div class="setting-group" style="margin-bottom: 2px;">
+            <span style="font-size: 12px; color: var(--muted-foreground); margin-right: 8px;">{{ (te && te('wizard.tournament_level')) ? t('wizard.tournament_level') : '赛事阶段' }}</span>
+            <div class="segmented-control">
+              <button type="button" :class="{ active: currentTournamentLevel === 'QUALIFICATION' }" @click="currentTournamentLevel = 'QUALIFICATION'; hapticSelection()">
+                {{ (te && te('wizard.level_qual')) ? t('wizard.level_qual') : '资格赛 (Q)' }}
+              </button>
+              <button type="button" :class="{ active: currentTournamentLevel === 'PLAYOFF' }" @click="currentTournamentLevel = 'PLAYOFF'; hapticSelection()">
+                {{ (te && te('wizard.level_playoff')) ? t('wizard.level_playoff') : '淘汰赛 (P)' }}
+              </button>
+            </div>
+          </div>
         </div>
       </section>
 

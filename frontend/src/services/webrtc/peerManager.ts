@@ -48,6 +48,11 @@ export interface CreatePeerConnectionExtras {
    * 若候选先于 Offer 到达 Host，会被挂到 Host 侧仍存在的旧 PeerConnection 上而丢失。
    */
   holdLocalCandidates?: boolean
+  /**
+   * 是否允许在 ICE 配置中携带 TURN。默认 false（纯 STUN / 纯 P2P，绝不产生 relay 候选）；
+   * 仅当多次重试确认无法直连时由 Client 会话层置 true，Host 依据 Offer 中的 allowTurn 对称配置。
+   */
+  allowTurn?: boolean
 }
 
 interface CandidateGate {
@@ -60,6 +65,7 @@ export class PeerConnectionManager {
   private options: PeerConnectionFactoryOptions
   currentTransportInfo: ConnectionTransportInfo | null = null
   private readonly candidateGates = new WeakMap<RTCPeerConnection, CandidateGate>()
+  private readonly silentUpgradePeers = new WeakSet<RTCPeerConnection>()
 
   constructor(options: PeerConnectionFactoryOptions) {
     this.options = options
@@ -179,6 +185,33 @@ export class PeerConnectionManager {
   }
 
   /**
+   * 重新关闭候选闸门（ICE restart 的 Offer 发出前调用）：restart 会产生带新 ufrag 的候选，
+   * 若先于 Offer 抵达对端会因 ufrag 未知而被丢弃，因此与首次握手一样必须保证 Offer → Candidates 的顺序。
+   */
+  holdLocalCandidates(peer: RTCPeerConnection | null | undefined): void {
+    if (!peer) return
+    const gate = this.candidateGates.get(peer)
+    if (gate) gate.open = false
+  }
+
+  /**
+   * 标记该 PeerConnection 正在进行“静默升级”（in-place ICE restart）。
+   * 静默期内：ICE restart 引起的 connectionState=connecting / iceConnectionState=checking 抖动
+   * 不会把 UI 状态翻成 connecting，也不会触发 ICE 停滞提示；真正的 disconnected / failed 仍照常上报。
+   */
+  beginSilentUpgrade(peer: RTCPeerConnection | null | undefined): void {
+    if (peer) this.silentUpgradePeers.add(peer)
+  }
+
+  endSilentUpgrade(peer: RTCPeerConnection | null | undefined): void {
+    if (peer) this.silentUpgradePeers.delete(peer)
+  }
+
+  isSilentUpgrade(peer: RTCPeerConnection | null | undefined): boolean {
+    return Boolean(peer && this.silentUpgradePeers.has(peer))
+  }
+
+  /**
    * 创建 PeerConnection（单一配置、并行打洞）。
    * 设计约束（防止逻辑自锁）：
    * 1. 不再存在“免 STUN 直连 → 超时拆除 → STUN 重建”的串行升级链；IPv6 / LAN / IPv4 NAT / TURN 在同一个 ICE 会话内并行检查。
@@ -196,9 +229,13 @@ export class PeerConnectionManager {
     const isHost = this.options.isHostMode()
     const callbacks = this.options.callbacks
     const sessionTag = extras.sessionTag
-    const config = buildIceConfiguration(forceRelay)
+    const allowTurn = Boolean(extras.allowTurn) || forceRelay
+    const config = buildIceConfiguration(allowTurn, forceRelay)
+    const hasTurn = (config.iceServers || []).some((s) =>
+      (Array.isArray(s.urls) ? s.urls : [s.urls]).some((u) => /^turns?:/i.test(u))
+    )
     log.info(
-      `Creating RTCPeerConnection (isHost: ${isHost}, targetSender: ${targetSender || 'default'}, forceRelay: ${forceRelay}, icePolicy: ${config.iceTransportPolicy}, sessionTag: ${sessionTag || 'none'})`
+      `Creating RTCPeerConnection (isHost: ${isHost}, targetSender: ${targetSender || 'default'}, allowTurn: ${allowTurn}, turnConfigured: ${hasTurn}, forceRelay: ${forceRelay}, icePolicy: ${config.iceTransportPolicy}, sessionTag: ${sessionTag || 'none'})`
     )
     const peer = new RTCPeerConnection(config)
 
@@ -398,7 +435,10 @@ export class PeerConnectionManager {
           }
           break
         default:
-          this.options.setStatus('connecting')
+          // 静默升级（in-place ICE restart）期间数据通道仍在传输，不得把 UI 翻成 connecting
+          if (!this.silentUpgradePeers.has(peer)) {
+            this.options.setStatus('connecting')
+          }
       }
     }
 
@@ -407,6 +447,8 @@ export class PeerConnectionManager {
       log.info(`ICE Connection state changed: ${iceState} (targetSender: ${targetSender || 'host'})`)
 
       if (iceState === 'checking') {
+        // 静默升级期间旧候选对仍在承载数据，不提示 ICE 停滞
+        if (this.silentUpgradePeers.has(peer)) return
         // 仅做 UI 提示：ICE 检查在 IPv6 黑洞 / UDP 丢弃时可能较慢，但绝不在此拆除连接
         if (!stallNoticeTimer) {
           stallNoticeTimer = setTimeout(() => {

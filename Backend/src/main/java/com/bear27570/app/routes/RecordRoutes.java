@@ -71,31 +71,41 @@ public class RecordRoutes {
                         jdbi.useTransaction(handle -> {
                             EventDao eventDao = handle.attach(EventDao.class);
                             RecordDao recordDao = handle.attach(RecordDao.class);
+                            UserDao userDao = handle.attach(UserDao.class);
                             
                             if (!eventDao.isMember(record.getEventId(), userId)) {
                                 throw new io.javalin.http.ForbiddenResponse("Not a member of this event");
                             }
                             
+                            boolean isHost = eventDao.isHost(record.getEventId(), userId);
                             ScoutingRecord existing = recordDao.findById(record.getId());
                             if (existing == null) {
                                 // New record: forcefully bind scoutId to authenticated user
-                                record.setScoutId(userId);
+                                if (!isHost || record.getScoutId() == null || record.getScoutId().isBlank()) {
+                                    record.setScoutId(userId);
+                                }
                                 if (record.getScoutName() == null || record.getScoutName().isBlank()) {
                                     record.setScoutName(userId);
                                 }
                             } else {
                                 // Existing record: only original author or event host can update
-                                boolean isHost = eventDao.isHost(record.getEventId(), userId);
                                 if (!Objects.equals(existing.getScoutId(), userId) && !isHost) {
                                     throw new io.javalin.http.ForbiddenResponse("Cannot modify another scout's record");
                                 }
                                 if (!isHost) {
                                     // Non-host author cannot transfer record ownership to someone else
                                     record.setScoutId(userId);
+                                } else if (record.getScoutId() == null || record.getScoutId().isBlank()) {
+                                    record.setScoutId(existing.getScoutId());
                                 }
                                 if (record.getScoutName() == null || record.getScoutName().isBlank()) {
-                                    record.setScoutName(existing.getScoutName() != null ? existing.getScoutName() : userId);
+                                    record.setScoutName(existing.getScoutName() != null ? existing.getScoutName() : (record.getScoutId() != null ? record.getScoutId() : userId));
                                 }
+                            }
+                            
+                            if (record.getScoutId() != null && !record.getScoutId().isBlank()) {
+                                userDao.ensureScoutUserPlaceholder(record.getScoutId(), record.getScoutName());
+                                eventDao.joinEvent(record.getEventId(), record.getScoutId());
                             }
                             
                             recordDao.upsert(record);
@@ -155,11 +165,16 @@ public class RecordRoutes {
                                         throw new io.javalin.http.ForbiddenResponse("Cannot modify another scout's record");
                                     }
                                 } else {
-                                    if (r.getScoutId() == null || r.getScoutId().isBlank()) {
-                                        r.setScoutId(existing != null ? existing.getScoutId() : userId);
-                                    }
-                                    if (existing != null && !Objects.equals(existing.getScoutId(), r.getScoutId())) {
-                                        throw new io.javalin.http.ForbiddenResponse("Cannot alter the author of an existing record");
+                                    if (!isHost) {
+                                        // Non-host ordinary scout cannot alter the author of an existing record even if stamped
+                                        if (existing != null && !Objects.equals(existing.getScoutId(), r.getScoutId())) {
+                                            throw new io.javalin.http.ForbiddenResponse("Cannot alter the author of an existing record");
+                                        }
+                                    } else {
+                                        // Host is authorized to alter author (e.g. account merge/migration)
+                                        if (existing != null && (r.getScoutId() == null || r.getScoutId().isBlank())) {
+                                            r.setScoutId(existing.getScoutId());
+                                        }
                                     }
                                 }
                                 
@@ -168,7 +183,10 @@ public class RecordRoutes {
                                 }
                                 
                                 // Foreign key safety: Ensure scout user placeholder exists in Host DB before upserting record
-                                userDao.ensureScoutUserPlaceholder(r.getScoutId(), r.getScoutName());
+                                if (r.getScoutId() != null && !r.getScoutId().isBlank()) {
+                                    userDao.ensureScoutUserPlaceholder(r.getScoutId(), r.getScoutName());
+                                    eventDao.joinEvent(r.getEventId(), r.getScoutId());
+                                }
 
                                 r.setSyncStatus("SYNCED");
                                 recordDao.upsert(r);

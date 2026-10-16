@@ -168,7 +168,6 @@ async function runDemo() {
 
     backendProcess.stdout.on('data', onData);
     backendProcess.stderr.on('data', onData);
-  });
     
     backendProcess.on('exit', code => {
       clearTimeout(timeout);
@@ -226,9 +225,9 @@ async function runDemo() {
     await pageHost.type('.modal-overlay input', `DEMO_${Date.now()}`);
     await delay(500);
     await pageHost.click('.btn-confirm');
-    await pageHost.waitForSelector('.event-meta strong');
+    await pageHost.waitForSelector('.event-code strong, .event-meta strong');
 
-    const eventCode = (await pageHost.$eval('.event-meta strong', el => el.textContent)).trim();
+    const eventCode = (await pageHost.$eval('.event-code strong, .event-meta strong', el => el.textContent)).trim();
     
     const choice2 = await promptNextStep(`赛事已创建 [${eventCode}]。接下来展示从机通过 WebRTC 接入房间。`);
     if (choice2 === '0') throw new Error('EARLY_EXIT');
@@ -260,15 +259,21 @@ async function runDemo() {
 
     console.log('\n🎬 第三幕: 极速 P2P 实时数据录入 (多条展示)');
     
-    // Client 去录入页 (Tab 0: Scout)
-    await pageClient.evaluate(() => document.querySelectorAll('.tab-btn')[0].click());
+    // Client 去录入页 (Tab: scout)
+    await pageClient.evaluate(() => {
+      const btn = document.querySelector('.tab-btn[data-tab="scout"]') || document.querySelectorAll('.tab-btn')[0];
+      if (btn) btn.click();
+    });
     await waitForTransition(pageClient);
     
-    // Host 去计分板页监控 (Tab 1: Rankings) 展示爬榜动画
-    await pageHost.evaluate(() => document.querySelectorAll('.tab-btn')[1].click());
+    // Host 去计分板页监控 (Tab: rankings) 展示爬榜动画
+    await pageHost.evaluate(() => {
+      const btn = document.querySelector('.tab-btn[data-tab="rankings"]') || document.querySelectorAll('.tab-btn')[3];
+      if (btn) btn.click();
+    });
     await waitForTransition(pageHost);
     
-    await highlightElement(pageClient, '.scout-form-container', '5. 调查员准备连续录入 15 组比赛数据');
+    await highlightElement(pageClient, '.scouting-form', '5. 调查员准备连续录入 15 组比赛数据');
     
     const records = [
       { match: '1', team: '254', alliance: 'Blue', score: '10' },
@@ -292,26 +297,35 @@ async function runDemo() {
       const rec = records[i];
       await pageClient.waitForSelector('input[placeholder="1-999"]');
       
-      // 先清空输入框
+      // 先清空场次和队伍输入框（新版只有 2 个 numeric input）
       await pageClient.evaluate(() => {
-          const inputs = document.querySelectorAll('input[inputmode="numeric"]');
-          if (inputs.length >= 3) {
-              inputs[0].value = '';
-              inputs[1].value = '';
-              inputs[2].value = '';
-              inputs[0].dispatchEvent(new Event('input', { bubbles: true }));
-              inputs[1].dispatchEvent(new Event('input', { bubbles: true }));
-              inputs[2].dispatchEvent(new Event('input', { bubbles: true }));
-          }
+        const inputs = document.querySelectorAll('input[inputmode="numeric"]');
+        inputs.forEach(inp => {
+          inp.value = '';
+          inp.dispatchEvent(new Event('input', { bubbles: true }));
+        });
       });
       
       const inputs = await pageClient.$$('input[inputmode="numeric"]');
-      await inputs[0].type(rec.match); 
-      await inputs[1].type(rec.team); 
-      // 输入得分以触发排名变动
-      if (inputs.length >= 3) {
-        await inputs[2].type(rec.score); 
-      }
+      if (inputs[0]) await inputs[0].type(rec.match);
+      if (inputs[1]) await inputs[1].type(rec.team);
+
+      // 根据 rec.score 自动点击新版盲操面板的进球键 (.pad-hit-btn) 与新轮次键 (.btn-new-cycle)
+      const targetBalls = Math.max(1, Math.min(16, Math.round(Number(rec.score) / 2)));
+      await pageClient.evaluate((balls) => {
+        const teleopTracker = document.querySelector('.phase-cycle-tracker.phase-teleop') || document.querySelector('.phase-cycle-tracker');
+        if (!teleopTracker) return;
+        const hitBtn = teleopTracker.querySelector('.pad-hit-btn');
+        const newCycleBtn = teleopTracker.querySelector('.btn-new-cycle');
+        for (let b = 0; b < balls; b++) {
+          if (b > 0 && b % 4 === 0 && newCycleBtn && !newCycleBtn.disabled) {
+            newCycleBtn.click();
+          }
+          if (hitBtn && !hitBtn.disabled) {
+            hitBtn.click();
+          }
+        }
+      }, targetBalls);
       
       await pageClient.evaluate((color) => {
           const span = Array.from(document.querySelectorAll('.spdt-labels span')).find(el => el.textContent.includes(color));
@@ -327,48 +341,56 @@ async function runDemo() {
       await delay(i < 3 ? 800 : 300); 
     }
     
-    await highlightElement(pageHost, '.stats-card', '7. 零延迟！计分板瞬间刷新，展示爬榜动态！');
+    await highlightElement(pageHost, '.rankings-panel', '7. 零延迟！计分板瞬间刷新，展示爬榜动态！');
 
     const choice4 = await promptNextStep("数据池已丰富。接下来展示前沿的 View Transitions 平滑动画与 3D 悬浮看板。");
     if (choice4 === '0') throw new Error('EARLY_EXIT');
 
     console.log('\n🎬 第四幕: 极致的丝滑体验与数据看板展示');
     
-    // Client 端展示底部导航切换动画
-    await highlightElement(pageClient, '.bottom-nav', '8. 体验媲美原生 App 的 View Transitions 视口动画');
-    const tabsClient = await pageClient.$$('.tab-btn');
-    if (tabsClient.length >= 3) {
-      await tabsClient[1].click(); // 去 Rankings(Dashboard)
-      await waitForTransition(pageClient);
-      await delay(1000);
-      await tabsClient[2].click(); // 去 History 页
-      await waitForTransition(pageClient);
-      await delay(1000);
-      await tabsClient[0].click(); // 回 Scout 页
-      await waitForTransition(pageClient);
-    }
+    // Client 端展示导航切换动画
+    await highlightElement(pageClient, '.tab-bar, .mobile-bottom-nav', '8. 体验媲美原生 App 的 View Transitions 视口动画');
+    await pageClient.evaluate(() => {
+      const btn = document.querySelector('.tab-btn[data-tab="rankings"]') || document.querySelectorAll('.tab-btn')[3];
+      if (btn) btn.click();
+    });
+    await waitForTransition(pageClient);
+    await delay(1000);
+    await pageClient.evaluate(() => {
+      const btn = document.querySelector('.tab-btn[data-tab="history"]') || document.querySelectorAll('.tab-btn')[4];
+      if (btn) btn.click();
+    });
+    await waitForTransition(pageClient);
+    await delay(1000);
+    await pageClient.evaluate(() => {
+      const btn = document.querySelector('.tab-btn[data-tab="scout"]') || document.querySelectorAll('.tab-btn')[0];
+      if (btn) btn.click();
+    });
+    await waitForTransition(pageClient);
     
-    // Host 端回到 Dashboard 展示 3D Card 悬浮
-    await pageHost.evaluate(() => document.querySelectorAll('.tab-btn')[1].click());
+    // Host 端回到 Rankings 展示看板交互
+    await pageHost.evaluate(() => {
+      const btn = document.querySelector('.tab-btn[data-tab="rankings"]') || document.querySelectorAll('.tab-btn')[3];
+      if (btn) btn.click();
+    });
     await waitForTransition(pageHost);
-    await highlightElement(pageHost, '.stats-card', '9. 计分板已汇总数据，物理引擎级 3D 倾斜交互');
+    await highlightElement(pageHost, '.rankings-panel', '9. 计分板已汇总数据，物理引擎级 3D 倾斜交互');
     
     const cardRect = await pageHost.evaluate(() => {
-      const card = document.querySelector('.stats-card');
+      const card = document.querySelector('.rankings-panel');
       if (!card) return null;
       const rect = card.getBoundingClientRect();
       return { x: rect.left, y: rect.top, w: rect.width, h: rect.height };
     });
     
     if (cardRect) {
-      // 模拟鼠标在卡片四周滑动以触发 3D tilt
       const cx = cardRect.x + cardRect.w / 2;
       const cy = cardRect.y + cardRect.h / 2;
       await pageHost.mouse.move(cx - 30, cy - 30, { steps: 5 });
       await delay(500);
       await pageHost.mouse.move(cx + 40, cy + 30, { steps: 5 });
       await delay(800);
-      await pageHost.mouse.move(0, 0); // 移开
+      await pageHost.mouse.move(0, 0);
     }
     
     // 最后再秀一下 Inbox
@@ -394,8 +416,11 @@ async function runDemo() {
     console.log('\n🎬 第六幕: 主机下发指令，Inbox 荧光接收');
     
     // Host 切到 Scouts 页面
-    await highlightElement(pageHost, '.tab-btn:nth-child(4)', '13. 主机切换到人员管理页');
-    await pageHost.evaluate(() => document.querySelectorAll('.tab-btn')[3].click());
+    await highlightElement(pageHost, '.tab-btn[data-tab="scouts"]', '13. 主机切换到人员管理页');
+    await pageHost.evaluate(() => {
+      const btn = document.querySelector('.tab-btn[data-tab="scouts"]') || document.querySelectorAll('.tab-btn')[6];
+      if (btn) btn.click();
+    });
     await waitForTransition(pageHost);
     
     // 拦截 Prompt 并自动发送消息

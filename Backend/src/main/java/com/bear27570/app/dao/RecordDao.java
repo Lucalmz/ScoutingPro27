@@ -19,10 +19,10 @@ public interface RecordDao {
             :matchNumber, :teamNumber,
             :autoScore, :teleopScore, :endgameScore, :totalScore,
             :notes, :rawData, :syncStatus, :isBroken, :isDeleted,
-            COALESCE(NULLIF(TRIM(:createdAt), ''), CURRENT_TIMESTAMP),
+            COALESCE(CAST(REPLACE(REPLACE(NULLIF(TRIM(:createdAt), ''), 'T', ' '), 'Z', '') AS TIMESTAMP), CURRENT_TIMESTAMP),
             CASE 
-                WHEN NULLIF(TRIM(:updatedAt), '') IS NOT NULL AND NULLIF(TRIM(:updatedAt), '') > DATEADD('SECOND', 5, CURRENT_TIMESTAMP) THEN CURRENT_TIMESTAMP
-                ELSE COALESCE(NULLIF(TRIM(:updatedAt), ''), CURRENT_TIMESTAMP)
+                WHEN NULLIF(TRIM(:updatedAt), '') IS NOT NULL AND CAST(REPLACE(REPLACE(NULLIF(TRIM(:updatedAt), ''), 'T', ' '), 'Z', '') AS TIMESTAMP) > DATEADD('SECOND', 5, CURRENT_TIMESTAMP) THEN CURRENT_TIMESTAMP
+                ELSE COALESCE(CAST(REPLACE(REPLACE(NULLIF(TRIM(:updatedAt), ''), 'T', ' '), 'Z', '') AS TIMESTAMP), CURRENT_TIMESTAMP)
             END,
             :version, :hostSeq
         )) AS src (
@@ -39,9 +39,9 @@ public interface RecordDao {
             OR (
                 src.version = COALESCE(target.version, 0) 
                 AND (
-                    src.updated_at > COALESCE(target.updated_at, '1970-01-01 00:00:00')
+                    src.updated_at > COALESCE(target.updated_at, TIMESTAMP '1970-01-01 00:00:00')
                     OR (
-                        src.updated_at = COALESCE(target.updated_at, '1970-01-01 00:00:00')
+                        src.updated_at = COALESCE(target.updated_at, TIMESTAMP '1970-01-01 00:00:00')
                         AND src.scout_id >= COALESCE(target.scout_id, '')
                     )
                 )

@@ -145,8 +145,8 @@ onMounted(async () => {
       await eventStore.fetchEvents(userStore.userId)
       evt = eventStore.events.find((e) => e.id === eventId.value)
     }
-    if (!evt && eventId.value.toLowerCase().startsWith('evt-')) {
-      const code = eventId.value.replace(/^evt-/i, '')
+    if (!evt && /^(evt-|ext_)/i.test(eventId.value)) {
+      const code = eventId.value.replace(/^(evt-|ext_)/i, '')
       evt = {
         id: eventId.value,
         name: `Event ${code.toUpperCase()}`,
@@ -235,12 +235,14 @@ onBeforeRouteLeave((to) => {
 
 onBeforeRouteUpdate((to, from) => {
   if (to.params.eventId !== from.params.eventId) {
+    const fromIdUpper = typeof from.params.eventId === 'string' ? from.params.eventId.trim().toUpperCase() : ''
+    const codeUpper = eventStore.currentEvent?.inviteCode?.trim().toUpperCase() || ''
     const isPlaceholderPromotion = Boolean(
       eventStore.currentEvent &&
       eventStore.currentEvent.id === to.params.eventId &&
-      typeof from.params.eventId === 'string' &&
-      eventStore.currentEvent.inviteCode &&
-      from.params.eventId.toUpperCase() === `EVT-${eventStore.currentEvent.inviteCode.toUpperCase()}`
+      fromIdUpper &&
+      codeUpper &&
+      (fromIdUpper === `EVT-${codeUpper}` || fromIdUpper === `EXT_${codeUpper}`)
     )
     if (isPlaceholderPromotion) {
       console.log('[EventView] Skipping WebRTC cleanup during placeholder promotion')
@@ -286,14 +288,23 @@ async function onRecordSubmitted(recordOrRecords: ScoutingRecord | ScoutingRecor
     const deduplicatedRecords = Array.from(new Map(allToPush.map((r) => [r.id, r])).values())
     // Host 本地写入也要打 hostSeq 并持久化落库，确保重启后单调递增及 Client 重连能增量同步（Standby 备用端不打序号，由主控端统一处理）
     if (eventStore.isHost && !connStore.isStandbyHost) {
+      for (const r of deduplicatedRecords) {
+        r.hostSeq = undefined
+      }
       connStore.stampHostSeq(deduplicatedRecords)
       try {
         await syncRecords(deduplicatedRecords)
       } catch (e) {
         console.error('[EventView] Failed to sync stamped records to DB:', e)
       }
+      connStore.pushIfNeeded(deduplicatedRecords)
+    } else {
+      // 非主机客户端：只推送属于自己的记录！绝不越权推送其他人被 reassessConflicts 影响的记录
+      const myOnlyRecords = deduplicatedRecords.filter((r) => r.scoutId === userStore.userId)
+      if (myOnlyRecords.length > 0) {
+        connStore.pushIfNeeded(myOnlyRecords)
+      }
     }
-    connStore.pushIfNeeded(deduplicatedRecords)
   }
   editingRecord.value = null // clear edit state after submit
 }

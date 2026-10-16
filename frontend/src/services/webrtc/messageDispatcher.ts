@@ -237,8 +237,14 @@ export function createMessageDispatcher(ctx: MessageDispatcherContext) {
     const authToken = isHost ? undefined : getLocalAuthToken()
     const currentInviteCode = ctx.getCurrentInviteCode()
     const hostSessionId = ctx.getHostSessionId()
-    const localUserId = ctx.getLocalUserId()
-    const localUserName = ctx.getLocalUserName()
+
+    const fallbackUserId = ctx.getLocalUserId() || records?.[0]?.scoutId
+    const fallbackUsername = ctx.getLocalUserName() || records?.[0]?.scoutName
+    if (fallbackUserId && !ctx.getLocalUserId()) ctx.setLocalUserId(fallbackUserId)
+    if (fallbackUsername && !ctx.getLocalUserName()) ctx.setLocalUserName(fallbackUsername)
+
+    const effectiveUserId = isHost ? undefined : (ctx.getLocalUserId() || fallbackUserId)
+    const effectiveUsername = isHost ? undefined : (ctx.getLocalUserName() || fallbackUsername)
 
     if (!records || records.length === 0) {
       return sendMessage(
@@ -246,8 +252,8 @@ export function createMessageDispatcher(ctx: MessageDispatcherContext) {
           type: 'SYNC_DATA',
           records: [],
           authCode: currentInviteCode,
-          senderUserId: isHost ? undefined : localUserId,
-          senderUserName: isHost ? undefined : localUserName,
+          senderUserId: effectiveUserId,
+          senderUserName: effectiveUsername,
           token: authToken,
           hostSessionId: isHost ? hostSessionId : undefined
         },
@@ -263,8 +269,8 @@ export function createMessageDispatcher(ctx: MessageDispatcherContext) {
             type: 'SYNC_DATA',
             records: chunk,
             authCode: currentInviteCode,
-            senderUserId: isHost ? undefined : localUserId,
-            senderUserName: isHost ? undefined : localUserName,
+            senderUserId: effectiveUserId,
+            senderUserName: effectiveUsername,
             token: authToken,
             hostSessionId: isHost ? hostSessionId : undefined
           },

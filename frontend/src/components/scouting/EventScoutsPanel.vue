@@ -122,7 +122,9 @@ function exportRankingsCSV() {
     ? ['队伍', '场数', '抛锚场次', '场均Auto', '场均Teleop', '场均Endgame', '最高分', '平均评分', '趋势', ...customHeaders]
     : ['Team', 'Matches', 'Breakdown Count', 'Avg Auto', 'Avg Teleop', 'Avg Endgame', 'Max Score', 'Avg Rating', 'Trend', ...customHeaders]
   const rows = recordStore.rankings.map(r => {
-    const teamRecs = recordStore.activeRecords.filter(rec => rec.teamNumber === r.teamNumber && !rec.isBroken)
+    const teamRecs = recordStore.activeRecords.filter(
+      rec => (!props.event?.id || rec.eventId === props.event.id) && rec.teamNumber === r.teamNumber && !rec.isBroken
+    )
     const customCells = activeCustomFields.map(f => {
       if (teamRecs.length === 0) return '-'
       if (f.fieldType === 'boolean') {
@@ -130,10 +132,11 @@ function exportRankingsCSV() {
         let total = 0
         for (const rec of teamRecs) {
           try {
-            const raw = JSON.parse(rec.rawData)
-            if (raw.customFields && raw.customFields[f.fieldKey] !== undefined) {
+            const raw = typeof rec.rawData === 'string' ? JSON.parse(rec.rawData) : (rec.rawData || {})
+            const val = (rec as any).customFields?.[f.fieldKey] ?? raw.customFields?.[f.fieldKey]
+            if (val !== undefined && val !== null) {
               total++
-              if (raw.customFields[f.fieldKey]) count++
+              if (val === true || val === 'true' || val === 1) count++
             }
           } catch {}
         }
@@ -143,11 +146,14 @@ function exportRankingsCSV() {
         let count = 0
         for (const rec of teamRecs) {
           try {
-            const raw = JSON.parse(rec.rawData)
-            const v = raw.customFields?.[f.fieldKey]
-            if (typeof v === 'number') {
-              sum += v
-              count++
+            const raw = typeof rec.rawData === 'string' ? JSON.parse(rec.rawData) : (rec.rawData || {})
+            const val = (rec as any).customFields?.[f.fieldKey] ?? raw.customFields?.[f.fieldKey]
+            if (val !== undefined && val !== null && val !== '') {
+              const num = Number(val)
+              if (!isNaN(num)) {
+                sum += num
+                count++
+              }
             }
           } catch {}
         }

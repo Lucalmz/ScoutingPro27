@@ -3,10 +3,15 @@ import {
   probeLocalInterfaceIpv6,
   resetLocalIpv6ProbeCache,
   buildIceConfiguration,
+  PURE_STUN_SERVERS,
   STUN_SERVERS,
+  TURN_SERVERS,
   isGlobalIpv6Address,
   CONNECTION_TIMING,
-  shouldForceRelayForAttempt
+  shouldAllowTurnForAttempt,
+  shouldForceRelayForAttempt,
+  SILENT_UPGRADE,
+  getSilentUpgradeDelayMs
 } from '@/services/webrtc/connectivity'
 import { PeerConnectionManager, type PeerConnectionFactoryOptions } from '@/services/webrtc/peerManager'
 import * as api from '@/services/api'
@@ -28,27 +33,74 @@ describe('Parallel Dual-Stack ICE & Non-Locking Hole Punching Architecture', () 
     vi.useRealTimers()
   })
 
-  describe('buildIceConfiguration specification', () => {
-    it('initializes single-PC with all STUN/TURN servers under iceTransportPolicy: "all" by default', () => {
+  describe('buildIceConfiguration & Zero-TURN specification', () => {
+    it('initializes default config with 100% pure STUN and zero TURN servers', () => {
       const config = buildIceConfiguration(false)
-      expect(config.iceServers).toEqual(STUN_SERVERS.iceServers)
+      expect(config.iceServers).toEqual(PURE_STUN_SERVERS.iceServers)
       expect(config.iceTransportPolicy).toBe('all')
       expect(config.iceCandidatePoolSize).toBe(2)
+
+      // 验证绝不包含任何 turn: 或 turns: 条目
+      const serialized = JSON.stringify(config.iceServers)
+      expect(serialized.includes('turn:')).toBe(false)
+      expect(serialized.includes('turns:')).toBe(false)
     })
 
-    it('builds relay-only config when forceRelay is specified for escalation attempts', () => {
-      const config = buildIceConfiguration(true)
-      expect(config.iceServers).toEqual(STUN_SERVERS.iceServers)
+    it('includes TURN servers only when allowTurn is explicitly true', () => {
+      const config = buildIceConfiguration(true, false)
+      expect(config.iceServers.length).toBe(
+        (PURE_STUN_SERVERS.iceServers?.length || 0) + TURN_SERVERS.length
+      )
+      expect(config.iceTransportPolicy).toBe('all')
+      const serialized = JSON.stringify(config.iceServers)
+      expect(serialized.includes('turn:global.relay.metered.ca')).toBe(true)
+    })
+
+    it('builds relay-only config when forceRelay is true', () => {
+      const config = buildIceConfiguration(true, true)
       expect(config.iceTransportPolicy).toBe('relay')
+      const serialized = JSON.stringify(config.iceServers)
+      expect(serialized.includes('turn:global.relay.metered.ca')).toBe(true)
     })
 
-    it('shouldForceRelayForAttempt implements escalation ladder: all -> all -> relay -> all -> relay', () => {
+    it('shouldAllowTurnForAttempt permits TURN only at attempt >= 3 (Zero-TURN by default)', () => {
+      expect(shouldAllowTurnForAttempt(0)).toBe(false)
+      expect(shouldAllowTurnForAttempt(1)).toBe(false)
+      expect(shouldAllowTurnForAttempt(2)).toBe(false)
+      expect(shouldAllowTurnForAttempt(3)).toBe(true)
+      expect(shouldAllowTurnForAttempt(4)).toBe(true)
+    })
+
+    it('shouldForceRelayForAttempt implements escalation ladder after attempt 3: attempt 4/6 relay', () => {
       expect(shouldForceRelayForAttempt(1)).toBe(false)
-      expect(shouldForceRelayForAttempt(2)).toBe(true)
+      expect(shouldForceRelayForAttempt(2)).toBe(false)
       expect(shouldForceRelayForAttempt(3)).toBe(false)
       expect(shouldForceRelayForAttempt(4)).toBe(true)
       expect(shouldForceRelayForAttempt(5)).toBe(false)
       expect(shouldForceRelayForAttempt(6)).toBe(true)
+    })
+
+    it('calculates silent upgrade exponential backoff delay correctly capped at 300s', () => {
+      // Relay tier: backoff 20s -> 40s -> 80s -> 160s -> 300s (cap)
+      expect(getSilentUpgradeDelayMs('relay', 0, false)).toBe(20000)
+      expect(getSilentUpgradeDelayMs('relay', 1, false)).toBe(40000)
+      expect(getSilentUpgradeDelayMs('relay', 2, false)).toBe(80000)
+      expect(getSilentUpgradeDelayMs('relay', 3, false)).toBe(160000)
+      expect(getSilentUpgradeDelayMs('relay', 4, false)).toBe(300000)
+      expect(getSilentUpgradeDelayMs('relay', 5, false)).toBe(300000)
+
+      // NAT P2P with IPv6 available: 60s -> 180s -> 600s -> null (max 3 probes)
+      expect(getSilentUpgradeDelayMs('nat_p2p', 0, true)).toBe(60000)
+      expect(getSilentUpgradeDelayMs('nat_p2p', 1, true)).toBe(180000)
+      expect(getSilentUpgradeDelayMs('nat_p2p', 2, true)).toBe(600000)
+      expect(getSilentUpgradeDelayMs('nat_p2p', 3, true)).toBe(null)
+
+      // NAT P2P without IPv6: null
+      expect(getSilentUpgradeDelayMs('nat_p2p', 0, false)).toBe(null)
+
+      // Optimal direct tier (LAN / IPv6): null
+      expect(getSilentUpgradeDelayMs('lan_p2p', 0, true)).toBe(null)
+      expect(getSilentUpgradeDelayMs('ipv6_p2p', 0, true)).toBe(null)
     })
   })
 

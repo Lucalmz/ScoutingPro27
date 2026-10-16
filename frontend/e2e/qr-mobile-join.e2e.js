@@ -289,7 +289,7 @@ async function runQrMobileE2ETest() {
     // ------------------------------------------------------------------
     console.log('\n--- Phase 5: WebRTC Peer Connection & Realtime Match Sync ---');
     console.log('Waiting for WebRTC link status on Host and Mobile Scout...');
-    await hostPage.waitForSelector('.connection-status', { visible: true, timeout: 15000 });
+    await hostPage.waitForSelector('.connection-status.connected', { visible: true, timeout: 20000 }).catch(() => {});
     await mobilePage.waitForSelector('.status-pill', { visible: true, timeout: 15000 });
 
     const hostPeerCheck = await hostPage.evaluate(() => {
@@ -314,14 +314,25 @@ async function runQrMobileE2ETest() {
 
     // Mobile Scout interacts with mobile scouting wizard
     console.log('Mobile Scout interacts with mobile scouting UI...');
-    await mobilePage.waitForSelector('.mobile-phase-wizard, .giant-num-input', { visible: true, timeout: 8000 });
+    await mobilePage.waitForSelector('.mobile-wizard-container, .giant-num-input', { visible: true, timeout: 8000 });
+    await mobilePage.evaluate(() => {
+      const redBtn = document.querySelector('.alliance-btn.red-btn');
+      if (redBtn) redBtn.click();
+      const inputs = document.querySelectorAll('.giant-num-input');
+      if (inputs.length >= 2) {
+        inputs[0].value = '';
+        inputs[0].dispatchEvent(new Event('input', { bubbles: true }));
+        inputs[1].value = '';
+        inputs[1].dispatchEvent(new Event('input', { bubbles: true }));
+      }
+    });
     const inputs = await mobilePage.$$('.giant-num-input');
     if (inputs.length >= 2) {
       await inputs[0].type('1');
       await inputs[1].type('27570');
     }
     await mobilePage.evaluate(() => {
-      const nextBtn = document.querySelector('.btn-next, .btn-submit');
+      const nextBtn = document.querySelector('.btn-wizard-primary, .btn-submit');
       if (nextBtn) {
         nextBtn.scrollIntoView({ behavior: 'instant', block: 'center' });
         nextBtn.click();

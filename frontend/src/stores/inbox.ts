@@ -107,8 +107,16 @@ export const useInboxStore = defineStore('inbox', () => {
   }
 
   function clearAllMessages() {
+    const inboxKey = getInboxStorageKey()
+    const outboxKey = getOutboxStorageKey()
     messages.value = []
     outbox.value = []
+    if (typeof localStorage !== 'undefined') {
+      try {
+        if (inboxKey) localStorage.removeItem(inboxKey)
+        if (outboxKey) localStorage.removeItem(outboxKey)
+      } catch {}
+    }
   }
 
   async function sendDirectMessage(

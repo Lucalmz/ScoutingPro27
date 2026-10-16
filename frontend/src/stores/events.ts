@@ -40,7 +40,8 @@ export const useEventStore = defineStore('events', () => {
         name,
         inviteCode
       }
-      if (!id.startsWith('evt-') && inviteCode) {
+      const isPlaceholder = id.toLowerCase().startsWith('evt-') || (Boolean(inviteCode) && id.toUpperCase() === `EXT_${inviteCode}`)
+      if (!isPlaceholder && inviteCode) {
         codeToAuthoritative.set(inviteCode, sanitized)
       }
     }
@@ -51,7 +52,8 @@ export const useEventStore = defineStore('events', () => {
       const id = String(item.id || '').trim()
       if (!id || seenIds.has(id)) continue
       const inviteCode = String(item.inviteCode || '').trim().toUpperCase()
-      if (id.startsWith('evt-') && inviteCode && codeToAuthoritative.has(inviteCode)) {
+      const isPlaceholder = id.toLowerCase().startsWith('evt-') || (Boolean(inviteCode) && id.toUpperCase() === `EXT_${inviteCode}`)
+      if (isPlaceholder && inviteCode && codeToAuthoritative.has(inviteCode)) {
         continue
       }
       const rawName = typeof item.name === 'string' ? item.name.trim() : ''
@@ -292,8 +294,23 @@ export const useEventStore = defineStore('events', () => {
         localStorage.removeItem(`sp27_pit_records_${eventId}`)
         localStorage.removeItem(`sp27_pit_teams_${eventId}`)
         localStorage.removeItem(`sp27_cf_${eventId}`)
+        localStorage.removeItem(`sp27_custom_fields_${eventId}`)
         localStorage.removeItem(`sp27_team_tags_${eventId}`)
         localStorage.removeItem(`sp27_known_scouts_${eventId}`)
+        localStorage.removeItem(`sp27_lastHostSeq_${eventId}`)
+        // 同步清理全局合并存储中属于该赛事的记录与标签
+        try {
+          const rawRecs = localStorage.getItem('scoutingpro_records')
+          if (rawRecs) {
+            const kept = JSON.parse(rawRecs).filter((r: any) => r.eventId !== eventId)
+            localStorage.setItem('scoutingpro_records', JSON.stringify(kept))
+          }
+          const rawTags = localStorage.getItem('scoutingpro_tags')
+          if (rawTags) {
+            const keptTags = JSON.parse(rawTags).filter((t: any) => t.eventId !== eventId)
+            localStorage.setItem('scoutingpro_tags', JSON.stringify(keptTags))
+          }
+        } catch {}
       } catch {}
     }
     try {
@@ -313,7 +330,7 @@ export const useEventStore = defineStore('events', () => {
       const eId = (e.id || '').trim().toLowerCase()
       const eCode = (e.inviteCode || '').trim().toUpperCase()
       if (eId === targetPlaceholder || e.id === authoritativeEvent.id) return false
-      if (eId.startsWith('evt-') && authInviteCode && eCode === authInviteCode) return false
+      if ((eId.startsWith('evt-') || eId.startsWith('ext_')) && authInviteCode && eCode === authInviteCode) return false
       return true
     })
     cleanList.push(authoritativeEvent)
@@ -352,7 +369,9 @@ export const useEventStore = defineStore('events', () => {
               key.startsWith('scoutingpro27_') ||
               key.startsWith('sp27_') ||
               key.startsWith('sp_inbox_') ||
-              key.startsWith('sp_outbox_'))
+              key.startsWith('sp_outbox_') ||
+              key.startsWith('inbox-messages-') ||
+              key.startsWith('inbox-outbox-'))
           ) {
             toRemove.push(key)
           }

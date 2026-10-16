@@ -178,12 +178,18 @@ async function capture() {
       await delay(2500);
       await waitForTransition(mobilePage);
 
-      // 在移动端录入界面稍微输入一些信息显得真实
+      // 在移动端向导界面选中红方联盟并填入场次 12 与战队 27570
       await mobilePage.evaluate(() => {
-        const matchInput = document.querySelector('input[name="matchNumber"], input[placeholder*="Match"], input[type="number"]');
-        if (matchInput) {
-          matchInput.value = '12';
-          matchInput.dispatchEvent(new Event('input', { bubbles: true }));
+        const redBtn = document.querySelector('.alliance-btn.red-btn');
+        if (redBtn) redBtn.click();
+        const numInputs = document.querySelectorAll('.giant-num-input, input[type="number"]');
+        if (numInputs[0]) {
+          numInputs[0].value = '12';
+          numInputs[0].dispatchEvent(new Event('input', { bubbles: true }));
+        }
+        if (numInputs[1]) {
+          numInputs[1].value = '27570';
+          numInputs[1].dispatchEvent(new Event('input', { bubbles: true }));
         }
       });
       await delay(600);

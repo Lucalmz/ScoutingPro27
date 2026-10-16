@@ -61,10 +61,16 @@ interface PhotoChunkBuffer {
 
 const photoChunkBuffers = new Map<string, PhotoChunkBuffer>()
 
-export function createChannelMessageHandler(ctx: ChannelMessageHandlerContext) {
-  const OFFLINE_MSG_TTL_MS = 10 * 60 * 1000
+export type ChannelMessageHandler = ((ev: MessageEvent, senderId?: string) => Promise<void>) & {
+  isQuarantinedPeer: (senderId: string) => boolean
+  clearQuarantine: (senderId: string) => void
+}
 
-  return async function handleChannelMessage(ev: MessageEvent, senderId?: string): Promise<void> {
+export function createChannelMessageHandler(ctx: ChannelMessageHandlerContext): ChannelMessageHandler {
+  const OFFLINE_MSG_TTL_MS = 10 * 60 * 1000
+  const quarantinedSenders = new Set<string>()
+
+  const handler = async function handleChannelMessage(ev: MessageEvent, senderId?: string): Promise<void> {
     const msg = safeJsonParse<WebRtcMessage>(ev.data)
     if (!msg) {
       log.warn('Ignored invalid or malformed data-channel message payload')
@@ -84,6 +90,21 @@ export function createChannelMessageHandler(ctx: ChannelMessageHandlerContext) {
 
     const isHostMode = ctx.isHostMode()
     const callbacks = ctx.callbacks
+
+    const normalizeIncomingEventId = (rawEventId?: string): string | undefined => {
+      if (!rawEventId || !isHostMode) return rawEventId
+      const hostAuthEventId = ctx.getCurrentEventId?.()
+      const rawUpper = rawEventId.trim().toUpperCase()
+      const codeUpper = (currentInviteCode || '').trim().toUpperCase()
+      if (
+        hostAuthEventId &&
+        codeUpper &&
+        (rawUpper === `EVT-${codeUpper}` || rawUpper === `EXT_${codeUpper}`)
+      ) {
+        return hostAuthEventId
+      }
+      return rawEventId
+    }
 
     if (isHostMode && senderId && ctx.stagedClients?.has(senderId)) {
       const staged = ctx.stagedClients.get(senderId)
@@ -209,8 +230,9 @@ export function createChannelMessageHandler(ctx: ChannelMessageHandlerContext) {
 
               if (conflictingExistingId) {
                 console.warn(
-                  `[WebRTC Host] Detected duplicate name conflict for username "${senderUserName}" (different userId ${senderUserId} vs existing ${conflictingExistingId}). Prompting to rename or merge.`
+                  `[WebRTC Host] Detected duplicate name conflict for username "${senderUserName}" (different userId ${senderUserId} vs existing ${conflictingExistingId}). Placing client ${senderId} in quarantine.`
                 )
+                quarantinedSenders.add(senderId)
                 const randomSuffix = Math.floor(10 + Math.random() * 90)
                 ctx.sendMessage(
                   {
@@ -224,6 +246,9 @@ export function createChannelMessageHandler(ctx: ChannelMessageHandlerContext) {
                   senderId
                 )
                 return
+              } else {
+                // 已无同名冲突（已重命名或合法合并），解除隔离
+                quarantinedSenders.delete(senderId)
               }
             }
 
@@ -268,6 +293,10 @@ export function createChannelMessageHandler(ctx: ChannelMessageHandlerContext) {
             ctx.setHostSeqCounter(msg.clientMaxSeq)
           }
         }
+        if (isHostMode && senderId && quarantinedSenders.has(senderId)) {
+          log.warn(`[WebRTC Host] Suppressing REQUEST_SYNC full sync for quarantined conflicting peer ${senderId}`)
+          return
+        }
         callbacks.onRequestSync(msg.sinceVersion ?? 0, senderId)
         break
 
@@ -278,6 +307,11 @@ export function createChannelMessageHandler(ctx: ChannelMessageHandlerContext) {
         }
         if (msg.hostSessionId) {
           ctx.setCurrentHostSessionId(msg.hostSessionId)
+        }
+
+        if (isHostMode && senderId && quarantinedSenders.has(senderId)) {
+          log.warn(`[WebRTC Host] Dropping SYNC_DATA from quarantined conflicting peer ${senderId} - records isolated`)
+          return
         }
 
         if (isHostMode && senderId && !ctx.clientIdToScoutId.has(senderId)) {
@@ -330,6 +364,16 @@ export function createChannelMessageHandler(ctx: ChannelMessageHandlerContext) {
                 log.error(`Dropped forged record ${r.id}: claimed scoutId="${r.scoutId}" does not match peer authenticated scoutId="${expectedScoutId}"`)
                 forgedRecordIds.push(r.id)
               } else {
+                const hostAuthEventId = ctx.getCurrentEventId?.()
+                const recEventUpper = (r.eventId || '').trim().toUpperCase()
+                const codeUpper = (currentInviteCode || '').trim().toUpperCase()
+                if (
+                  hostAuthEventId &&
+                  codeUpper &&
+                  (recEventUpper === `EVT-${codeUpper}` || recEventUpper === `EXT_${codeUpper}`)
+                ) {
+                  r.eventId = hostAuthEventId
+                }
                 legitimateRecords.push(r)
               }
             }
@@ -405,9 +449,7 @@ export function createChannelMessageHandler(ctx: ChannelMessageHandlerContext) {
                 ctx.clients.forEach((c, cid) => {
                   if (cid !== senderId && c.dc && c.dc.readyState === 'open') {
                     if (!c.sender) c.sender = new DataChannelSender(c.dc)
-                    c.sender.enqueueSend(payload).catch((err) => {
-                      console.warn(`[WebRTC Host] Failed to broadcast chunk to client ${cid}:`, err)
-                    })
+                    c.sender.enqueueSendQuiet(payload, `records broadcast to ${cid}`)
                   }
                 })
               }
@@ -469,7 +511,7 @@ export function createChannelMessageHandler(ctx: ChannelMessageHandlerContext) {
                 const targetClient = ctx.clients.get(cid)
                 if (targetClient && targetClient.dc && targetClient.dc.readyState === 'open') {
                   if (!targetClient.sender) targetClient.sender = new DataChannelSender(targetClient.dc)
-                  targetClient.sender.enqueueSend(JSON.stringify(msg))
+                  targetClient.sender.enqueueSendQuiet(JSON.stringify(msg), 'DIRECT_MESSAGE forward')
                   forwarded = true
                 }
               }
@@ -478,7 +520,7 @@ export function createChannelMessageHandler(ctx: ChannelMessageHandlerContext) {
               if (targetClient && targetClient.dc && targetClient.dc.readyState === 'open') {
                 if (msg.targetId !== senderId) {
                   if (!targetClient.sender) targetClient.sender = new DataChannelSender(targetClient.dc)
-                  targetClient.sender.enqueueSend(JSON.stringify(msg))
+                  targetClient.sender.enqueueSendQuiet(JSON.stringify(msg), 'DIRECT_MESSAGE forward')
                   forwarded = true
                 }
               }
@@ -493,13 +535,19 @@ export function createChannelMessageHandler(ctx: ChannelMessageHandlerContext) {
 
       case 'TEAM_TAGS_UPDATE':
         if (msg.eventId && msg.tag) {
+          if (isHostMode) {
+            msg.eventId = normalizeIncomingEventId(msg.eventId) || msg.eventId
+            if (msg.tag.eventId) {
+              msg.tag.eventId = normalizeIncomingEventId(msg.tag.eventId) || msg.tag.eventId
+            }
+          }
           callbacks.onTagUpdateReceived?.(msg.tag, msg.action, msg.eventId, msg.teamNumber)
           // Host 广播给其他 Client
           if (isHostMode && senderId) {
             ctx.clients.forEach((c, cid) => {
               if (cid !== senderId && c.dc && c.dc.readyState === 'open') {
                 if (!c.sender) c.sender = new DataChannelSender(c.dc)
-                c.sender.enqueueSend(JSON.stringify(msg))
+                c.sender.enqueueSendQuiet(JSON.stringify(msg), 'TEAM_TAGS_UPDATE broadcast')
               }
             })
           }
@@ -508,6 +556,10 @@ export function createChannelMessageHandler(ctx: ChannelMessageHandlerContext) {
 
       case 'REQUEST_TAGS_SYNC':
         if (isHostMode) {
+          if (senderId && quarantinedSenders.has(senderId)) {
+            log.warn(`[WebRTC Host] Dropping REQUEST_TAGS_SYNC from quarantined conflicting peer ${senderId}`)
+            break
+          }
           callbacks.onRequestTagsSync?.(senderId)
         }
         break
@@ -520,6 +572,10 @@ export function createChannelMessageHandler(ctx: ChannelMessageHandlerContext) {
 
       case 'REQUEST_CUSTOM_FIELDS_SYNC':
         if (isHostMode) {
+          if (senderId && quarantinedSenders.has(senderId)) {
+            log.warn(`[WebRTC Host] Dropping REQUEST_CUSTOM_FIELDS_SYNC from quarantined conflicting peer ${senderId}`)
+            break
+          }
           callbacks.onRequestCustomFieldsSync?.(senderId)
         }
         break
@@ -538,7 +594,7 @@ export function createChannelMessageHandler(ctx: ChannelMessageHandlerContext) {
             ctx.clients.forEach((c, cid) => {
               if (cid !== senderId && c.dc && c.dc.readyState === 'open') {
                 if (!c.sender) c.sender = new DataChannelSender(c.dc)
-                c.sender.enqueueSend(JSON.stringify(msg))
+                c.sender.enqueueSendQuiet(JSON.stringify(msg), 'CUSTOM_FIELD_UPDATE broadcast')
               }
             })
           }
@@ -547,6 +603,10 @@ export function createChannelMessageHandler(ctx: ChannelMessageHandlerContext) {
 
       case 'REQUEST_SCHEDULE_SYNC':
         if (isHostMode) {
+          if (senderId && quarantinedSenders.has(senderId)) {
+            log.warn(`[WebRTC Host] Dropping REQUEST_SCHEDULE_SYNC from quarantined conflicting peer ${senderId}`)
+            break
+          }
           callbacks.onRequestScheduleSync?.(senderId)
         }
         break
@@ -576,7 +636,7 @@ export function createChannelMessageHandler(ctx: ChannelMessageHandlerContext) {
             ctx.clients.forEach((c, cid) => {
               if (cid !== senderId && c.dc && c.dc.readyState === 'open') {
                 if (!c.sender) c.sender = new DataChannelSender(c.dc)
-                c.sender.enqueueSend(JSON.stringify(msg))
+                c.sender.enqueueSendQuiet(JSON.stringify(msg), 'ASSIGNMENT_UPDATE broadcast')
               }
             })
           }
@@ -585,6 +645,10 @@ export function createChannelMessageHandler(ctx: ChannelMessageHandlerContext) {
 
       case 'REQUEST_PIT_SYNC':
         if (isHostMode) {
+          if (senderId && quarantinedSenders.has(senderId)) {
+            log.warn(`[WebRTC Host] Dropping REQUEST_PIT_SYNC from quarantined conflicting peer ${senderId}`)
+            break
+          }
           callbacks.onRequestPitSync?.(senderId)
         }
         break
@@ -597,13 +661,16 @@ export function createChannelMessageHandler(ctx: ChannelMessageHandlerContext) {
 
       case 'PIT_SCOUT_UPDATE':
         if (msg.record) {
+          if (isHostMode && msg.record.eventId) {
+            msg.record.eventId = normalizeIncomingEventId(msg.record.eventId) || msg.record.eventId
+          }
           callbacks.onPitScoutUpdateReceived?.(msg.record)
           if (isHostMode) {
             // Forward to other clients
             ctx.clients.forEach((c, cid) => {
               if (cid !== senderId && c.dc && c.dc.readyState === 'open') {
                 if (!c.sender) c.sender = new DataChannelSender(c.dc)
-                c.sender.enqueueSend(JSON.stringify(msg))
+                c.sender.enqueueSendQuiet(JSON.stringify(msg), 'PIT_SCOUT_UPDATE broadcast')
               }
             })
             // 回传确认回执给发送方 Client
@@ -623,13 +690,20 @@ export function createChannelMessageHandler(ctx: ChannelMessageHandlerContext) {
 
       case 'PIT_SCOUT_BATCH_SYNC':
         if (Array.isArray(msg.records) && msg.records.length > 0) {
+          if (isHostMode) {
+            for (const r of msg.records) {
+              if (r && r.eventId) {
+                r.eventId = normalizeIncomingEventId(r.eventId) || r.eventId
+              }
+            }
+          }
           callbacks.onPitScoutBatchSyncReceived?.(msg.records, senderId)
           if (isHostMode) {
             // Forward to other clients
             ctx.clients.forEach((c, cid) => {
               if (cid !== senderId && c.dc && c.dc.readyState === 'open') {
                 if (!c.sender) c.sender = new DataChannelSender(c.dc)
-                c.sender.enqueueSend(JSON.stringify(msg))
+                c.sender.enqueueSendQuiet(JSON.stringify(msg), 'PIT_SCOUT_BATCH_SYNC broadcast')
               }
             })
             // 回传批量确认回执给发送方 Client
@@ -896,6 +970,7 @@ export function createChannelMessageHandler(ctx: ChannelMessageHandlerContext) {
           }
           if (isHostMode) {
             if (senderId) {
+              quarantinedSenders.delete(senderId)
               const oldSet = ctx.scoutIdToClientIds.get(msg.oldScoutId)
               ctx.scoutIdToClientIds.delete(msg.oldScoutId)
               let targetSet = ctx.scoutIdToClientIds.get(msg.newScoutId)
@@ -918,7 +993,7 @@ export function createChannelMessageHandler(ctx: ChannelMessageHandlerContext) {
             ctx.clients.forEach((c, cid) => {
               if (cid !== senderId && c.dc && c.dc.readyState === 'open') {
                 if (!c.sender) c.sender = new DataChannelSender(c.dc)
-                c.sender.enqueueSend(JSON.stringify(msg))
+                c.sender.enqueueSendQuiet(JSON.stringify(msg), 'IDENTITY_MIGRATION broadcast')
               }
             })
             if (senderId) {
@@ -1000,6 +1075,16 @@ export function createChannelMessageHandler(ctx: ChannelMessageHandlerContext) {
           break
         }
 
+        const hostAuthEventId = ctx.getCurrentEventId?.()
+        const rawEventUpper = eventId.trim().toUpperCase()
+        const codeUpper = (currentInviteCode || '').trim().toUpperCase()
+        const effectiveEventId =
+          hostAuthEventId &&
+          codeUpper &&
+          (rawEventUpper === `EVT-${codeUpper}` || rawEventUpper === `EXT_${codeUpper}`)
+            ? hostAuthEventId
+            : eventId
+
         // 清理超过 5 分钟未完成的过期分片缓冲
         const now = Date.now()
         for (const [tId, buf] of photoChunkBuffers.entries()) {
@@ -1012,7 +1097,7 @@ export function createChannelMessageHandler(ctx: ChannelMessageHandlerContext) {
         if (!buffer) {
           buffer = {
             transferId,
-            eventId,
+            eventId: effectiveEventId,
             key,
             totalChunks,
             chunks: new Array(totalChunks),
@@ -1097,6 +1182,7 @@ export function createChannelMessageHandler(ctx: ChannelMessageHandlerContext) {
           }
 
           if (senderId) {
+            quarantinedSenders.delete(senderId)
             let targetSet = ctx.scoutIdToClientIds.get(authRes.id)
             if (!targetSet) {
               targetSet = new Set<string>()
@@ -1131,7 +1217,7 @@ export function createChannelMessageHandler(ctx: ChannelMessageHandlerContext) {
             ctx.clients.forEach((c, cid) => {
               if (cid !== senderId && c.dc && c.dc.readyState === 'open') {
                 if (!c.sender) c.sender = new DataChannelSender(c.dc)
-                c.sender.enqueueSend(JSON.stringify(migrationMsg))
+                c.sender.enqueueSendQuiet(JSON.stringify(migrationMsg), 'IDENTITY_MIGRATION broadcast')
               }
             })
           }
@@ -1181,4 +1267,11 @@ export function createChannelMessageHandler(ctx: ChannelMessageHandlerContext) {
       }
     }
   }
+
+  handler.isQuarantinedPeer = (senderId: string) => quarantinedSenders.has(senderId)
+  handler.clearQuarantine = (senderId: string) => {
+    quarantinedSenders.delete(senderId)
+  }
+
+  return handler as ChannelMessageHandler
 }

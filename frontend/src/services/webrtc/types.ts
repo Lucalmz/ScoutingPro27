@@ -126,6 +126,7 @@ export interface WebRtcService {
   getTransportInfo: () => ConnectionTransportInfo | null
   getDataChannel: () => RTCDataChannel | null
   isHostMode: () => boolean
+  isQuarantinedPeer?: (peerId: string) => boolean
   requestAccountMerge: (
     targetUsername: string,
     targetPassword: string,

@@ -147,9 +147,14 @@ export const useRecordStore = defineStore('records', () => {
 
   // --- fetch ---
   async function fetchRecords(eventId: string, ftcYear?: number, ftcEventCode?: string) {
-    currentEventId.value = eventId
+    const isSwitchingEvent = currentEventId.value !== eventId
     loading.value = true
     error.value = null
+    currentEventId.value = eventId
+    if (isSwitchingEvent) {
+      officialMatches.value = []
+      bannedTeams.value = []
+    }
     try {
       const fetched = await listRecords(eventId)
       // 旧数据升迁：version 缺失的记录赋为 1，避免被 version=0 的传入覆盖
@@ -242,6 +247,7 @@ export const useRecordStore = defineStore('records', () => {
           r.updatedAt = new Date().toISOString()
           r.version = (r.version || 0) + 1  // 冲突状态变更也要递增 version
           r.syncStatus = 'PENDING'
+          r.hostSeq = undefined
           updatedRecords.push(r)
         }
       }
@@ -252,6 +258,7 @@ export const useRecordStore = defineStore('records', () => {
           r.updatedAt = new Date().toISOString()
           r.version = (r.version || 0) + 1  // 冲突状态变更也要递增 version
           r.syncStatus = 'PENDING'
+          r.hostSeq = undefined
           updatedRecords.push(r)
         }
       }

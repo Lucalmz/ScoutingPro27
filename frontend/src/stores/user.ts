@@ -27,10 +27,21 @@ export const useUserStore = defineStore('user', () => {
     }
   }
 
+  // Eager restore on store initialization
+  if (typeof window !== 'undefined') {
+    restoreFromCache()
+  }
+
   function isStandalonePwaMode(): boolean {
     if (typeof window === 'undefined') return false
     const host = window.location.hostname
-    return host.includes('github.io') || host.includes('pages.dev') || host.includes('vercel.app')
+    return (
+      host.includes('github.io') ||
+      host.includes('pages.dev') ||
+      host.includes('vercel.app') ||
+      host.includes('netlify.app') ||
+      host.includes('gitlab.io')
+    )
   }
 
   async function login(usernameInput: string, passwordInput: string): Promise<boolean> {
@@ -297,9 +308,14 @@ export const useUserStore = defineStore('user', () => {
   }
 
   async function logout() {
+    const prevUserId = user.value?.id
     user.value = null
     try {
       localStorage.removeItem('scoutingpro-user')
+      if (prevUserId) {
+        localStorage.removeItem(`inbox-messages-${prevUserId}`)
+        localStorage.removeItem(`inbox-outbox-${prevUserId}`)
+      }
     } catch {}
 
     // 1. Disconnect WebRTC and reset connection store

@@ -58,6 +58,9 @@ export interface HostSessionContext {
   getUsername?: () => string
   getUserId?: () => string
   callbacks: WebRtcCallbacks
+  clientIdToScoutId?: Map<string, string>
+  clientIdToScoutName?: Map<string, string>
+  scoutIdToClientIds?: Map<string, Set<string>>
 }
 
 function extractTicketPayload(ticket: string): Record<string, any> | null {
@@ -213,6 +216,10 @@ export function createHostSignalingHandler(ctx: HostSessionContext) {
           log.warn(`Host peer connection for ${sender} stalled or closed. Cleaning up peer resources...`)
           const curActive = clients.get(sender)
           if (curActive && curActive.pc === targetPc) {
+            if (curActive.sender) {
+              try { curActive.sender.abort('Host peer connection disconnected') } catch {}
+              curActive.sender = undefined
+            }
             if (curActive.dc) {
               curActive.dc.onmessage = null
               curActive.dc.onopen = null
@@ -229,6 +236,10 @@ export function createHostSignalingHandler(ctx: HostSessionContext) {
           }
           const curStaged = stagedClients.get(sender)
           if (curStaged && curStaged.pc === targetPc) {
+            if (curStaged.sender) {
+              try { curStaged.sender.abort('Host staged connection disconnected') } catch {}
+              curStaged.sender = undefined
+            }
             if (curStaged.dc) {
               curStaged.dc.onmessage = null
               curStaged.dc.onopen = null
@@ -254,6 +265,10 @@ export function createHostSignalingHandler(ctx: HostSessionContext) {
           // Enforce hard-reset: kill any previous channels cleanly and register directly into clients!
           if (existing) {
             log.info(`Tearing down previous connection for peer ${sender} before creating new PeerConnection`)
+            if (existing.sender) {
+              try { existing.sender.abort('Connection torn down by new session offer') } catch {}
+              existing.sender = undefined
+            }
             if (existing.dc) {
               existing.dc.onmessage = null
               existing.dc.onopen = null
@@ -272,6 +287,10 @@ export function createHostSignalingHandler(ctx: HostSessionContext) {
           }
           const existingStaged = stagedClients.get(sender)
           if (existingStaged) {
+            if (existingStaged.sender) {
+              try { existingStaged.sender.abort('Staged connection torn down by new session offer') } catch {}
+              existingStaged.sender = undefined
+            }
             if (existingStaged.dc) {
               existingStaged.dc.onmessage = null
               existingStaged.dc.onopen = null
@@ -292,8 +311,10 @@ export function createHostSignalingHandler(ctx: HostSessionContext) {
           const onDisconnect = () => {
             if (pcRef) makeOnDisconnect(pcRef)()
           }
+          const allowTurn = Boolean(data.allowTurn || data.offer?.allowTurn || data.forceRelay)
           const pc = ctx.peerMgr.createPeerConnection(sender, onDisconnect, false, undefined, {
-            sessionTag: data.clientSessionId
+            sessionTag: data.clientSessionId,
+            allowTurn
           })
           pcRef = pc
           setupDcHandler(pc)
@@ -449,12 +470,36 @@ export function createHostSignalingHandler(ctx: HostSessionContext) {
             isInSessionFlapping: isFlapping
           })
 
-          if (trustEval.status === 'TRUSTED_MATCH') {
-            log.info(`[TOFU] Trusted device match: ${clientDeviceId} (${effectiveUsername}). Auto-approving SAS.`)
+          const bindVerifiedPeerIdentity = () => {
+            sas.clientVerifiedIdentities.set(sender, {
+              userId: effectiveUserId,
+              username: effectiveUsername,
+              ecdhPublicKey: data.ecdhPublicKey
+            })
+            // 关键修复：立刻绑定 sender <-> effectiveUserId 双向映射，确保私信与防伪校验立即可用
+            if (effectiveUserId) {
+              ctx.clientIdToScoutId?.set(sender, effectiveUserId)
+              if (effectiveUsername) {
+                ctx.clientIdToScoutName?.set(sender, effectiveUsername)
+              }
+              if (ctx.scoutIdToClientIds) {
+                let cSet = ctx.scoutIdToClientIds.get(effectiveUserId)
+                if (!cSet) {
+                  cSet = new Set()
+                  ctx.scoutIdToClientIds.set(effectiveUserId, cSet)
+                }
+                cSet.add(sender)
+              }
+            }
             sas.clientSasStates.set(sender, 'VERIFIED')
             if (effectiveUserId) {
               ctx.callbacks.onClientConnected?.(effectiveUserId, effectiveUsername)
             }
+          }
+
+          if (trustEval.status === 'TRUSTED_MATCH') {
+            log.info(`[TOFU] Trusted device match: ${clientDeviceId} (${effectiveUsername}). Auto-approving SAS.`)
+            bindVerifiedPeerIdentity()
 
             const pendingOut = sas.hostPendingOutgoing.get(sender) || []
             sas.hostPendingOutgoing.delete(sender)
@@ -481,10 +526,7 @@ export function createHostSignalingHandler(ctx: HostSessionContext) {
                 trustLevel: 'TOFU_TRUSTED'
               })
             }
-            sas.clientSasStates.set(sender, 'VERIFIED')
-            if (effectiveUserId) {
-              ctx.callbacks.onClientConnected?.(effectiveUserId, effectiveUsername)
-            }
+            bindVerifiedPeerIdentity()
 
             const pendingOut = sas.hostPendingOutgoing.get(sender) || []
             sas.hostPendingOutgoing.delete(sender)

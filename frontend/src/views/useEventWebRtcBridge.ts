@@ -168,46 +168,50 @@ export function useEventWebRtcBridge({
       },
 
       onRequestScheduleSync: async (senderId) => {
-        if (eventStore.isHost && connStore.rtcService) {
-          const allSchedules = scheduleStore.schedules
-          const allAssignments = Object.values(scheduleStore.assignments)
-          const CHUNK_SIZE = 20
-          if (allSchedules.length <= CHUNK_SIZE) {
-            await connStore.rtcService.sendMessage(
-              {
-                type: 'SCHEDULE_FULL_SYNC',
-                schedules: allSchedules,
-                assignments: allAssignments
-              },
-              senderId
-            )
-          } else {
-            const totalBatches = Math.ceil(allSchedules.length / CHUNK_SIZE)
-            const syncId = `sched-${Date.now()}`
-            const allMatchNums = new Set(allSchedules.map((s) => Number(s.matchNumber)))
-            for (let i = 0; i < totalBatches; i++) {
-              const batchSchedules = allSchedules.slice(i * CHUNK_SIZE, (i + 1) * CHUNK_SIZE)
-              const batchMatchNums = new Set(batchSchedules.map((s) => Number(s.matchNumber)))
-              const batchAssignments =
-                i === totalBatches - 1
-                  ? allAssignments.filter(
-                      (a) => batchMatchNums.has(Number(a.matchNumber)) || !allMatchNums.has(Number(a.matchNumber))
-                    )
-                  : allAssignments.filter((a) => batchMatchNums.has(Number(a.matchNumber)))
-
+        try {
+          if (eventStore.isHost && connStore.rtcService) {
+            const allSchedules = scheduleStore.schedules
+            const allAssignments = Object.values(scheduleStore.assignments)
+            const CHUNK_SIZE = 20
+            if (allSchedules.length <= CHUNK_SIZE) {
               await connStore.rtcService.sendMessage(
                 {
-                  type: 'SCHEDULE_BATCH_SYNC',
-                  batchIndex: i,
-                  totalBatches,
-                  schedules: batchSchedules,
-                  assignments: batchAssignments,
-                  syncId
+                  type: 'SCHEDULE_FULL_SYNC',
+                  schedules: allSchedules,
+                  assignments: allAssignments
                 },
                 senderId
               )
+            } else {
+              const totalBatches = Math.ceil(allSchedules.length / CHUNK_SIZE)
+              const syncId = `sched-${Date.now()}`
+              const allMatchNums = new Set(allSchedules.map((s) => Number(s.matchNumber)))
+              for (let i = 0; i < totalBatches; i++) {
+                const batchSchedules = allSchedules.slice(i * CHUNK_SIZE, (i + 1) * CHUNK_SIZE)
+                const batchMatchNums = new Set(batchSchedules.map((s) => Number(s.matchNumber)))
+                const batchAssignments =
+                  i === totalBatches - 1
+                    ? allAssignments.filter(
+                        (a) => batchMatchNums.has(Number(a.matchNumber)) || !allMatchNums.has(Number(a.matchNumber))
+                      )
+                    : allAssignments.filter((a) => batchMatchNums.has(Number(a.matchNumber)))
+
+                await connStore.rtcService.sendMessage(
+                  {
+                    type: 'SCHEDULE_BATCH_SYNC',
+                    batchIndex: i,
+                    totalBatches,
+                    schedules: batchSchedules,
+                    assignments: batchAssignments,
+                    syncId
+                  },
+                  senderId
+                )
+              }
             }
           }
+        } catch (err) {
+          console.warn('[EventView] Failed to respond to onRequestScheduleSync:', err)
         }
       },
 
@@ -245,29 +249,33 @@ export function useEventWebRtcBridge({
       },
 
       onRequestPitSync: async (senderId) => {
-        if (eventStore.isHost && connStore.rtcService) {
-          const allRecords = pitStore.records
-          const CHUNK_SIZE = 15
-          if (allRecords.length <= CHUNK_SIZE) {
-            await connStore.rtcService.sendMessage(
-              {
-                type: 'PIT_SCOUT_FULL_SYNC',
-                records: allRecords
-              },
-              senderId
-            )
-          } else {
-            for (let i = 0; i < allRecords.length; i += CHUNK_SIZE) {
-              const chunk = allRecords.slice(i, i + CHUNK_SIZE)
+        try {
+          if (eventStore.isHost && connStore.rtcService) {
+            const allRecords = pitStore.records
+            const CHUNK_SIZE = 15
+            if (allRecords.length <= CHUNK_SIZE) {
               await connStore.rtcService.sendMessage(
                 {
-                  type: 'PIT_SCOUT_BATCH_SYNC',
-                  records: chunk
+                  type: 'PIT_SCOUT_FULL_SYNC',
+                  records: allRecords
                 },
                 senderId
               )
+            } else {
+              for (let i = 0; i < allRecords.length; i += CHUNK_SIZE) {
+                const chunk = allRecords.slice(i, i + CHUNK_SIZE)
+                await connStore.rtcService.sendMessage(
+                  {
+                    type: 'PIT_SCOUT_BATCH_SYNC',
+                    records: chunk
+                  },
+                  senderId
+                )
+              }
             }
           }
+        } catch (err) {
+          console.warn('[EventView] Failed to respond to onRequestPitSync:', err)
         }
       },
 
@@ -276,15 +284,21 @@ export function useEventWebRtcBridge({
       },
 
       onRequestCustomFieldsSync: (senderId) => {
-        if (eventStore.isHost && connStore.rtcService && eventStore.currentEvent?.id) {
-          connStore.rtcService.sendMessage(
-            {
-              type: 'CUSTOM_FIELDS_FULL_SYNC',
-              eventId: eventStore.currentEvent.id,
-              fields: customFieldsStore.getFields(eventStore.currentEvent.id)
-            },
-            senderId
-          )
+        try {
+          if (eventStore.isHost && connStore.rtcService && eventStore.currentEvent?.id) {
+            connStore.rtcService.sendMessage(
+              {
+                type: 'CUSTOM_FIELDS_FULL_SYNC',
+                eventId: eventStore.currentEvent.id,
+                fields: customFieldsStore.getFields(eventStore.currentEvent.id)
+              },
+              senderId
+            ).catch((err: any) => {
+              console.warn('[EventView] Failed to send custom fields full sync:', err)
+            })
+          }
+        } catch (err) {
+          console.warn('[EventView] Failed to respond to onRequestCustomFieldsSync:', err)
         }
       },
 
@@ -385,11 +399,15 @@ export function useEventWebRtcBridge({
         }
 
         const currentRouteEventId = router.currentRoute.value.params.eventId as string
+        const upperRouteId = (currentRouteEventId || '').trim().toUpperCase()
+        const upperInviteCode = (actualEvent.inviteCode || '').trim().toUpperCase()
         const isEphemeralPlaceholder = Boolean(
-          !isDesktopHost() &&
-          currentRouteEventId &&
-          actualEvent.inviteCode &&
-          currentRouteEventId.toUpperCase() === `EVT-${actualEvent.inviteCode.toUpperCase()}`
+          upperRouteId &&
+          upperInviteCode &&
+          (
+            (!isDesktopHost() && upperRouteId === `EVT-${upperInviteCode}`) ||
+            upperRouteId === `EXT_${upperInviteCode}`
+          )
         )
 
         if (isEphemeralPlaceholder && currentRouteEventId) {
@@ -404,16 +422,22 @@ export function useEventWebRtcBridge({
           }
         }
 
-        // 核心修复 Bug 2：仅当手机端以临时占位 ID (如 evt-INVITECODE) 访问且收到了 Host 下发的权威元数据时，才升迁临时 ID
+        // 核心修复：当以临时占位 ID (如手机端 evt-CODE 或跨机端 ext_CODE) 访问且收到了 Host 下发的权威元数据时，升迁临时 ID 并重推待同步数据
         if (actualEvent.id && isEphemeralPlaceholder && actualEvent.id !== currentRouteEventId) {
-          console.log(`[EventView] Migrating temporary mobile event ID "${currentRouteEventId}" to authoritative UUID "${actualEvent.id}"`)
+          console.log(`[EventView] Migrating temporary event ID "${currentRouteEventId}" to authoritative UUID "${actualEvent.id}"`)
           recordStore.migrateEventId(currentRouteEventId, actualEvent.id)
           pitStore.migrateEventId(currentRouteEventId, actualEvent.id)
           scheduleStore.migrateEventId(currentRouteEventId, actualEvent.id)
-          router.replace({
+          customFieldsStore.migrateEventId?.(currentRouteEventId, actualEvent.id)
+          try {
+            const { migrateMobilePhotosEventId } = await import('@/services/mobilePhotoCache')
+            await migrateMobilePhotosEventId(currentRouteEventId, actualEvent.id)
+          } catch {}
+          await router.replace({
             path: `/event/${actualEvent.id}`,
             query: router.currentRoute.value.query
           })
+          void triggerClientSyncPipeline(false)
         }
       },
 
@@ -652,57 +676,102 @@ export function useEventWebRtcBridge({
             lastConnectedHostSessionId.value = curHostSessionId
           }
 
-          // Client 连接／重连：按序发起同步流水线，避免并发数据风暴
-          connStore.requestSync(
-            isHostTakeover ? 0 : lastHostSeq.value,
-            undefined,
-            userStore.userId,
-            userStore.username,
-            userStore.token,
-            { isHostTakeover, clientMaxSeq: lastHostSeq.value }
-          )
-
-          // 核心自愈：若发生主机切换，即使此前已标记为 SYNCED 也重推属于自己的记录，确保新主机不漏历史打分；常规重连推送 PENDING 及未获 Host 签发的未打号记录
-          const myRecs = recordStore.records.filter(
-            (r) =>
-              r.eventId === evt.id &&
-              r.scoutId === userStore.userId &&
-              (isHostTakeover || r.syncStatus === 'PENDING' || !r.hostSeq)
-          )
-          if (myRecs.length > 0) {
-            console.log(`[EventView] Auto self-healing: pushing ${myRecs.length} unconfirmed/pending records to host...`)
-            await connStore.pushRecords(myRecs)
+          if (connStore.sessionConflict) {
+            console.warn('[EventView] Connected but session conflict is active; suspending auto-sync pipeline until resolved.')
+            return
           }
 
-          // 移动端重连核心自愈 1：主动出清离线期间录入的 Pit 展位记录
-          await pitStore.flushPendingPitRecords(evt.id)
-
-          // 移动端重连核心自愈 2：主动出清离线照片队列，确保特写照片落盘到 Host
-          flushOfflinePhotos(evt.id)
-
-          // 顺序向 Host 请求最新的赛程与排班、展位侦察记录、以及战队标签
-          if (connStore.rtcService) {
-            await connStore.rtcService.sendMessage({
-              type: 'REQUEST_SCHEDULE_SYNC'
-            })
-            await connStore.rtcService.sendMessage({
-              type: 'REQUEST_PIT_SYNC'
-            })
-            await connStore.rtcService.sendMessage({
-              type: 'REQUEST_CUSTOM_FIELDS_SYNC',
-              eventId: evt.id
-            })
-            customFieldsStore.fetchFields(evt.id).catch((e: any) => {
-              console.warn('[EventView] Failed to fetch custom fields:', e)
-            })
-            await connStore.rtcService.requestTagsSync(evt.id).catch((e: any) => {
-              console.warn('[EventView] Failed to request tags sync:', e)
-            })
-          }
+          await triggerClientSyncPipeline(isHostTakeover)
         } else {
           // Host 连通或恢复后，同样主动巡检照片队列
           flushOfflinePhotos(evt.id)
         }
+      }
+    }
+  )
+
+  async function triggerClientSyncPipeline(isHostTakeover = false) {
+    const evt = eventStore.currentEvent
+    if (!evt || eventStore.isHost) return
+    if (connStore.sessionConflict) {
+      console.warn('[EventView] Connected but session conflict is active; suspending auto-sync pipeline until resolved.')
+      return
+    }
+
+    // Client 连接／重连：按序发起同步流水线，避免并发数据风暴
+    connStore.requestSync(
+      isHostTakeover ? 0 : lastHostSeq.value,
+      undefined,
+      userStore.userId,
+      userStore.username,
+      userStore.token,
+      { isHostTakeover, clientMaxSeq: lastHostSeq.value }
+    )
+
+    // 核心自愈：若发生主机切换，即使此前已标记为 SYNCED 也重推属于自己的记录，确保新主机不漏历史打分；常规重连推送 PENDING 及未获 Host 签发的未打号记录
+    const myRecs = recordStore.records.filter(
+      (r) =>
+        r.eventId === evt.id &&
+        r.scoutId === userStore.userId &&
+        (isHostTakeover || r.syncStatus === 'PENDING' || !r.hostSeq)
+    )
+    if (myRecs.length > 0) {
+      console.log(`[EventView] Auto self-healing: pushing ${myRecs.length} unconfirmed/pending records to host...`)
+      await connStore.pushRecords(myRecs).catch((err) => {
+        console.warn('[EventView] Failed to auto-push pending records:', err)
+      })
+    }
+
+    // 移动端重连核心自愈 1：主动出清离线期间录入的 Pit 展位记录
+    try {
+      await pitStore.flushPendingPitRecords(evt.id)
+    } catch (e) {
+      console.warn('[EventView] Failed to flush pending pit records:', e)
+    }
+
+    // 移动端重连核心自愈 2：主动出清离线照片队列，确保特写照片落盘到 Host
+    flushOfflinePhotos(evt.id)
+
+    // 顺序向 Host 请求最新的赛程与排班、展位侦察记录、以及战队标签
+    if (connStore.rtcService) {
+      try {
+        await connStore.rtcService.sendMessage({
+          type: 'REQUEST_SCHEDULE_SYNC'
+        })
+      } catch (e) {
+        console.warn('[EventView] Failed to request schedule sync:', e)
+      }
+      try {
+        await connStore.rtcService.sendMessage({
+          type: 'REQUEST_PIT_SYNC'
+        })
+      } catch (e) {
+        console.warn('[EventView] Failed to request pit sync:', e)
+      }
+      try {
+        await connStore.rtcService.sendMessage({
+          type: 'REQUEST_CUSTOM_FIELDS_SYNC',
+          eventId: evt.id
+        })
+      } catch (e) {
+        console.warn('[EventView] Failed to request custom fields sync:', e)
+      }
+      customFieldsStore.fetchFields(evt.id).catch((e: any) => {
+        console.warn('[EventView] Failed to fetch custom fields:', e)
+      })
+      connStore.rtcService.requestTagsSync(evt.id).catch((e: any) => {
+        console.warn('[EventView] Failed to request tags sync:', e)
+      })
+    }
+  }
+
+  watch(
+    () => connStore.sessionConflict,
+    async (conflict, oldConflict) => {
+      // 当冲突被解决（从存在冲突变为 null）且当前已连通时，唤醒此前暂停的同步流水线
+      if (oldConflict && !conflict && connStore.status === 'connected' && !eventStore.isHost) {
+        console.log('[EventView] Session conflict resolved, resuming auto-sync pipeline...')
+        await triggerClientSyncPipeline(false)
       }
     }
   )

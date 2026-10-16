@@ -531,6 +531,20 @@ public class EventRoutes {
         """, newEventId, oldEventId, newEventId);
         handle.execute("DELETE FROM ai_chat_sessions WHERE event_id = ?", oldEventId);
 
+        // 9.5 event_custom_fields
+        handle.execute("""
+            UPDATE event_custom_fields
+            SET event_id = ?
+            WHERE event_id = ?
+              AND NOT EXISTS (
+                  SELECT 1 FROM event_custom_fields target
+                  WHERE target.event_id = ?
+                    AND target.target = event_custom_fields.target
+                    AND target.field_key = event_custom_fields.field_key
+              )
+        """, newEventId, oldEventId, newEventId);
+        handle.execute("DELETE FROM event_custom_fields WHERE event_id = ?", oldEventId);
+
         // 10. Physically migrate pit photos directory
         try {
             File oldDir = new File(AppConfig.resolveBaseDataDir(), "pit_photos" + File.separator + oldEventId);

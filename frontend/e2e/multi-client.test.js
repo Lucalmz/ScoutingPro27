@@ -80,14 +80,46 @@ function killProcessTree(pid) {
 
 async function forceRelay(page) {
   await page.evaluateOnNewDocument(() => {
+    window.__TEST_FORCE_ALLOW_TURN__ = true;
+    const FALLBACK_TURN_SERVERS = [
+      {
+        urls: 'turn:global.relay.metered.ca:80',
+        username: 'ac2f17ce5be760e70209a1da',
+        credential: 'hnCbsBr54qxItqgo'
+      },
+      {
+        urls: 'turn:global.relay.metered.ca:80?transport=tcp',
+        username: 'ac2f17ce5be760e70209a1da',
+        credential: 'hnCbsBr54qxItqgo'
+      },
+      {
+        urls: 'turn:global.relay.metered.ca:443',
+        username: 'ac2f17ce5be760e70209a1da',
+        credential: 'hnCbsBr54qxItqgo'
+      },
+      {
+        urls: 'turns:global.relay.metered.ca:443?transport=tcp',
+        username: 'ac2f17ce5be760e70209a1da',
+        credential: 'hnCbsBr54qxItqgo'
+      }
+    ];
     const OriginalRTCPeerConnection = window.RTCPeerConnection;
     window.RTCPeerConnection = function(config) {
       if (config) {
         config.iceTransportPolicy = 'relay';
-        console.log('[WEBRTC-MOCK] Forced iceTransportPolicy to relay');
+        const existing = Array.isArray(config.iceServers) ? config.iceServers : [];
+        const hasTurn = existing.some(s => {
+          const u = Array.isArray(s.urls) ? s.urls.join(',') : String(s.urls || '');
+          return u.includes('turn:') || u.includes('turns:');
+        });
+        if (!hasTurn) {
+          config.iceServers = [...existing, ...FALLBACK_TURN_SERVERS];
+        }
+        console.log('[WEBRTC-MOCK] Forced iceTransportPolicy to relay with TURN servers');
       }
       return new OriginalRTCPeerConnection(config);
     };
+    window.RTCPeerConnection.prototype = OriginalRTCPeerConnection.prototype;
   });
 }
 
@@ -152,7 +184,7 @@ async function runTest() {
         `--window-size=${width},${height}`,
         ...(SHOW_UI ? [`--window-position=${x},${y}`] : [])
       ],
-      defaultViewport: { width, height }
+      defaultViewport: { width: 1024, height: 800 }
     };
   };
 
@@ -196,9 +228,9 @@ async function runTest() {
     await pageHost.waitForSelector('.modal-overlay input');
     await pageHost.type('.modal-overlay input', `RELAY_TEST_${Date.now()}`);
     await pageHost.click('.btn-confirm');
-    await pageHost.waitForSelector('.event-meta strong');
+    await pageHost.waitForSelector('.event-code strong, .event-meta strong');
 
-    const eventCode = (await pageHost.$eval('.event-meta strong', el => el.textContent)).trim();
+    const eventCode = (await pageHost.$eval('.event-code strong, .event-meta strong', el => el.textContent)).trim();
     console.log(`🎉 Event Created! Code: ${eventCode}`);
     console.timeEnd('Step 1 Duration');
 
@@ -332,8 +364,18 @@ async function runTest() {
     console.time('Step 6 Duration');
     const correctRecord = async (page, newTeamNumber) => {
       await goToHistoryTab(page);
-      await page.waitForSelector('.btn-edit-conflict');
-      await page.click('.btn-edit-conflict');
+      const myUserId = await page.evaluate(() => {
+        try {
+          return JSON.parse(localStorage.getItem('scoutingpro-user') || '{}').id || '';
+        } catch {
+          return '';
+        }
+      });
+      const targetCardSelector = myUserId
+        ? `.history-card[data-scout-id="${myUserId}"] .btn-edit`
+        : '.btn-edit-conflict';
+      await page.waitForSelector(targetCardSelector, { timeout: 10000 });
+      await page.click(targetCardSelector);
       await waitForTransition(page);
       
       // We are back at Scout Form, let's change the team number
@@ -406,7 +448,10 @@ async function runTest() {
     }
     
     if (hasConflictAtEnd) {
-      console.error('❌ FAILED: Client1 still has conflict after reconnecting!');
+      const recordsDump = await pageClient1.evaluate(() => {
+        return window.localStorage.getItem('scoutingpro_records') || 'none';
+      });
+      console.error('❌ FAILED: Client1 still has conflict after reconnecting! Records dump:', recordsDump);
       process.exitCode = 1;
     } else {
       console.log('🚀 SUCCESS: Client1 conflict automatically cleared after syncing from Host!');
@@ -523,12 +568,12 @@ async function runTest() {
 
     // Verify injected record was NEVER accepted on Host or Clients
     const hostHasInjected = await pageHost.evaluate(() => {
-      const allRecords = JSON.parse(localStorage.getItem('scoutingpro-records') || '[]');
+      const allRecords = JSON.parse(localStorage.getItem('scoutingpro_records') || '[]');
       return allRecords.some(r => r.id === 'injected-fake-uuid-999');
     });
 
     const clientHasInjected = await pageClient1.evaluate(() => {
-      const allRecords = JSON.parse(localStorage.getItem('scoutingpro-records') || '[]');
+      const allRecords = JSON.parse(localStorage.getItem('scoutingpro_records') || '[]');
       return allRecords.some(r => r.id === 'injected-fake-uuid-999');
     });
 
@@ -629,7 +674,8 @@ async function runTest() {
         const sortedKeys = Object.keys(spoofEnvelope).sort();
         const canonicalObj = {};
         for (const k of sortedKeys) canonicalObj[k] = spoofEnvelope[k];
-        spoofEnvelope.signature = crypto.createHmac('sha256', `${eventCode}:scoutingpro27`).update(JSON.stringify(canonicalObj)).digest('hex');
+        const derivedKey = crypto.pbkdf2Sync(eventCode, 'scoutingpro27', 100000, 32, 'sha256');
+        spoofEnvelope.signature = crypto.createHmac('sha256', derivedKey).update(JSON.stringify(canonicalObj)).digest('hex');
 
         attackerMqtt3.publish(signalTopic, JSON.stringify(spoofEnvelope), {}, () => resolve());
       });

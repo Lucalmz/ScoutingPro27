@@ -41,10 +41,10 @@ public interface PitScoutDao {
             :claimedAutoStrategy, :claimedAutoScore, :claimedTeleopCycles, :claimedTeleopScore,
             :claimedEndgameScore, :claimedTotalScore,
             :photoKeys, :version, :hostSeq, :isDeleted, :rawData,
-            COALESCE(NULLIF(TRIM(:createdAt), ''), CURRENT_TIMESTAMP),
+            COALESCE(CAST(REPLACE(REPLACE(NULLIF(TRIM(:createdAt), ''), 'T', ' '), 'Z', '') AS TIMESTAMP), CURRENT_TIMESTAMP),
             CASE 
-                WHEN NULLIF(TRIM(:updatedAt), '') IS NOT NULL AND NULLIF(TRIM(:updatedAt), '') > DATEADD('SECOND', 5, CURRENT_TIMESTAMP) THEN CURRENT_TIMESTAMP
-                ELSE COALESCE(NULLIF(TRIM(:updatedAt), ''), CURRENT_TIMESTAMP)
+                WHEN NULLIF(TRIM(:updatedAt), '') IS NOT NULL AND CAST(REPLACE(REPLACE(NULLIF(TRIM(:updatedAt), ''), 'T', ' '), 'Z', '') AS TIMESTAMP) > DATEADD('SECOND', 5, CURRENT_TIMESTAMP) THEN CURRENT_TIMESTAMP
+                ELSE COALESCE(CAST(REPLACE(REPLACE(NULLIF(TRIM(:updatedAt), ''), 'T', ' '), 'Z', '') AS TIMESTAMP), CURRENT_TIMESTAMP)
             END
         )) AS src (
             id, event_id, team_number, scout_id, scout_name, robot_name,
@@ -61,9 +61,9 @@ public interface PitScoutDao {
             OR (
                 src.version = COALESCE(target.version, 0) 
                 AND (
-                    src.updated_at > COALESCE(target.updated_at, '1970-01-01 00:00:00')
+                    src.updated_at > COALESCE(target.updated_at, TIMESTAMP '1970-01-01 00:00:00')
                     OR (
-                        src.updated_at = COALESCE(target.updated_at, '1970-01-01 00:00:00')
+                        src.updated_at = COALESCE(target.updated_at, TIMESTAMP '1970-01-01 00:00:00')
                         AND src.scout_id >= COALESCE(target.scout_id, '')
                     )
                 )

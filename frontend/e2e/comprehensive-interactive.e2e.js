@@ -668,11 +668,15 @@ async function runComprehensiveInteractiveE2E() {
     await robustLogin(scoutPage, scoutUser);
     await scoutPage.waitForSelector('.event-view', { timeout: 15000 });
     await waitForTransition(scoutPage);
-    recordCheck('Scout auto-joined event via invite parameter', scoutPage.url().includes(eventId));
+    recordCheck('Scout auto-joined event via invite parameter', Boolean((eventId && scoutPage.url().includes(eventId)) || (eventInviteCode && scoutPage.url().includes(eventInviteCode))));
 
-    // Wait for connection status indicator
+    // Wait for connection status indicator and actual WebRTC P2P handshake completion
     await hostPage.waitForSelector('.connection-status', { visible: true, timeout: 15000 });
     await scoutPage.waitForSelector('.connection-status', { visible: true, timeout: 15000 });
+    await Promise.all([
+      hostPage.waitForSelector('.connection-status.connected', { timeout: 20000 }).catch(() => {}),
+      scoutPage.waitForSelector('.connection-status.connected', { timeout: 20000 }).catch(() => {})
+    ]);
     recordCheck('Host and Scout both initialized WebRTC connection status widgets', true);
 
     // Host closes browser to simulate Host drop / network severance

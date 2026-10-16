@@ -349,4 +349,181 @@ describe('Account Conflict & Takeover Fixes', () => {
     expect(scheduleStore.schedules).toHaveLength(4)
     expect(Object.keys(scheduleStore.assignments)).toHaveLength(2)
   })
+
+  it('strictly quarantines conflicting client: suppresses sync requests and SYNC_DATA, frees peer on merge', async () => {
+    const { useUserStore } = await import('@/stores/user')
+    const userStore = useUserStore()
+    userStore.user = {
+      id: 'host_alice_uuid',
+      username: 'Alice',
+      token: 'host_token'
+    }
+
+    const onRequestSync = vi.fn()
+    const onRequestScheduleSync = vi.fn()
+    const onRequestPitSync = vi.fn()
+    const onRequestTagsSync = vi.fn()
+    const onRequestCustomFieldsSync = vi.fn()
+    const onRecordsReceived = vi.fn().mockResolvedValue([])
+    const sendMessage = vi.fn()
+
+    const scoutIdToClientIds = new Map<string, Set<string>>()
+    const clientIdToScoutId = new Map<string, string>()
+    const clientIdToScoutName = new Map<string, string>()
+
+    const handler = createChannelMessageHandler({
+      isHostMode: () => true,
+      currentInviteCode: () => 'ROOM99',
+      getCurrentEventId: () => 'evt-uuid-1',
+      getHostSessionId: () => 'host-sess-1',
+      getCurrentHostSessionId: () => 'host-sess-1',
+      setCurrentHostSessionId: () => {},
+      callbacks: {
+        onRequestSync,
+        onRequestScheduleSync,
+        onRequestPitSync,
+        onRequestTagsSync,
+        onRequestCustomFieldsSync,
+        onRecordsReceived
+      },
+      clients: new Map([
+        ['client_conflict', { pc: {} as any, dc: { readyState: 'open' } as any }],
+        ['client_normal', { pc: {} as any, dc: { readyState: 'open' } as any }]
+      ]),
+      stagedClients: new Map(),
+      scoutIdToClientIds,
+      clientIdToScoutId,
+      clientIdToScoutName,
+      pendingTakeovers: new Map(),
+      takeoverCooldowns: new Map(),
+      offlineMessages: { flush: vi.fn().mockReturnValue([]) } as any,
+      sendMessage,
+      promoteTakeover: vi.fn(),
+      enqueueHostTask: async (_id, task) => { await task() },
+      cleanupPeerResources: vi.fn(),
+      stampHostSeq: vi.fn(),
+      getHostSeqCounter: () => 0,
+      setHostSeqCounter: () => {},
+      closeClient: vi.fn(),
+      setStatus: vi.fn()
+    })
+
+    // 1. Normal client (Bob) connects with REQUEST_SYNC
+    await handler({
+      data: JSON.stringify({
+        type: 'REQUEST_SYNC',
+        senderUserId: 'bob_uuid',
+        senderUserName: 'Bob',
+        authCode: 'ROOM99'
+      })
+    } as MessageEvent, 'client_normal')
+
+    expect(handler.isQuarantinedPeer('client_normal')).toBe(false)
+    expect(onRequestSync).toHaveBeenCalledWith(0, 'client_normal')
+    onRequestSync.mockClear()
+
+    // 2. Conflicting client connects claiming username "Alice" (same as Host, but different userId)
+    await handler({
+      data: JSON.stringify({
+        type: 'REQUEST_SYNC',
+        senderUserId: 'phone_alice_diff_uuid',
+        senderUserName: 'Alice',
+        authCode: 'ROOM99'
+      })
+    } as MessageEvent, 'client_conflict')
+
+    // Conflicting client must be quarantined and received SESSION_CONFLICT
+    expect(handler.isQuarantinedPeer('client_conflict')).toBe(true)
+    expect(sendMessage).toHaveBeenCalledWith(
+      expect.objectContaining({
+        type: 'SESSION_CONFLICT',
+        conflictType: 'DUPLICATE_NAME',
+        conflictingUsername: 'Alice',
+        conflictingUserId: 'host_alice_uuid'
+      }),
+      'client_conflict'
+    )
+    expect(onRequestSync).not.toHaveBeenCalled()
+
+    // 3. During quarantine, all sync requests from client_conflict are dropped!
+    await handler({ data: JSON.stringify({ type: 'REQUEST_SCHEDULE_SYNC', authCode: 'ROOM99' }) } as MessageEvent, 'client_conflict')
+    expect(onRequestScheduleSync).not.toHaveBeenCalled()
+
+    await handler({ data: JSON.stringify({ type: 'REQUEST_PIT_SYNC', authCode: 'ROOM99' }) } as MessageEvent, 'client_conflict')
+    expect(onRequestPitSync).not.toHaveBeenCalled()
+
+    await handler({ data: JSON.stringify({ type: 'REQUEST_TAGS_SYNC', authCode: 'ROOM99' }) } as MessageEvent, 'client_conflict')
+    expect(onRequestTagsSync).not.toHaveBeenCalled()
+
+    await handler({ data: JSON.stringify({ type: 'REQUEST_CUSTOM_FIELDS_SYNC', authCode: 'ROOM99' }) } as MessageEvent, 'client_conflict')
+    expect(onRequestCustomFieldsSync).not.toHaveBeenCalled()
+
+    // And SYNC_DATA is dropped (not passed to onRecordsReceived)
+    await handler({
+      data: JSON.stringify({
+        type: 'SYNC_DATA',
+        records: [{ id: 'rec-1', eventId: 'evt-uuid-1', scoutId: 'phone_alice_diff_uuid' }],
+        authCode: 'ROOM99'
+      })
+    } as MessageEvent, 'client_conflict')
+    expect(onRecordsReceived).not.toHaveBeenCalled()
+
+    // 4. Meanwhile, client_normal's requests are completely unaffected!
+    await handler({ data: JSON.stringify({ type: 'REQUEST_SCHEDULE_SYNC', authCode: 'ROOM99' }) } as MessageEvent, 'client_normal')
+    expect(onRequestScheduleSync).toHaveBeenCalledWith('client_normal')
+
+    // 5. Client resolves conflict via merge (MERGE_ACCOUNT_REQUEST with correct credentials)
+    const api = await import('@/services/api')
+    vi.spyOn(api, 'login').mockResolvedValueOnce({
+      id: 'host_alice_uuid',
+      username: 'Alice',
+      token: 'merged_token'
+    })
+
+    await handler({
+      data: JSON.stringify({
+        type: 'MERGE_ACCOUNT_REQUEST',
+        requestId: 'req-merge-ok',
+        targetUsername: 'Alice',
+        targetPassword: 'correct_password',
+        sourceUserId: 'phone_alice_diff_uuid',
+        sourceUsername: 'Alice',
+        authCode: 'ROOM99'
+      })
+    } as MessageEvent, 'client_conflict')
+
+    // Quarantine must be lifted!
+    expect(handler.isQuarantinedPeer('client_conflict')).toBe(false)
+
+    // 6. After merge, sync requests are accepted
+    await handler({ data: JSON.stringify({ type: 'REQUEST_SCHEDULE_SYNC', authCode: 'ROOM99' }) } as MessageEvent, 'client_conflict')
+    expect(onRequestScheduleSync).toHaveBeenCalledWith('client_conflict')
+  })
+
+  it('mobile devices are permanently locked out of isStandbyHost and takeoverHost', async () => {
+    const isMobileModule = await import('@/composables/useIsMobile')
+    const photoStorageModule = await import('@/services/photoStorage')
+
+    // Simulate mobile environment
+    vi.spyOn(isMobileModule, 'isMobileDevice').mockReturnValue(true)
+    vi.spyOn(photoStorageModule, 'isDesktopHost').mockReturnValue(false)
+
+    const connStore = useConnectionStore()
+
+    // Attempting to set standby host on mobile must remain false
+    connStore.setStandbyHost(true, { hostSessionId: 'sess-host-9' })
+    expect(connStore.isStandbyHost).toBe(false)
+    expect(connStore.standbyHostInfo).toBeNull()
+
+    // Direct write to isStandbyHost also blocked
+    ;(connStore as any).isStandbyHost = true
+    expect(connStore.isStandbyHost).toBe(false)
+
+    // Attempting takeoverHost is blocked
+    const warnSpy = vi.spyOn(console, 'warn')
+    await connStore.takeoverHost()
+    expect(warnSpy).toHaveBeenCalledWith(
+      expect.stringContaining('Mobile devices cannot act as host or takeover host')
+    )
+  })
 })

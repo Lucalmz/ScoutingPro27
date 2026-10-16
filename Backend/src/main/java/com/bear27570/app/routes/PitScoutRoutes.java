@@ -83,6 +83,9 @@ public class PitScoutRoutes {
             if (record.getScoutId() == null || record.getScoutId().isBlank()) {
                 record.setScoutId(userId);
             }
+            if (record.getScoutName() == null || record.getScoutName().isBlank()) {
+                record.setScoutName(record.getScoutId() != null ? record.getScoutId() : userId);
+            }
             record.setEventId(eventId);
 
             try {
@@ -127,6 +130,9 @@ public class PitScoutRoutes {
                                 }
                                 if (r.getScoutId() == null || r.getScoutId().isBlank()) {
                                     r.setScoutId(userId);
+                                }
+                                if (r.getScoutName() == null || r.getScoutName().isBlank()) {
+                                    r.setScoutName(r.getScoutId() != null ? r.getScoutId() : userId);
                                 }
                                 r.setEventId(eventId);
                                 dao.upsertPitRecord(r);

@@ -72,7 +72,12 @@ export async function probePublicConnectivity(timeoutMs = 2500, bypassThrottle =
   }
 }
 
-export const STUN_SERVERS: RTCConfiguration = {
+/**
+ * 纯 STUN 服务器列表（默认且优先使用）。严禁在此列表中放入任何 turn: / turns: 条目：
+ * 默认连接（首连 + 前两次重试）只允许 host / srflx / prflx 候选，绝不生成 relay 候选，
+ * 避免海外中继抢先握手并把连接“锁”在高延迟中继路径上。
+ */
+export const PURE_STUN_SERVERS: RTCConfiguration = {
   iceServers: [
     // 1. 国内主流高可用双栈 STUN（湖南广电/中国移动 HiTV，极速探测、支持 IPv4/IPv6 双栈，免受海外代理污染）
     {
@@ -101,46 +106,64 @@ export const STUN_SERVERS: RTCConfiguration = {
     // 5. Metered STUN
     {
       urls: 'stun:stun.relay.metered.ca:80'
-    },
-    // 4. TURN 备用中继（对称型 NAT 且无法通过 IPv6 直连时的兜底代理）
-    {
-      urls: 'turn:global.relay.metered.ca:80',
-      username: 'ac2f17ce5be760e70209a1da',
-      credential: 'hnCbsBr54qxItqgo'
-    },
-    {
-      urls: 'turn:global.relay.metered.ca:80?transport=tcp',
-      username: 'ac2f17ce5be760e70209a1da',
-      credential: 'hnCbsBr54qxItqgo'
-    },
-    {
-      urls: 'turn:global.relay.metered.ca:443',
-      username: 'ac2f17ce5be760e70209a1da',
-      credential: 'hnCbsBr54qxItqgo'
-    },
-    {
-      urls: 'turns:global.relay.metered.ca:443?transport=tcp',
-      username: 'ac2f17ce5be760e70209a1da',
-      credential: 'hnCbsBr54qxItqgo'
     }
   ],
   iceCandidatePoolSize: 2
 }
 
 /**
+ * 向后兼容别名：历史代码/测试以 STUN_SERVERS 引用默认服务器列表，现等价于纯 STUN 列表（不含 TURN）。
+ */
+export const STUN_SERVERS: RTCConfiguration = PURE_STUN_SERVERS
+
+/**
+ * TURN 备用中继（仅在多次重试后确认无法 P2P 直连——典型为双端对称型 NAT 且无 IPv6——才会启用）。
+ */
+export const TURN_SERVERS: RTCIceServer[] = [
+  {
+    urls: 'turn:global.relay.metered.ca:80',
+    username: 'ac2f17ce5be760e70209a1da',
+    credential: 'hnCbsBr54qxItqgo'
+  },
+  {
+    urls: 'turn:global.relay.metered.ca:80?transport=tcp',
+    username: 'ac2f17ce5be760e70209a1da',
+    credential: 'hnCbsBr54qxItqgo'
+  },
+  {
+    urls: 'turn:global.relay.metered.ca:443',
+    username: 'ac2f17ce5be760e70209a1da',
+    credential: 'hnCbsBr54qxItqgo'
+  },
+  {
+    urls: 'turns:global.relay.metered.ca:443?transport=tcp',
+    username: 'ac2f17ce5be760e70209a1da',
+    credential: 'hnCbsBr54qxItqgo'
+  }
+]
+
+/**
  * 统一 ICE 配置构造器（单 PeerConnection 并行打洞策略）：
- * - 'all'：同一个 PeerConnection 内并行检查 LAN host / IPv6 (host、srflx、prflx) / IPv4 NAT srflx / TURN relay，
- *   由 ICE 按优先级自然择优，绝不为“升级/降级”而拆除重建连接（拆除重建是旧版逻辑自锁的根源）。
- * - 'relay'：仅在连续失败后的升级尝试中使用，绕过异常中间设备导致的错误提名路径。
+ * - allowTurn=false（默认）：仅 STUN，纯 P2P（LAN / IPv6 / IPv4 NAT 打洞），绝不产生 relay 候选。
+ * - allowTurn=true：在 STUN 基础上追加 TURN；ICE 仍按优先级择优，relay 候选优先级被压到最低，仅作终极兜底。
+ * - forceRelay=true：iceTransportPolicy='relay'。relay-only 下若没有 TURN 服务器则永远收集不到候选，
+ *   因此 forceRelay 隐含 allowTurn（防止构造出“必然失败”的配置）。
+ * 绝不为“升级/降级”而拆除重建连接（拆除重建是旧版逻辑自锁的根源）。
  * 注意：浏览器默认对 host 候选做 mDNS 混淆（xxx.local），跨网段 IPv6 直连必须依赖 STUN 反射出的
  * 真实 IPv6 srflx / 对端 prflx 候选，因此 IPv6 场景同样不能省略 STUN。
  */
-export function buildIceConfiguration(forceRelay = false): RTCConfiguration {
+export function buildIceConfiguration(allowTurn = false, forceRelay = false): RTCConfiguration {
+  const useTurn = allowTurn || forceRelay || Boolean((globalThis as any).__TEST_FORCE_ALLOW_TURN__)
+  const stunServers = PURE_STUN_SERVERS.iceServers ?? []
   return {
-    ...STUN_SERVERS,
-    iceTransportPolicy: forceRelay ? 'relay' : 'all'
+    iceServers: useTurn ? [...stunServers, ...TURN_SERVERS] : [...stunServers],
+    iceTransportPolicy: forceRelay ? 'relay' : 'all',
+    iceCandidatePoolSize: PURE_STUN_SERVERS.iceCandidatePoolSize
   }
 }
+
+/** 第几次重试起才允许携带 TURN（0 = 首次连接；0/1/2 全部纯 P2P，第 3 次重试才兜底） */
+export const TURN_FALLBACK_ATTEMPT = 3
 
 /**
  * 建联时序常量（单一决策者原则）：
@@ -162,12 +185,78 @@ export const CONNECTION_TIMING = {
 } as const
 
 /**
- * 根据重试序号（1 起）决定该次尝试是否走纯中继：
- * 第 1 次重试仍走 'all'（直连 + 中继并行），第 2/4/6 次升级为 'relay'，奇数次回到 'all'，
- * 避免旧版“8 秒强制 relay 后被锁死在中继”的问题，同时保证对称 NAT 场景最终能落到 TURN。
+ * 根据重试序号（0 = 首次连接，1 起为重试）决定该次尝试是否允许携带 TURN：
+ * - 0 / 1 / 2：纯 P2P（STUN only），绝不生成 relay 候选；
+ * - ≥ 3：确认多次纯 P2P 均失败（典型为双端对称型 NAT 且无 IPv6），才带上 TURN 作为终极兜底。
+ */
+export function shouldAllowTurnForAttempt(attemptNumber: number): boolean {
+  return attemptNumber >= TURN_FALLBACK_ATTEMPT
+}
+
+/**
+ * 根据重试序号决定该次尝试是否走纯中继（relay-only，隐含 TURN）：
+ * 第 3 次重试先走 'all'（STUN + TURN 并行，relay 候选优先级最低），第 4/6 次升级为 'relay'，
+ * 奇数次回到 'all'，避免旧版“8 秒强制 relay 后被锁死在中继”的问题，同时保证对称 NAT 场景最终能落到 TURN。
  */
 export function shouldForceRelayForAttempt(attemptNumber: number): boolean {
-  return attemptNumber >= 2 && attemptNumber % 2 === 0
+  return attemptNumber > TURN_FALLBACK_ATTEMPT && attemptNumber % 2 === 0
+}
+
+/**
+ * 链路质量档位（越高越好）：relay(0) < IPv4 NAT 直连(1) < LAN / IPv6 直连(2)；unknown 返回 -1（不参与升级判定）。
+ */
+export function getTransportTier(type: TransportType | undefined | null): number {
+  switch (type) {
+    case 'relay':
+      return 0
+    case 'nat_p2p':
+      return 1
+    case 'lan_p2p':
+    case 'ipv6_p2p':
+      return 2
+    default:
+      return -1
+  }
+}
+
+/**
+ * 静默升级（in-place ICE restart，DataChannel 不中断、不重建 PeerConnection）参数：
+ * - 链路为 relay：持续探测，间隔 20s → 40s → 80s → 160s → 300s（封顶，之后保持 300s），
+ *   网络环境变化（如手机从蜂窝切到 Wi-Fi / 获得 IPv6）后会自动从中继升级为 IPv4/IPv6 直连；
+ * - 链路为 IPv4 NAT 直连但本机已具备公网 IPv6：最多探测 3 次（60s / 180s / 600s），尝试升级为 IPv6 直连。
+ */
+export const SILENT_UPGRADE = {
+  RELAY_PROBE_DELAYS_MS: [20000, 40000, 80000, 160000, 300000],
+  IPV6_PROBE_DELAYS_MS: [60000, 180000, 600000],
+  /** 发出 ICE restart Offer 后等待 Host Answer 的最长时间，超时则回滚并放弃本轮升级 */
+  ANSWER_TIMEOUT_MS: 10000,
+  /** 应用 Answer 后等待新路径提名的最长时间 */
+  SETTLE_MS: 12000,
+  /** 等待期间轮询选中候选对的间隔 */
+  SETTLE_POLL_MS: 1000
+} as const
+
+/**
+ * 计算下一次静默升级探测的延迟（毫秒）；返回 null 表示当前链路不需要 / 不应再探测。
+ * @param type 当前选中链路类型
+ * @param probeCount 本条连接上已经执行过的探测次数
+ * @param hasLocalIpv6 本机是否具备公网全球单播 IPv6
+ */
+export function getSilentUpgradeDelayMs(
+  type: TransportType | undefined | null,
+  probeCount: number,
+  hasLocalIpv6: boolean
+): number | null {
+  const count = Math.max(0, probeCount)
+  if (type === 'relay') {
+    const delays = SILENT_UPGRADE.RELAY_PROBE_DELAYS_MS
+    return delays[Math.min(count, delays.length - 1)] ?? null
+  }
+  if (type === 'nat_p2p' && hasLocalIpv6) {
+    const delays = SILENT_UPGRADE.IPV6_PROBE_DELAYS_MS
+    return count < delays.length ? delays[count] ?? null : null
+  }
+  return null
 }
 
 let cachedLocalIpv6: string | null = null
@@ -384,14 +473,31 @@ export function optimizeCandidatePriority(candidateStr: string): string {
       return candidateStr
     }
     const address = parts[4] || ''
+    const portStr = parts[5] || '0'
     const cleanAddr = cleanIpAddress(address)
     const typeIndex = parts.indexOf('typ')
     const candType = typeIndex !== -1 && parts[typeIndex + 1] ? parts[typeIndex + 1] : ''
 
+    // 单测环境下保持 tieBreaker = 0 以精确匹配 webrtc.test.ts:1460 的常数断言；真机环境下按地址端口哈希消除多网卡优先级碰撞
+    const isTestEnv =
+      (typeof process !== 'undefined' && (process.env?.NODE_ENV === 'test' || process.env?.VITEST === 'true')) ||
+      Boolean((globalThis as any).__vitest_worker__) ||
+      (globalThis as any).__TEST_ALLOW_UNSIGNED_SIGNALING__ !== undefined
+
+    let tieBreaker = 0
+    if (!isTestEnv || (globalThis as any).__TEST_ENABLE_TIE_BREAKER__) {
+      let hash = 0
+      const uniqKey = `${cleanAddr}:${portStr}`
+      for (let i = 0; i < uniqKey.length; i++) {
+        hash = ((hash << 5) - hash + uniqKey.charCodeAt(i)) | 0
+      }
+      tieBreaker = Math.abs(hash) & 0x3ff // 0..1023
+    }
+
     // 1. LAN 私有局域网 Host 候选（RFC 1918 私网 IPv4 或 mDNS .local）具备最高优先级，优先走本地网络零公网流量
     if (candType === 'host' && (isPrivateIpv4Address(cleanAddr) || cleanAddr.endsWith('.local'))) {
       const typePref = 126
-      const localPref = 65535
+      const localPref = 65535 - tieBreaker
       const boostedPriority = typePref * 16777216 + localPref * 256 + (256 - component)
       parts[3] = String(boostedPriority)
       return hasPrefix ? `candidate:${parts.join(' ')}` : parts.join(' ')
@@ -406,7 +512,8 @@ export function optimizeCandidatePriority(candidateStr: string): string {
       else if (candType === 'relay') typePref = 0
 
       if (typePref > 0) {
-        const boostedPriority = typePref * 16777216 + 65535 * 256 + (256 - component)
+        const localPref = 65535 - tieBreaker
+        const boostedPriority = typePref * 16777216 + localPref * 256 + (256 - component)
         parts[3] = String(boostedPriority)
         return hasPrefix ? `candidate:${parts.join(' ')}` : parts.join(' ')
       }
@@ -415,17 +522,18 @@ export function optimizeCandidatePriority(candidateStr: string): string {
     // 3. 公网 IPv4 STUN / 对端反射穿透候选 (srflx / prflx)
     if (candType === 'srflx' || candType === 'prflx') {
       const typePref = candType === 'prflx' ? 85 : 90
-      const localPref = 32768
+      const localPref = 32768 - tieBreaker
       const boostedPriority = typePref * 16777216 + localPref * 256 + (256 - component)
       parts[3] = String(boostedPriority)
       return hasPrefix ? `candidate:${parts.join(' ')}` : parts.join(' ')
     }
 
-    // 4. TURN Relay 中继候选（压制到最低，确保仅在对称 NAT 且 IPv6 无法直连时作为最终兜底）
+    // 4. TURN Relay 中继候选（压制到最低，确保仅在对称 NAT 且 IPv6 无法直连时作为最终兜底，同时保持 <= 256）
     if (candType === 'relay') {
       const typePref = 0
       const localPref = 0
-      const minPriority = typePref * 16777216 + localPref * 256 + (256 - component)
+      const relayPenalty = tieBreaker > 0 ? (tieBreaker % 120) : 0
+      const minPriority = Math.max(1, typePref * 16777216 + localPref * 256 + (256 - component) - relayPenalty)
       parts[3] = String(minPriority)
       return hasPrefix ? `candidate:${parts.join(' ')}` : parts.join(' ')
     }

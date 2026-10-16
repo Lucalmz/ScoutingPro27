@@ -4,7 +4,10 @@ import { useRouter, onBeforeRouteLeave } from 'vue-router'
 import { useI18n } from 'vue-i18n'
 import { useRecordStore } from '@/stores/records'
 import { useConnectionStore } from '@/stores/connection'
+import { useEventStore } from '@/stores/events'
+import { useUserStore } from '@/stores/user'
 import { useToastStore } from '@/stores/toast'
+import { syncRecords } from '@/services/api'
 import TagPicker from '@/components/common/TagPicker.vue'
 import ConnectionStatus from '@/components/common/ConnectionStatus.vue'
 import { usePitScoutStore } from '@/stores/pitScout'
@@ -23,6 +26,9 @@ const { t, te } = useI18n()
 const recordStore = useRecordStore()
 const pitStore = usePitScoutStore()
 const customFieldsStore = useCustomFieldsStore()
+const eventStore = useEventStore()
+const userStore = useUserStore()
+const connStore = useConnectionStore()
 const toastStore = useToastStore()
 const isPitDrawerOpen = ref(false)
 
@@ -375,9 +381,27 @@ async function saveComment(match: ScoutingRecord) {
     const updatedRecord = { ...match, notes: editCommentText.value, updatedAt: new Date().toISOString() }
     const { success, recordsToPush } = await recordStore.updateRecord(updatedRecord)
     if (success) {
-      import('@/stores/connection').then(({ useConnectionStore }) => {
-        useConnectionStore().pushIfNeeded(recordsToPush)
-      })
+      if (recordsToPush && recordsToPush.length > 0) {
+        const deduplicatedRecords = Array.from(new Map(recordsToPush.map((r) => [r.id, r])).values())
+        if (eventStore.isHost && !connStore.isStandbyHost) {
+          for (const r of deduplicatedRecords) {
+            r.hostSeq = undefined
+          }
+          connStore.stampHostSeq(deduplicatedRecords)
+          try {
+            await syncRecords(deduplicatedRecords)
+          } catch (e) {
+            console.error('[TeamDetailView] Failed to sync stamped records to DB:', e)
+          }
+          connStore.pushIfNeeded(deduplicatedRecords)
+        } else {
+          // 非主机客户端：只推送属于自己的记录！绝不越权推送其他人被 reassessConflicts 影响的记录
+          const myOnlyRecords = deduplicatedRecords.filter((r) => r.scoutId === userStore.userId)
+          if (myOnlyRecords.length > 0) {
+            connStore.pushIfNeeded(myOnlyRecords)
+          }
+        }
+      }
       editingMatchId.value = null
     }
   } catch (e: any) {

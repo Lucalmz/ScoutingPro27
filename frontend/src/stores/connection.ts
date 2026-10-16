@@ -68,7 +68,20 @@ export const useConnectionStore = defineStore('connection', () => {
       }
     }
   })
-  const isStandbyHost = ref(false)
+  const _isStandbyHost = ref(false)
+  const isStandbyHost = computed({
+    get: () => {
+      if (!isDesktopHost() || isMobileDevice()) return false
+      return _isStandbyHost.value
+    },
+    set: (val: boolean) => {
+      if (!isDesktopHost() || isMobileDevice()) {
+        _isStandbyHost.value = false
+        return
+      }
+      _isStandbyHost.value = val
+    }
+  })
   const standbyHostInfo = ref<{ hostSessionId: string; hostDeviceId?: string } | null>(null)
   const isTakingOver = ref(false)
   const lastTakeoverTime = ref(0)
@@ -112,11 +125,11 @@ export const useConnectionStore = defineStore('connection', () => {
 
   function setStandbyHost(isStandby: boolean, info?: { hostSessionId: string; hostDeviceId?: string }) {
     if (!isDesktopHost() || isMobileDevice()) {
-      isStandbyHost.value = false
+      _isStandbyHost.value = false
       standbyHostInfo.value = null
       return
     }
-    isStandbyHost.value = isStandby
+    _isStandbyHost.value = isStandby
     if (info) standbyHostInfo.value = info
     else if (!isStandby) standbyHostInfo.value = null
   }

@@ -8,6 +8,7 @@ import {
   NonceLruCache,
   sha256Hex
 } from '@/utils/crypto'
+import { isStaticCloudHost } from '@/services/api'
 import { createLogger } from '@/utils/logger'
 
 const log = createLogger('WebRTC:Signaling')
@@ -32,6 +33,20 @@ export const BUILTIN_BROKERS: SignalingEndpoint[] = [
     id: 'fallback',
     name: 'Global Anycast Backup',
     url: 'wss://broker.emqx.io:8084/mqtt',
+    protocol: 'mqtt',
+    region: 'global'
+  },
+  {
+    id: 'hivemq',
+    name: 'HiveMQ Public Backup',
+    url: 'wss://broker.hivemq.com:8884/mqtt',
+    protocol: 'mqtt',
+    region: 'global'
+  },
+  {
+    id: 'mosquitto',
+    name: 'Eclipse Mosquitto Backup',
+    url: 'wss://test.mosquitto.org:8081/mqtt',
     protocol: 'mqtt',
     region: 'global'
   }
@@ -66,24 +81,51 @@ export function resolveBrokerUrl(targetOrId?: string | null): string {
 }
 
 /**
- * 混合信令通道：支持 MQTT 公网代理与原生局域网 WebSocket。
+ * 安全解码 WebSocket 帧载荷（全面兼容 string、Blob、ArrayBuffer 与 Uint8Array）
+ */
+function decodeWsPayload(raw: unknown): string | Promise<string> {
+  if (typeof raw === 'string') return raw
+  if (raw instanceof Uint8Array) {
+    return new TextDecoder().decode(raw)
+  }
+  if (raw instanceof ArrayBuffer) {
+    return new TextDecoder().decode(new Uint8Array(raw))
+  }
+  if (ArrayBuffer.isView(raw)) {
+    return new TextDecoder().decode(new Uint8Array(raw.buffer, raw.byteOffset, raw.byteLength))
+  }
+  if (typeof Blob !== 'undefined' && raw instanceof Blob) {
+    return raw.text()
+  }
+  return String(raw ?? '')
+}
+
+function isBrowserSimulatedOffline(): boolean {
+  return typeof navigator !== 'undefined' && navigator.onLine === false
+}
+
+/**
+ * 混合信令通道：支持 MQTT 公网代理与原生局域网 WebSocket（及双栈伴随桥接）。
  * 特性：
  * 1. 硬隔离安全拦截：严禁业务类型走信令
- * 2. 全载荷 HMAC-SHA256 签名与 Nonce/Timestamp 防重放防篡改
- * 3. 支持局域网离线赛场（Javalin /ws/signal 端点）
+ * 2. 全载荷 HMAC-SHA256 签名与 Nonce/Timestamp 防重放防篡改（容忍 ±15 分钟设备时钟偏差）
+ * 3. 支持局域网离线赛场（Javalin /ws/signal 端点自动伴随双发）
  * 4. 支持多节点容灾回退（Failover）
  */
 export class SignalingChannel {
   private client: mqtt.MqttClient | null = null
   private wsClient: WebSocket | null = null
+  private companionLanWs: WebSocket | null = null
   private topic: string = ''
   readonly clientId: string
   private messageCallback: ((data: unknown) => void | Promise<void>) | null = null
   private hmacKey: CryptoKey | null = null
-  private nonceCache: NonceLruCache = new NonceLruCache(5000, 30000)
+  // 允许手机与电脑之间存在最多 ±15 分钟的系统时钟偏差，依靠 5000 容量 Nonce 缓存防重放
+  private nonceCache: NonceLruCache = new NonceLruCache(5000, 15 * 60 * 1000)
   private currentBrokerIndex = 0
   private isNativeWs = false
   private activeUrl: string = ''
+  private didNotifyConnect = false
 
   constructor(private room: string, private preferredEndpoint?: string) {
     this.clientId = `sp27-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`
@@ -125,9 +167,54 @@ export class SignalingChannel {
       return
     }
 
-    // 2. 走标准 MQTT 信令协议
+    // 2. 走标准 MQTT 信令协议，并在本地后端可达时自动挂载局域网伴随 WebSocket 桥
     this.isNativeWs = false
+    this.connectCompanionLanWs(callbacks.onConnect)
     this.connectMqtt(target, callbacks)
+  }
+
+  /**
+   * 局域网伴随 WebSocket 桥：
+   * 当主机运行在本地 Javalin 后端但默认使用 MQTT 时，同时监听本地 /ws/signal/{room}，
+   * 确保扫码选中 "赛场离线热点 (b=lan)" 的手机或外网受限的同局域网设备能零延迟直通主机！
+   */
+  private connectCompanionLanWs(onConnect?: () => void): void {
+    const isTestEnv =
+      (typeof process !== 'undefined' && (process.env?.NODE_ENV === 'test' || process.env?.VITEST === 'true')) ||
+      Boolean((globalThis as any).__vitest_worker__) ||
+      (globalThis as any).__TEST_ALLOW_UNSIGNED_SIGNALING__ !== undefined
+    if (isTestEnv && !(globalThis as any).__TEST_ENABLE_COMPANION_WS__) return
+    if (typeof window === 'undefined' || typeof WebSocket === 'undefined') return
+    if (!window.location?.host || isStaticCloudHost()) return
+
+    try {
+      const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:'
+      const lanWsUrl = `${protocol}//${window.location.host}/ws/signal/${this.room}`
+      this.companionLanWs = new WebSocket(lanWsUrl)
+      try {
+        this.companionLanWs.binaryType = 'arraybuffer'
+      } catch {}
+      this.companionLanWs.onopen = () => {
+        log.info(`Companion LAN WebSocket bridge active at ${lanWsUrl}`)
+        if (!this.didNotifyConnect) {
+          this.didNotifyConnect = true
+          onConnect?.()
+        }
+      }
+      this.companionLanWs.onmessage = async (ev) => {
+        if (isBrowserSimulatedOffline() && this.companionLanWs?.url.includes('localhost')) return
+        const text = typeof ev.data === 'string' ? ev.data : await decodeWsPayload(ev.data)
+        await this.handleIncomingPayload(text)
+      }
+      this.companionLanWs.onerror = () => {
+        // 静默忽略伴随通道错误，不影响主通道
+      }
+      this.companionLanWs.onclose = () => {
+        this.companionLanWs = null
+      }
+    } catch {
+      this.companionLanWs = null
+    }
   }
 
   private connectNativeWs(url: string, callbacks: { onConnect?: () => void; onError?: (err?: Error) => void }): void {
@@ -137,12 +224,15 @@ export class SignalingChannel {
 
     try {
       this.wsClient = new WebSocket(fullWsUrl)
+      try {
+        this.wsClient.binaryType = 'arraybuffer'
+      } catch {}
       this.wsClient.onopen = () => {
         log.info(`Native LAN WebSocket connected to ${fullWsUrl}`)
         callbacks.onConnect?.()
       }
       this.wsClient.onmessage = async (ev) => {
-        const text = typeof ev.data === 'string' ? ev.data : new TextDecoder().decode(ev.data)
+        const text = await decodeWsPayload(ev.data)
         await this.handleIncomingPayload(text)
       }
       this.wsClient.onerror = (err: any) => {
@@ -180,7 +270,10 @@ export class SignalingChannel {
           log.info(`Subscribed to topic ${this.topic}. Ready for WebRTC handshakes.`)
         }
       })
-      callbacks.onConnect?.()
+      if (!this.didNotifyConnect) {
+        this.didNotifyConnect = true
+        callbacks.onConnect?.()
+      }
     })
 
     this.client.on('error', (err) => {
@@ -189,8 +282,12 @@ export class SignalingChannel {
         log.warn(`Attempting failover to backup broker...`)
         this.currentBrokerIndex++
         this.preferredEndpoint = undefined
-        this.close()
+        this.closeMqttOnly()
         this.connect({ onMessage: this.messageCallback!, onConnect: callbacks.onConnect, onError: callbacks.onError })
+        return
+      }
+      if (this.companionLanWs && this.companionLanWs.readyState === WebSocket.OPEN) {
+        log.info(`MQTT unreachable, but Companion LAN WebSocket is active; staying online in LAN mode.`)
         return
       }
       callbacks.onError?.(err)
@@ -198,11 +295,14 @@ export class SignalingChannel {
 
     this.client.on('offline', () => {
       log.warn(`MQTT client entered offline state on ${brokerUrl}`)
+      if (this.companionLanWs && this.companionLanWs.readyState === WebSocket.OPEN) {
+        return
+      }
       callbacks.onError?.()
     })
 
     this.client.on('message', async (_topic: string, payload: Uint8Array) => {
-      const decoded = new TextDecoder().decode(payload)
+      const decoded = typeof payload === 'string' ? payload : new TextDecoder().decode(payload)
       await this.handleIncomingPayload(decoded)
     })
   }
@@ -247,11 +347,11 @@ export class SignalingChannel {
     // 如果指定了 target 且不是自己，忽略
     if (msg.target && msg.target !== this.clientId) return
 
-    // 时间戳与 Nonce 防重放校验 (±30s)
+    // 时间戳与 Nonce 防重放校验 (±15min 容忍跨设备时钟误差 + Nonce 严格防重放与双通道去重)
     if (msg.timestamp && msg.nonce) {
       const fresh = this.nonceCache.verifyAndAdd(msg.nonce, msg.timestamp)
       if (!fresh) {
-        log.warn(`[Security] Dropped signaling message from ${msg.sender}: invalid timestamp (${msg.timestamp}) or replayed nonce (${msg.nonce}).`)
+        log.warn(`[Security] Dropped signaling message from ${msg.sender}: invalid timestamp (${msg.timestamp}) or replayed/duplicate nonce (${msg.nonce}).`)
         return
       }
     }
@@ -259,11 +359,7 @@ export class SignalingChannel {
     // 全载荷 HMAC-SHA256 签名校验（严格校验，不可跳过）
     if (this.hmacKey) {
       if (!msg.signature) {
-        if (
-          typeof process !== 'undefined' &&
-          process.env?.NODE_ENV === 'test' &&
-          (globalThis as any).__TEST_ALLOW_UNSIGNED_SIGNALING__
-        ) {
+        if ((globalThis as any).__TEST_ALLOW_UNSIGNED_SIGNALING__) {
           // legacy unit test fixtures bypass
         } else {
           log.warn(`[Security] Dropped signaling message from ${msg.sender}: missing mandatory HMAC signature (type: ${msg.type || 'unknown'}).`)
@@ -340,12 +436,29 @@ export class SignalingChannel {
     })
 
     const payloadString = JSON.stringify(envelope)
+    let sentAny = false
 
     if (this.isNativeWs && this.wsClient && this.wsClient.readyState === WebSocket.OPEN) {
       this.wsClient.send(payloadString)
+      sentAny = true
     } else if (this.client && typeof this.client.publish === 'function') {
       this.client.publish(this.topic, payloadString)
-    } else {
+      sentAny = true
+    }
+
+    // 若伴随局域网 WebSocket 已打开，同步双发（对端通过 NonceLruCache 自动去重）
+    if (
+      this.companionLanWs &&
+      this.companionLanWs.readyState === WebSocket.OPEN &&
+      !(isBrowserSimulatedOffline() && this.companionLanWs.url.includes('localhost'))
+    ) {
+      try {
+        this.companionLanWs.send(payloadString)
+        sentAny = true
+      } catch {}
+    }
+
+    if (!sentAny) {
       log.warn('Attempted to send signaling message while client is not connected')
     }
   }
@@ -354,22 +467,18 @@ export class SignalingChannel {
     if (this.isNativeWs) {
       return Boolean(this.wsClient && this.wsClient.readyState === WebSocket.OPEN)
     }
+    if (
+      this.companionLanWs &&
+      this.companionLanWs.readyState === WebSocket.OPEN &&
+      !(isBrowserSimulatedOffline() && this.companionLanWs.url.includes('localhost'))
+    ) {
+      return true
+    }
     return Boolean(this.client && (this.client as any).connected)
   }
 
-  close(): void {
-    if (this.wsClient) {
-      try {
-        this.wsClient.onopen = null
-        this.wsClient.onmessage = null
-        this.wsClient.onerror = null
-        this.wsClient.onclose = null
-        this.wsClient.close()
-      } catch {}
-      this.wsClient = null
-    }
+  private closeMqttOnly(): void {
     if (this.client) {
-      log.info(`Closing signaling channel on topic ${this.topic}...`)
       try {
         if (typeof this.client.removeAllListeners === 'function') {
           this.client.removeAllListeners()
@@ -383,5 +492,33 @@ export class SignalingChannel {
       } catch {}
       this.client = null
     }
+  }
+
+  close(): void {
+    if (this.wsClient) {
+      try {
+        this.wsClient.onopen = null
+        this.wsClient.onmessage = null
+        this.wsClient.onerror = null
+        this.wsClient.onclose = null
+        this.wsClient.close()
+      } catch {}
+      this.wsClient = null
+    }
+    if (this.companionLanWs) {
+      try {
+        this.companionLanWs.onopen = null
+        this.companionLanWs.onmessage = null
+        this.companionLanWs.onerror = null
+        this.companionLanWs.onclose = null
+        this.companionLanWs.close()
+      } catch {}
+      this.companionLanWs = null
+    }
+    if (this.client) {
+      log.info(`Closing signaling channel on topic ${this.topic}...`)
+      this.closeMqttOnly()
+    }
+    this.didNotifyConnect = false
   }
 }
