@@ -586,10 +586,11 @@ export function isBogusOrTunCandidate(candidateStr: string): boolean {
     return true
   }
 
-  if (candType === 'srflx' && raddr && raddr !== '::' && raddr !== '0.0.0.0') {
+  if (candType === 'srflx' && raddr && raddr !== '::' && raddr !== '0.0.0.0' && !raddr.endsWith('.local')) {
     const addrIsV6 = addr.includes(':')
     const raddrIsV6 = raddr.includes(':')
     // 跨协议族反射候选（IPv4 srflx 绑在 IPv6 虚拟网卡上，或反之）100% 为代理污染废包
+    // 注意：必须排除 raddr 为 .local (mDNS) 的情形，否则手机端 IPv6 srflx (addr 含冒号而 raddr 为 uuid.local 不含冒号) 会被误判拦截！
     if (addrIsV6 !== raddrIsV6) {
       return true
     }
@@ -725,24 +726,22 @@ export function optimizeCandidatePriority(candidateStr: string): string {
 export function optimizeSdpCandidates(sdp: string): string {
   if (!sdp || typeof sdp !== 'string') return sdp
   try {
-    const outLines: string[] = []
-    for (const line of sdp.split(/\r\n|\n/)) {
-      if (line.startsWith('a=candidate:')) {
-        const rawCand = line.slice(2)
-        if (isBogusOrTunCandidate(rawCand)) {
-          const synthesized = synthesizePhysicalHostCandidatesFromTun(rawCand)
-          for (const syn of synthesized) {
-            outLines.push(`a=${syn}`)
-          }
-          continue
+    return sdp
+      .split(/\r\n|\n/)
+      .filter((line) => {
+        if (line.startsWith('a=candidate:')) {
+          return !isBogusOrTunCandidate(line.slice(2))
         }
-        const optimized = optimizeCandidatePriority(rawCand)
-        outLines.push(`a=${optimized}`)
-      } else {
-        outLines.push(line)
-      }
-    }
-    return outLines.join('\r\n')
+        return true
+      })
+      .map((line) => {
+        if (line.startsWith('a=candidate:')) {
+          const optimized = optimizeCandidatePriority(line.slice(2))
+          return `a=${optimized}`
+        }
+        return line
+      })
+      .join('\r\n')
   } catch (err) {
     console.warn('[WebRTC] SDP candidate priority rewriting failed, falling back to original SDP:', err)
     return sdp

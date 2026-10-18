@@ -842,50 +842,6 @@ export function createClientSession(ctx: ClientSessionContext) {
     }
   }
 
-  async function maybeInjectSynthesizedHostIpv6Candidate(clientPc: RTCPeerConnection, candidateObj: any) {
-    if (!lastHostIpv6 || !isGlobalIpv6Address(lastHostIpv6) || !candidateObj?.candidate) return
-    try {
-      const raw = String(candidateObj.candidate).trim()
-      const cleanStr = raw.startsWith('candidate:') ? raw.slice('candidate:'.length).trim() : raw
-      const parts = cleanStr.split(/\s+/)
-      if (parts.length < 7) return
-      const protocol = (parts[2] || '').toLowerCase()
-      if (protocol !== 'udp') return
-
-      const candAddr = cleanIpAddress(parts[4] || '')
-      const candPort = parts[5] || ''
-      const typeIdx = parts.indexOf('typ')
-      const candType = typeIdx !== -1 && parts[typeIdx + 1] ? parts[typeIdx + 1] : ''
-      if (candType === 'relay') return
-
-      if (candAddr === lastHostIpv6 && candType === 'host') {
-        injectedHostIpv6Ports.add(candPort)
-        return
-      }
-
-      const rportIdx = parts.indexOf('rport')
-      const rport = rportIdx !== -1 && parts[rportIdx + 1] && parts[rportIdx + 1] !== '0' ? parts[rportIdx + 1] : ''
-      const targetPort = candAddr.includes(':') ? candPort : (rport || candPort)
-      if (!targetPort || targetPort === '0' || injectedHostIpv6Ports.has(targetPort)) return
-
-      injectedHostIpv6Ports.add(targetPort)
-      const ufragIdx = parts.indexOf('ufrag')
-      const ufragPart = ufragIdx !== -1 && parts[ufragIdx + 1] ? ` ufrag ${parts[ufragIdx + 1]}` : ''
-      const synCandStr = optimizeCandidatePriority(
-        `candidate:2999999999 1 udp 2122260223 ${lastHostIpv6} ${targetPort} typ host generation 0${ufragPart}`
-      )
-      await clientPc.addIceCandidate(
-        toIceCandidate({
-          candidate: synCandStr,
-          sdpMid: candidateObj.sdpMid ?? '0',
-          sdpMLineIndex: candidateObj.sdpMLineIndex ?? 0,
-          usernameFragment: candidateObj.usernameFragment
-        })
-      )
-      log.info(`[WebRTC Client] Injected direct NIC IPv6 host candidate for Host: [${lastHostIpv6}]:${targetPort}`)
-    } catch {}
-  }
-
   async function evaluateAndApplyClientTrust(
     hostPubKey: string,
     hostDeviceId?: string,
@@ -1229,9 +1185,9 @@ export function createClientSession(ctx: ClientSessionContext) {
             }
             if (candidateObj && candidateObj.candidate) {
               candidateObj.candidate = optimizeCandidatePriority(candidateObj.candidate)
+              log.info(`Remote ICE Candidate (pending) added from Host: ${candidateObj.candidate.trim()}`)
             }
             await clientPc.addIceCandidate(toIceCandidate(candidateObj))
-            await maybeInjectSynthesizedHostIpv6Candidate(clientPc, candidateObj)
           } catch (candidateErr) {
             log.warn('Failed to add pending candidate:', candidateErr)
           }
@@ -1287,8 +1243,10 @@ export function createClientSession(ctx: ClientSessionContext) {
 
       if (ctx.getClientPc() !== clientPc) return
       try {
+        if (candidateData?.candidate) {
+          log.info(`Remote ICE Candidate added from Host: ${String(candidateData.candidate).trim()}`)
+        }
         await clientPc.addIceCandidate(toIceCandidate(candidateData))
-        await maybeInjectSynthesizedHostIpv6Candidate(clientPc, candidateData)
       } catch (addErr) {
         if (!clientPc.remoteDescription) {
           const pending = ctx.getClientPendingCandidates()

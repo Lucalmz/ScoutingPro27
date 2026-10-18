@@ -693,6 +693,7 @@ export function createHostSignalingHandler(ctx: HostSessionContext) {
             }
             if (candidateObj && candidateObj.candidate) {
               candidateObj.candidate = optimizeCandidatePriority(candidateObj.candidate)
+              log.info(`Remote ICE Candidate (pending) added from ${sender}: ${String(candidateObj.candidate).trim()}`)
             }
             await pc.addIceCandidate(toIceCandidate(candidateObj))
           } catch (err) {
@@ -795,6 +796,9 @@ export function createHostSignalingHandler(ctx: HostSessionContext) {
         }
         if (targetHolder.pc) {
           try {
+            if (candidateData?.candidate) {
+              log.info(`Remote ICE Candidate added from ${sender}: ${String(candidateData.candidate).trim()}`)
+            }
             await targetHolder.pc.addIceCandidate(toIceCandidate(candidateData))
           } catch {
             targetHolder.pendingCandidates.push(candidateData)

@@ -334,18 +334,6 @@ export class PeerConnectionManager {
             this.tunEnvironmentDetected = true
           }
           if (isBogusOrTunCandidate(rawCandStr)) {
-            const synthesizedList = synthesizePhysicalHostCandidatesFromTun(rawCandStr)
-            for (const synStr of synthesizedList) {
-              dispatchOrQueueCandidate(
-                {
-                  candidate: synStr,
-                  sdpMid: ev.candidate.sdpMid ?? '0',
-                  sdpMLineIndex: ev.candidate.sdpMLineIndex ?? 0,
-                  usernameFragment: ev.candidate.usernameFragment
-                },
-                true
-              )
-            }
             log.info(`Filtered out bogus/TUN poison ICE candidate: ${rawCandStr.trim()}`)
             return
           }
