@@ -6,6 +6,7 @@ import {
   classifyCandidatePair,
   isBogusOrTunCandidate,
   isTunVirtualAddress,
+  synthesizePhysicalHostCandidatesFromTun,
   cleanIpAddress,
   CONNECTION_TIMING
 } from './connectivity'
@@ -255,6 +256,7 @@ export class PeerConnectionManager {
       `Creating RTCPeerConnection (isHost: ${isHost}, targetSender: ${targetSender || 'default'}, allowTurn: ${allowTurn}, turnConfigured: ${hasTurn}, forceRelay: ${forceRelay}, icePolicy: ${config.iceTransportPolicy}, sessionTag: ${sessionTag || 'none'})`
     )
     const peer = new RTCPeerConnection(config)
+    const emittedCandidateKeys = new Set<string>()
 
     // ---------------- 本地候选发送（顺序化 + 会话标签 + 可选暂存闸门） ----------------
     let sendChain: Promise<void> = Promise.resolve()
@@ -298,6 +300,28 @@ export class PeerConnectionManager {
     }
     this.candidateGates.set(peer, gate)
 
+    const dispatchOrQueueCandidate = (candObj: RTCIceCandidateInit, isSynthesized = false) => {
+      const cStr = candObj.candidate || ''
+      if (cStr) {
+        const p = cStr.trim().split(/\s+/)
+        const cAddr = cleanIpAddress(p[4] || '')
+        const cPort = p[5] || ''
+        const tIdx = p.indexOf('typ')
+        const cType = tIdx !== -1 && p[tIdx + 1] ? p[tIdx + 1] : ''
+        const dedupKey = `${cAddr}:${cPort}:${cType}`
+        if (emittedCandidateKeys.has(dedupKey)) return
+        emittedCandidateKeys.add(dedupKey)
+      }
+      log.info(
+        `Local ICE Candidate generated${isSynthesized ? ' [NIC-Direct]' : ''}: ${candObj.candidate ? candObj.candidate.trim() : 'null'} (target: ${targetSender || 'host'}, held: ${!gate.open})`
+      )
+      if (gate.open) {
+        sendLocalCandidate(candObj)
+      } else {
+        gate.queue.push(candObj)
+      }
+    }
+
     peer.onicecandidate = (ev) => {
       if (ev.candidate) {
         const rawCandStr = ev.candidate.candidate || ''
@@ -310,6 +334,18 @@ export class PeerConnectionManager {
             this.tunEnvironmentDetected = true
           }
           if (isBogusOrTunCandidate(rawCandStr)) {
+            const synthesizedList = synthesizePhysicalHostCandidatesFromTun(rawCandStr)
+            for (const synStr of synthesizedList) {
+              dispatchOrQueueCandidate(
+                {
+                  candidate: synStr,
+                  sdpMid: ev.candidate.sdpMid ?? '0',
+                  sdpMLineIndex: ev.candidate.sdpMLineIndex ?? 0,
+                  usernameFragment: ev.candidate.usernameFragment
+                },
+                true
+              )
+            }
             log.info(`Filtered out bogus/TUN poison ICE candidate: ${rawCandStr.trim()}`)
             return
           }
@@ -325,14 +361,7 @@ export class PeerConnectionManager {
         if (candObj.candidate) {
           candObj.candidate = optimizeCandidatePriority(candObj.candidate)
         }
-        log.info(
-          `Local ICE Candidate generated: ${candObj.candidate ? candObj.candidate.trim() : 'null'} (target: ${targetSender || 'host'}, held: ${!gate.open})`
-        )
-        if (gate.open) {
-          sendLocalCandidate(candObj)
-        } else {
-          gate.queue.push(candObj)
-        }
+        dispatchOrQueueCandidate(candObj, false)
       } else {
         log.info(`ICE Gathering Complete (null candidate received)`)
       }
@@ -390,6 +419,9 @@ export class PeerConnectionManager {
         try {
           peer.close()
         } catch {}
+        if (!isHost && onDisconnect) {
+          onDisconnect(reason)
+        }
         return
       }
       log.warn(`PeerConnection failure reported (reason: ${reason}, target: ${targetSender || 'host'}, connectedBefore: ${hasConnected})`)

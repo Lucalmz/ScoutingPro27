@@ -51,9 +51,11 @@ public class NetworkUtil {
                name.contains("6to4") ||
                name.contains("pseudo") ||
                name.contains("meta") ||
+               name.contains("mihomo") ||
                name.contains("wintun") ||
                name.contains("sing-tun") ||
                name.contains("clash") ||
+               name.contains("flclash") ||
                name.contains("wireguard") ||
                name.contains("tailscale") ||
                name.contains("zerotier") ||
@@ -128,7 +130,7 @@ public class NetworkUtil {
                         for (InetAddress addr : Collections.list(addrs)) {
                             if (addr instanceof Inet4Address && !addr.isLoopbackAddress() && addr.isSiteLocalAddress()) {
                                 String ip = addr.getHostAddress();
-                                if (!validIpv4s.contains(ip)) {
+                                if (ip != null && !ip.startsWith("198.18.") && !ip.startsWith("198.19.") && !validIpv4s.contains(ip)) {
                                     validIpv4s.add(ip);
                                 }
                             } else if (isGlobalUnicastIpv6(addr)) {
@@ -229,35 +231,64 @@ public class NetworkUtil {
     }
 
     /**
-     * 在 Windows 环境下尝试自动化配置入站防火墙放行规则
+     * 检查当前 Windows 防火墙是否已存在针对 WebRTC UDP 入站端口范围 (49152-65535) 的放行规则
      */
-    public static void ensureWindowsFirewallPort(int port) {
-        if (!System.getProperty("os.name", "").toLowerCase().contains("win")) return;
-        if (isWindowsFirewallPortAllowed(port)) {
-            System.out.println("[Firewall] Windows 防火墙已存在放行规则 (TCP " + port + ")，无需重复添加");
-            return;
+    public static boolean isWindowsFirewallWebRtcUdpAllowed() {
+        String os = System.getProperty("os.name", "").toLowerCase();
+        if (!os.contains("win")) {
+            return true;
         }
         try {
             ProcessBuilder pb = new ProcessBuilder(
-                    "netsh", "advfirewall", "firewall", "add", "rule",
-                    "name=ScoutingPro27 Inbound (" + port + ")",
-                    "dir=in", "action=allow", "protocol=TCP",
-                    "localport=" + port, "profile=any"
+                    "netsh", "advfirewall", "firewall", "show", "rule",
+                    "name=ScoutingPro27 WebRTC UDP"
             );
             pb.redirectErrorStream(true);
             Process p = pb.start();
-            int code = p.waitFor();
-            // 同步放行 WebRTC 所需的 UDP 入站端口范围 (49152-65535)，防止公用网络拦截 LAN/IPv6 P2P 打洞
-            new ProcessBuilder(
-                    "netsh", "advfirewall", "firewall", "add", "rule",
-                    "name=ScoutingPro27 WebRTC UDP",
-                    "dir=in", "action=allow", "protocol=UDP",
-                    "localport=49152-65535", "profile=any"
-            ).start().waitFor();
+            return p.waitFor() == 0;
+        } catch (Exception e) {
+            return false;
+        }
+    }
+
+    /**
+     * 在 Windows 环境下尝试自动化配置入站防火墙放行规则（同时涵盖 TCP 服务端口与 WebRTC UDP 49152-65535 端口）
+     */
+    public static void ensureWindowsFirewallPort(int port) {
+        if (!System.getProperty("os.name", "").toLowerCase().contains("win")) return;
+        boolean tcpAllowed = isWindowsFirewallPortAllowed(port);
+        boolean udpAllowed = isWindowsFirewallWebRtcUdpAllowed();
+        if (tcpAllowed && udpAllowed) {
+            System.out.println("[Firewall] Windows 防火墙已存在放行规则 (TCP " + port + " 及 WebRTC UDP 49152-65535)，无需重复添加");
+            return;
+        }
+        try {
+            int code = 0;
+            if (!tcpAllowed) {
+                ProcessBuilder pb = new ProcessBuilder(
+                        "netsh", "advfirewall", "firewall", "add", "rule",
+                        "name=ScoutingPro27 Inbound (" + port + ")",
+                        "dir=in", "action=allow", "protocol=TCP",
+                        "localport=" + port, "profile=any"
+                );
+                pb.redirectErrorStream(true);
+                Process p = pb.start();
+                code = p.waitFor();
+            }
+            if (!udpAllowed) {
+                Process pUdp = new ProcessBuilder(
+                        "netsh", "advfirewall", "firewall", "add", "rule",
+                        "name=ScoutingPro27 WebRTC UDP",
+                        "dir=in", "action=allow", "protocol=UDP",
+                        "localport=49152-65535", "profile=any"
+                ).start();
+                int udpCode = pUdp.waitFor();
+                if (code == 0) code = udpCode;
+            }
             if (code == 0) {
-                System.out.println("[Firewall] Windows 防火墙入站规则已确认放行 TCP " + port + " 及 WebRTC UDP 端口");
+                System.out.println("[Firewall] Windows 防火墙入站规则已确认放行 TCP " + port + " 及 WebRTC UDP 49152-65535 端口");
             } else {
-                System.out.println("[Firewall] 提示: netsh 返回代码 " + code + "（如受限，请以管理员身份运行以完全放行公网入站）");
+                System.out.println("[Firewall] 提示: netsh 返回代码 " + code + "（如受限，可在界面点击放行防火墙或以管理员身份运行以完全放行 IPv6/UDP 直连入站）");
             }
         } catch (Exception e) {
             System.err.println("[Firewall] 检查 Windows 防火墙规则异常: " + e.getMessage());
@@ -265,27 +296,28 @@ public class NetworkUtil {
     }
 
     /**
-     * 响应用户界面点击：通过 UAC 管理员提权运行 netsh 放行防火墙端口
+     * 响应用户界面点击：通过 UAC 管理员提权运行 netsh 同时放行 TCP 服务端口与 WebRTC UDP 49152-65535 入站端口
      */
     public static boolean openWindowsFirewallPrompt(int port) {
         String os = System.getProperty("os.name", "").toLowerCase();
         if (!os.contains("win")) {
             return false;
         }
-        if (isWindowsFirewallPortAllowed(port)) {
-            System.out.println("[Firewall] 端口 " + port + " 已经放行，无需重复配置");
+        if (isWindowsFirewallPortAllowed(port) && isWindowsFirewallWebRtcUdpAllowed()) {
+            System.out.println("[Firewall] 端口 TCP " + port + " 及 WebRTC UDP 已经放行，无需重复配置");
             return true;
         }
         try {
-            // 通过 PowerShell Start-Process 以管理员权限 (Verb RunAs) 静默调用 netsh
+            String cmdArgs = "/c netsh advfirewall firewall add rule name=\"ScoutingPro27 Inbound (" + port + ")\" dir=in action=allow protocol=TCP localport=" + port + " profile=any & " +
+                             "netsh advfirewall firewall add rule name=\"ScoutingPro27 WebRTC UDP\" dir=in action=allow protocol=UDP localport=49152-65535 profile=any";
             ProcessBuilder pb = new ProcessBuilder(
                     "powershell.exe", "-NoProfile", "-NonInteractive", "-Command",
-                    "Start-Process netsh.exe -ArgumentList 'advfirewall firewall add rule name=\"\"\"ScoutingPro27 Inbound (" + port + ")\"\"\" dir=in action=allow protocol=TCP localport=" + port + " profile=any' -Verb RunAs -Wait -WindowStyle Hidden"
+                    "Start-Process cmd.exe -ArgumentList '" + cmdArgs.replace("'", "''") + "' -Verb RunAs -Wait -WindowStyle Hidden"
             );
             Process p = pb.start();
             int exitCode = p.waitFor();
             if (exitCode == 0 && isWindowsFirewallPortAllowed(port)) {
-                System.out.println("[Firewall] Windows 防火墙入站端口 " + port + " 已通过管理员提权成功放行");
+                System.out.println("[Firewall] Windows 防火墙入站端口 TCP " + port + " 及 WebRTC UDP 已通过管理员提权成功放行");
                 return true;
             }
             return isWindowsFirewallPortAllowed(port);

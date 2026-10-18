@@ -13,6 +13,7 @@ import { evaluatePeerKeyTrust, savePeerTrustRecord } from '@/utils/identityStore
 
 import type { ClientEntry, WebRtcCallbacks } from './types'
 import {
+  buildIceConfiguration,
   optimizeCandidatePriority,
   optimizeSdpCandidates,
   sortCandidatesPreferIpv6,
@@ -165,10 +166,14 @@ export function createHostSignalingHandler(ctx: HostSessionContext) {
       })
 
       ctx.enqueueHostTask(sender, async () => {
-        const existing = clients.get(sender)
-        const isExistingActive =
-          existing && existing.pc && !['disconnected', 'failed', 'closed'].includes(existing.pc.connectionState)
+        if (!cachedHostIpv6) {
+          try {
+            const ip = await probeLocalInterfaceIpv6()
+            if (ip && isGlobalIpv6Address(ip)) cachedHostIpv6 = cleanIpAddress(ip)
+          } catch {}
+        }
 
+        const existing = clients.get(sender)
         let clientData: ClientEntry
 
         const setupDcHandler = (targetPc: RTCPeerConnection) => {
@@ -265,6 +270,12 @@ export function createHostSignalingHandler(ctx: HostSessionContext) {
 
         if (isIceRestart && existing) {
           log.info(`Performing in-place ICE restart renegotiation for existing peer ${sender}`)
+          const allowTurnOnRestart = Boolean(data.allowTurn || data.offer?.allowTurn || data.forceRelay)
+          try {
+            if (typeof existing.pc.setConfiguration === 'function') {
+              existing.pc.setConfiguration(buildIceConfiguration(allowTurnOnRestart, false))
+            }
+          } catch {}
           clientData = existing
         } else {
           // Client initiated a new connection / session.
@@ -657,6 +668,7 @@ export function createHostSignalingHandler(ctx: HostSessionContext) {
             // 回显 clientSessionId：Client 据此丢弃针对旧 Offer 的过期 Answer
             clientSessionId: data.clientSessionId,
             hostSessionId,
+            hostIpv6: cachedHostIpv6 || undefined,
             ecdhPublicKey: localEcdhPubHex,
             deviceId: localDeviceId,
             username: ctx.getUsername?.() || '',

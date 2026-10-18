@@ -249,19 +249,33 @@ export function getSilentUpgradeDelayMs(
 }
 
 let cachedLocalIpv6: string | null = null
+let cachedPhysicalIpv4s: string[] = []
+let cachedPhysicalIpv6s: string[] = []
 let lastIpv6ProbeTime = 0
 
 /**
- * 重置网卡 IPv6 缓存（供单元测试或网络切换时使用）
+ * 重置网卡 IPv6 与物理网卡地址缓存（供单元测试或网络切换时使用）
  */
 export function resetLocalIpv6ProbeCache(): void {
   cachedLocalIpv6 = null
+  cachedPhysicalIpv4s = []
+  cachedPhysicalIpv6s = []
   lastIpv6ProbeTime = 0
 }
 
 /**
- * 优先从本机网卡探测公网全球单播 IPv6 (GUA, 2000::/3)
- * 1. 电脑端 Host：尝试直接调用 Java 后端系统接口，100% 准确读取物理网卡
+ * 获取已缓存的本机真实物理网卡地址列表（排除 TUN 198.18.x.x / fdfe:... 等虚拟网卡）
+ */
+export function getCachedPhysicalAddresses(): { ipv4s: string[]; ipv6s: string[] } {
+  return {
+    ipv4s: [...cachedPhysicalIpv4s],
+    ipv6s: [...cachedPhysicalIpv6s]
+  }
+}
+
+/**
+ * 优先从本机网卡探测公网全球单播 IPv6 (GUA, 2000::/3)，并同步缓存物理网卡 IPv4/IPv6 列表：
+ * 1. 电脑端 Host：尝试直接调用 Java 后端系统接口，100% 准确读取物理网卡（绕过 TUN 路由表劫持）
  * 2. 手机/浏览器端：使用空 iceServers 在本地 30ms 提取 host 候选，零 STUN 网络请求
  */
 export async function probeLocalInterfaceIpv6(): Promise<string | null> {
@@ -277,14 +291,51 @@ export async function probeLocalInterfaceIpv6(): Promise<string | null> {
     return cachedLocalIpv6
   }
 
-  // 1. 电脑端 Host：尝试直接调用 Java 后端系统接口读取物理网卡 GUA IPv6
+  // 1. 电脑端 Host：尝试直接调用 Java 后端系统接口读取物理网卡 GUA IPv6 与局域网 IPv4
   try {
     const { getNetworkInfo } = await import('@/services/api')
     const net = await getNetworkInfo()
-    if (net?.primaryIpv6 && isGlobalIpv6Address(net.primaryIpv6)) {
-      cachedLocalIpv6 = cleanIpAddress(net.primaryIpv6)
-      lastIpv6ProbeTime = now
-      return cachedLocalIpv6
+    if (net) {
+      const v4Set = new Set<string>()
+      if (net.primaryIp) {
+        const cleanV4 = cleanIpAddress(net.primaryIp)
+        if (isPrivateIpv4Address(cleanV4) && !cleanV4.startsWith('127.') && !isTunVirtualAddress(cleanV4)) {
+          v4Set.add(cleanV4)
+        }
+      }
+      if (Array.isArray((net as any).allIps)) {
+        for (const ip of (net as any).allIps) {
+          const cleanV4 = cleanIpAddress(ip)
+          if (isPrivateIpv4Address(cleanV4) && !cleanV4.startsWith('127.') && !isTunVirtualAddress(cleanV4)) {
+            v4Set.add(cleanV4)
+          }
+        }
+      }
+      cachedPhysicalIpv4s = Array.from(v4Set)
+
+      const v6Set = new Set<string>()
+      if (net.primaryIpv6 && isGlobalIpv6Address(net.primaryIpv6)) {
+        v6Set.add(cleanIpAddress(net.primaryIpv6))
+      }
+      if (Array.isArray((net as any).allIpv6s)) {
+        for (const ip6 of (net as any).allIpv6s) {
+          if (isGlobalIpv6Address(ip6)) {
+            v6Set.add(cleanIpAddress(ip6))
+          }
+        }
+      }
+      cachedPhysicalIpv6s = Array.from(v6Set)
+
+      if (net.primaryIpv6 && isGlobalIpv6Address(net.primaryIpv6)) {
+        cachedLocalIpv6 = cleanIpAddress(net.primaryIpv6)
+        lastIpv6ProbeTime = now
+        return cachedLocalIpv6
+      }
+      if (cachedPhysicalIpv6s.length > 0) {
+        cachedLocalIpv6 = cachedPhysicalIpv6s[0] || null
+        lastIpv6ProbeTime = now
+        return cachedLocalIpv6
+      }
     }
   } catch {}
 
@@ -311,6 +362,9 @@ export async function probeLocalInterfaceIpv6(): Promise<string | null> {
         const addr = cleanIpAddress(parts[4] || '')
         if (isGlobalIpv6Address(addr)) {
           cachedLocalIpv6 = addr
+          if (!cachedPhysicalIpv6s.includes(addr)) {
+            cachedPhysicalIpv6s.push(addr)
+          }
           lastIpv6ProbeTime = Date.now()
           clearTimeout(timer)
           try { pc.close() } catch {}
@@ -329,6 +383,44 @@ export async function probeLocalInterfaceIpv6(): Promise<string | null> {
       resolve(null)
     }
   })
+}
+
+/**
+ * 当浏览器/JCEF 因开启 TUN (198.18.0.1 / fdfe:dcba:9876::1) 默认路由劫持而仅吐出 TUN 虚拟网卡的 typ host 候选时，
+ * 利用底层通配套接字 (0.0.0.0:port / [::]:port) 在所有物理网卡相同端口同时监听的特性，
+ * 将 TUN typ host 候选合成为指向本机真实物理网卡 (公网 IPv6 GUA 240e/2408/2409 与局域网 192.168.x.x) 的直连 typ host 候选。
+ */
+export function synthesizePhysicalHostCandidatesFromTun(rawCandidateStr: string): string[] {
+  if (!rawCandidateStr || typeof rawCandidateStr !== 'string') return []
+  const trimmed = rawCandidateStr.trim()
+  const hasPrefix = trimmed.startsWith('candidate:')
+  const cleanStr = hasPrefix ? trimmed.slice('candidate:'.length).trim() : trimmed
+  const parts = cleanStr.split(/\s+/)
+  if (parts.length < 7) return []
+
+  const addr = cleanIpAddress(parts[4] || '')
+  const typeIndex = parts.indexOf('typ')
+  const candType = typeIndex !== -1 && parts[typeIndex + 1] ? parts[typeIndex + 1] : ''
+  if (candType !== 'host' || !isTunVirtualAddress(addr)) {
+    return []
+  }
+
+  const isV6Tun = addr.includes(':')
+  const targetIps = isV6Tun ? cachedPhysicalIpv6s : cachedPhysicalIpv4s
+  if (!targetIps || targetIps.length === 0) return []
+
+  const synthesized: string[] = []
+  for (const physIp of targetIps) {
+    const newParts = [...parts]
+    newParts[4] = physIp
+    const costIdx = newParts.indexOf('network-cost')
+    if (costIdx !== -1 && newParts[costIdx + 1]) {
+      newParts[costIdx + 1] = '10'
+    }
+    const candidateLine = hasPrefix ? `candidate:${newParts.join(' ')}` : newParts.join(' ')
+    synthesized.push(optimizeCandidatePriority(candidateLine))
+  }
+  return synthesized
 }
 
 /**
@@ -544,6 +636,23 @@ export function optimizeCandidatePriority(candidateStr: string): string {
       return hasPrefix ? `candidate:${parts.join(' ')}` : parts.join(' ')
     }
 
+    // 清洗非 relay 候选上的 TUN 虚拟 raddr (fdfe:... / 198.18.x.x) 与 network-cost 999 惩罚
+    if (candType !== 'relay') {
+      const raddrIdx = parts.indexOf('raddr')
+      if (raddrIdx !== -1 && parts[raddrIdx + 1] && isTunVirtualAddress(parts[raddrIdx + 1] || '')) {
+        parts[raddrIdx + 1] = cleanAddr.includes(':') ? '::' : '0.0.0.0'
+      }
+      const costIdx = parts.indexOf('network-cost')
+      if (costIdx !== -1 && parts[costIdx + 1]) {
+        parts[costIdx + 1] = '10'
+      }
+    } else {
+      const costIdx = parts.indexOf('network-cost')
+      if (costIdx !== -1 && parts[costIdx + 1]) {
+        parts[costIdx + 1] = '999'
+      }
+    }
+
     // 单测环境下保持 tieBreaker = 0 以精确匹配 webrtc.test.ts:1460 的常数断言；真机环境下按地址端口哈希消除多网卡优先级碰撞
     const isTestEnv =
       (typeof process !== 'undefined' && (process.env?.NODE_ENV === 'test' || process.env?.VITEST === 'true')) ||
@@ -616,22 +725,24 @@ export function optimizeCandidatePriority(candidateStr: string): string {
 export function optimizeSdpCandidates(sdp: string): string {
   if (!sdp || typeof sdp !== 'string') return sdp
   try {
-    return sdp
-      .split(/\r\n|\n/)
-      .filter((line) => {
-        if (line.startsWith('a=candidate:')) {
-          return !isBogusOrTunCandidate(line.slice(2))
+    const outLines: string[] = []
+    for (const line of sdp.split(/\r\n|\n/)) {
+      if (line.startsWith('a=candidate:')) {
+        const rawCand = line.slice(2)
+        if (isBogusOrTunCandidate(rawCand)) {
+          const synthesized = synthesizePhysicalHostCandidatesFromTun(rawCand)
+          for (const syn of synthesized) {
+            outLines.push(`a=${syn}`)
+          }
+          continue
         }
-        return true
-      })
-      .map((line) => {
-        if (line.startsWith('a=candidate:')) {
-          const optimized = optimizeCandidatePriority(line.slice(2))
-          return `a=${optimized}`
-        }
-        return line
-      })
-      .join('\r\n')
+        const optimized = optimizeCandidatePriority(rawCand)
+        outLines.push(`a=${optimized}`)
+      } else {
+        outLines.push(line)
+      }
+    }
+    return outLines.join('\r\n')
   } catch (err) {
     console.warn('[WebRTC] SDP candidate priority rewriting failed, falling back to original SDP:', err)
     return sdp

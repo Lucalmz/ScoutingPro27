@@ -2,6 +2,7 @@ package com.bear27570.app;
 
 import com.bear27570.app.db.JdbiConfig;
 import com.bear27570.app.routes.ApiRoutes;
+import com.bear27570.app.util.NetworkUtil;
 import io.javalin.Javalin;
 import io.javalin.http.staticfiles.Location;
 import me.friwi.jcefmaven.CefAppBuilder;
@@ -313,6 +314,10 @@ public class Main {
 
             final Javalin app = startServerWithFallback(apiRoutes, targetPort);
 
+            // 异步确认并配置 Windows 防火墙（同时放行 TCP 服务端口与 WebRTC UDP 49152-65535 入站端口）
+            final int activePort = app.port();
+            new Thread(() -> NetworkUtil.ensureWindowsFirewallPort(activePort), "firewall-check").start();
+
             Runtime.getRuntime().addShutdownHook(new Thread(() -> {
                 try {
                     apiRoutes.shutdown();
@@ -345,11 +350,7 @@ public class Main {
             CefAppBuilder builder = new CefAppBuilder();
             builder.setInstallDir(ensureJcefBundle());
             builder.getCefSettings().windowless_rendering_enabled = false;
-            // 允许暴露真实本地网卡 IP（包括公网 IPv6），避免 Chromium 默认用 mDNS .local 掩盖导致跨网络 IPv6 直连打洞失败
-            // 解除无媒体权限时的网卡枚举限制，强制 WebRTC 遍历绑定全部物理网卡（防止开启 TUN 时被 198.18.0.1 默认路由独占而丢失 192.168.x.x 与 IPv6 Host 候选）
-            builder.addJcefArgs("--enforce-webrtc-ip-permission-check=false");
-            builder.addJcefArgs("--force-webrtc-ip-handling-policy=default");
-            builder.addJcefArgs("--force-fieldtrials=WebRTC-BindUsingAnyAddress/Disabled/");
+            builder.addJcefArgs("--use-fake-ui-for-media-stream");
             builder.addJcefArgs("--disable-features=WebRtcHideLocalIpsWithMdns,WebUsb,MediaRouter,CalculateNativeWinOcclusion");
             builder.addJcefArgs("--disable-device-discovery-notifications");
             builder.addJcefArgs("--disable-usb-keyboard-detect");

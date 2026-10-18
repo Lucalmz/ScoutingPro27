@@ -12,6 +12,7 @@ import { evaluatePeerKeyTrust, savePeerTrustRecord } from '@/utils/identityStore
 
 import type { WebRtcCallbacks } from './types'
 import {
+  buildIceConfiguration,
   optimizeCandidatePriority,
   optimizeSdpCandidates,
   sortCandidatesPreferIpv6,
@@ -97,9 +98,11 @@ export function createClientSession(ctx: ClientSessionContext) {
   let reconnectTimer: ReturnType<typeof setTimeout> | null = null
   let connectWatchdog: ReturnType<typeof setTimeout> | null = null
   let virtualFallbackTimer: ReturnType<typeof setTimeout> | null = null
+  let virtualNativeUpgradeTimer: ReturnType<typeof setTimeout> | null = null
   let activeVirtualDc: VirtualDataChannel | null = null
   let lastOfferTimestamp = 0
   let lastHostIpv6: string | null = null
+  let injectedHostIpv6Ports = new Set<string>()
   let attemptEpoch = 0
   let failedEpoch = -1
   let activeSetupPromise: Promise<void> | null = null
@@ -121,6 +124,10 @@ export function createClientSession(ctx: ClientSessionContext) {
     if (virtualFallbackTimer) {
       clearTimeout(virtualFallbackTimer)
       virtualFallbackTimer = null
+    }
+    if (virtualNativeUpgradeTimer) {
+      clearTimeout(virtualNativeUpgradeTimer)
+      virtualNativeUpgradeTimer = null
     }
   }
 
@@ -227,6 +234,7 @@ export function createClientSession(ctx: ClientSessionContext) {
     stopDataChannelHeartbeat()
     silentUpgradeProbeCount = 0
     isSilentUpgradeInFlight = false
+    injectedHostIpv6Ports.clear()
 
     const oldSender = ctx.getClientSender?.()
     if (oldSender) {
@@ -302,13 +310,99 @@ export function createClientSession(ctx: ClientSessionContext) {
     return startSetup(forceRelay)
   }
 
+  function scheduleBackgroundNativeP2pRetry(epoch: number) {
+    if (virtualNativeUpgradeTimer) {
+      clearTimeout(virtualNativeUpgradeTimer)
+      virtualNativeUpgradeTimer = null
+    }
+    const delayMs = SILENT_UPGRADE.RELAY_PROBE_DELAYS_MS[Math.min(silentUpgradeProbeCount, SILENT_UPGRADE.RELAY_PROBE_DELAYS_MS.length - 1)] || 20000
+    silentUpgradeProbeCount++
+    virtualNativeUpgradeTimer = setTimeout(async () => {
+      virtualNativeUpgradeTimer = null
+      if (epoch !== attemptEpoch || ctx.isHostMode?.() || ctx.isExplicitlyClosed()) return
+      if (!activeVirtualDc || activeVirtualDc.readyState !== 'open') return
+
+      const currentSessionId = ctx.getClientSessionId()
+      log.info(`[WebRTC Client] Launching background native P2P upgrade probe while VirtualDataChannel is active (sessionId: ${currentSessionId})`)
+      const bgPc = ctx.peerMgr.createPeerConnection(
+        undefined,
+        () => {
+          if (epoch === attemptEpoch && activeVirtualDc && activeVirtualDc.readyState === 'open') {
+            scheduleBackgroundNativeP2pRetry(epoch)
+          }
+        },
+        false,
+        ctx.getClientHostSenderId(),
+        { sessionTag: currentSessionId, holdLocalCandidates: true, allowTurn: false }
+      )
+      ctx.peerMgr.markVirtualChannelActive(bgPc)
+      ctx.setClientPc(bgPc)
+
+      const bgDc = bgPc.createDataChannel('scoutingpro-data')
+      const bgSender = new DataChannelSender(bgDc)
+      bgDc.onmessage = (e) => ctx.handleChannelMessage(e)
+      bgDc.onopen = () => {
+        if (epoch !== attemptEpoch) return
+        log.info('Hot-upgrading active session from VirtualDataChannel to Native UDP P2P DataChannel!')
+        if (activeVirtualDc) {
+          activeVirtualDc.onclose = null
+          try { activeVirtualDc.close() } catch {}
+          activeVirtualDc = null
+        }
+        ctx.setClientDc(bgDc)
+        ctx.setClientSender(bgSender)
+        void ctx.peerMgr.updateTransportInfo(bgPc)
+        void checkAndScheduleSilentUpgrade()
+      }
+
+      try {
+        const offer = await bgPc.createOffer()
+        if (epoch !== attemptEpoch) return
+        await bgPc.setLocalDescription(offer)
+        if (epoch !== attemptEpoch) return
+        const rawOffer = {
+          type: offer.type,
+          sdp: optimizeSdpCandidates(bgPc?.localDescription?.sdp || offer.sdp || ''),
+          deviceId: ctx.getLocalDeviceId(),
+          username: ctx.getUsername?.() || '',
+          userId: ctx.getUserId?.() || '',
+          allowTurn: false,
+          forceRelay: false
+        }
+        let offerPayload: any = rawOffer
+        if (ctx.sas.clientSharedAesKey) {
+          try {
+            offerPayload = await encryptSignalingData(ctx.sas.clientSharedAesKey, JSON.stringify(rawOffer))
+          } catch {}
+        }
+        ctx.getSignaling()?.send(
+          {
+            offer: offerPayload,
+            ecdhPublicKey: ctx.getLocalEcdhPubHex(),
+            deviceId: ctx.getLocalDeviceId(),
+            clientSessionId: currentSessionId,
+            hostSessionId: ctx.getCurrentHostSessionId(),
+            username: ctx.getUsername?.() || '',
+            userId: ctx.getUserId?.() || '',
+            allowTurn: false,
+            forceRelay: false
+          },
+          ctx.getClientHostSenderId()
+        )
+        ctx.peerMgr.releaseLocalCandidates(bgPc)
+      } catch {
+        try { bgPc.close() } catch {}
+      }
+    }, delayMs)
+  }
+
   function activateVirtualFallbackChannel(epoch: number, sessionId: string) {
     if (epoch !== attemptEpoch) return
     const curDc = ctx.getClientDc()
     if (curDc && curDc.readyState === 'open') return
     if (!ctx.sas.clientSharedAesKey || !ctx.getClientHostSenderId()) return
 
-    log.info(`[WebRTC Client] Native UDP ICE blocked/slow (TUN or Symmetric NAT). Activating ECDH-encrypted VirtualDataChannel for session ${sessionId}!`)
+    log.info(`[WebRTC Client] Native UDP ICE slow (>10s). Activating ECDH-encrypted VirtualDataChannel for session ${sessionId} while continuing native P2P in background!`)
     ctx.peerMgr.markVirtualChannelActive(ctx.getClientPc())
     const vdc = new VirtualDataChannel({
       label: 'scoutingpro-data-virtual',
@@ -369,13 +463,13 @@ export function createClientSession(ctx: ClientSessionContext) {
       (globalThis as any).__TEST_ALLOW_UNSIGNED_SIGNALING__ !== undefined
 
     if (!isTestEnv && sessionId) {
-      // 真机环境下：若 3.5 秒内原生 UDP 打洞未通（典型如开启了全局 TUN），立刻挂载 ECDH 加密虚拟通道先行连通，同时保留后台原生 PC 继续打洞
+      // 给足原生 IPv6 / LAN / NAT 打洞 10 秒窗口，避免在 3.5s 过早抢占切换至 VirtualDataChannel
       virtualFallbackTimer = setTimeout(() => {
         virtualFallbackTimer = null
         if (epoch === attemptEpoch && dc.readyState !== 'open') {
           activateVirtualFallbackChannel(epoch, sessionId)
         }
-      }, 3500)
+      }, 10000)
     }
 
     connectWatchdog = setTimeout(() => {
@@ -455,7 +549,12 @@ export function createClientSession(ctx: ClientSessionContext) {
     const currentSessionId = ctx.getClientSessionId()
 
     try {
-      // 纯直连试探：静默升级彻底不带 TURN，仅依赖 LAN、IPv6 与 IPv4 NAT 候选
+      try {
+        if (typeof pc.setConfiguration === 'function') {
+          pc.setConfiguration(buildIceConfiguration(false, false))
+        }
+      } catch {}
+
       const offer = await pc.createOffer({ iceRestart: true })
       if (epoch !== attemptEpoch || ctx.getClientPc() !== pc) {
         ctx.peerMgr.endSilentUpgrade(pc)
@@ -581,11 +680,13 @@ export function createClientSession(ctx: ClientSessionContext) {
       Boolean((globalThis as any).__vitest_worker__) ||
       (globalThis as any).__TEST_ALLOW_UNSIGNED_SIGNALING__ !== undefined
 
-    // 真机下若检测到 TUN 虚拟网卡或已发生过重试，立即开启 TURN (含 TCP/TLS 443) 并行兜底；单测环境下严格遵循 shouldAllowTurnForAttempt
-    const allowTurn =
-      shouldAllowTurnForAttempt(reconnectAttempts) ||
-      forceRelay ||
-      (!isTestEnv && (ctx.peerMgr.tunEnvironmentDetected || reconnectAttempts >= 1))
+    if (!isTestEnv) {
+      void probeLocalInterfaceIpv6().catch(() => {})
+    }
+
+    const turnDisabledByUser =
+      typeof localStorage !== 'undefined' && localStorage.getItem('sp27-disable-turn') === 'true'
+    const allowTurn = !turnDisabledByUser && (shouldAllowTurnForAttempt(reconnectAttempts) || forceRelay)
 
     log.info(
       `Initiating setupClientConnection (sessionId: ${newClientSessionId}, epoch: ${epoch}, allowTurn: ${allowTurn}, icePolicy: ${forceRelay ? 'relay' : 'all'}, hostSenderId: ${ctx.getClientHostSenderId() || 'none'}, hostIpv6: ${lastHostIpv6 || 'unknown'})`
@@ -594,9 +695,9 @@ export function createClientSession(ctx: ClientSessionContext) {
     const pc = ctx.peerMgr.createPeerConnection(
       undefined,
       (reason?: string) => {
-        // 若当前已由加密虚拟通道稳定承载，忽略后台原生 PC 的超时断开，不触发断连重建
         if (activeVirtualDc && activeVirtualDc.readyState === 'open' && ctx.getClientDc() === (activeVirtualDc as any)) {
-          log.info(`Native PC reported ${reason}, but VirtualDataChannel is active and healthy; keeping session connected.`)
+          log.info(`Native PC reported ${reason}, but VirtualDataChannel is active and healthy; scheduling background native P2P retry.`)
+          scheduleBackgroundNativeP2pRetry(epoch)
           return
         }
         failAttempt(epoch, reason || 'peer_failure')
@@ -741,6 +842,50 @@ export function createClientSession(ctx: ClientSessionContext) {
     }
   }
 
+  async function maybeInjectSynthesizedHostIpv6Candidate(clientPc: RTCPeerConnection, candidateObj: any) {
+    if (!lastHostIpv6 || !isGlobalIpv6Address(lastHostIpv6) || !candidateObj?.candidate) return
+    try {
+      const raw = String(candidateObj.candidate).trim()
+      const cleanStr = raw.startsWith('candidate:') ? raw.slice('candidate:'.length).trim() : raw
+      const parts = cleanStr.split(/\s+/)
+      if (parts.length < 7) return
+      const protocol = (parts[2] || '').toLowerCase()
+      if (protocol !== 'udp') return
+
+      const candAddr = cleanIpAddress(parts[4] || '')
+      const candPort = parts[5] || ''
+      const typeIdx = parts.indexOf('typ')
+      const candType = typeIdx !== -1 && parts[typeIdx + 1] ? parts[typeIdx + 1] : ''
+      if (candType === 'relay') return
+
+      if (candAddr === lastHostIpv6 && candType === 'host') {
+        injectedHostIpv6Ports.add(candPort)
+        return
+      }
+
+      const rportIdx = parts.indexOf('rport')
+      const rport = rportIdx !== -1 && parts[rportIdx + 1] && parts[rportIdx + 1] !== '0' ? parts[rportIdx + 1] : ''
+      const targetPort = candAddr.includes(':') ? candPort : (rport || candPort)
+      if (!targetPort || targetPort === '0' || injectedHostIpv6Ports.has(targetPort)) return
+
+      injectedHostIpv6Ports.add(targetPort)
+      const ufragIdx = parts.indexOf('ufrag')
+      const ufragPart = ufragIdx !== -1 && parts[ufragIdx + 1] ? ` ufrag ${parts[ufragIdx + 1]}` : ''
+      const synCandStr = optimizeCandidatePriority(
+        `candidate:2999999999 1 udp 2122260223 ${lastHostIpv6} ${targetPort} typ host generation 0${ufragPart}`
+      )
+      await clientPc.addIceCandidate(
+        toIceCandidate({
+          candidate: synCandStr,
+          sdpMid: candidateObj.sdpMid ?? '0',
+          sdpMLineIndex: candidateObj.sdpMLineIndex ?? 0,
+          usernameFragment: candidateObj.usernameFragment
+        })
+      )
+      log.info(`[WebRTC Client] Injected direct NIC IPv6 host candidate for Host: [${lastHostIpv6}]:${targetPort}`)
+    } catch {}
+  }
+
   async function evaluateAndApplyClientTrust(
     hostPubKey: string,
     hostDeviceId?: string,
@@ -882,6 +1027,9 @@ export function createClientSession(ctx: ClientSessionContext) {
     const sas = ctx.sas
 
     if (data.type === 'host_heartbeat') {
+      if (data.hostIpv6 && isGlobalIpv6Address(data.hostIpv6)) {
+        lastHostIpv6 = cleanIpAddress(data.hostIpv6)
+      }
       if (data.hostSessionId && !ctx.getCurrentHostSessionId()) {
         ctx.setCurrentHostSessionId(data.hostSessionId)
       }
@@ -1027,6 +1175,9 @@ export function createClientSession(ctx: ClientSessionContext) {
         if (data.hostSessionId) {
           ctx.setCurrentHostSessionId(data.hostSessionId)
         }
+        if (data.hostIpv6 && isGlobalIpv6Address(data.hostIpv6)) {
+          lastHostIpv6 = cleanIpAddress(data.hostIpv6)
+        }
 
         if (data.ecdhPublicKey && !sas.clientSharedAesKey && localEcdhKeyPair) {
           try {
@@ -1080,6 +1231,7 @@ export function createClientSession(ctx: ClientSessionContext) {
               candidateObj.candidate = optimizeCandidatePriority(candidateObj.candidate)
             }
             await clientPc.addIceCandidate(toIceCandidate(candidateObj))
+            await maybeInjectSynthesizedHostIpv6Candidate(clientPc, candidateObj)
           } catch (candidateErr) {
             log.warn('Failed to add pending candidate:', candidateErr)
           }
@@ -1136,6 +1288,7 @@ export function createClientSession(ctx: ClientSessionContext) {
       if (ctx.getClientPc() !== clientPc) return
       try {
         await clientPc.addIceCandidate(toIceCandidate(candidateData))
+        await maybeInjectSynthesizedHostIpv6Candidate(clientPc, candidateData)
       } catch (addErr) {
         if (!clientPc.remoteDescription) {
           const pending = ctx.getClientPendingCandidates()
