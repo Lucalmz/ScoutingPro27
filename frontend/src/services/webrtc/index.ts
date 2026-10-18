@@ -232,8 +232,12 @@ export function createWebRtcService(callbacks: WebRtcCallbacks): WebRtcService {
     getClientSecurityFingerprint: () => sas.clientSecurityFingerprint,
     getClientHostSenderId: () => clientHostSenderId,
     onHostClientClosed: (targetSender: string, peer?: RTCPeerConnection) => {
-      // 身份校验：若该 sender 已被新 Offer 替换为新的 PeerConnection，旧连接的终止事件不得清理新连接的状态
-      const current = clients.get(targetSender)
+      // 身份校验：若当前会话已由 VirtualDataChannel 接管且处于 open，或已被新 Offer 替换，绝不清理会话与 ECDH 密钥！
+      const current = clients.get(targetSender) || stagedClients.get(targetSender)
+      if (current && (current.dc as any)?.isVirtual && current.dc?.readyState === 'open') {
+        log.info(`Ignoring native PeerConnection closure for ${targetSender} because VirtualDataChannel is active`)
+        return
+      }
       if (peer && current && current.pc !== peer) {
         log.info(`Ignoring closure of superseded PeerConnection for ${targetSender}`)
         return
@@ -1200,7 +1204,12 @@ export function createWebRtcService(callbacks: WebRtcCallbacks): WebRtcService {
       return false
     }
 
-    if (!forceFreshSignaling && status === 'connected' && clientDc?.readyState === 'open' && clientPc?.connectionState === 'connected') {
+    if (
+      !forceFreshSignaling &&
+      status === 'connected' &&
+      clientDc?.readyState === 'open' &&
+      ((clientDc as any)?.isVirtual || clientPc?.connectionState === 'connected')
+    ) {
       return true
     }
 

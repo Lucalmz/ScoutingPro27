@@ -346,7 +346,9 @@ public class Main {
             builder.setInstallDir(ensureJcefBundle());
             builder.getCefSettings().windowless_rendering_enabled = false;
             // 允许暴露真实本地网卡 IP（包括公网 IPv6），避免 Chromium 默认用 mDNS .local 掩盖导致跨网络 IPv6 直连打洞失败
-            // 强制 WebRTC 遍历绑定全部物理网卡（防止开启 TUN 时被 198.18.0.1 默认路由独占而丢失 192.168.x.x 局域网候选）
+            // 解除无媒体权限时的网卡枚举限制，强制 WebRTC 遍历绑定全部物理网卡（防止开启 TUN 时被 198.18.0.1 默认路由独占而丢失 192.168.x.x 与 IPv6 Host 候选）
+            builder.addJcefArgs("--enforce-webrtc-ip-permission-check=false");
+            builder.addJcefArgs("--force-webrtc-ip-handling-policy=default");
             builder.addJcefArgs("--force-fieldtrials=WebRTC-BindUsingAnyAddress/Disabled/");
             builder.addJcefArgs("--disable-features=WebRtcHideLocalIpsWithMdns,WebUsb,MediaRouter,CalculateNativeWinOcclusion");
             builder.addJcefArgs("--disable-device-discovery-notifications");

@@ -309,6 +309,7 @@ export function createClientSession(ctx: ClientSessionContext) {
     if (!ctx.sas.clientSharedAesKey || !ctx.getClientHostSenderId()) return
 
     log.info(`[WebRTC Client] Native UDP ICE blocked/slow (TUN or Symmetric NAT). Activating ECDH-encrypted VirtualDataChannel for session ${sessionId}!`)
+    ctx.peerMgr.markVirtualChannelActive(ctx.getClientPc())
     const vdc = new VirtualDataChannel({
       label: 'scoutingpro-data-virtual',
       sessionId,
@@ -324,8 +325,23 @@ export function createClientSession(ctx: ClientSessionContext) {
       clearConnectWatchdog()
       clearReconnectTimer()
       reconnectAttempts = 0
+      ctx.callbacks.onIceStalled?.(false)
       ctx.setClientDc(vdc as unknown as RTCDataChannel)
       ctx.setClientSender(new DataChannelSender(vdc as unknown as RTCDataChannel))
+      const vdcTransportInfo = {
+        type: 'relay' as const,
+        label: 'ECDH Tunnel (TLS)',
+        localAddress: 'virtual-e2ee',
+        remoteAddress: 'wss-broker:8084',
+        localCandidateType: 'virtual',
+        remoteCandidateType: 'virtual',
+        protocol: 'wss/tls',
+        isIpv6: false,
+        rttMs: null as number | null,
+        securityFingerprint: ctx.sas.clientSecurityFingerprint || undefined
+      }
+      ctx.peerMgr.currentTransportInfo = vdcTransportInfo
+      ;(ctx.callbacks.onTransportInfoChanged || ctx.callbacks.onTransportChange)?.(vdcTransportInfo)
       ctx.setStatus('connected')
       startDataChannelHeartbeat()
     }
@@ -927,10 +943,9 @@ export function createClientSession(ctx: ClientSessionContext) {
       const curPc = ctx.getClientPc()
       const curDc = ctx.getClientDc()
       const isAlreadyConnected = Boolean(
-        curPc &&
-        curPc.connectionState === 'connected' &&
         curDc &&
-        curDc.readyState === 'open'
+        curDc.readyState === 'open' &&
+        ((curDc as any)?.isVirtual || (curPc && curPc.connectionState === 'connected'))
       )
       const isConnectingOrChecking = Boolean(
         curPc &&
@@ -1171,6 +1186,15 @@ export function createClientSession(ctx: ClientSessionContext) {
     if (pendingPings.has(timestamp)) {
       const resolve = pendingPings.get(timestamp)
       pendingPings.delete(timestamp)
+      if (activeVirtualDc && ctx.getClientDc() === (activeVirtualDc as any) && ctx.peerMgr.currentTransportInfo) {
+        const rtt = Math.max(1, Date.now() - timestamp)
+        ctx.peerMgr.currentTransportInfo = {
+          ...ctx.peerMgr.currentTransportInfo,
+          rttMs: rtt,
+          securityFingerprint: ctx.sas.clientSecurityFingerprint || ctx.peerMgr.currentTransportInfo.securityFingerprint
+        }
+        ;(ctx.callbacks.onTransportInfoChanged || ctx.callbacks.onTransportChange)?.(ctx.peerMgr.currentTransportInfo)
+      }
       resolve?.(true)
     }
   }

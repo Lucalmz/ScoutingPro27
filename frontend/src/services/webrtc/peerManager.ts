@@ -70,9 +70,22 @@ export class PeerConnectionManager {
   tunEnvironmentDetected = false
   private readonly candidateGates = new WeakMap<RTCPeerConnection, CandidateGate>()
   private readonly silentUpgradePeers = new WeakSet<RTCPeerConnection>()
+  private readonly virtualFallbackPeers = new WeakSet<RTCPeerConnection>()
 
   constructor(options: PeerConnectionFactoryOptions) {
     this.options = options
+  }
+
+  /**
+   * 标记某条原生 PeerConnection 已由 ECDH 加密 VirtualDataChannel 兜底接管：
+   * 若后台原生 PC 随后打洞成功（connected），仍允许触发热升级；
+   * 若后台原生 PC 超时失败（disconnected / failed / closed / GC），静默回收底层废套接字，绝不中断当前会话。
+   */
+  markVirtualChannelActive(peer: RTCPeerConnection | null | undefined): void {
+    if (peer) {
+      this.virtualFallbackPeers.add(peer)
+      this.options.callbacks.onIceStalled?.(false)
+    }
   }
 
   async updateTransportInfo(peer: RTCPeerConnection, targetSender?: string): Promise<void> {
@@ -370,6 +383,15 @@ export class PeerConnectionManager {
       if (failureReported) return
       failureReported = true
       clearTimers()
+      if (this.virtualFallbackPeers.has(peer)) {
+        log.info(
+          `Background native PeerConnection (${reason}) closed while VirtualDataChannel is active (target: ${targetSender || 'host'}); keeping virtual session alive.`
+        )
+        try {
+          peer.close()
+        } catch {}
+        return
+      }
       log.warn(`PeerConnection failure reported (reason: ${reason}, target: ${targetSender || 'host'}, connectedBefore: ${hasConnected})`)
       if (isHost) {
         try { peer.close() } catch {}
@@ -431,6 +453,9 @@ export class PeerConnectionManager {
           }
           break
         case 'disconnected':
+          if (this.virtualFallbackPeers.has(peer)) {
+            break
+          }
           // 给 ICE 一个短暂自愈窗口（如 Wi-Fi 漫游），超时仍未恢复再判定失败
           this.options.setStatus('unstable')
           if (!disconnectGraceTimer) {
@@ -447,14 +472,16 @@ export class PeerConnectionManager {
           break
         case 'closed':
           if (this.options.isExplicitlyClosed?.()) {
-            this.options.setStatus('offline')
+            if (!this.virtualFallbackPeers.has(peer)) {
+              this.options.setStatus('offline')
+            }
           } else {
             reportFailure('connection_closed')
           }
           break
         default:
-          // 静默升级（in-place ICE restart）期间数据通道仍在传输，不得把 UI 翻成 connecting
-          if (!this.silentUpgradePeers.has(peer)) {
+          // 静默升级或虚拟通道承载期间数据通道仍在传输，不得把 UI 翻成 connecting
+          if (!this.silentUpgradePeers.has(peer) && !this.virtualFallbackPeers.has(peer)) {
             this.options.setStatus('connecting')
           }
       }
@@ -465,13 +492,13 @@ export class PeerConnectionManager {
       log.info(`ICE Connection state changed: ${iceState} (targetSender: ${targetSender || 'host'})`)
 
       if (iceState === 'checking') {
-        // 静默升级期间旧候选对仍在承载数据，不提示 ICE 停滞
-        if (this.silentUpgradePeers.has(peer)) return
+        // 静默升级或虚拟通道已激活期间不提示 ICE 停滞
+        if (this.silentUpgradePeers.has(peer) || this.virtualFallbackPeers.has(peer)) return
         // 仅做 UI 提示：ICE 检查在 IPv6 黑洞 / UDP 丢弃时可能较慢，但绝不在此拆除连接
         if (!stallNoticeTimer) {
           stallNoticeTimer = setTimeout(() => {
             stallNoticeTimer = null
-            if (peer.iceConnectionState === 'checking') {
+            if (peer.iceConnectionState === 'checking' && !this.virtualFallbackPeers.has(peer)) {
               log.warn(`[Watchdog] ICE check taking longer than ${CONNECTION_TIMING.ICE_STALL_NOTICE_MS}ms (possible IPv6 blackhole / middlebox UDP drop). Waiting for parallel srflx/relay pairs.`)
               callbacks.onIceStalled?.(true)
             }
@@ -497,7 +524,9 @@ export class PeerConnectionManager {
         setTimeout(() => this.updateTransportInfo(peer, targetSender), 3000)
       } else if (iceState === 'disconnected') {
         callbacks.onIceStalled?.(false)
-        this.options.setStatus('unstable')
+        if (!this.virtualFallbackPeers.has(peer)) {
+          this.options.setStatus('unstable')
+        }
       } else if (iceState === 'failed') {
         callbacks.onIceStalled?.(false)
         reportFailure('ice_failed')

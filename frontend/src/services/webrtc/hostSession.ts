@@ -696,6 +696,13 @@ export function createHostSignalingHandler(ctx: HostSessionContext) {
         const targetHolder = stagedClients.get(sender) || clients.get(sender)
         if (!targetHolder) return
 
+        // 标记该客户端的后台原生 PC 已由虚拟通道兜底，防止 15s ICE 超时误杀会话与密钥
+        ctx.peerMgr.markVirtualChannelActive(targetHolder.pc)
+        if (stagedClients.has(sender)) {
+          clients.set(sender, targetHolder)
+          stagedClients.delete(sender)
+        }
+
         // 若该客户端尚未打开原生 DataChannel，为其挂载 VirtualDataChannel
         if (!targetHolder.dc || targetHolder.dc.readyState !== 'open') {
           const vdc = new VirtualDataChannel({

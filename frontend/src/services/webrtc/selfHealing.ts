@@ -67,8 +67,7 @@ export function setupSelfHealing(options: SelfHealingOptions): { dispose: () => 
     const status = options.getStatus()
     log.info(`App resumed (document visible), current status: ${status}`)
 
-    // 0. 若处于 unstable：区分“DataChannel 背压流控（底层通道仍健康 open+connected）”与“ICE 断连失联”
-    // 仅当 options.isHealthy?.() === true 时才属于正常背压，保留当前连接；若底层已断连则必须向下走自愈重连！
+    // 0. 若处于 unstable：区分“DataChannel 背压流控（底层通道仍健康）”与“ICE 断连失联”
     if (status === 'unstable' && options.isHealthy?.()) {
       log.info('App resumed while status is unstable (backpressure on healthy channel); preserving active session.')
       return

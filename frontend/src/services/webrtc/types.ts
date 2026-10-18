@@ -56,6 +56,7 @@ export type WebRtcCallbacks = {
   onIdentityMigration?: (eventId: string, oldScoutId: string, newScoutId: string, newScoutName: string) => Promise<void> | void
   onEventMetadataReceived?: (event: ScoutingEvent) => void
   onTransportInfoChanged?: (info: ConnectionTransportInfo) => void
+  onTransportChange?: (info: ConnectionTransportInfo) => void
   onSasVerificationRequired?: (peer: { peerId: string; username: string; ecdhPublicKey?: string }, fingerprint: string) => void
   onSasVerified?: (peerId: string) => void
   onSasRejected?: (peerId: string, reason?: string) => void
