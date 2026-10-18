@@ -4,6 +4,9 @@ import {
   buildIceConfiguration,
   optimizeCandidatePriority,
   classifyCandidatePair,
+  isBogusOrTunCandidate,
+  isTunVirtualAddress,
+  cleanIpAddress,
   CONNECTION_TIMING
 } from './connectivity'
 import type { SignalingChannel } from './signaling'
@@ -64,6 +67,7 @@ interface CandidateGate {
 export class PeerConnectionManager {
   private options: PeerConnectionFactoryOptions
   currentTransportInfo: ConnectionTransportInfo | null = null
+  tunEnvironmentDetected = false
   private readonly candidateGates = new WeakMap<RTCPeerConnection, CandidateGate>()
   private readonly silentUpgradePeers = new WeakSet<RTCPeerConnection>()
 
@@ -283,6 +287,20 @@ export class PeerConnectionManager {
 
     peer.onicecandidate = (ev) => {
       if (ev.candidate) {
+        const rawCandStr = ev.candidate.candidate || ''
+        if (rawCandStr) {
+          const parts = rawCandStr.trim().split(/\s+/)
+          const addr = cleanIpAddress(parts[4] || '')
+          const raddrIdx = parts.indexOf('raddr')
+          const raddr = raddrIdx !== -1 && parts[raddrIdx + 1] ? cleanIpAddress(parts[raddrIdx + 1] || '') : ''
+          if (isTunVirtualAddress(addr) || isTunVirtualAddress(raddr)) {
+            this.tunEnvironmentDetected = true
+          }
+          if (isBogusOrTunCandidate(rawCandStr)) {
+            log.info(`Filtered out bogus/TUN poison ICE candidate: ${rawCandStr.trim()}`)
+            return
+          }
+        }
         const candObj: RTCIceCandidateInit = ev.candidate.toJSON
           ? ev.candidate.toJSON()
           : {

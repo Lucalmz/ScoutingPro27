@@ -1258,7 +1258,11 @@ export function createWebRtcService(callbacks: WebRtcCallbacks): WebRtcService {
     reconnectNow,
     isHealthy: () => {
       if (isHostMode) return true
-      return Boolean(clientDc && clientDc.readyState === 'open' && clientPc && clientPc.connectionState === 'connected')
+      return Boolean(
+        clientDc &&
+          clientDc.readyState === 'open' &&
+          ((clientDc as any)?.isVirtual || (clientPc && clientPc.connectionState === 'connected'))
+      )
     },
     pingPeer: async () => {
       if (isHostMode) return true

@@ -92,20 +92,9 @@ export const PURE_STUN_SERVERS: RTCConfiguration = {
     {
       urls: ['stun:stun.cloudflare.com:3478']
     },
-    // 3. Google STUN（全球 Anycast 冗余节点）
+    // 3. 直连 IPv6 Anycast STUN（免 DNS 解析，绕过 Fake-IP 域名劫持）
     {
-      urls: ['stun:stun.l.google.com:19302', 'stun:stun1.l.google.com:19302']
-    },
-    // 4. 直连国际 IPv6 Anycast STUN（免 DNS 解析，彻底绕过国内 ISP DNS 缺失 AAAA 记录的问题）
-    {
-      urls: [
-        'stun:[2606:4700:49::]:3478',
-        'stun:[2001:4860:4864:5:8000::1]:19302'
-      ]
-    },
-    // 5. Metered STUN
-    {
-      urls: 'stun:stun.relay.metered.ca:80'
+      urls: ['stun:[2606:4700:49::]:3478']
     }
   ],
   iceCandidatePoolSize: 2
@@ -451,6 +440,77 @@ export function isPrivateIpv4Address(ip: string): boolean {
 }
 
 /**
+ * 检查 IP 地址是否为代理软件 TUN 虚拟网卡地址 (Clash / Mihomo / sing-box / Surge Fake-IP 或 ULA)
+ * - 198.18.0.0/15 (198.18.x.x ~ 198.19.x.x): 标准 TUN Fake-IP 段
+ * - 100.64.0.0/10: CGNAT / Tailscale / Clash TUN 段
+ * - fc00::/7 (fc00:: ~ fdff::, 如 fdfe:dcba:9876::1): TUN IPv6 ULA 虚拟地址段
+ */
+export function isTunVirtualAddress(ip: string): boolean {
+  if (!ip || typeof ip !== 'string') return false
+  const clean = cleanIpAddress(ip)
+  if (!clean) return false
+  if (clean.startsWith('198.18.') || clean.startsWith('198.19.')) return true
+  if (/^100\.(6[4-9]|[7-9]\d|1[01]\d|12[0-7])\./.test(clean)) return true
+  if (clean.startsWith('fc') || clean.startsWith('fd')) return true
+  return false
+}
+
+/**
+ * 检查是否为国内主流运营商公网 IPv6 (中国电信 240e / 中国联通 2408 / 中国移动 2409 / 教育网及广电 240c/2001:da8)
+ */
+export function isDomesticCarrierIpv6(ip: string): boolean {
+  if (!ip || typeof ip !== 'string') return false
+  const clean = cleanIpAddress(ip)
+  return (
+    clean.startsWith('240e:') ||
+    clean.startsWith('2408:') ||
+    clean.startsWith('2409:') ||
+    clean.startsWith('240c:') ||
+    clean.startsWith('2001:da8:') ||
+    clean.startsWith('2001:250:')
+  )
+}
+
+/**
+ * 识别必须丢弃或极度降权的 TUN 毒丸候选：
+ * 1. typ host 且地址本身是 TUN 虚拟网卡地址 (198.18.x.x / fdfe:dcba:9876::1) —— 对端 100% 无法直连此虚拟内网地址
+ * 2. typ srflx 但候选地址协议族与 raddr 协议族不一致（例如 IPv4 216.195.192.84 却挂着 IPv6 raddr fdfe:dcba:9876::1，系 TUN 代理节点转换产物，底层必不通）
+ * 3. typ srflx 且 raddr 是 TUN 虚拟 IPv6 (fc00::/7)，但反射出的是非国内运营商的境外代理 IPv6 (如 2404:c140:...)
+ */
+export function isBogusOrTunCandidate(candidateStr: string): boolean {
+  if (!candidateStr || typeof candidateStr !== 'string') return false
+  const trimmed = candidateStr.trim()
+  const cleanStr = trimmed.startsWith('candidate:') ? trimmed.slice('candidate:'.length).trim() : trimmed
+  const parts = cleanStr.split(/\s+/)
+  if (parts.length < 7) return false
+
+  const addr = cleanIpAddress(parts[4] || '')
+  const typeIndex = parts.indexOf('typ')
+  const candType = typeIndex !== -1 && parts[typeIndex + 1] ? parts[typeIndex + 1] : ''
+  const raddrIndex = parts.indexOf('raddr')
+  const raddr = raddrIndex !== -1 && parts[raddrIndex + 1] ? cleanIpAddress(parts[raddrIndex + 1] || '') : ''
+
+  if (candType === 'host' && isTunVirtualAddress(addr)) {
+    return true
+  }
+
+  if (candType === 'srflx' && raddr && raddr !== '::' && raddr !== '0.0.0.0') {
+    const addrIsV6 = addr.includes(':')
+    const raddrIsV6 = raddr.includes(':')
+    // 跨协议族反射候选（IPv4 srflx 绑在 IPv6 虚拟网卡上，或反之）100% 为代理污染废包
+    if (addrIsV6 !== raddrIsV6) {
+      return true
+    }
+    // 绑在 TUN ULA IPv6 上且反射出境外代理节点 IPv6
+    if (addrIsV6 && isTunVirtualAddress(raddr) && !isDomesticCarrierIpv6(addr)) {
+      return true
+    }
+  }
+
+  return false
+}
+
+/**
  * 根据 RFC 8445 计算重写 candidate 优先级，实现 LAN 优先 > IPv6 优先 > 公网 STUN > TURN 兜底：
  * priority = (2^24)*(type-preference) + (2^8)*(local-preference) + (256 - component)
  */
@@ -477,6 +537,12 @@ export function optimizeCandidatePriority(candidateStr: string): string {
     const cleanAddr = cleanIpAddress(address)
     const typeIndex = parts.indexOf('typ')
     const candType = typeIndex !== -1 && parts[typeIndex + 1] ? parts[typeIndex + 1] : ''
+
+    // 0. 拦截 TUN 虚拟网卡 Host 候选 (198.18.x.x / fdfe:...) 与代理污染毒丸候选，将其优先级压到最低 (1)
+    if (isBogusOrTunCandidate(cleanStr)) {
+      parts[3] = '1'
+      return hasPrefix ? `candidate:${parts.join(' ')}` : parts.join(' ')
+    }
 
     // 单测环境下保持 tieBreaker = 0 以精确匹配 webrtc.test.ts:1460 的常数断言；真机环境下按地址端口哈希消除多网卡优先级碰撞
     const isTestEnv =
@@ -545,13 +611,19 @@ export function optimizeCandidatePriority(candidateStr: string): string {
 }
 
 /**
- * 调整 SDP 内所有 a=candidate: 行的优先级，确保发出的 Offer/Answer 中的 IPv6 具备最高优先级
+ * 调整 SDP 内所有 a=candidate: 行的优先级，并过滤掉 TUN 虚拟网卡废候选
  */
 export function optimizeSdpCandidates(sdp: string): string {
   if (!sdp || typeof sdp !== 'string') return sdp
   try {
     return sdp
       .split(/\r\n|\n/)
+      .filter((line) => {
+        if (line.startsWith('a=candidate:')) {
+          return !isBogusOrTunCandidate(line.slice(2))
+        }
+        return true
+      })
       .map((line) => {
         if (line.startsWith('a=candidate:')) {
           const optimized = optimizeCandidatePriority(line.slice(2))
@@ -571,12 +643,10 @@ export function optimizeSdpCandidates(sdp: string): string {
  * 1. 局域网私有 IPv4 Host（最高：120 分，本地零公网流量直连）
  * 2. 公网全球单播 IPv6 Host（100 分）
  * 3. 公网全球单播 IPv6 STUN srflx（90 分）
- * 4. 其他有效 IPv6（80 分）
- * 5. 公网 IPv4 Host（70 分）
- * 6. 公网 IPv4 STUN srflx（50 分）
- * 7. 公网 IPv4 prflx（45 分）
- * 8. 其他候选（20 分）
- * 9. TURN Relay 中继（5 分，最低兜底）
+ * 4. 公网 IPv4 STUN srflx（50 分）
+ * 5. 公网 IPv4 prflx（45 分）
+ * 6. TURN Relay 中继（5 分，最低兜底）
+ * 7. TUN 虚拟地址 / 代理污染毒丸候选（1 分，垫底）
  */
 export function sortCandidatesPreferIpv6<T extends { candidate?: string }>(candidates: T[]): T[] {
   return [...candidates].sort((a, b) => {
@@ -588,6 +658,8 @@ export function sortCandidatesPreferIpv6<T extends { candidate?: string }>(candi
       const cleanStr = trimmed.startsWith('candidate:') ? trimmed.slice('candidate:'.length).trim() : trimmed
       const parts = cleanStr.split(/\s+/)
       if (parts.length < 7) return 0
+      if (isBogusOrTunCandidate(cleanStr)) return 1
+
       const address = parts[4] || ''
       const cleanAddr = cleanIpAddress(address)
       const typeIndex = parts.indexOf('typ')
@@ -603,12 +675,12 @@ export function sortCandidatesPreferIpv6<T extends { candidate?: string }>(candi
         if (candType === 'srflx') return 90
         return 85
       }
-      if (isIpv6Address(cleanAddr)) return 80
-      // 3. 其他公网 Host 候选
-      if (candType === 'host') return 70
-      // 4. IPv4 STUN 穿透候选 (srflx / prflx)
+      // 3. IPv4 STUN 穿透候选 (srflx / prflx)
       if (candType === 'srflx') return 50
       if (candType === 'prflx') return 45
+      // 4. 其他非 TUN 公网 Host 候选
+      if (candType === 'host') return 40
+      if (isIpv6Address(cleanAddr)) return 30
       // 5. TURN Relay 中继候选（兜底方案，优先级极低）
       if (candType === 'relay') return 5
       return 20

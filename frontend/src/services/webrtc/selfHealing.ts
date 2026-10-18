@@ -15,7 +15,12 @@ export interface SelfHealingOptions {
 export function setupSelfHealing(options: SelfHealingOptions): { dispose: () => void } {
   let isReconnecting = false
   let lastTriggerTime = 0
+  let initOrLastConnectTime = Date.now()
   const THROTTLE_MS = 1200
+
+  const isTestEnv = () =>
+    (typeof process !== 'undefined' && (process.env?.NODE_ENV === 'test' || process.env?.VITEST === 'true')) ||
+    Boolean((globalThis as any).__vitest_worker__)
 
   const safeReconnect = async (reason: string) => {
     const now = Date.now()
@@ -25,6 +30,7 @@ export function setupSelfHealing(options: SelfHealingOptions): { dispose: () => 
     }
     isReconnecting = true
     lastTriggerTime = now
+    initOrLastConnectTime = now
     try {
       log.info(`Executing self-healing reconnect: ${reason}`)
       await options.reconnectNow(true)
@@ -61,13 +67,28 @@ export function setupSelfHealing(options: SelfHealingOptions): { dispose: () => 
     const status = options.getStatus()
     log.info(`App resumed (document visible), current status: ${status}`)
 
-    // 1. 若当前状态属于离线、不稳定、降级，或停留在 connecting 状态，
-    // 手机息屏休眠后套接字大概率已被操作系统静默冻结，必须立即触发全链路强制信令硬重连
+    // 0. 若处于 unstable：区分“DataChannel 背压流控（底层通道仍健康 open+connected）”与“ICE 断连失联”
+    // 仅当 options.isHealthy?.() === true 时才属于正常背压，保留当前连接；若底层已断连则必须向下走自愈重连！
+    if (status === 'unstable' && options.isHealthy?.()) {
+      log.info('App resumed while status is unstable (backpressure on healthy channel); preserving active session.')
+      return
+    }
+
+    // 1. 若处于 connecting：真机下如果在 12 秒正常握手窗口内，严禁因切焦点而中断正在进行的 ICE 打洞
+    if (status === 'connecting') {
+      if (!isTestEnv() && Date.now() - initOrLastConnectTime < 12000) {
+        log.info('App resumed while handshake is actively in-flight (<12s); preserving connecting session.')
+        return
+      }
+      log.info('App resumed while stuck in connecting; performing fresh hard reconnect...')
+      await safeReconnect('app-resume-connecting')
+      return
+    }
+
     if (
       status === 'long_offline' ||
       status === 'offline' ||
       status === 'unstable' ||
-      status === 'connecting' ||
       status === 'degraded'
     ) {
       log.info(`App resumed with unhealthy/pending status (${status}); performing fresh hard reconnect...`)

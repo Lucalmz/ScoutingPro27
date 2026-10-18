@@ -30,7 +30,7 @@ watch(() => inboxStore.messages.length, (newLen, oldLen) => {
         :name="isViewTransitionSupported ? 'none' : 'page'" 
         :css="!isViewTransitionSupported"
         :mode="isViewTransitionSupported ? undefined : 'out-in'">
-        <component :is="Component" :key="route.path" />
+        <component :is="Component" :key="route.name === 'event' ? 'event-view' : route.path" />
       </transition>
     </router-view>
   </div>

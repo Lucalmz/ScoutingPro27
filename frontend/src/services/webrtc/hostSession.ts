@@ -18,12 +18,14 @@ import {
   sortCandidatesPreferIpv6,
   probeLocalInterfaceIpv6,
   isGlobalIpv6Address,
+  isBogusOrTunCandidate,
   cleanIpAddress
 } from './connectivity'
 import type { SignalingChannel } from './signaling'
 import { toSessionDescription, toIceCandidate } from './sdpUtil'
 import type { SasSecurityManager } from './sasManager'
 import type { PeerConnectionManager } from './peerManager'
+import { VirtualDataChannel, tryDecryptVirtualFrame } from './virtualDataChannel'
 import { createLogger } from '@/utils/logger'
 
 const log = createLogger('WebRTC:Host')
@@ -213,8 +215,12 @@ export function createHostSignalingHandler(ctx: HostSessionContext) {
         )
 
         const makeOnDisconnect = (targetPc: RTCPeerConnection) => () => {
-          log.warn(`Host peer connection for ${sender} stalled or closed. Cleaning up peer resources...`)
           const curActive = clients.get(sender)
+          if (curActive && curActive.pc === targetPc && (curActive.dc as any)?.isVirtual && curActive.dc?.readyState === 'open') {
+            log.info(`Host native PC for ${sender} closed, but VirtualDataChannel is active; preserving client session.`)
+            return
+          }
+          log.warn(`Host peer connection for ${sender} stalled or closed. Cleaning up peer resources...`)
           if (curActive && curActive.pc === targetPc) {
             if (curActive.sender) {
               try { curActive.sender.abort('Host peer connection disconnected') } catch {}
@@ -682,6 +688,54 @@ export function createHostSignalingHandler(ctx: HostSessionContext) {
           }
         }
       })
+    } else if (data.encrypted) {
+      ctx.enqueueHostTask(sender, async () => {
+        const sharedKey = sas.clientSharedKeys.get(sender)
+        const frame = await tryDecryptVirtualFrame(sharedKey, data.encrypted)
+        if (!frame) return
+        const targetHolder = stagedClients.get(sender) || clients.get(sender)
+        if (!targetHolder) return
+
+        // 若该客户端尚未打开原生 DataChannel，为其挂载 VirtualDataChannel
+        if (!targetHolder.dc || targetHolder.dc.readyState !== 'open') {
+          const vdc = new VirtualDataChannel({
+            label: 'scoutingpro-data-virtual',
+            sessionId: frame.sessionId,
+            getSignaling: ctx.getSignaling,
+            getSharedAesKey: () => sas.clientSharedKeys.get(sender) || null,
+            getTargetPeerId: () => sender
+          })
+          const senderObj = new DataChannelSender(vdc as unknown as RTCDataChannel)
+          targetHolder.dc = vdc as unknown as RTCDataChannel
+          targetHolder.sender = senderObj
+          vdc.onmessage = (e) => ctx.handleChannelMessage(e, sender)
+          vdc.onopen = () => {
+            log.info(`Host VirtualDataChannel state is now OPEN with ${sender}`)
+            ctx.updateHostStatus()
+            const currentEventMetadata = ctx.getCurrentEventMetadata()
+            if (currentEventMetadata) {
+              ctx.sendMessage(
+                {
+                  type: 'EVENT_METADATA',
+                  event: currentEventMetadata,
+                  authCode: currentInviteCode || undefined,
+                  hostSessionId: hostSessionId || undefined
+                },
+                sender
+              )
+            }
+          }
+          vdc.onclose = () => {
+            log.warn(`Host VirtualDataChannel closed with ${sender}`)
+            ctx.updateHostStatus()
+          }
+          vdc.open()
+        }
+
+        if (frame.vdc === 'data' && typeof frame.payload === 'string' && (targetHolder.dc as any)?.receiveDecryptedPayload) {
+          ;(targetHolder.dc as any).receiveDecryptedPayload(frame.payload)
+        }
+      })
     } else if (data.candidate) {
       ctx.enqueueHostTask(sender, async () => {
         const candidateSessionTag: string | undefined = data.clientSessionId || undefined
@@ -696,6 +750,10 @@ export function createHostSignalingHandler(ctx: HostSessionContext) {
           }
         }
         if (candidateData && candidateData.candidate) {
+          if (isBogusOrTunCandidate(candidateData.candidate)) {
+            log.info(`Dropped remote bogus/TUN poison candidate from ${sender}:`, candidateData.candidate)
+            return
+          }
           candidateData.candidate = optimizeCandidatePriority(candidateData.candidate)
         }
 

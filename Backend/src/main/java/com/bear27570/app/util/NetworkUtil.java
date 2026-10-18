@@ -247,8 +247,15 @@ public class NetworkUtil {
             pb.redirectErrorStream(true);
             Process p = pb.start();
             int code = p.waitFor();
+            // 同步放行 WebRTC 所需的 UDP 入站端口范围 (49152-65535)，防止公用网络拦截 LAN/IPv6 P2P 打洞
+            new ProcessBuilder(
+                    "netsh", "advfirewall", "firewall", "add", "rule",
+                    "name=ScoutingPro27 WebRTC UDP",
+                    "dir=in", "action=allow", "protocol=UDP",
+                    "localport=49152-65535", "profile=any"
+            ).start().waitFor();
             if (code == 0) {
-                System.out.println("[Firewall] Windows 防火墙入站规则已确认放行 TCP 端口 " + port);
+                System.out.println("[Firewall] Windows 防火墙入站规则已确认放行 TCP " + port + " 及 WebRTC UDP 端口");
             } else {
                 System.out.println("[Firewall] 提示: netsh 返回代码 " + code + "（如受限，请以管理员身份运行以完全放行公网入站）");
             }
