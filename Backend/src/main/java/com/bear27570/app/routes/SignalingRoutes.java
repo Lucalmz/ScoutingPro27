@@ -67,8 +67,15 @@ public class SignalingRoutes {
                         roomPeers.remove(room);
                     }
                 }
-                logger.warn("[Signaling LAN] Error on client in room [{}]: {}", room, 
-                        ctx.error() != null ? ctx.error().getMessage() : "unknown error");
+                Throwable err = ctx.error();
+                if (err instanceof java.nio.channels.ClosedChannelException || err instanceof java.io.EOFException) {
+                    logger.info("[Signaling LAN] Channel closed for client in room [{}]", room);
+                    return;
+                }
+                String errMsg = (err != null && err.getMessage() != null && !err.getMessage().isBlank())
+                        ? err.getMessage()
+                        : (err != null ? err.getClass().getSimpleName() : "unknown error");
+                logger.warn("[Signaling LAN] Error on client in room [{}]: {}", room, errMsg);
             });
         });
     }

@@ -464,21 +464,28 @@ public class Main {
                 frame.addWindowListener(new WindowAdapter() {
                     @Override
                     public void windowClosing(WindowEvent e) {
-                        try {
-                            cefApp.dispose();
-                        } catch (Exception ignored) {}
-                        frame.dispose();
-                        try {
-                            app.stop();
-                        } catch (Exception ignored) {}
-                        // 1. 先释放 JCEF 实例文件锁与数据库连接池
-                        releaseProfileLock();
-                        com.bear27570.app.db.JdbiConfig.closeDataSources();
-                        // 2. 仅清理多开降级产生的临时目录，绝不删除持久化主目录 jcef_profile！
-                        if (cacheDir != null && cacheDir.getName().startsWith("scoutingpro-jcef-")) {
-                            deleteDir(cacheDir);
-                        }
-                        System.exit(0);
+                        frame.setVisible(false);
+                        new Thread(() -> {
+                            try {
+                                browser.executeJavaScript("if (window.__rtcDisconnect) { window.__rtcDisconnect(); }", browser.getURL(), 0);
+                                Thread.sleep(150);
+                            } catch (Exception ignored) {}
+                            try {
+                                cefApp.dispose();
+                            } catch (Exception ignored) {}
+                            SwingUtilities.invokeLater(frame::dispose);
+                            try {
+                                app.stop();
+                            } catch (Exception ignored) {}
+                            // 1. 先释放 JCEF 实例文件锁与数据库连接池
+                            releaseProfileLock();
+                            com.bear27570.app.db.JdbiConfig.closeDataSources();
+                            // 2. 仅清理多开降级产生的临时目录，绝不删除持久化主目录 jcef_profile！
+                            if (cacheDir != null && cacheDir.getName().startsWith("scoutingpro-jcef-")) {
+                                deleteDir(cacheDir);
+                            }
+                            System.exit(0);
+                        }, "app-graceful-shutdown").start();
                     }
                 });
 

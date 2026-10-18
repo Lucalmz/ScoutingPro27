@@ -240,7 +240,11 @@ export class DataChannelSender {
       throw new Error(`DataChannel closed before send (current state: ${this.dc.readyState})`)
     }
 
-    this.dc.send(payload)
+    if (typeof (this.dc as any).sendAsync === 'function') {
+      await (this.dc as any).sendAsync(payload)
+    } else {
+      this.dc.send(payload)
+    }
 
     if (this.dc.bufferedAmount > this.BUFFER_HIGH_WATERMARK) {
       this.onCongestion?.(true)

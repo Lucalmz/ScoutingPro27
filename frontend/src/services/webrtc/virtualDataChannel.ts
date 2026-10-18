@@ -47,14 +47,14 @@ export class VirtualDataChannel {
     this.dispatchEvent('open', ev)
   }
 
-  public send(data: string): void {
+  public sendAsync(data: string): Promise<void> {
     if (this.readyState !== 'open') {
-      throw new Error(`VirtualDataChannel is not open (state: ${this.readyState})`)
+      return Promise.reject(new Error(`VirtualDataChannel is not open (state: ${this.readyState})`))
     }
     const byteLen = typeof data === 'string' ? data.length : 0
     this.bufferedAmount += byteLen
 
-    this.sendChain = this.sendChain
+    const task = this.sendChain
       .then(async () => {
         if (this.readyState !== 'open') return
         const signaling = this.options.getSignaling()
@@ -89,6 +89,13 @@ export class VirtualDataChannel {
           this.dispatchEvent('bufferedamountlow', new Event('bufferedamountlow'))
         }
       })
+
+    this.sendChain = task
+    return task
+  }
+
+  public send(data: string): void {
+    void this.sendAsync(data)
   }
 
   public receiveDecryptedPayload(payload: string): void {

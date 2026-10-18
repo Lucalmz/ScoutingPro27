@@ -47,6 +47,7 @@ export function useEventWebRtcBridge({
   const lastConnectedHostSessionId = ref<string>('')
   const wasActiveHostBeforeDemotion = ref<boolean>(false)
   const syncedMemberIds = new Set<string>()
+  let lastSyncPipelineTriggeredAt = 0
 
   function advanceLastHostSeq(incomingRecords: ScoutingRecord[]) {
     const validSeqs = incomingRecords
@@ -430,6 +431,15 @@ export function useEventWebRtcBridge({
           scheduleStore.migrateEventId(currentRouteEventId, actualEvent.id)
           customFieldsStore.migrateEventId?.(currentRouteEventId, actualEvent.id)
           try {
+            const oldSeq = parseInt(localStorage.getItem(`sp27_lastHostSeq_${currentRouteEventId}`) ?? '0', 10) || 0
+            const newSeq = parseInt(localStorage.getItem(`sp27_lastHostSeq_${actualEvent.id}`) ?? '0', 10) || 0
+            const mergedSeq = Math.max(lastHostSeq.value, oldSeq, newSeq)
+            if (mergedSeq > 0) {
+              localStorage.setItem(`sp27_lastHostSeq_${actualEvent.id}`, String(mergedSeq))
+              lastHostSeq.value = mergedSeq
+            }
+          } catch {}
+          try {
             const { migrateMobilePhotosEventId } = await import('@/services/mobilePhotoCache')
             await migrateMobilePhotosEventId(currentRouteEventId, actualEvent.id)
           } catch {}
@@ -437,7 +447,13 @@ export function useEventWebRtcBridge({
             path: `/event/${actualEvent.id}`,
             query: router.currentRoute.value.query
           })
-          void triggerClientSyncPipeline(false)
+          // 若刚在 2 秒内执行过首次连接同步流水线，仅需针对新权威 UUID 刷新自定义字段与标签，避免重复拉取全量比赛记录
+          if (Date.now() - lastSyncPipelineTriggeredAt < 2000) {
+            customFieldsStore.fetchFields(actualEvent.id).catch(() => {})
+            connStore.rtcService?.requestTagsSync(actualEvent.id).catch(() => {})
+          } else {
+            void triggerClientSyncPipeline(false)
+          }
         }
       },
 
@@ -485,8 +501,8 @@ export function useEventWebRtcBridge({
           .reduce((m, r) => Math.max(m, r.hostSeq || 0), 0)
         connStore.initHostSeq(Math.max(dbMaxSeq, lastHostSeq.value))
 
-        // 升迁为主机后，主动向所有 Peer 广播最新排班、标签与自定义字段基准包
-        if (connStore.rtcService && eventStore.currentEvent?.id) {
+        // 升迁为主机后，若当前已有活跃连接的 Peer，主动向所有 Peer 广播最新排班、标签与自定义字段基准包
+        if (connStore.rtcService && eventStore.currentEvent?.id && connStore.rtcService.getDataChannel()?.readyState === 'open') {
           const evId = eventStore.currentEvent.id
           const allSchedules = scheduleStore.schedules
           const allAssignments = Object.values(scheduleStore.assignments)
@@ -697,6 +713,11 @@ export function useEventWebRtcBridge({
       console.warn('[EventView] Connected but session conflict is active; suspending auto-sync pipeline until resolved.')
       return
     }
+    const now = Date.now()
+    if (!isHostTakeover && now - lastSyncPipelineTriggeredAt < 1200) {
+      return
+    }
+    lastSyncPipelineTriggeredAt = now
 
     // Client 连接／重连：按序发起同步流水线，避免并发数据风暴
     connStore.requestSync(

@@ -10,13 +10,17 @@ export interface SelfHealingOptions {
   isHealthy?: () => boolean
   pingPeer?: () => Promise<boolean>
   isConflictActive?: () => boolean
+  isHostMode?: () => boolean
 }
 
 export function setupSelfHealing(options: SelfHealingOptions): { dispose: () => void } {
   let isReconnecting = false
+  let isResumeProbing = false
   let lastTriggerTime = 0
+  let lastResumeTime = 0
   let initOrLastConnectTime = Date.now()
   const THROTTLE_MS = 1200
+  const RESUME_DEBOUNCE_MS = 500
 
   const isTestEnv = () =>
     (typeof process !== 'undefined' && (process.env?.NODE_ENV === 'test' || process.env?.VITEST === 'true')) ||
@@ -46,6 +50,14 @@ export function setupSelfHealing(options: SelfHealingOptions): { dispose: () => 
       log.info('Device network came online, but session conflict is active; suppressing reconnect.')
       return
     }
+    // Host 模式下若信令/房间已处于正常工作态（connected / waiting / connecting），严禁因网卡波动调用 reconnectNow 拆毁整个房间！
+    if (options.isHostMode?.()) {
+      const curStatus = options.getStatus()
+      if (curStatus === 'connected' || curStatus === 'waiting' || curStatus === 'connecting' || options.isHealthy?.()) {
+        log.info(`Network event in Host mode while status is ${curStatus}; preserving active host room.`)
+        return
+      }
+    }
     log.info('Device network came online, probing public connectivity...')
     const canReachPublic = await probePublicConnectivity(2500)
     if (canReachPublic) {
@@ -60,6 +72,11 @@ export function setupSelfHealing(options: SelfHealingOptions): { dispose: () => 
     if (typeof document !== 'undefined' && document.visibilityState !== 'visible') {
       return
     }
+    const now = Date.now()
+    if (isResumeProbing || (!isTestEnv() && now - lastResumeTime < RESUME_DEBOUNCE_MS)) {
+      return
+    }
+    lastResumeTime = now
     if (options.isConflictActive?.()) {
       log.info('App resumed, but session conflict is active; suppressing reconnect.')
       return
@@ -67,7 +84,19 @@ export function setupSelfHealing(options: SelfHealingOptions): { dispose: () => 
     const status = options.getStatus()
     log.info(`App resumed (document visible), current status: ${status}`)
 
-    // 0. 若处于 unstable：区分“DataChannel 背压流控（底层通道仍健康）”与“ICE 断连失联”
+    // 核心守卫：Host 模式下只要不是彻底离线 (offline / long_offline)，无论处于 waiting、connected、connecting 还是 unstable，
+    // 均严禁执行从机维度的 pingPeer 探测或重置房间！
+    if (options.isHostMode?.()) {
+      if (status === 'offline' || status === 'long_offline') {
+        log.info(`App resumed in Host mode while ${status}; re-initializing host signaling...`)
+        await safeReconnect(`host-resume-${status}`)
+      } else {
+        log.info(`App resumed in Host mode (status: ${status}); preserving host session without peer ping probe.`)
+      }
+      return
+    }
+
+    // 0.1 若处于 unstable：区分“DataChannel 背压流控（底层通道仍健康）”与“ICE 断连失联”
     if (status === 'unstable' && options.isHealthy?.()) {
       log.info('App resumed while status is unstable (backpressure on healthy channel); preserving active session.')
       return
@@ -95,14 +124,23 @@ export function setupSelfHealing(options: SelfHealingOptions): { dispose: () => 
       return
     }
 
+    if (status === 'waiting') {
+      return
+    }
+
     // 2. 防御移动端息屏“僵尸连接（Zombie Connection）”
     // 手机息屏切后台唤醒时，底层 TCP/SCTP 套接字常被 OS 静默冻结，但 status 仍停留在 'connected'
     let isAlive = false
-    if (options.pingPeer) {
-      log.info('App resumed; performing fast active ping probe to eliminate zombie connection...')
-      isAlive = await options.pingPeer()
-    } else if (options.isHealthy) {
-      isAlive = options.isHealthy()
+    isResumeProbing = true
+    try {
+      if (options.pingPeer) {
+        log.info('App resumed; performing fast active ping probe to eliminate zombie connection...')
+        isAlive = await options.pingPeer()
+      } else if (options.isHealthy) {
+        isAlive = options.isHealthy()
+      }
+    } finally {
+      isResumeProbing = false
     }
 
     if (!isAlive) {

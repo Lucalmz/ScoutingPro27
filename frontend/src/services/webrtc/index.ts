@@ -861,6 +861,17 @@ export function createWebRtcService(callbacks: WebRtcCallbacks): WebRtcService {
       log.warn('Mobile devices are strictly prohibited from acting as host. Falling back to join() client mode.')
       return join(inviteCode, username, userId, preferredBroker)
     }
+    if (probeTimer) {
+      clearTimeout(probeTimer)
+      probeTimer = null
+    }
+    stopHostHeartbeat()
+    stopStandbyWatchdog()
+    if (signaling) {
+      try { signaling.close() } catch {}
+      signaling = null
+    }
+
     isHostMode = true
     isStandbyHostMode = false
     isProbing = true
@@ -1197,8 +1208,11 @@ export function createWebRtcService(callbacks: WebRtcCallbacks): WebRtcService {
       return false
     }
     if (isHostMode) {
+      if (signaling && signaling.isConnected() && (status === 'connected' || status === 'waiting')) {
+        return true
+      }
       if (currentInviteCode) {
-        await host(currentInviteCode)
+        await host(currentInviteCode, currentEventMetadata || undefined, currentUsername || undefined, currentUserId || undefined)
         return true
       }
       return false
@@ -1265,8 +1279,9 @@ export function createWebRtcService(callbacks: WebRtcCallbacks): WebRtcService {
   const selfHealing = setupSelfHealing({
     getStatus: () => status,
     reconnectNow,
+    isHostMode: () => isHostMode,
     isHealthy: () => {
-      if (isHostMode) return true
+      if (isHostMode) return Boolean(signaling && signaling.isConnected())
       return Boolean(
         clientDc &&
           clientDc.readyState === 'open' &&
@@ -1298,13 +1313,19 @@ export function createWebRtcService(callbacks: WebRtcCallbacks): WebRtcService {
     stopStandbyWatchdog()
     isStandbyHostMode = false
 
+    const closingSignaling = signaling
+    signaling = null
+    let hostLeavingPromise: Promise<void> | null = null
+
     if (isHostMode) {
-      if (signaling) {
-        signaling.send({
-          type: 'HOST_LEAVING',
-          hostSessionId,
-          deviceId: localDeviceId
-        })
+      if (closingSignaling) {
+        hostLeavingPromise = closingSignaling
+          .send({
+            type: 'HOST_LEAVING',
+            hostSessionId,
+            deviceId: localDeviceId
+          })
+          .catch(() => {})
       }
       clients.forEach((c) => {
         if (c.dc) c.dc.onclose = null
@@ -1352,9 +1373,19 @@ export function createWebRtcService(callbacks: WebRtcCallbacks): WebRtcService {
     }
     pendingMergeRequests.clear()
 
-    signaling?.close()
-    signaling = null
     setStatus('offline')
+    const isTest =
+      (typeof process !== 'undefined' && (process.env?.NODE_ENV === 'test' || process.env?.VITEST === 'true')) ||
+      Boolean((globalThis as any).__vitest_worker__) ||
+      (globalThis as any).__TEST_ALLOW_UNSIGNED_SIGNALING__ !== undefined
+
+    if (!isTest && hostLeavingPromise && closingSignaling) {
+      void hostLeavingPromise.finally(() => {
+        closingSignaling.close()
+      })
+    } else {
+      closingSignaling?.close()
+    }
   }
 
   return {

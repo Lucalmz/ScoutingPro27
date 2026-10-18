@@ -196,7 +196,8 @@ export class SignalingChannel {
       } catch {}
       this.companionLanWs.onopen = () => {
         log.info(`Companion LAN WebSocket bridge active at ${lanWsUrl}`)
-        if (!this.didNotifyConnect) {
+        // 若浏览器处于离线态，则立即以伴随局域网 WS 作为主用信令触发 onConnect；否则等待 MQTT 订阅完成或超时兜底
+        if (isBrowserSimulatedOffline() && !this.didNotifyConnect) {
           this.didNotifyConnect = true
           onConnect?.()
         }
@@ -304,6 +305,10 @@ export class SignalingChannel {
       }
       if (this.companionLanWs && this.companionLanWs.readyState === WebSocket.OPEN) {
         log.info(`MQTT unreachable, but Companion LAN WebSocket is active; staying online in LAN mode.`)
+        if (!this.didNotifyConnect) {
+          this.didNotifyConnect = true
+          callbacks.onConnect?.()
+        }
         return
       }
       callbacks.onError?.(err)
@@ -312,6 +317,10 @@ export class SignalingChannel {
     this.client.on('offline', () => {
       log.warn(`MQTT client entered offline state on ${brokerUrl}`)
       if (this.companionLanWs && this.companionLanWs.readyState === WebSocket.OPEN) {
+        if (!this.didNotifyConnect) {
+          this.didNotifyConnect = true
+          callbacks.onConnect?.()
+        }
         return
       }
       callbacks.onError?.()

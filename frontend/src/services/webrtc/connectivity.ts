@@ -542,6 +542,8 @@ export function isTunVirtualAddress(ip: string): boolean {
   const clean = cleanIpAddress(ip)
   if (!clean) return false
   if (clean.startsWith('198.18.') || clean.startsWith('198.19.')) return true
+  // 识别 sing-box / Mihomo (Clash Meta) / NekoBox 默认 TUN IPv4 段 (172.19.0.x) 及 Docker/WSL 虚拟网桥网关 (.0.1)
+  if (/^172\.(1[7-9]|2\d|3[0-1])\.0\.[12]$/.test(clean)) return true
   if (/^100\.(6[4-9]|[7-9]\d|1[01]\d|12[0-7])\./.test(clean)) return true
   if (clean.startsWith('fc') || clean.startsWith('fd')) return true
   return false
@@ -584,6 +586,18 @@ export function isBogusOrTunCandidate(candidateStr: string): boolean {
 
   if (candType === 'host' && isTunVirtualAddress(addr)) {
     return true
+  }
+
+  // 拦截绑定在 TUN 虚拟网卡上的 IPv4 srflx 候选，以及 Chromium 抹零 raddr (0.0.0.0) 但源自高开销虚拟网卡的反射候选
+  if (candType === 'srflx') {
+    if (raddr && !addr.includes(':') && isTunVirtualAddress(raddr)) {
+      return true
+    }
+    const costIdx = parts.indexOf('network-cost')
+    const costVal = costIdx !== -1 && parts[costIdx + 1] ? parseInt(parts[costIdx + 1] || '0', 10) : 0
+    if (raddr === '0.0.0.0' && costVal >= 50) {
+      return true
+    }
   }
 
   if (candType === 'srflx' && raddr && raddr !== '::' && raddr !== '0.0.0.0' && !raddr.endsWith('.local')) {
@@ -637,14 +651,20 @@ export function optimizeCandidatePriority(candidateStr: string): string {
       return hasPrefix ? `candidate:${parts.join(' ')}` : parts.join(' ')
     }
 
-    // 清洗非 relay 候选上的 TUN 虚拟 raddr (fdfe:... / 198.18.x.x) 与 network-cost 999 惩罚
+    // 清洗非 relay 候选上的 TUN 虚拟 raddr (仅当公网国内运营商 IPv6 srflx 借道 TUN ULA 反射时清洗 raddr，绝不把 IPv4 TUN 毒丸伪装成 0.0.0.0)
     if (candType !== 'relay') {
       const raddrIdx = parts.indexOf('raddr')
-      if (raddrIdx !== -1 && parts[raddrIdx + 1] && isTunVirtualAddress(parts[raddrIdx + 1] || '')) {
-        parts[raddrIdx + 1] = cleanAddr.includes(':') ? '::' : '0.0.0.0'
+      if (
+        raddrIdx !== -1 &&
+        parts[raddrIdx + 1] &&
+        cleanAddr.includes(':') &&
+        isDomesticCarrierIpv6(cleanAddr) &&
+        isTunVirtualAddress(parts[raddrIdx + 1] || '')
+      ) {
+        parts[raddrIdx + 1] = '::'
       }
       const costIdx = parts.indexOf('network-cost')
-      if (costIdx !== -1 && parts[costIdx + 1]) {
+      if (costIdx !== -1 && parts[costIdx + 1] && !isTunVirtualAddress(cleanAddr)) {
         parts[costIdx + 1] = '10'
       }
     } else {

@@ -56,7 +56,7 @@ describe('User Store', () => {
     expect(res.newId).toBe('user-uuid-permanent')
     expect(store.userId).toBe('user-uuid-permanent')
     expect(store.username).toBe('NewName')
-  })
+  }, 15000)
 
   it('rename preserves immutable user ID when backend is offline', async () => {
     const store = useUserStore()

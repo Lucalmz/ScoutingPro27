@@ -6,7 +6,6 @@ import {
   classifyCandidatePair,
   isBogusOrTunCandidate,
   isTunVirtualAddress,
-  synthesizePhysicalHostCandidatesFromTun,
   cleanIpAddress,
   CONNECTION_TIMING
 } from './connectivity'
@@ -257,6 +256,8 @@ export class PeerConnectionManager {
     )
     const peer = new RTCPeerConnection(config)
     const emittedCandidateKeys = new Set<string>()
+    const poisonedTunPorts = new Set<string>()
+    const poisonedTunNetworkIds = new Set<string>()
 
     // ---------------- 本地候选发送（顺序化 + 会话标签 + 可选暂存闸门） ----------------
     let sendChain: Promise<void> = Promise.resolve()
@@ -328,12 +329,31 @@ export class PeerConnectionManager {
         if (rawCandStr) {
           const parts = rawCandStr.trim().split(/\s+/)
           const addr = cleanIpAddress(parts[4] || '')
+          const port = parts[5] || ''
+          const typIdx = parts.indexOf('typ')
+          const candType = typIdx !== -1 && parts[typIdx + 1] ? parts[typIdx + 1] : ''
           const raddrIdx = parts.indexOf('raddr')
           const raddr = raddrIdx !== -1 && parts[raddrIdx + 1] ? cleanIpAddress(parts[raddrIdx + 1] || '') : ''
+          const rportIdx = parts.indexOf('rport')
+          const rport = rportIdx !== -1 && parts[rportIdx + 1] ? parts[rportIdx + 1] : ''
+          const netIdIdx = parts.indexOf('network-id')
+          const netId = netIdIdx !== -1 && parts[netIdIdx + 1] ? parts[netIdIdx + 1] : ''
+
           if (isTunVirtualAddress(addr) || isTunVirtualAddress(raddr)) {
             this.tunEnvironmentDetected = true
+            if (candType === 'host') {
+              if (port) poisonedTunPorts.add(port)
+              if (netId) poisonedTunNetworkIds.add(netId)
+            }
           }
-          if (isBogusOrTunCandidate(rawCandStr)) {
+
+          const isPoisonedSrflxFromTun =
+            candType === 'srflx' &&
+            !addr.includes(':') &&
+            ((rport && poisonedTunPorts.has(rport)) ||
+              (raddr === '0.0.0.0' && netId && poisonedTunNetworkIds.has(netId)))
+
+          if (isBogusOrTunCandidate(rawCandStr) || isPoisonedSrflxFromTun) {
             log.info(`Filtered out bogus/TUN poison ICE candidate: ${rawCandStr.trim()}`)
             return
           }

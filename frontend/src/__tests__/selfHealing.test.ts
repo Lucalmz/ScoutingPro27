@@ -121,4 +121,72 @@ describe('setupSelfHealing', () => {
     expect(reconnectNow).toHaveBeenCalledWith(true)
     selfHealing.dispose()
   })
+
+  it('does not pingPeer or reconnect on resume when isHostMode returns true and status is connected', async () => {
+    const reconnectNow = vi.fn().mockResolvedValue(true)
+    const pingPeer = vi.fn().mockResolvedValue(false)
+    const selfHealing = setupSelfHealing({
+      getStatus: () => 'connected',
+      reconnectNow,
+      pingPeer,
+      isHostMode: () => true
+    })
+
+    expect(listeners['visibilitychange']).toBeDefined()
+    await listeners['visibilitychange'][0]()
+
+    expect(pingPeer).not.toHaveBeenCalled()
+    expect(reconnectNow).not.toHaveBeenCalled()
+    selfHealing.dispose()
+  })
+
+  it('does not pingPeer or reconnect on resume when status is waiting', async () => {
+    const reconnectNow = vi.fn().mockResolvedValue(true)
+    const pingPeer = vi.fn().mockResolvedValue(false)
+    const selfHealing = setupSelfHealing({
+      getStatus: () => 'waiting',
+      reconnectNow,
+      pingPeer,
+      isHostMode: () => true
+    })
+
+    expect(listeners['visibilitychange']).toBeDefined()
+    await listeners['visibilitychange'][0]()
+
+    expect(pingPeer).not.toHaveBeenCalled()
+    expect(reconnectNow).not.toHaveBeenCalled()
+    selfHealing.dispose()
+  })
+
+  it('does not reconnect on network-online in Host mode when status is connected or waiting', async () => {
+    const reconnectNow = vi.fn().mockResolvedValue(true)
+    const selfHealing = setupSelfHealing({
+      getStatus: () => 'waiting',
+      reconnectNow,
+      isHostMode: () => true
+    })
+
+    expect(listeners['online']).toBeDefined()
+    await listeners['online'][0]()
+
+    expect(reconnectNow).not.toHaveBeenCalled()
+    selfHealing.dispose()
+  })
+
+  it('triggers reconnect on resume in Host mode when status is offline', async () => {
+    const reconnectNow = vi.fn().mockResolvedValue(true)
+    const selfHealing = setupSelfHealing({
+      getStatus: () => 'offline',
+      reconnectNow,
+      isHostMode: () => true
+    })
+
+    expect(listeners['visibilitychange']).toBeDefined()
+    await listeners['visibilitychange'][0]()
+
+    expect(reconnectNow).toHaveBeenCalledTimes(1)
+    expect(reconnectNow).toHaveBeenCalledWith(true)
+    selfHealing.dispose()
+  })
 })
+

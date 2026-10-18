@@ -205,6 +205,9 @@ export function createHostSignalingHandler(ctx: HostSessionContext) {
             }
 
             if (targetHolder) {
+              if (targetHolder.dc && (targetHolder.dc as any).isVirtual && targetHolder.dc !== dc) {
+                try { targetHolder.dc.close() } catch {}
+              }
               targetHolder.dc = dc
               targetHolder.sender = senderObj
             }
@@ -278,20 +281,29 @@ export function createHostSignalingHandler(ctx: HostSessionContext) {
           } catch {}
           clientData = existing
         } else {
-          // Client initiated a new connection / session.
-          // Enforce hard-reset: kill any previous channels cleanly and register directly into clients!
+          // 若当前存在活跃的 VirtualDataChannel，在新的原生 DataChannel 真正 open 之前保留虚拟通道，支持无缝后台热升级
+          const preservedVirtualDc =
+            existing && (existing.dc as any)?.isVirtual && existing.dc?.readyState === 'open'
+              ? existing.dc
+              : undefined
+          const preservedVirtualSender = preservedVirtualDc ? existing?.sender : undefined
+
           if (existing) {
             log.info(`Tearing down previous connection for peer ${sender} before creating new PeerConnection`)
-            if (existing.sender) {
-              try { existing.sender.abort('Connection torn down by new session offer') } catch {}
-              existing.sender = undefined
-            }
-            if (existing.dc) {
-              existing.dc.onmessage = null
-              existing.dc.onopen = null
-              existing.dc.onclose = null
-              existing.dc.onerror = null
-              try { existing.dc.close() } catch {}
+            if (!preservedVirtualDc) {
+              if (existing.sender) {
+                try { existing.sender.abort('Connection torn down by new session offer') } catch {}
+                existing.sender = undefined
+              }
+              if (existing.dc) {
+                existing.dc.onmessage = null
+                existing.dc.onopen = null
+                existing.dc.onclose = null
+                existing.dc.onerror = null
+                try { existing.dc.close() } catch {}
+              }
+            } else if (data.clientSessionId) {
+              ;(preservedVirtualDc as any).sessionId = data.clientSessionId
             }
             if (existing.pc) {
               existing.pc.onicecandidate = null
@@ -334,8 +346,17 @@ export function createHostSignalingHandler(ctx: HostSessionContext) {
             allowTurn
           })
           pcRef = pc
+          if (preservedVirtualDc) {
+            ctx.peerMgr.markVirtualChannelActive(pc)
+          }
           setupDcHandler(pc)
-          clientData = { pc, sessionId: data.clientSessionId, pendingCandidates: [] }
+          clientData = {
+            pc,
+            dc: preservedVirtualDc,
+            sender: preservedVirtualSender,
+            sessionId: data.clientSessionId,
+            pendingCandidates: []
+          }
           clients.set(sender, clientData)
         }
 
@@ -462,6 +483,39 @@ export function createHostSignalingHandler(ctx: HostSessionContext) {
         // TOFU Peer Trust Evaluation
         if (data.ecdhPublicKey) {
           const clientDeviceId = offerData?.deviceId || data.deviceId || 'device_default'
+          if (clientDeviceId && clientDeviceId !== 'device_default') {
+            for (const [oldSender, recordedDevId] of Array.from(sas.clientDeviceIds.entries())) {
+              if (oldSender !== sender && recordedDevId === clientDeviceId) {
+                log.info(`Cleaning up superseded session ${oldSender} for same deviceId ${clientDeviceId} (new sender: ${sender})`)
+                const staleEntry = clients.get(oldSender) || stagedClients.get(oldSender)
+                if (staleEntry) {
+                  try { staleEntry.sender?.abort('Superseded by new sender from same deviceId') } catch {}
+                  if (staleEntry.dc) {
+                    staleEntry.dc.onmessage = null
+                    staleEntry.dc.onopen = null
+                    staleEntry.dc.onclose = null
+                    staleEntry.dc.onerror = null
+                    try { staleEntry.dc.close() } catch {}
+                  }
+                  if (staleEntry.pc) {
+                    staleEntry.pc.onicecandidate = null
+                    staleEntry.pc.onconnectionstatechange = null
+                    staleEntry.pc.oniceconnectionstatechange = null
+                    try { staleEntry.pc.close() } catch {}
+                  }
+                  clients.delete(oldSender)
+                  stagedClients.delete(oldSender)
+                }
+                sas.cleanupPeerResources(oldSender)
+                const boundUid = ctx.clientIdToScoutId?.get(oldSender)
+                if (boundUid) {
+                  ctx.scoutIdToClientIds?.get(boundUid)?.delete(oldSender)
+                  ctx.clientIdToScoutId?.delete(oldSender)
+                }
+                ctx.clientIdToScoutName?.delete(oldSender)
+              }
+            }
+          }
           sas.clientDeviceIds.set(sender, clientDeviceId)
           const isTicketVerified = Boolean(verifiedUser)
           const effectiveUserId = verifiedUser?.userId || offerData?.userId || data.userId || ''

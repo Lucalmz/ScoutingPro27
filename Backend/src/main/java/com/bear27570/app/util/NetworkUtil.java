@@ -289,7 +289,9 @@ public class NetworkUtil {
                 System.out.println("[Firewall] Windows 防火墙入站规则已确认放行 TCP " + port + " 及 WebRTC UDP 49152-65535 端口");
             } else {
                 System.out.println("[Firewall] 普通权限下 netsh 返回代码 " + code + "，正在唤起 UAC 管理员提权以永久放行 WebRTC UDP 49152-65535 入站规则...");
-                openWindowsFirewallPrompt(port);
+                if (!openWindowsFirewallPrompt(port)) {
+                    System.err.println("[Firewall] 警告：UAC 防火墙提权未完成或被拒绝，跨网段 WebRTC UDP 入站可能受阻");
+                }
             }
         } catch (Exception e) {
             System.err.println("[Firewall] 检查 Windows 防火墙规则异常: " + e.getMessage());
@@ -311,24 +313,30 @@ public class NetworkUtil {
         }
         try {
             String psScript =
-                    "netsh advfirewall firewall add rule name='ScoutingPro27 Inbound (" + port + ")' dir=in action=allow protocol=TCP localport=" + port + " profile=any; " +
-                    "netsh advfirewall firewall add rule name='ScoutingPro27 WebRTC UDP' dir=in action=allow protocol=UDP localport=49152-65535 profile=any; " +
+                    "netsh advfirewall firewall add rule name=\"ScoutingPro27 Inbound (" + port + ")\" dir=in action=allow protocol=TCP localport=" + port + " profile=any; " +
+                    "netsh advfirewall firewall add rule name=\"ScoutingPro27 WebRTC UDP\" dir=in action=allow protocol=UDP localport=49152-65535 profile=any; " +
                     "Get-NetFirewallRule -Direction Inbound -Action Block -ErrorAction SilentlyContinue | ForEach-Object { " +
                     "$app = $_ | Get-NetFirewallApplicationFilter -ErrorAction SilentlyContinue; " +
                     "if ($app -and ($app.Program -match 'java|jcef|scoutingpro')) { Remove-NetFirewallRule -Name $_.Name -ErrorAction SilentlyContinue } " +
                     "}";
+            String encodedCommand = java.util.Base64.getEncoder().encodeToString(
+                    psScript.getBytes(java.nio.charset.StandardCharsets.UTF_16LE)
+            );
             ProcessBuilder pb = new ProcessBuilder(
                     "powershell.exe", "-NoProfile", "-NonInteractive", "-Command",
-                    "Start-Process powershell.exe -ArgumentList '-NoProfile','-NonInteractive','-WindowStyle','Hidden','-Command',\"" +
-                    psScript.replace("\"", "\\\"") + "\" -Verb RunAs -Wait -WindowStyle Hidden"
+                    "Start-Process powershell.exe -ArgumentList '-NoProfile','-NonInteractive','-WindowStyle','Hidden','-EncodedCommand','" +
+                    encodedCommand + "' -Verb RunAs -Wait -WindowStyle Hidden"
             );
+            pb.redirectErrorStream(true);
             Process p = pb.start();
+            p.getInputStream().readAllBytes();
             int exitCode = p.waitFor();
             boolean bothAllowed = isWindowsFirewallPortAllowed(port) && isWindowsFirewallWebRtcUdpAllowed();
             if (exitCode == 0 && bothAllowed) {
                 System.out.println("[Firewall] Windows 防火墙入站端口 TCP " + port + " 及 WebRTC UDP 49152-65535 已通过管理员提权成功放行");
                 return true;
             }
+            System.err.println("[Firewall] UAC 提权执行结束，exitCode=" + exitCode + ", bothAllowed=" + bothAllowed);
             return bothAllowed;
         } catch (Exception e) {
             System.err.println("[Firewall] 唤起 Windows 防火墙提权执行异常: " + e.getMessage());
