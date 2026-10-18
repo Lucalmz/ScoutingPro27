@@ -18,9 +18,24 @@ export function setupSelfHealing(options: SelfHealingOptions): { dispose: () => 
   let isResumeProbing = false
   let lastTriggerTime = 0
   let lastResumeTime = 0
+  let connectingEnteredAt = 0
+  let lastObservedStatus: ConnectionStatus | null = null
   let initOrLastConnectTime = Date.now()
   const THROTTLE_MS = 1200
   const RESUME_DEBOUNCE_MS = 500
+
+  const trackStatusTransition = (): ConnectionStatus => {
+    const cur = options.getStatus()
+    if (cur !== lastObservedStatus) {
+      if (cur === 'connecting') {
+        connectingEnteredAt = Date.now()
+      } else {
+        connectingEnteredAt = 0
+      }
+      lastObservedStatus = cur
+    }
+    return cur
+  }
 
   const isTestEnv = () =>
     (typeof process !== 'undefined' && (process.env?.NODE_ENV === 'test' || process.env?.VITEST === 'true')) ||
@@ -50,11 +65,19 @@ export function setupSelfHealing(options: SelfHealingOptions): { dispose: () => 
       log.info('Device network came online, but session conflict is active; suppressing reconnect.')
       return
     }
+    const curStatus = trackStatusTransition()
     // Host 模式下若信令/房间已处于正常工作态（connected / waiting / connecting），严禁因网卡波动调用 reconnectNow 拆毁整个房间！
     if (options.isHostMode?.()) {
-      const curStatus = options.getStatus()
       if (curStatus === 'connected' || curStatus === 'waiting' || curStatus === 'connecting' || options.isHealthy?.()) {
         log.info(`Network event in Host mode while status is ${curStatus}; preserving active host room.`)
+        return
+      }
+    } else {
+      if (
+        (curStatus === 'connected' && options.isHealthy?.()) ||
+        (curStatus === 'connecting' && connectingEnteredAt > 0 && Date.now() - connectingEnteredAt < 15000)
+      ) {
+        log.info(`Network event in Client mode while status is ${curStatus}; preserving healthy/connecting session.`)
         return
       }
     }
@@ -81,7 +104,7 @@ export function setupSelfHealing(options: SelfHealingOptions): { dispose: () => 
       log.info('App resumed, but session conflict is active; suppressing reconnect.')
       return
     }
-    const status = options.getStatus()
+    const status = trackStatusTransition()
     log.info(`App resumed (document visible), current status: ${status}`)
 
     // 核心守卫：Host 模式下只要不是彻底离线 (offline / long_offline)，无论处于 waiting、connected、connecting 还是 unstable，
@@ -102,10 +125,11 @@ export function setupSelfHealing(options: SelfHealingOptions): { dispose: () => 
       return
     }
 
-    // 1. 若处于 connecting：真机下如果在 12 秒正常握手窗口内，严禁因切焦点而中断正在进行的 ICE 打洞
+    // 1. 若处于 connecting：真机下如果在 15 秒正常握手窗口内，严禁因切焦点而中断正在进行的 ICE 打洞
     if (status === 'connecting') {
-      if (!isTestEnv() && Date.now() - initOrLastConnectTime < 12000) {
-        log.info('App resumed while handshake is actively in-flight (<12s); preserving connecting session.')
+      const timeInConnecting = connectingEnteredAt > 0 ? Date.now() - connectingEnteredAt : Date.now() - initOrLastConnectTime
+      if (!isTestEnv() && timeInConnecting < 15000) {
+        log.info('App resumed while handshake is actively in-flight (<15s); preserving connecting session.')
         return
       }
       log.info('App resumed while stuck in connecting; performing fresh hard reconnect...')

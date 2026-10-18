@@ -151,7 +151,9 @@ export function useEventWebRtcBridge({
       },
 
       onTagUpdateReceived: (tag, action, eventIdVal) => {
-        if (eventIdVal === eventStore.currentEvent?.id) {
+        const curId = eventStore.currentEvent?.id
+        const isMatch = eventIdVal === curId || (curId?.startsWith('evt-') && eventIdVal && !eventIdVal.startsWith('evt-'))
+        if (isMatch) {
           recordStore.applyTagUpdate(tag, action)
         }
       },
@@ -163,7 +165,9 @@ export function useEventWebRtcBridge({
       },
 
       onTagsFullSyncReceived: (tags, eventIdVal) => {
-        if (eventIdVal === eventStore.currentEvent?.id) {
+        const curId = eventStore.currentEvent?.id
+        const isMatch = eventIdVal === curId || (curId?.startsWith('evt-') && eventIdVal && !eventIdVal.startsWith('evt-'))
+        if (isMatch) {
           recordStore.applyTagsFullSync(tags)
         }
       },

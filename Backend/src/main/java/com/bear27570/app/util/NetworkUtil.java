@@ -231,7 +231,7 @@ public class NetworkUtil {
     }
 
     /**
-     * 检查当前 Windows 防火墙是否已存在针对 WebRTC UDP 入站端口范围 (49152-65535) 的放行规则
+     * 检查当前 Windows 防火墙是否已存在针对 WebRTC UDP 入站端口范围 (1024-65535, edge=yes) 的放行规则
      */
     public static boolean isWindowsFirewallWebRtcUdpAllowed() {
         String os = System.getProperty("os.name", "").toLowerCase();
@@ -241,87 +241,125 @@ public class NetworkUtil {
         try {
             ProcessBuilder pb = new ProcessBuilder(
                     "netsh", "advfirewall", "firewall", "show", "rule",
-                    "name=ScoutingPro27 WebRTC UDP"
+                    "name=ScoutingPro27 WebRTC UDP v2"
             );
             pb.redirectErrorStream(true);
             Process p = pb.start();
-            return p.waitFor() == 0;
+            int exitCode = p.waitFor();
+            return exitCode == 0;
         } catch (Exception e) {
             return false;
         }
     }
 
     /**
-     * 在 Windows 环境下尝试自动化配置入站防火墙放行规则（同时涵盖 TCP 服务端口与 WebRTC UDP 49152-65535 端口）
+     * 在 Windows 环境下尝试自动化配置入站防火墙放行规则（涵盖 TCP 服务端口、WebRTC UDP 1024-65535 edge=yes、Java/JCEF 程序级放行与物理网卡 IPv6 直连路由）
      */
     public static void ensureWindowsFirewallPort(int port) {
-        if (!System.getProperty("os.name", "").toLowerCase().contains("win")) return;
-        boolean tcpAllowed = isWindowsFirewallPortAllowed(port);
-        boolean udpAllowed = isWindowsFirewallWebRtcUdpAllowed();
-        if (tcpAllowed && udpAllowed) {
-            System.out.println("[Firewall] Windows 防火墙已存在放行规则 (TCP " + port + " 及 WebRTC UDP 49152-65535)，无需重复添加");
+        String os = System.getProperty("os.name", "").toLowerCase();
+        if (!os.contains("win")) {
             return;
         }
+        boolean tcpAllowed = isWindowsFirewallPortAllowed(port);
+        boolean udpAllowed = isWindowsFirewallWebRtcUdpAllowed();
+        boolean hasAppBlock = hasWindowsFirewallAppBlockRule();
+        boolean ipv6DirectRoutesOk = isWindowsIpv6DirectRoutesConfigured();
+
+        if (tcpAllowed && udpAllowed && !hasAppBlock && ipv6DirectRoutesOk) {
+            System.out.println("[Firewall] Windows 防火墙规则 (TCP " + port + " & WebRTC UDP 1024-65535 edge=yes) 及物理网卡 IPv6 直连路由均已就绪");
+            return;
+        }
+
+        String psScript = buildWindowsNetworkAndFirewallSetupScript(port);
+        String encodedCommand = java.util.Base64.getEncoder().encodeToString(
+                psScript.getBytes(java.nio.charset.StandardCharsets.UTF_16LE)
+        );
+
         try {
-            int code = 0;
-            if (!tcpAllowed) {
-                ProcessBuilder pb = new ProcessBuilder(
-                        "netsh", "advfirewall", "firewall", "add", "rule",
-                        "name=ScoutingPro27 Inbound (" + port + ")",
-                        "dir=in", "action=allow", "protocol=TCP",
-                        "localport=" + port, "profile=any"
-                );
-                pb.redirectErrorStream(true);
-                Process p = pb.start();
-                code = p.waitFor();
+            // 1. 先尝试在当前进程权限下直接执行（若当前已是管理员权限，无需弹窗即可静默完成）
+            ProcessBuilder pb = new ProcessBuilder(
+                    "powershell.exe", "-NoProfile", "-NonInteractive", "-EncodedCommand", encodedCommand
+            );
+            pb.redirectErrorStream(true);
+            Process p = pb.start();
+            p.getInputStream().readAllBytes();
+            int code = p.waitFor();
+            if (code == 0 && isWindowsFirewallPortAllowed(port) && isWindowsFirewallWebRtcUdpAllowed() && !hasWindowsFirewallAppBlockRule()) {
+                System.out.println("[Firewall] 已在当前权限下完成 Windows 防火墙放行 (UDP 1024-65535 edge=yes) 与 TUN 环境国内 IPv6 物理直连路由配置");
+                return;
             }
-            if (!udpAllowed) {
-                Process pUdp = new ProcessBuilder(
-                        "netsh", "advfirewall", "firewall", "add", "rule",
-                        "name=ScoutingPro27 WebRTC UDP",
-                        "dir=in", "action=allow", "protocol=UDP",
-                        "localport=49152-65535", "profile=any"
-                ).start();
-                int udpCode = pUdp.waitFor();
-                if (code == 0) code = udpCode;
-            }
-            if (code == 0 && isWindowsFirewallPortAllowed(port) && isWindowsFirewallWebRtcUdpAllowed()) {
-                System.out.println("[Firewall] Windows 防火墙入站规则已确认放行 TCP " + port + " 及 WebRTC UDP 49152-65535 端口");
-            } else {
-                System.out.println("[Firewall] 普通权限下 netsh 返回代码 " + code + "，正在唤起 UAC 管理员提权以永久放行 WebRTC UDP 49152-65535 入站规则...");
-                if (!openWindowsFirewallPrompt(port)) {
-                    System.err.println("[Firewall] 警告：UAC 防火墙提权未完成或被拒绝，跨网段 WebRTC UDP 入站可能受阻");
-                }
+            System.out.println("[Firewall] 检测到防火墙规则需更新或 TUN 抢占 IPv6 路由，正在唤起 UAC 管理员提权以配置 WebRTC IPv6 穿透环境...");
+            if (!openWindowsFirewallPrompt(port, encodedCommand)) {
+                System.err.println("[Firewall] 警告：UAC 提权未完成或被拒绝，TUN 环境下的跨网 IPv6 WebRTC 直连可能受阻");
             }
         } catch (Exception e) {
-            System.err.println("[Firewall] 检查 Windows 防火墙规则异常: " + e.getMessage());
+            System.err.println("[Firewall] 配置 Windows 防火墙与 IPv6 路由异常: " + e.getMessage());
         }
     }
 
+    private static String buildWindowsNetworkAndFirewallSetupScript(int port) {
+        String javaExe = ProcessHandle.current().info().command().orElse("");
+        String jcefHelperExe = new java.io.File(
+                System.getProperty("user.home"),
+                ".scoutingpro27/jcef-bundle/jcef_helper.exe"
+        ).getAbsolutePath();
+
+        StringBuilder sb = new StringBuilder();
+        // 1. 放行 TCP 端口与全范围 WebRTC UDP 端口 (1024-65535)，必须开启 edge=yes 以放行跨 /64 子网的公网 IPv6 UDP 入站打洞包
+        sb.append("netsh advfirewall firewall delete rule name=\"ScoutingPro27 WebRTC UDP\" | Out-Null; ");
+        sb.append("netsh advfirewall firewall delete rule name=\"ScoutingPro27 WebRTC UDP v2\" | Out-Null; ");
+        sb.append("netsh advfirewall firewall add rule name=\"ScoutingPro27 Inbound (").append(port).append(")\" dir=in action=allow protocol=TCP localport=").append(port).append(" profile=any | Out-Null; ");
+        sb.append("netsh advfirewall firewall add rule name=\"ScoutingPro27 WebRTC UDP v2\" dir=in action=allow protocol=UDP localport=1024-65535 profile=any edge=yes | Out-Null; ");
+
+        // 2. 移除针对 java / jcef_helper / scoutingpro 的入站 Block 规则（Windows 防火墙中 Block 优先级高于端口 Allow）
+        sb.append("Get-NetFirewallRule -Direction Inbound -Action Block -ErrorAction SilentlyContinue | ForEach-Object { ");
+        sb.append("$app = $_ | Get-NetFirewallApplicationFilter -ErrorAction SilentlyContinue; ");
+        sb.append("if ($app -and ($app.Program -match 'java|jcef|scoutingpro')) { Remove-NetFirewallRule -Name $_.Name -ErrorAction SilentlyContinue } ");
+        sb.append("}; ");
+
+        // 3. 显式为当前 Java 进程和 jcef_helper.exe 添加带 edge=yes 的应用程序级入站 Allow 规则
+        if (!javaExe.isEmpty()) {
+            sb.append("netsh advfirewall firewall add rule name=\"ScoutingPro27 App Java\" dir=in action=allow program=\"")
+              .append(javaExe.replace("\"", "")).append("\" profile=any edge=yes | Out-Null; ");
+        }
+        sb.append("if (Test-Path '").append(jcefHelperExe.replace("'", "''")).append("') { ");
+        sb.append("netsh advfirewall firewall add rule name=\"ScoutingPro27 App JCEF\" dir=in action=allow program=\"")
+          .append(jcefHelperExe.replace("\"", "")).append("\" profile=any edge=yes | Out-Null; ");
+        sb.append("}; ");
+
+        // 4. 核心破局：当开启 Clash/Mihomo/sing-box TUN 时，TUN 会注入 ::/1、8000::/1 或 2000::/3 劫持所有公网 IPv6 出站包。
+        // 自动定位拥有 fe80:* 链路本地网关的物理网卡，为其注入 /16 国内运营商 IPv6 直连路由（/16 优先于 TUN 的 /3 和 /1），
+        // 使 WebRTC 物理网卡 IPv6 打洞包 100% 走物理路由器直出，同时由强主机模型自动阻断 libwebrtc 内部 fdfe:: TUN 端口向外发包！
+        sb.append("$physRoute = Get-NetRoute -AddressFamily IPv6 -DestinationPrefix '::/0' -ErrorAction SilentlyContinue | ")
+          .append("Where-Object { $_.NextHop -like 'fe80:*' } | Sort-Object RouteMetric, InterfaceMetric | Select-Object -First 1; ");
+        sb.append("if ($physRoute) { ");
+        sb.append("$ifIdx = $physRoute.InterfaceIndex; $nh = $physRoute.NextHop; ");
+        sb.append("$cnPrefixes = @('2408::/16','2409::/16','240e::/16','240c::/16','2001:da8::/32','2001:250::/32'); ");
+        sb.append("foreach ($pfx in $cnPrefixes) { ");
+        sb.append("Remove-NetRoute -AddressFamily IPv6 -DestinationPrefix $pfx -Confirm:$false -ErrorAction SilentlyContinue; ");
+        sb.append("New-NetRoute -AddressFamily IPv6 -DestinationPrefix $pfx -InterfaceIndex $ifIdx -NextHop $nh -RouteMetric 1 -PolicyStore ActiveStore -ErrorAction SilentlyContinue | Out-Null; ");
+        sb.append("} }");
+        return sb.toString();
+    }
+
     /**
-     * 通过 UAC 管理员提权运行 netsh 同时放行 TCP 服务端口与 WebRTC UDP 49152-65535 入站端口，
-     * 并移除 Windows 防火墙中可能存在的针对 java.exe / javaw.exe / jcef_helper.exe 的入站阻止(Block)规则
+     * 通过 UAC 管理员提权运行 PowerShell 脚本同时放行 TCP 服务端口、WebRTC UDP 1024-65535 edge=yes、
+     * Java/JCEF 程序级放行与物理网卡 IPv6 直连路由
      */
     public static boolean openWindowsFirewallPrompt(int port) {
+        String psScript = buildWindowsNetworkAndFirewallSetupScript(port);
+        String encodedCommand = java.util.Base64.getEncoder().encodeToString(
+                psScript.getBytes(java.nio.charset.StandardCharsets.UTF_16LE)
+        );
+        return openWindowsFirewallPrompt(port, encodedCommand);
+    }
+
+    private static boolean openWindowsFirewallPrompt(int port, String encodedCommand) {
         String os = System.getProperty("os.name", "").toLowerCase();
         if (!os.contains("win")) {
             return false;
         }
-        if (isWindowsFirewallPortAllowed(port) && isWindowsFirewallWebRtcUdpAllowed()) {
-            System.out.println("[Firewall] 端口 TCP " + port + " 及 WebRTC UDP 已经放行，无需重复配置");
-            return true;
-        }
         try {
-            String psScript =
-                    "netsh advfirewall firewall add rule name=\"ScoutingPro27 Inbound (" + port + ")\" dir=in action=allow protocol=TCP localport=" + port + " profile=any; " +
-                    "netsh advfirewall firewall add rule name=\"ScoutingPro27 WebRTC UDP\" dir=in action=allow protocol=UDP localport=49152-65535 profile=any; " +
-                    "Get-NetFirewallRule -Direction Inbound -Action Block -ErrorAction SilentlyContinue | ForEach-Object { " +
-                    "$app = $_ | Get-NetFirewallApplicationFilter -ErrorAction SilentlyContinue; " +
-                    "if ($app -and ($app.Program -match 'java|jcef|scoutingpro')) { Remove-NetFirewallRule -Name $_.Name -ErrorAction SilentlyContinue } " +
-                    "}";
-            String encodedCommand = java.util.Base64.getEncoder().encodeToString(
-                    psScript.getBytes(java.nio.charset.StandardCharsets.UTF_16LE)
-            );
             ProcessBuilder pb = new ProcessBuilder(
                     "powershell.exe", "-NoProfile", "-NonInteractive", "-Command",
                     "Start-Process powershell.exe -ArgumentList '-NoProfile','-NonInteractive','-WindowStyle','Hidden','-EncodedCommand','" +
@@ -333,7 +371,7 @@ public class NetworkUtil {
             int exitCode = p.waitFor();
             boolean bothAllowed = isWindowsFirewallPortAllowed(port) && isWindowsFirewallWebRtcUdpAllowed();
             if (exitCode == 0 && bothAllowed) {
-                System.out.println("[Firewall] Windows 防火墙入站端口 TCP " + port + " 及 WebRTC UDP 49152-65535 已通过管理员提权成功放行");
+                System.out.println("[Firewall] Windows 防火墙 (UDP 1024-65535 edge=yes) 及国内 IPv6 物理网卡直连路由已通过管理员提权配置成功");
                 return true;
             }
             System.err.println("[Firewall] UAC 提权执行结束，exitCode=" + exitCode + ", bothAllowed=" + bothAllowed);
@@ -341,6 +379,51 @@ public class NetworkUtil {
         } catch (Exception e) {
             System.err.println("[Firewall] 唤起 Windows 防火墙提权执行异常: " + e.getMessage());
             return false;
+        }
+    }
+
+    public static boolean hasWindowsFirewallAppBlockRule() {
+        String os = System.getProperty("os.name", "").toLowerCase();
+        if (!os.contains("win")) {
+            return false;
+        }
+        try {
+            ProcessBuilder pb = new ProcessBuilder(
+                    "powershell.exe", "-NoProfile", "-NonInteractive", "-Command",
+                    "Get-NetFirewallRule -Direction Inbound -Action Block -Enabled True -ErrorAction SilentlyContinue | ForEach-Object { " +
+                    "$app = $_ | Get-NetFirewallApplicationFilter -ErrorAction SilentlyContinue; " +
+                    "if ($app -and ($app.Program -match 'java|jcef|scoutingpro')) { Write-Output 'BLOCKED'; break } }"
+            );
+            pb.redirectErrorStream(true);
+            Process p = pb.start();
+            String out = new String(p.getInputStream().readAllBytes(), java.nio.charset.StandardCharsets.UTF_8);
+            p.waitFor();
+            return out.contains("BLOCKED");
+        } catch (Exception e) {
+            return false;
+        }
+    }
+
+    public static boolean isWindowsIpv6DirectRoutesConfigured() {
+        String os = System.getProperty("os.name", "").toLowerCase();
+        if (!os.contains("win")) {
+            return true;
+        }
+        try {
+            ProcessBuilder pb = new ProcessBuilder(
+                    "powershell.exe", "-NoProfile", "-NonInteractive", "-Command",
+                    "$phys = Get-NetRoute -AddressFamily IPv6 -DestinationPrefix '::/0' -ErrorAction SilentlyContinue | Where-Object { $_.NextHop -like 'fe80:*' } | Select-Object -First 1; " +
+                    "if (-not $phys) { Write-Output 'NO_IPV6_PHYS'; exit 0 }; " +
+                    "$r = Get-NetRoute -AddressFamily IPv6 -DestinationPrefix '2409::/16' -ErrorAction SilentlyContinue | Where-Object { $_.InterfaceIndex -eq $phys.InterfaceIndex }; " +
+                    "if ($r) { Write-Output 'ROUTE_OK' } else { Write-Output 'ROUTE_MISSING' }"
+            );
+            pb.redirectErrorStream(true);
+            Process p = pb.start();
+            String out = new String(p.getInputStream().readAllBytes(), java.nio.charset.StandardCharsets.UTF_8);
+            p.waitFor();
+            return out.contains("ROUTE_OK") || out.contains("NO_IPV6_PHYS");
+        } catch (Exception e) {
+            return true;
         }
     }
 }

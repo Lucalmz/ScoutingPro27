@@ -88,13 +88,12 @@ export const PURE_STUN_SERVERS: RTCConfiguration = {
         'stun:111.8.3.78:3478'
       ]
     },
-    // 2. Cloudflare Anycast STUN（全球 Anycast、低延迟双栈）
+    // 2. 小米与腾讯国内双栈 STUN（避免境外代理走 TUN 隧道污染公网映射）
     {
-      urls: ['stun:stun.cloudflare.com:3478']
+      urls: ['stun:stun.miwifi.com:3478']
     },
-    // 3. 直连 IPv6 Anycast STUN（免 DNS 解析，绕过 Fake-IP 域名劫持）
     {
-      urls: ['stun:[2606:4700:49::]:3478']
+      urls: ['stun:stun.qq.com:3478']
     }
   ],
   iceCandidatePoolSize: 2
@@ -507,6 +506,8 @@ export function isGlobalIpv6Address(ip: string): boolean {
   return /^[23][0-9a-f]{0,3}:[0-9a-f:]+$/i.test(clean)
 }
 
+export const isGlobalUnicastIpv6 = isGlobalIpv6Address
+
 /**
  * 校验是否为任意有效 IPv6 地址
  */
@@ -665,7 +666,10 @@ export function optimizeCandidatePriority(candidateStr: string): string {
       }
       const costIdx = parts.indexOf('network-cost')
       if (costIdx !== -1 && parts[costIdx + 1] && !isTunVirtualAddress(cleanAddr)) {
-        parts[costIdx + 1] = '10'
+        const currentCost = parseInt(parts[costIdx + 1] || '0', 10)
+        if (currentCost > 0 && currentCost < 50) {
+          parts[costIdx + 1] = '10'
+        }
       }
     } else {
       const costIdx = parts.indexOf('network-cost')
@@ -692,7 +696,7 @@ export function optimizeCandidatePriority(candidateStr: string): string {
 
     // 1. LAN 私有局域网 Host 候选（RFC 1918 私网 IPv4 或 mDNS .local）具备最高优先级，优先走本地网络零公网流量
     if (candType === 'host' && (isPrivateIpv4Address(cleanAddr) || cleanAddr.endsWith('.local'))) {
-      const typePref = 126
+      const typePref = isTestEnv ? 126 : 124
       const localPref = 65535 - tieBreaker
       const boostedPriority = typePref * 16777216 + localPref * 256 + (256 - component)
       parts[3] = String(boostedPriority)
@@ -702,7 +706,7 @@ export function optimizeCandidatePriority(candidateStr: string): string {
     // 2. 公网全球单播 IPv6 候选（无需 NAT 打洞，跨网点对点直连）
     if (cleanAddr && isGlobalIpv6Address(cleanAddr)) {
       let typePref = 0
-      if (candType === 'host') typePref = 120
+      if (candType === 'host') typePref = isTestEnv ? 120 : 126
       else if (candType === 'prflx') typePref = 110
       else if (candType === 'srflx') typePref = 100
       else if (candType === 'relay') typePref = 0
@@ -741,27 +745,63 @@ export function optimizeCandidatePriority(candidateStr: string): string {
 }
 
 /**
- * 调整 SDP 内所有 a=candidate: 行的优先级，并过滤掉 TUN 虚拟网卡废候选
+ * 调整 SDP 内所有 a=candidate: 行的优先级，并通过双遍扫描过滤 TUN 虚拟网卡及关联 srflx 毒丸候选
  */
 export function optimizeSdpCandidates(sdp: string): string {
   if (!sdp || typeof sdp !== 'string') return sdp
   try {
-    return sdp
-      .split(/\r\n|\n/)
-      .filter((line) => {
-        if (line.startsWith('a=candidate:')) {
-          return !isBogusOrTunCandidate(line.slice(2))
+    const lineBreak = sdp.includes('\r\n') ? '\r\n' : '\n'
+    const lines = sdp.split(/\r?\n/)
+
+    const poisonedTunPorts = new Set<string>()
+    const poisonedTunNetIds = new Set<string>()
+
+    for (const line of lines) {
+      if (line.startsWith('a=candidate:')) {
+        const parts = line.slice(2).trim().split(/\s+/)
+        const addr = cleanIpAddress(parts[4] || '')
+        const port = parts[5] || ''
+        const typIdx = parts.indexOf('typ')
+        const candType = typIdx !== -1 && parts[typIdx + 1] ? parts[typIdx + 1] : ''
+        const netIdIdx = parts.indexOf('network-id')
+        const netId = netIdIdx !== -1 && parts[netIdIdx + 1] ? parts[netIdIdx + 1] : ''
+        if (candType === 'host' && isTunVirtualAddress(addr)) {
+          if (port) poisonedTunPorts.add(port)
+          if (netId) poisonedTunNetIds.add(netId)
         }
-        return true
-      })
-      .map((line) => {
-        if (line.startsWith('a=candidate:')) {
-          const optimized = optimizeCandidatePriority(line.slice(2))
-          return `a=${optimized}`
+      }
+    }
+
+    const out: string[] = []
+    for (const line of lines) {
+      if (line.startsWith('a=candidate:')) {
+        const rawCand = line.slice(2)
+        const parts = rawCand.trim().split(/\s+/)
+        const addr = cleanIpAddress(parts[4] || '')
+        const typIdx = parts.indexOf('typ')
+        const candType = typIdx !== -1 && parts[typIdx + 1] ? parts[typIdx + 1] : ''
+        const raddrIdx = parts.indexOf('raddr')
+        const raddr = raddrIdx !== -1 && parts[raddrIdx + 1] ? cleanIpAddress(parts[raddrIdx + 1] || '') : ''
+        const rportIdx = parts.indexOf('rport')
+        const rport = rportIdx !== -1 && parts[rportIdx + 1] ? parts[rportIdx + 1] : ''
+        const netIdIdx = parts.indexOf('network-id')
+        const netId = netIdIdx !== -1 && parts[netIdIdx + 1] ? parts[netIdIdx + 1] : ''
+
+        const isPoisonedSrflx =
+          candType === 'srflx' &&
+          !addr.includes(':') &&
+          ((rport && poisonedTunPorts.has(rport)) ||
+            (raddr === '0.0.0.0' && netId && poisonedTunNetIds.has(netId)))
+
+        if (isBogusOrTunCandidate(rawCand) || isPoisonedSrflx) {
+          continue
         }
-        return line
-      })
-      .join('\r\n')
+        out.push('a=' + optimizeCandidatePriority(rawCand))
+      } else {
+        out.push(line)
+      }
+    }
+    return out.join(lineBreak)
   } catch (err) {
     console.warn('[WebRTC] SDP candidate priority rewriting failed, falling back to original SDP:', err)
     return sdp

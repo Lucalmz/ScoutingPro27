@@ -6,6 +6,7 @@ import {
   classifyCandidatePair,
   isBogusOrTunCandidate,
   isTunVirtualAddress,
+  isGlobalUnicastIpv6,
   cleanIpAddress,
   CONNECTION_TIMING
 } from './connectivity'
@@ -292,6 +293,22 @@ export class PeerConnectionManager {
       release: () => {
         if (gate.open) return
         gate.open = true
+        // 将公网单播 IPv6 host 候选排在队列最前面发送，使对端比同名异网 192.168.1.x 更早收到并触发 IPv6 双向打洞
+        gate.queue.sort((a, b) => {
+          const score = (c: RTCIceCandidateInit): number => {
+            const s = c.candidate || ''
+            const parts = s.trim().split(/\s+/)
+            const addr = cleanIpAddress(parts[4] || '')
+            const typIdx = parts.indexOf('typ')
+            const typ = typIdx !== -1 ? parts[typIdx + 1] : ''
+            if (typ === 'host' && isGlobalUnicastIpv6(addr)) return 0
+            if (typ === 'srflx' && isGlobalUnicastIpv6(addr)) return 1
+            if (typ === 'host') return 2
+            if (typ === 'srflx') return 3
+            return 4
+          }
+          return score(a) - score(b)
+        })
         const queued = gate.queue.splice(0)
         if (queued.length > 0) {
           log.info(`Releasing ${queued.length} held local ICE candidates after offer dispatch (target: ${targetSender || 'host'})`)

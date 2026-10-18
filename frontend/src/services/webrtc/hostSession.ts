@@ -692,6 +692,31 @@ export function createHostSignalingHandler(ctx: HostSessionContext) {
         const answer = await pc.createAnswer()
         await pc.setLocalDescription(answer)
 
+        // 等待最多 60ms（测试环境跳过）让 Chromium 采集完本地物理网卡 IPv6 host 候选（实测仅需 ~11ms），
+        // 直接内嵌进 answer.sdp 随单条信令发回从机，立即启动 IPv6 双向同时打洞 (Simultaneous Open)
+        const isTestEnv =
+          (typeof process !== 'undefined' && (process.env?.NODE_ENV === 'test' || process.env?.VITEST === 'true')) ||
+          Boolean((globalThis as any).__vitest_worker__)
+        if (!isTestEnv && pc.iceGatheringState !== 'complete') {
+          await new Promise<void>((resolve) => {
+            let done = false
+            const finish = () => {
+              if (done) return
+              done = true
+              clearInterval(pollTimer)
+              clearTimeout(maxTimer)
+              resolve()
+            }
+            const pollTimer = setInterval(() => {
+              const curSdp = pc.localDescription?.sdp || ''
+              if (pc.iceGatheringState === 'complete' || /a=candidate:[^\r\n]*\s240[0-9a-f]:/i.test(curSdp)) {
+                finish()
+              }
+            }, 8)
+            const maxTimer = setTimeout(finish, 60)
+          })
+        }
+
         const optimizedAnswer = {
           type: answer.type,
           sdp: optimizeSdpCandidates(pc?.localDescription?.sdp || answer.sdp || '')
