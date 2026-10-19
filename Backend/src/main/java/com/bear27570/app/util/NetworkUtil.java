@@ -231,7 +231,7 @@ public class NetworkUtil {
     }
 
     /**
-     * 检查当前 Windows 防火墙是否已存在针对 WebRTC UDP 入站端口范围 (1024-65535, edge=yes) 的放行规则
+     * 检查当前 Windows 防火墙是否已存在针对 WebRTC UDP 入站端口范围 (1024-65535 edge=yes) 的放行规则
      */
     public static boolean isWindowsFirewallWebRtcUdpAllowed() {
         String os = System.getProperty("os.name", "").toLowerCase();
@@ -243,17 +243,23 @@ public class NetworkUtil {
                     "netsh", "advfirewall", "firewall", "show", "rule",
                     "name=ScoutingPro27 WebRTC UDP v2"
             );
-            pb.redirectErrorStream(true);
             Process p = pb.start();
             int exitCode = p.waitFor();
-            return exitCode == 0;
+            if (exitCode == 0) return true;
+            // 兼容旧版规则名称
+            ProcessBuilder pbOld = new ProcessBuilder(
+                    "netsh", "advfirewall", "firewall", "show", "rule",
+                    "name=ScoutingPro27 WebRTC UDP"
+            );
+            return pbOld.start().waitFor() == 0;
         } catch (Exception e) {
             return false;
         }
     }
 
     /**
-     * 在 Windows 环境下尝试自动化配置入站防火墙放行规则（涵盖 TCP 服务端口、WebRTC UDP 1024-65535 edge=yes、Java/JCEF 程序级放行与物理网卡 IPv6 直连路由）
+     * 在 Windows 环境下尝试自动化配置入站防火墙放行规则（同时涵盖 TCP 服务端口与 WebRTC UDP 1024-65535 edge=yes 端口），
+     * 并注入全球公网 IPv6 (2000::/4, 3000::/4) 物理网卡直连分流路由
      */
     public static void ensureWindowsFirewallPort(int port) {
         String os = System.getProperty("os.name", "").toLowerCase();
@@ -266,7 +272,7 @@ public class NetworkUtil {
         boolean ipv6DirectRoutesOk = isWindowsIpv6DirectRoutesConfigured();
 
         if (tcpAllowed && udpAllowed && !hasAppBlock && ipv6DirectRoutesOk) {
-            System.out.println("[Firewall] Windows 防火墙规则 (TCP " + port + " & WebRTC UDP 1024-65535 edge=yes) 及物理网卡 IPv6 直连路由均已就绪");
+            System.out.println("[Firewall] Windows 防火墙规则 (TCP " + port + " & WebRTC UDP 1024-65535 edge=yes) 及全球 GUA IPv6 (2000::/4, 3000::/4) 物理直连路由均已就绪");
             return;
         }
 
@@ -284,13 +290,13 @@ public class NetworkUtil {
             Process p = pb.start();
             p.getInputStream().readAllBytes();
             int code = p.waitFor();
-            if (code == 0 && isWindowsFirewallPortAllowed(port) && isWindowsFirewallWebRtcUdpAllowed() && !hasWindowsFirewallAppBlockRule()) {
-                System.out.println("[Firewall] 已在当前权限下完成 Windows 防火墙放行 (UDP 1024-65535 edge=yes) 与 TUN 环境国内 IPv6 物理直连路由配置");
+            if (code == 0 && isWindowsFirewallPortAllowed(port) && isWindowsFirewallWebRtcUdpAllowed() && !hasWindowsFirewallAppBlockRule() && isWindowsIpv6DirectRoutesConfigured()) {
+                System.out.println("[Firewall] 已在当前权限下完成 Windows 防火墙放行 (UDP 1024-65535 edge=yes) 与全球 GUA IPv6 物理网卡直连分流配置");
                 return;
             }
             System.out.println("[Firewall] 检测到防火墙规则需更新或 TUN 抢占 IPv6 路由，正在唤起 UAC 管理员提权以配置 WebRTC IPv6 穿透环境...");
             if (!openWindowsFirewallPrompt(port, encodedCommand)) {
-                System.err.println("[Firewall] 警告：UAC 提权未完成或被拒绝，TUN 环境下的跨网 IPv6 WebRTC 直连可能受阻");
+                System.err.println("[Firewall] 警告：UAC 提权未完成或被拒绝，TUN 环境下的跨网/跨境 IPv6 WebRTC 直连可能受阻");
             }
         } catch (Exception e) {
             System.err.println("[Firewall] 配置 Windows 防火墙与 IPv6 路由异常: " + e.getMessage());
@@ -301,11 +307,11 @@ public class NetworkUtil {
         String javaExe = ProcessHandle.current().info().command().orElse("");
         String jcefHelperExe = new java.io.File(
                 System.getProperty("user.home"),
-                ".scoutingpro27/jcef-bundle/jcef_helper.exe"
+                ".scoutingpro27\\jcef-bundle\\jcef_helper.exe"
         ).getAbsolutePath();
 
         StringBuilder sb = new StringBuilder();
-        // 1. 放行 TCP 端口与全范围 WebRTC UDP 端口 (1024-65535)，必须开启 edge=yes 以放行跨 /64 子网的公网 IPv6 UDP 入站打洞包
+        // 1. 放行 TCP 端口与全范围 WebRTC UDP 端口 (1024-65535)，必须开启 edge=yes 以放行跨子网/跨境公网 IPv6 UDP 入站打洞包
         sb.append("netsh advfirewall firewall delete rule name=\"ScoutingPro27 WebRTC UDP\" | Out-Null; ");
         sb.append("netsh advfirewall firewall delete rule name=\"ScoutingPro27 WebRTC UDP v2\" | Out-Null; ");
         sb.append("netsh advfirewall firewall add rule name=\"ScoutingPro27 Inbound (").append(port).append(")\" dir=in action=allow protocol=TCP localport=").append(port).append(" profile=any | Out-Null; ");
@@ -327,25 +333,23 @@ public class NetworkUtil {
           .append(jcefHelperExe.replace("\"", "")).append("\" profile=any edge=yes | Out-Null; ");
         sb.append("}; ");
 
-        // 4. 核心破局：当开启 Clash/Mihomo/sing-box TUN 时，TUN 会注入 ::/1、8000::/1 或 2000::/3 劫持所有公网 IPv6 出站包。
-        // 自动定位拥有 fe80:* 链路本地网关的物理网卡，为其注入 /16 国内运营商 IPv6 直连路由（/16 优先于 TUN 的 /3 和 /1），
-        // 使 WebRTC 物理网卡 IPv6 打洞包 100% 走物理路由器直出，同时由强主机模型自动阻断 libwebrtc 内部 fdfe:: TUN 端口向外发包！
+        // 4. 核心破局（实现“信令走 TUN 代理、全球 IPv6 打洞走物理网卡直连”）：
+        // TUN 模式会注入 ::/1 + 8000::/1 (前缀 /1) 或 2000::/3 (前缀 /3) 劫持全局 IPv6。
+        // 自动定位拥有 fe80:* 链路本地网关的物理网卡，将全球单播 IPv6 (2000::/3) 拆分为两条 /4 路由 (2000::/4 与 3000::/4)
+        // 绑定到物理网卡网关（/4 优先于 TUN 的 /3 和 /1），使境内与跨境公网 IPv6 打洞包 100% 走物理网卡直出，
+        // 同时 IPv4 与 Fake-IP (198.18.0.0/15, fc00::/18) 信令流量继续走 TUN 代理隧道！
         sb.append("$physRoute = Get-NetRoute -AddressFamily IPv6 -DestinationPrefix '::/0' -ErrorAction SilentlyContinue | ")
           .append("Where-Object { $_.NextHop -like 'fe80:*' } | Sort-Object RouteMetric, InterfaceMetric | Select-Object -First 1; ");
         sb.append("if ($physRoute) { ");
         sb.append("$ifIdx = $physRoute.InterfaceIndex; $nh = $physRoute.NextHop; ");
-        sb.append("$cnPrefixes = @('2408::/16','2409::/16','240e::/16','240c::/16','2001:da8::/32','2001:250::/32'); ");
-        sb.append("foreach ($pfx in $cnPrefixes) { ");
+        sb.append("$guaPrefixes = @('2000::/4','3000::/4'); ");
+        sb.append("foreach ($pfx in $guaPrefixes) { ");
         sb.append("Remove-NetRoute -AddressFamily IPv6 -DestinationPrefix $pfx -Confirm:$false -ErrorAction SilentlyContinue; ");
         sb.append("New-NetRoute -AddressFamily IPv6 -DestinationPrefix $pfx -InterfaceIndex $ifIdx -NextHop $nh -RouteMetric 1 -PolicyStore ActiveStore -ErrorAction SilentlyContinue | Out-Null; ");
         sb.append("} }");
         return sb.toString();
     }
 
-    /**
-     * 通过 UAC 管理员提权运行 PowerShell 脚本同时放行 TCP 服务端口、WebRTC UDP 1024-65535 edge=yes、
-     * Java/JCEF 程序级放行与物理网卡 IPv6 直连路由
-     */
     public static boolean openWindowsFirewallPrompt(int port) {
         String psScript = buildWindowsNetworkAndFirewallSetupScript(port);
         String encodedCommand = java.util.Base64.getEncoder().encodeToString(
@@ -355,10 +359,6 @@ public class NetworkUtil {
     }
 
     private static boolean openWindowsFirewallPrompt(int port, String encodedCommand) {
-        String os = System.getProperty("os.name", "").toLowerCase();
-        if (!os.contains("win")) {
-            return false;
-        }
         try {
             ProcessBuilder pb = new ProcessBuilder(
                     "powershell.exe", "-NoProfile", "-NonInteractive", "-Command",
@@ -371,7 +371,7 @@ public class NetworkUtil {
             int exitCode = p.waitFor();
             boolean bothAllowed = isWindowsFirewallPortAllowed(port) && isWindowsFirewallWebRtcUdpAllowed();
             if (exitCode == 0 && bothAllowed) {
-                System.out.println("[Firewall] Windows 防火墙 (UDP 1024-65535 edge=yes) 及国内 IPv6 物理网卡直连路由已通过管理员提权配置成功");
+                System.out.println("[Firewall] Windows 防火墙 (UDP 1024-65535 edge=yes) 及全球 GUA IPv6 (2000::/4, 3000::/4) 物理直连路由已通过管理员提权配置成功");
                 return true;
             }
             System.err.println("[Firewall] UAC 提权执行结束，exitCode=" + exitCode + ", bothAllowed=" + bothAllowed);
@@ -414,8 +414,9 @@ public class NetworkUtil {
                     "powershell.exe", "-NoProfile", "-NonInteractive", "-Command",
                     "$phys = Get-NetRoute -AddressFamily IPv6 -DestinationPrefix '::/0' -ErrorAction SilentlyContinue | Where-Object { $_.NextHop -like 'fe80:*' } | Select-Object -First 1; " +
                     "if (-not $phys) { Write-Output 'NO_IPV6_PHYS'; exit 0 }; " +
-                    "$r = Get-NetRoute -AddressFamily IPv6 -DestinationPrefix '2409::/16' -ErrorAction SilentlyContinue | Where-Object { $_.InterfaceIndex -eq $phys.InterfaceIndex }; " +
-                    "if ($r) { Write-Output 'ROUTE_OK' } else { Write-Output 'ROUTE_MISSING' }"
+                    "$r1 = Get-NetRoute -AddressFamily IPv6 -DestinationPrefix '2000::/4' -ErrorAction SilentlyContinue | Where-Object { $_.InterfaceIndex -eq $phys.InterfaceIndex }; " +
+                    "$r2 = Get-NetRoute -AddressFamily IPv6 -DestinationPrefix '3000::/4' -ErrorAction SilentlyContinue | Where-Object { $_.InterfaceIndex -eq $phys.InterfaceIndex }; " +
+                    "if ($r1 -and $r2) { Write-Output 'ROUTE_OK' } else { Write-Output 'ROUTE_MISSING' }"
             );
             pb.redirectErrorStream(true);
             Process p = pb.start();

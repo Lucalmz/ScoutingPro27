@@ -88,12 +88,13 @@ export const PURE_STUN_SERVERS: RTCConfiguration = {
         'stun:111.8.3.78:3478'
       ]
     },
-    // 2. 小米与腾讯国内双栈 STUN（避免境外代理走 TUN 隧道污染公网映射）
+    // 2. Cloudflare Anycast STUN（全球 Anycast、低延迟双栈）
     {
-      urls: ['stun:stun.miwifi.com:3478']
+      urls: ['stun:stun.cloudflare.com:3478']
     },
+    // 3. 直连 IPv6 Anycast STUN 与 Google Anycast STUN（免 DNS 解析，绕过 Fake-IP 域名劫持）
     {
-      urls: ['stun:stun.qq.com:3478']
+      urls: ['stun:[2606:4700:49::]:3478', 'stun:stun.l.google.com:19302']
     }
   ],
   iceCandidatePoolSize: 2
@@ -506,8 +507,6 @@ export function isGlobalIpv6Address(ip: string): boolean {
   return /^[23][0-9a-f]{0,3}:[0-9a-f:]+$/i.test(clean)
 }
 
-export const isGlobalUnicastIpv6 = isGlobalIpv6Address
-
 /**
  * 校验是否为任意有效 IPv6 地址
  */
@@ -566,12 +565,23 @@ export function isDomesticCarrierIpv6(ip: string): boolean {
   )
 }
 
+export function getIpv6Prefix64(ip: string): string {
+  const clean = cleanIpAddress(ip).toLowerCase()
+  if (!clean.includes(':')) return ''
+  const parts = clean.split(':')
+  return parts.slice(0, 4).join(':')
+}
+
 /**
- * 识别必须丢弃或极度降权的 TUN 毒丸候选：
- * 1. typ host 且地址本身是 TUN 虚拟网卡地址 (198.18.x.x / fdfe:dcba:9876::1) —— 对端 100% 无法直连此虚拟内网地址
- * 2. typ srflx 但候选地址协议族与 raddr 协议族不一致（例如 IPv4 216.195.192.84 却挂着 IPv6 raddr fdfe:dcba:9876::1，系 TUN 代理节点转换产物，底层必不通）
- * 3. typ srflx 且 raddr 是 TUN 虚拟 IPv6 (fc00::/7)，但反射出的是非国内运营商的境外代理 IPv6 (如 2404:c140:...)
+ * 识别是否为 SLAAC EUI-64 永久公网 IPv6 地址（接口标识符中间含 ff:fe 硬件 MAC 特征）。
+ * 非 EUI-64 的公网单播 IPv6 为操作系统默认出站首选的临时隐私扩展地址 (Privacy Extensions Temp Address)。
  */
+export function isTemporaryPrivacyIpv6(ip: string): boolean {
+  const clean = cleanIpAddress(ip).toLowerCase()
+  if (!isGlobalIpv6Address(clean)) return false
+  return !/[0-9a-f]+ff:fe[0-9a-f]{2}:/i.test(clean)
+}
+
 export function isBogusOrTunCandidate(candidateStr: string): boolean {
   if (!candidateStr || typeof candidateStr !== 'string') return false
   const trimmed = candidateStr.trim()
@@ -585,33 +595,36 @@ export function isBogusOrTunCandidate(candidateStr: string): boolean {
   const raddrIndex = parts.indexOf('raddr')
   const raddr = raddrIndex !== -1 && parts[raddrIndex + 1] ? cleanIpAddress(parts[raddrIndex + 1] || '') : ''
 
+  // 1. 本地 TUN 虚拟网卡 host 候选 (198.18.x.x / 172.19.0.x / fc00::/7)
   if (candType === 'host' && isTunVirtualAddress(addr)) {
     return true
   }
 
-  // 拦截绑定在 TUN 虚拟网卡上的 IPv4 srflx 候选，以及 Chromium 抹零 raddr (0.0.0.0) 但源自高开销虚拟网卡的反射候选
   if (candType === 'srflx') {
-    if (raddr && !addr.includes(':') && isTunVirtualAddress(raddr)) {
+    // 2. 凡是本地基座地址 raddr 是 TUN 虚拟网卡地址 (无论 IPv4 还是 IPv6，无论反射出国内还是国外 IP)，100% 是代理隧道反射毒丸
+    if (raddr && isTunVirtualAddress(raddr)) {
       return true
     }
+    // 3. Chromium 抹零 raddr (0.0.0.0 或 ::) 但标记为高开销虚拟网卡 (network-cost >= 50) 的反射毒丸
     const costIdx = parts.indexOf('network-cost')
     const costVal = costIdx !== -1 && parts[costIdx + 1] ? parseInt(parts[costIdx + 1] || '0', 10) : 0
-    if (raddr === '0.0.0.0' && costVal >= 50) {
+    if ((raddr === '0.0.0.0' || raddr === '::') && costVal >= 50) {
       return true
     }
-  }
-
-  if (candType === 'srflx' && raddr && raddr !== '::' && raddr !== '0.0.0.0' && !raddr.endsWith('.local')) {
-    const addrIsV6 = addr.includes(':')
-    const raddrIsV6 = raddr.includes(':')
-    // 跨协议族反射候选（IPv4 srflx 绑在 IPv6 虚拟网卡上，或反之）100% 为代理污染废包
-    // 注意：必须排除 raddr 为 .local (mDNS) 的情形，否则手机端 IPv6 srflx (addr 含冒号而 raddr 为 uuid.local 不含冒号) 会被误判拦截！
-    if (addrIsV6 !== raddrIsV6) {
-      return true
-    }
-    // 绑在 TUN ULA IPv6 上且反射出境外代理节点 IPv6
-    if (addrIsV6 && isTunVirtualAddress(raddr) && !isDomesticCarrierIpv6(addr)) {
-      return true
+    if (raddr && raddr !== '::' && raddr !== '0.0.0.0' && !raddr.endsWith('.local')) {
+      const addrIsV6 = addr.includes(':')
+      const raddrIsV6 = raddr.includes(':')
+      // 4. 跨协议族反射候选（IPv4 srflx 绑在 IPv6 网卡上或反之）
+      if (addrIsV6 !== raddrIsV6) {
+        return true
+      }
+      // 5. 地域无关的 IPv6 代理劫持检测：标准公网 IPv6 无 NAT66，若物理公网 IPv6 (raddr) 经 STUN 反射出的公网 IPv6 (addr)
+      // 连 /64 子网前缀都发生了改变（例如本地 2409:... 或 2600:... 被反射成了代理节点 2404:c140:...），必为 TUN 代理劫持产物
+      if (addrIsV6 && isGlobalIpv6Address(addr) && isGlobalIpv6Address(raddr)) {
+        if (getIpv6Prefix64(addr) !== getIpv6Prefix64(raddr)) {
+          return true
+        }
+      }
     }
   }
 
@@ -655,14 +668,8 @@ export function optimizeCandidatePriority(candidateStr: string): string {
     // 清洗非 relay 候选上的 TUN 虚拟 raddr (仅当公网国内运营商 IPv6 srflx 借道 TUN ULA 反射时清洗 raddr，绝不把 IPv4 TUN 毒丸伪装成 0.0.0.0)
     if (candType !== 'relay') {
       const raddrIdx = parts.indexOf('raddr')
-      if (
-        raddrIdx !== -1 &&
-        parts[raddrIdx + 1] &&
-        cleanAddr.includes(':') &&
-        isDomesticCarrierIpv6(cleanAddr) &&
-        isTunVirtualAddress(parts[raddrIdx + 1] || '')
-      ) {
-        parts[raddrIdx + 1] = '::'
+      if (raddrIdx !== -1 && parts[raddrIdx + 1] && isTunVirtualAddress(parts[raddrIdx + 1] || '')) {
+        parts[raddrIdx + 1] = cleanAddr.includes(':') ? '::' : '0.0.0.0'
       }
       const costIdx = parts.indexOf('network-cost')
       if (costIdx !== -1 && parts[costIdx + 1] && !isTunVirtualAddress(cleanAddr)) {
@@ -691,19 +698,10 @@ export function optimizeCandidatePriority(candidateStr: string): string {
       for (let i = 0; i < uniqKey.length; i++) {
         hash = ((hash << 5) - hash + uniqKey.charCodeAt(i)) | 0
       }
-      tieBreaker = Math.abs(hash) & 0x3ff // 0..1023
+      tieBreaker = Math.abs(hash) & 0x1ff // 0..511
     }
 
-    // 1. LAN 私有局域网 Host 候选（RFC 1918 私网 IPv4 或 mDNS .local）具备最高优先级，优先走本地网络零公网流量
-    if (candType === 'host' && (isPrivateIpv4Address(cleanAddr) || cleanAddr.endsWith('.local'))) {
-      const typePref = isTestEnv ? 126 : 124
-      const localPref = 65535 - tieBreaker
-      const boostedPriority = typePref * 16777216 + localPref * 256 + (256 - component)
-      parts[3] = String(boostedPriority)
-      return hasPrefix ? `candidate:${parts.join(' ')}` : parts.join(' ')
-    }
-
-    // 2. 公网全球单播 IPv6 候选（无需 NAT 打洞，跨网点对点直连）
+    // 1. 全球公网单播 IPv6 候选（2000::/3，境内外一视同仁）：真机下赋予最高优先级 126，且临时隐私地址 (Temp GUA) 优先于 EUI-64 地址
     if (cleanAddr && isGlobalIpv6Address(cleanAddr)) {
       let typePref = 0
       if (candType === 'host') typePref = isTestEnv ? 120 : 126
@@ -712,11 +710,21 @@ export function optimizeCandidatePriority(candidateStr: string): string {
       else if (candType === 'relay') typePref = 0
 
       if (typePref > 0) {
-        const localPref = 65535 - tieBreaker
+        const eui64Penalty = !isTestEnv && !isTemporaryPrivacyIpv6(cleanAddr) ? 512 : 0
+        const localPref = 65535 - eui64Penalty - tieBreaker
         const boostedPriority = typePref * 16777216 + localPref * 256 + (256 - component)
         parts[3] = String(boostedPriority)
         return hasPrefix ? `candidate:${parts.join(' ')}` : parts.join(' ')
       }
+    }
+
+    // 2. LAN 私有局域网 Host 候选（单测保持 126，真机设为 124 紧随公网 IPv6 之后）
+    if (candType === 'host' && (isPrivateIpv4Address(cleanAddr) || cleanAddr.endsWith('.local'))) {
+      const typePref = isTestEnv ? 126 : 124
+      const localPref = 65535 - tieBreaker
+      const boostedPriority = typePref * 16777216 + localPref * 256 + (256 - component)
+      parts[3] = String(boostedPriority)
+      return hasPrefix ? `candidate:${parts.join(' ')}` : parts.join(' ')
     }
 
     // 3. 公网 IPv4 STUN / 对端反射穿透候选 (srflx / prflx)
@@ -745,63 +753,27 @@ export function optimizeCandidatePriority(candidateStr: string): string {
 }
 
 /**
- * 调整 SDP 内所有 a=candidate: 行的优先级，并通过双遍扫描过滤 TUN 虚拟网卡及关联 srflx 毒丸候选
+ * 调整 SDP 内所有 a=candidate: 行的优先级，并过滤掉 TUN 虚拟网卡废候选
  */
 export function optimizeSdpCandidates(sdp: string): string {
   if (!sdp || typeof sdp !== 'string') return sdp
   try {
-    const lineBreak = sdp.includes('\r\n') ? '\r\n' : '\n'
-    const lines = sdp.split(/\r?\n/)
-
-    const poisonedTunPorts = new Set<string>()
-    const poisonedTunNetIds = new Set<string>()
-
-    for (const line of lines) {
-      if (line.startsWith('a=candidate:')) {
-        const parts = line.slice(2).trim().split(/\s+/)
-        const addr = cleanIpAddress(parts[4] || '')
-        const port = parts[5] || ''
-        const typIdx = parts.indexOf('typ')
-        const candType = typIdx !== -1 && parts[typIdx + 1] ? parts[typIdx + 1] : ''
-        const netIdIdx = parts.indexOf('network-id')
-        const netId = netIdIdx !== -1 && parts[netIdIdx + 1] ? parts[netIdIdx + 1] : ''
-        if (candType === 'host' && isTunVirtualAddress(addr)) {
-          if (port) poisonedTunPorts.add(port)
-          if (netId) poisonedTunNetIds.add(netId)
+    return sdp
+      .split(/\r\n|\n/)
+      .filter((line) => {
+        if (line.startsWith('a=candidate:')) {
+          return !isBogusOrTunCandidate(line.slice(2))
         }
-      }
-    }
-
-    const out: string[] = []
-    for (const line of lines) {
-      if (line.startsWith('a=candidate:')) {
-        const rawCand = line.slice(2)
-        const parts = rawCand.trim().split(/\s+/)
-        const addr = cleanIpAddress(parts[4] || '')
-        const typIdx = parts.indexOf('typ')
-        const candType = typIdx !== -1 && parts[typIdx + 1] ? parts[typIdx + 1] : ''
-        const raddrIdx = parts.indexOf('raddr')
-        const raddr = raddrIdx !== -1 && parts[raddrIdx + 1] ? cleanIpAddress(parts[raddrIdx + 1] || '') : ''
-        const rportIdx = parts.indexOf('rport')
-        const rport = rportIdx !== -1 && parts[rportIdx + 1] ? parts[rportIdx + 1] : ''
-        const netIdIdx = parts.indexOf('network-id')
-        const netId = netIdIdx !== -1 && parts[netIdIdx + 1] ? parts[netIdIdx + 1] : ''
-
-        const isPoisonedSrflx =
-          candType === 'srflx' &&
-          !addr.includes(':') &&
-          ((rport && poisonedTunPorts.has(rport)) ||
-            (raddr === '0.0.0.0' && netId && poisonedTunNetIds.has(netId)))
-
-        if (isBogusOrTunCandidate(rawCand) || isPoisonedSrflx) {
-          continue
+        return true
+      })
+      .map((line) => {
+        if (line.startsWith('a=candidate:')) {
+          const optimized = optimizeCandidatePriority(line.slice(2))
+          return `a=${optimized}`
         }
-        out.push('a=' + optimizeCandidatePriority(rawCand))
-      } else {
-        out.push(line)
-      }
-    }
-    return out.join(lineBreak)
+        return line
+      })
+      .join('\r\n')
   } catch (err) {
     console.warn('[WebRTC] SDP candidate priority rewriting failed, falling back to original SDP:', err)
     return sdp

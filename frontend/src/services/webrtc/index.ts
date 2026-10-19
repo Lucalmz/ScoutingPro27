@@ -201,7 +201,6 @@ export function createWebRtcService(callbacks: WebRtcCallbacks): WebRtcService {
     callbacks.onStatusChange(s)
   }
 
-  let hostStatusDebounceTimer: any = null
   function updateHostStatus() {
     if (!isHostMode) return
     let active = 0
@@ -209,33 +208,11 @@ export function createWebRtcService(callbacks: WebRtcCallbacks): WebRtcService {
       if (c.dc && c.dc.readyState === 'open') active++
     })
     if (active > 0) {
-      if (hostStatusDebounceTimer) {
-        clearTimeout(hostStatusDebounceTimer)
-        hostStatusDebounceTimer = null
-      }
-      setStatus('connected')
+      if (status !== 'connected') setStatus('connected')
     } else if (signaling) {
-      // 当 active 暂时变为 0（例如从机正在重连或重协商），延迟 300ms 再切到 'waiting'，防止状态闪烁
-      if (!hostStatusDebounceTimer && status === 'connected') {
-        hostStatusDebounceTimer = setTimeout(() => {
-          hostStatusDebounceTimer = null
-          let curActive = 0
-          clients.forEach((c) => {
-            if (c.dc && c.dc.readyState === 'open') curActive++
-          })
-          if (curActive === 0 && signaling) {
-            setStatus('waiting')
-          }
-        }, 300)
-      } else if (status !== 'connected') {
-        setStatus('waiting')
-      }
+      if (status !== 'waiting') setStatus('waiting')
     } else {
-      if (hostStatusDebounceTimer) {
-        clearTimeout(hostStatusDebounceTimer)
-        hostStatusDebounceTimer = null
-      }
-      setStatus('offline')
+      if (status !== 'offline') setStatus('offline')
     }
   }
 
@@ -1327,11 +1304,6 @@ export function createWebRtcService(callbacks: WebRtcCallbacks): WebRtcService {
     isExplicitlyClosed = true
     selfHealing.dispose()
     clientSession.clearReconnectTimer()
-
-    if (hostStatusDebounceTimer) {
-      clearTimeout(hostStatusDebounceTimer)
-      hostStatusDebounceTimer = null
-    }
 
     if (probeTimer) {
       clearTimeout(probeTimer)

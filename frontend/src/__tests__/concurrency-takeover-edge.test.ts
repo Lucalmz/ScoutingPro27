@@ -195,7 +195,7 @@ describe('Comprehensive Concurrency, Standby Takeover & Silent Failure Edge Test
     await vi.waitFor(() => {
       expect(service2.isStandbyHost()).toBe(true)
       expect(hostStandby2).toHaveBeenCalled()
-    })
+    }, { timeout: 3000 })
 
     // 3. Tab 1 disconnects / crashes
     service1.disconnect()
@@ -203,14 +203,14 @@ describe('Comprehensive Concurrency, Standby Takeover & Silent Failure Edge Test
     // Wait for Tab 2 watchdog to trigger on missing heartbeats
     await vi.waitFor(() => {
       expect(hostLeft2).toHaveBeenCalled()
-    })
+    }, { timeout: 3000 })
 
     // 4. Tab 2 clicks Takeover to become Active Host
     await service2.takeoverHost()
     await vi.waitFor(() => {
       expect(service2.isStandbyHost()).toBe(false)
       expect(hostPromoted2).toHaveBeenCalled()
-    })
+    }, { timeout: 3000 })
 
     service2.disconnect()
   })

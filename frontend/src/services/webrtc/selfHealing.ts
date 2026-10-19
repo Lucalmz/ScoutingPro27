@@ -20,7 +20,6 @@ export function setupSelfHealing(options: SelfHealingOptions): { dispose: () => 
   let lastResumeTime = 0
   let connectingEnteredAt = 0
   let lastObservedStatus: ConnectionStatus | null = null
-  let initOrLastConnectTime = Date.now()
   const THROTTLE_MS = 1200
   const RESUME_DEBOUNCE_MS = 500
 
@@ -49,7 +48,6 @@ export function setupSelfHealing(options: SelfHealingOptions): { dispose: () => 
     }
     isReconnecting = true
     lastTriggerTime = now
-    initOrLastConnectTime = now
     try {
       log.info(`Executing self-healing reconnect: ${reason}`)
       await options.reconnectNow(true)
@@ -77,7 +75,7 @@ export function setupSelfHealing(options: SelfHealingOptions): { dispose: () => 
         (curStatus === 'connected' && options.isHealthy?.()) ||
         (curStatus === 'connecting' && connectingEnteredAt > 0 && Date.now() - connectingEnteredAt < 15000)
       ) {
-        log.info(`Network event in Client mode while status is ${curStatus}; preserving healthy/connecting session.`)
+        log.info(`Network event in Client mode while status is ${curStatus}; preserving active/connecting session.`)
         return
       }
     }
@@ -127,8 +125,8 @@ export function setupSelfHealing(options: SelfHealingOptions): { dispose: () => 
 
     // 1. 若处于 connecting：真机下如果在 15 秒正常握手窗口内，严禁因切焦点而中断正在进行的 ICE 打洞
     if (status === 'connecting') {
-      const timeInConnecting = connectingEnteredAt > 0 ? Date.now() - connectingEnteredAt : Date.now() - initOrLastConnectTime
-      if (!isTestEnv() && timeInConnecting < 15000) {
+      const connectingDuration = connectingEnteredAt > 0 ? Date.now() - connectingEnteredAt : 0
+      if (!isTestEnv() && connectingDuration < 15000) {
         log.info('App resumed while handshake is actively in-flight (<15s); preserving connecting session.')
         return
       }

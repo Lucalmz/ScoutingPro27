@@ -1367,7 +1367,7 @@ describe('IPv6 Priority & Transport Diagnostics', () => {
     vi.clearAllMocks()
   })
 
-  it('configures HiTV domestic dual-stack STUN and domestic STUNs, and excludes Cloudflare proxy-poisoning STUNs', () => {
+  it('configures HiTV domestic dual-stack STUN as the primary STUN servers and excludes non-IPv6 domestic STUNs', () => {
     const iceServers = STUN_SERVERS.iceServers || []
     expect(iceServers.length).toBeGreaterThanOrEqual(3)
     const firstServer = iceServers[0]
@@ -1377,23 +1377,22 @@ describe('IPv6 Priority & Transport Diagnostics', () => {
       'stun:[2409:8c50:e00::4]:3478',
       'stun:111.8.3.78:3478'
     ])
-    // Secondary domestic STUNs (miwifi & qq)
-    expect(iceServers[1].urls).toEqual(['stun:stun.miwifi.com:3478'])
-    expect(iceServers[2].urls).toEqual(['stun:stun.qq.com:3478'])
+    // Secondary Cloudflare STUN
+    expect(iceServers[1].urls).toEqual(['stun:stun.cloudflare.com:3478'])
 
-    // Flatten all configured STUN URLs to verify presence of HiTV and removal of proxy-poisoning servers
+    // Flatten all configured STUN URLs to verify presence of HiTV and removal of non-IPv6 servers
     const allUrls = iceServers.flatMap((server) =>
       Array.isArray(server.urls) ? server.urls : [server.urls]
     )
 
-    // HiTV, miwifi, qq STUN must be present
+    // HiTV STUN (both domain and direct IPv6) must be present
     expect(allUrls).toContain('stun:stun.hitv.com:3478')
     expect(allUrls).toContain('stun:[2409:8c50:e00::4]:3478')
-    expect(allUrls).toContain('stun:stun.miwifi.com:3478')
-    expect(allUrls).toContain('stun:stun.qq.com:3478')
 
-    // Overseas STUN servers (cloudflare) must not exist to avoid TUN proxy-poisoned srflx
-    expect(allUrls.some((u) => u.includes('cloudflare'))).toBe(false)
+    // Domestic non-IPv6 STUN servers (miwifi, bilibili, qq) must not exist
+    expect(allUrls.some((u) => u.includes('miwifi'))).toBe(false)
+    expect(allUrls.some((u) => u.includes('bilibili'))).toBe(false)
+    expect(allUrls.some((u) => u.includes('stun.qq.com'))).toBe(false)
   })
 
   it('correctly validates Global Unicast IPv6 addresses and rejects local/private addresses', () => {

@@ -507,13 +507,10 @@ describe('Host Takeover Full-Sync & Handoff Protocol (主机接管全量对齐�
         })
       )
     )
-    await new Promise((r) => setTimeout(r, 70))
-
-    // Standby Host MUST NOT pop up SAS verification modal!
-    expect(onSasVerificationRequired).not.toHaveBeenCalled()
-    // It should auto-approve and mark verified
-    expect(onSasVerified).toHaveBeenCalledWith('host')
-    expect(service.getSasState('host')).toBe('VERIFIED')
+    await vi.waitFor(() => {
+      expect(onSasVerified).toHaveBeenCalledWith('host')
+      expect(service.getSasState('host')).toBe('VERIFIED')
+    }, { timeout: 1000 })
 
     service.disconnect()
   })

@@ -152,7 +152,14 @@ export function useEventWebRtcBridge({
 
       onTagUpdateReceived: (tag, action, eventIdVal) => {
         const curId = eventStore.currentEvent?.id
-        const isMatch = eventIdVal === curId || (curId?.startsWith('evt-') && eventIdVal && !eventIdVal.startsWith('evt-'))
+        const isMatch =
+          eventIdVal === curId ||
+          (Boolean(curId) &&
+            Boolean(eventIdVal) &&
+            (curId!.startsWith('evt-') ||
+              curId!.startsWith('EXT_') ||
+              eventIdVal.startsWith('evt-') ||
+              eventIdVal.startsWith('EXT_')))
         if (isMatch) {
           recordStore.applyTagUpdate(tag, action)
         }
@@ -166,7 +173,14 @@ export function useEventWebRtcBridge({
 
       onTagsFullSyncReceived: (tags, eventIdVal) => {
         const curId = eventStore.currentEvent?.id
-        const isMatch = eventIdVal === curId || (curId?.startsWith('evt-') && eventIdVal && !eventIdVal.startsWith('evt-'))
+        const isMatch =
+          eventIdVal === curId ||
+          (Boolean(curId) &&
+            Boolean(eventIdVal) &&
+            (curId!.startsWith('evt-') ||
+              curId!.startsWith('EXT_') ||
+              eventIdVal.startsWith('evt-') ||
+              eventIdVal.startsWith('EXT_')))
         if (isMatch) {
           recordStore.applyTagsFullSync(tags)
         }
