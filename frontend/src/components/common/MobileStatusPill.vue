@@ -22,6 +22,9 @@ const statusColor = computed(() => {
     case 'connected':
       return '#39ff14'
     case 'connecting':
+    case 'waiting':
+    case 'unstable':
+    case 'degraded':
       return '#facc15'
     case 'offline':
     case 'long_offline':
@@ -36,6 +39,9 @@ const statusLabel = computed(() => {
     case 'connected':
       return t('connection.connected') || 'Connected'
     case 'connecting':
+    case 'waiting':
+    case 'unstable':
+    case 'degraded':
       return t('connection.connecting') || 'Connecting'
     case 'offline':
     case 'long_offline':

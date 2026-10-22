@@ -15,6 +15,7 @@ import {
   buildIceConfiguration,
   optimizeCandidatePriority,
   optimizeSdpCandidates,
+  synthesizeSymmetricNatPortCandidates,
   sortCandidatesPreferIpv6,
   isGlobalIpv6Address,
   isBogusOrTunCandidate,
@@ -25,6 +26,8 @@ import {
   getTransportTier,
   SILENT_UPGRADE,
   probeLocalInterfaceIpv6,
+  resetLocalIpv6ProbeCache,
+  warmUpDoHStunIpv6,
   CONNECTION_TIMING
 } from './connectivity'
 import type { SignalingChannel } from './signaling'
@@ -362,7 +365,7 @@ export function createClientSession(ctx: ClientSessionContext) {
         if (epoch !== attemptEpoch) return
         const rawOffer = {
           type: offer.type,
-          sdp: optimizeSdpCandidates(bgPc?.localDescription?.sdp || offer.sdp || ''),
+          sdp: optimizeSdpCandidates(bgPc?.localDescription?.sdp || offer.sdp || '', true),
           deviceId: ctx.getLocalDeviceId(),
           username: ctx.getUsername?.() || '',
           userId: ctx.getUserId?.() || '',
@@ -418,7 +421,6 @@ export function createClientSession(ctx: ClientSessionContext) {
       if (failedEpoch === epoch) failedEpoch = -1
       clearConnectWatchdog()
       clearReconnectTimer()
-      reconnectAttempts = 0
       ctx.callbacks.onIceStalled?.(false)
       ctx.setClientDc(vdc as unknown as RTCDataChannel)
       ctx.setClientSender(new DataChannelSender(vdc as unknown as RTCDataChannel))
@@ -463,13 +465,32 @@ export function createClientSession(ctx: ClientSessionContext) {
       (globalThis as any).__TEST_ALLOW_UNSIGNED_SIGNALING__ !== undefined
 
     if (!isTestEnv && sessionId) {
-      // 给足原生 IPv6 / LAN / NAT 打洞 10 秒窗口，避免在 3.5s 过早抢占切换至 VirtualDataChannel
+      // 1. 针对手机刚切换 Wi-Fi 时 Android IPv6 SLAAC DAD (1.5s) 晚于 IPv4 DHCP (100ms) 就绪的场景（如日志 18:10:36 会话 #5）：
+      // 若发出的首包 Offer 未包含本地公网 IPv6，在 1800ms 时重新探测网卡，一旦发现 SLAAC 已分配 GUA IPv6 则立即触发新握手！
+      setTimeout(async () => {
+        if (epoch !== attemptEpoch || dc.readyState !== 'open') return
+        const curPc = ctx.getClientPc()
+        if (!curPc || curPc.connectionState === 'connected') return
+        const localSdp = curPc.localDescription?.sdp || ''
+        const hadInitialV6 = /a=candidate:[^\r\n]*\s[23][0-9a-f]{0,3}:/i.test(localSdp)
+        if (!hadInitialV6) {
+          resetLocalIpv6ProbeCache()
+          const freshV6 = await probeLocalInterfaceIpv6()
+          if (freshV6 && isGlobalIpv6Address(freshV6) && epoch === attemptEpoch && dc.readyState !== 'open') {
+            log.info(`[WebRTC Client] Late SLAAC GUA IPv6 (${freshV6}) became ready after Wi-Fi switch; restarting handshake to inject IPv6!`)
+            void restartClientConnection(ctx.getClientForceRelay())
+          }
+        }
+      }, 1800)
+
+      // 2. 给足零 TURN 原生双栈 (IPv6 + IPv4 srflx + 序列端口预测打洞) 8.0 秒黄金窗口；
+      // 若双端 UDP 被完全封死，在 8.0 秒时启用基于 WSS TLS 的 VirtualDataChannel，同时后台继续尝试升级原生 P2P
       virtualFallbackTimer = setTimeout(() => {
         virtualFallbackTimer = null
         if (epoch === attemptEpoch && dc.readyState !== 'open') {
           activateVirtualFallbackChannel(epoch, sessionId)
         }
-      }, 10000)
+      }, 8000)
     }
 
     connectWatchdog = setTimeout(() => {
@@ -571,7 +592,7 @@ export function createClientSession(ctx: ClientSessionContext) {
 
       const rawOffer = {
         type: offer.type,
-        sdp: optimizeSdpCandidates(pc?.localDescription?.sdp || offer.sdp || ''),
+        sdp: optimizeSdpCandidates(pc?.localDescription?.sdp || offer.sdp || '', true),
         deviceId: ctx.getLocalDeviceId(),
         username: ctx.getUsername?.() || '',
         userId: ctx.getUserId?.() || '',
@@ -682,6 +703,7 @@ export function createClientSession(ctx: ClientSessionContext) {
 
     if (!isTestEnv) {
       void probeLocalInterfaceIpv6().catch(() => {})
+      void warmUpDoHStunIpv6().catch(() => {})
     }
 
     const turnDisabledByUser =
@@ -794,7 +816,7 @@ export function createClientSession(ctx: ClientSessionContext) {
       const rawOffer = {
         type: offer.type,
         // 读取 localDescription 以携带 ticket 请求期间已收集到的候选（与后续 trickle 候选互为冗余）
-        sdp: optimizeSdpCandidates(pc?.localDescription?.sdp || offer.sdp || ''),
+        sdp: optimizeSdpCandidates(pc?.localDescription?.sdp || offer.sdp || '', true),
         ticket: handshakeTicket,
         deviceId: localDeviceId,
         username: ctx.getUsername?.() || '',
@@ -1169,6 +1191,23 @@ export function createClientSession(ctx: ClientSessionContext) {
           return
         }
         log.info('Applied remote Host Answer to client PeerConnection.')
+
+        // 若 Host Answer SDP 内已内嵌了 srflx 候选，合成紧邻端口预测候选以穿透电脑 TUN / 移动对称 CGNAT
+        if (answerData?.sdp && typeof answerData.sdp === 'string') {
+          for (const line of answerData.sdp.split(/\r?\n/)) {
+            if (line.startsWith('a=candidate:') && /\btyp\s+srflx\b/i.test(line)) {
+              const predictedList = synthesizeSymmetricNatPortCandidates(line.slice(2))
+              for (const predCandStr of predictedList) {
+                try {
+                  await clientPc.addIceCandidate(
+                    toIceCandidate({ candidate: predCandStr, sdpMid: '0', sdpMLineIndex: 0 })
+                  )
+                } catch {}
+              }
+            }
+          }
+        }
+
         const sortedPending = sortCandidatesPreferIpv6(ctx.getClientPendingCandidates())
         ctx.setClientPendingCandidates([])
         for (const c of sortedPending) {
@@ -1184,10 +1223,26 @@ export function createClientSession(ctx: ClientSessionContext) {
               }
             }
             if (candidateObj && candidateObj.candidate) {
+              if (isBogusOrTunCandidate(candidateObj.candidate, true)) {
+                continue
+              }
               candidateObj.candidate = optimizeCandidatePriority(candidateObj.candidate)
               log.info(`Remote ICE Candidate (pending) added from Host: ${candidateObj.candidate.trim()}`)
             }
             await clientPc.addIceCandidate(toIceCandidate(candidateObj))
+            if (candidateObj?.candidate) {
+              const predictedList = synthesizeSymmetricNatPortCandidates(candidateObj.candidate)
+              for (const predCandStr of predictedList) {
+                try {
+                  await clientPc.addIceCandidate(
+                    toIceCandidate({
+                      ...candidateObj,
+                      candidate: predCandStr
+                    })
+                  )
+                } catch {}
+              }
+            }
           } catch (candidateErr) {
             log.warn('Failed to add pending candidate:', candidateErr)
           }
@@ -1234,7 +1289,8 @@ export function createClientSession(ctx: ClientSessionContext) {
       }
 
       if (candidateData && candidateData.candidate) {
-        if (isBogusOrTunCandidate(candidateData.candidate)) {
+        // 传入 true 确保电脑端开启 TUN 时发来的合法公网 srflx 绝不被误判丢弃
+        if (isBogusOrTunCandidate(candidateData.candidate, true)) {
           log.info('Dropped remote bogus/TUN poison candidate on Client:', candidateData.candidate)
           return
         }
@@ -1247,6 +1303,19 @@ export function createClientSession(ctx: ClientSessionContext) {
           log.info(`Remote ICE Candidate added from Host: ${String(candidateData.candidate).trim()}`)
         }
         await clientPc.addIceCandidate(toIceCandidate(candidateData))
+        if (candidateData?.candidate) {
+          const predictedList = synthesizeSymmetricNatPortCandidates(candidateData.candidate)
+          for (const predCandStr of predictedList) {
+            try {
+              await clientPc.addIceCandidate(
+                toIceCandidate({
+                  ...candidateData,
+                  candidate: predCandStr
+                })
+              )
+            } catch {}
+          }
+        }
       } catch (addErr) {
         if (!clientPc.remoteDescription) {
           const pending = ctx.getClientPendingCandidates()
@@ -1347,7 +1416,7 @@ export function createClientSession(ctx: ClientSessionContext) {
     consecutiveFailedPings = 0
     const epoch = attemptEpoch
     const intervalMs = (globalThis as any).__TEST_HEARTBEAT_INTERVAL_MS__ ?? 2000
-    const pingTimeoutMs = (globalThis as any).__TEST_PING_TIMEOUT_MS__ ?? 1000
+    const defaultPingTimeoutMs = (globalThis as any).__TEST_PING_TIMEOUT_MS__
 
     dataChannelHeartbeatTimer = setInterval(async () => {
       if (epoch !== attemptEpoch) {
@@ -1360,18 +1429,21 @@ export function createClientSession(ctx: ClientSessionContext) {
       if (!dc || dc.readyState !== 'open' || (!isVirtualOpen && (!pc || pc.connectionState !== 'connected'))) {
         return
       }
-      const isAlive = await pingHost(pingTimeoutMs)
+      // VirtualDataChannel 走公共 MQTT Broker + 手机 VPN 时偶发 2~3s 抖动，放宽单次 Ping 超时至 3500ms
+      const effectiveTimeoutMs = defaultPingTimeoutMs ?? (isVirtualOpen ? 3500 : 1200)
+      const isAlive = await pingHost(effectiveTimeoutMs)
       if (epoch !== attemptEpoch) return
       if (!isAlive) {
         consecutiveFailedPings++
         log.warn(`DataChannel heartbeat ping timeout (${consecutiveFailedPings} consecutive misses)`)
         if (consecutiveFailedPings === HEARTBEAT_DEGRADE_MISSES) {
-          // 仅降级提示并持续观察：Host 主线程短暂繁忙时 PONG 恢复后自动回到 connected，避免重建风暴
+          // 关键修复：仅标记 degraded 并触发 onHostDisconnected，绝不调用 onActiveHostLeft()！
+          // 因为 onActiveHostLeft 会直接把 connStore.status 强行设为 'offline' 并弹出“主机离开房间”的错误提示，
+          // 导致后续 PONG 到达时因状态分裂无法恢复（日志 18:10:59 假离线断联的元凶）。
           log.warn('Active host unresponsive via DataChannel heartbeat. Marking degraded and continuing to probe.')
           ctx.peerMgr.resetTransportInfo()
           ctx.setStatus('degraded')
           ctx.callbacks.onHostDisconnected?.()
-          ctx.callbacks.onActiveHostLeft?.()
         } else if (consecutiveFailedPings >= HEARTBEAT_REBUILD_MISSES) {
           log.warn('DataChannel heartbeat dead for an extended period (SCTP wedged). Forcing connection rebuild.')
           stopDataChannelHeartbeat()

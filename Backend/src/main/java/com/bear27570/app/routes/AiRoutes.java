@@ -197,17 +197,17 @@ public class AiRoutes {
                 return;
             }
 
-            Proxy proxy = Proxy.NO_PROXY;
-            if (proxyPortStr != null && !proxyPortStr.isEmpty()) {
+            Integer proxyPort = null;
+            if (proxyPortStr != null && !proxyPortStr.isBlank()) {
                 try {
-                    int port = Integer.parseInt(proxyPortStr);
-                    String host = (proxyHost != null && !proxyHost.isEmpty()) ? proxyHost : "127.0.0.1";
-                    proxy = new Proxy(Proxy.Type.HTTP, new java.net.InetSocketAddress(host, port));
+                    proxyPort = Integer.parseInt(proxyPortStr.trim());
                 } catch (NumberFormatException e) {
                     ctx.status(400).result(gson.toJson(Map.of("error", "Invalid proxy port"))).contentType("application/json");
                     return;
                 }
             }
+
+            Proxy proxy = AiClient.resolveEffectiveProxy(proxyHost, proxyPort);
 
             long start = System.currentTimeMillis();
             try {

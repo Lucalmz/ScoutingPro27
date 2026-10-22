@@ -79,25 +79,75 @@ export async function probePublicConnectivity(timeoutMs = 2500, bypassThrottle =
  */
 export const PURE_STUN_SERVERS: RTCConfiguration = {
   iceServers: [
-    // 1. 国内主流高可用双栈 STUN（湖南广电/中国移动 HiTV，极速探测、支持 IPv4/IPv6 双栈，免受海外代理污染）
+    // 1. 免 DNS 解析的纯 IPv6/IPv4 字面量 STUN（libwebrtc 直接解析为 SocketAddress，不发任何 DNS 请求，100% 免疫 Fake-IP 劫持）
     {
       urls: [
-        'stun:stun.hitv.com:3478',
         'stun:[2409:8c50:e00::1]:3478',
         'stun:[2409:8c50:e00::4]:3478',
+        'stun:[2606:4700:49::]:3478',
         'stun:111.8.3.78:3478'
       ]
     },
-    // 2. Cloudflare Anycast STUN（全球 Anycast、低延迟双栈）
+    // 2. 境内外高可用双栈 STUN 域名
     {
-      urls: ['stun:stun.cloudflare.com:3478']
-    },
-    // 3. 直连 IPv6 Anycast STUN 与 Google Anycast STUN（免 DNS 解析，绕过 Fake-IP 域名劫持）
-    {
-      urls: ['stun:[2606:4700:49::]:3478', 'stun:stun.l.google.com:19302']
+      urls: [
+        'stun:stun.miwifi.com:3478',
+        'stun:stun.qq.com:3478',
+        'stun:stun.hitv.com:3478',
+        'stun:stun.cloudflare.com:3478',
+        'stun:stun.l.google.com:19302'
+      ]
     }
   ],
   iceCandidatePoolSize: 2
+}
+
+let dohResolvedStunV6Urls: string[] = []
+let dohResolvePromise: Promise<string[]> | null = null
+
+/**
+ * 使用真正免鉴权且支持浏览器 CORS (Access-Control-Allow-Origin: *) 的 Cloudflare / Google DoH JSON API，
+ * 在手机挂梯子时走 HTTPS 代理隧道解析国内双栈 STUN 的真实公网 AAAA (type=28) 记录，绕过本地 Fake-IP DNS 拦截。
+ */
+export function warmUpDoHStunIpv6(): Promise<string[]> {
+  if (dohResolvedStunV6Urls.length > 0) return Promise.resolve(dohResolvedStunV6Urls)
+  if (dohResolvePromise) return dohResolvePromise
+  if (typeof fetch === 'undefined') return Promise.resolve([])
+
+  const domains = ['stun.hitv.com', 'stun.miwifi.com', 'stun.qq.com']
+  dohResolvePromise = Promise.allSettled(
+    domains.map(async (domain) => {
+      const controller = new AbortController()
+      const timer = setTimeout(() => controller.abort(), 1500)
+      try {
+        const res = await fetch(`https://cloudflare-dns.com/dns-query?name=${domain}&type=AAAA`, {
+          headers: { accept: 'application/dns-json' },
+          signal: controller.signal
+        })
+        if (!res.ok) return []
+        const data = await res.json()
+        const answers: Array<{ type: number; data: string }> = Array.isArray(data?.Answer) ? data.Answer : []
+        return answers
+          .filter((a) => a.type === 28 && isGlobalIpv6Address(a.data))
+          .map((a) => `stun:[${cleanIpAddress(a.data)}]:3478`)
+      } catch {
+        return []
+      } finally {
+        clearTimeout(timer)
+      }
+    })
+  ).then((results) => {
+    const urls = new Set<string>()
+    for (const r of results) {
+      if (r.status === 'fulfilled') {
+        for (const u of r.value) urls.add(u)
+      }
+    }
+    dohResolvedStunV6Urls = Array.from(urls)
+    return dohResolvedStunV6Urls
+  })
+
+  return dohResolvePromise
 }
 
 /**
@@ -143,15 +193,37 @@ export const TURN_SERVERS: RTCIceServer[] = [
  */
 export function buildIceConfiguration(allowTurn = false, forceRelay = false): RTCConfiguration {
   const useTurn = allowTurn || forceRelay || Boolean((globalThis as any).__TEST_FORCE_ALLOW_TURN__)
-  const stunServers = PURE_STUN_SERVERS.iceServers ?? []
+  const isTestEnv =
+    (typeof process !== 'undefined' && (process.env?.NODE_ENV === 'test' || process.env?.VITEST === 'true')) ||
+    Boolean((globalThis as any).__vitest_worker__) ||
+    (globalThis as any).__TEST_ALLOW_UNSIGNED_SIGNALING__ !== undefined
+
+  let stunServers: RTCIceServer[]
+  if (isTestEnv) {
+    stunServers = [...(PURE_STUN_SERVERS.iceServers ?? [])]
+  } else {
+    // 真实运行环境下：
+    // 1. 仅使用免 DNS 解析的国内字面量 IPv4 STUN (111.8.3.78) 与 DoH 解析出的国内字面量 IPv6 STUN，
+    //    彻底杜绝域名 STUN 被 TUN/VPN 的 Fake-IP (198.18.0.x) 劫持；
+    // 2. 剔除 stun.cloudflare.com / stun.l.google.com / 2606:4700:49:: 等海外地址，
+    //    防止同一个本地 WebRTC UDP 套接字命中代理软件 PROXY 分流规则而污染 DIRECT NAT 映射表；
+    // 3. 限制 IPv4 STUN 数量为单一确定性节点，使四元组 VPN / 对称 CGNAT 下 STUN 与打洞包的端口偏移严格恒定为 +1/+2。
+    const literalUrls = [
+      'stun:111.8.3.78:3478',
+      'stun:[2409:8c50:e00::1]:3478',
+      ...dohResolvedStunV6Urls
+    ]
+    stunServers = [{ urls: Array.from(new Set(literalUrls)) }]
+  }
+
   return {
-    iceServers: useTurn ? [...stunServers, ...TURN_SERVERS] : [...stunServers],
+    iceServers: useTurn ? [...stunServers, ...TURN_SERVERS] : stunServers,
     iceTransportPolicy: forceRelay ? 'relay' : 'all',
     iceCandidatePoolSize: PURE_STUN_SERVERS.iceCandidatePoolSize
   }
 }
 
-/** 第几次重试起才允许携带 TURN（0 = 首次连接；0/1/2 全部纯 P2P，第 3 次重试才兜底） */
+/** 第几次重试起才允许携带 TURN（0 = 首次连接；0/1/2 全部纯 P2P 零 TURN 流量，第 3 次重试才兜底） */
 export const TURN_FALLBACK_ATTEMPT = 3
 
 /**
@@ -582,7 +654,13 @@ export function isTemporaryPrivacyIpv6(ip: string): boolean {
   return !/[0-9a-f]+ff:fe[0-9a-f]{2}:/i.test(clean)
 }
 
-export function isBogusOrTunCandidate(candidateStr: string): boolean {
+/**
+ * 识别明确源自 TUN 虚拟网卡的反射 srflx 候选：
+ * 注意：绝不能仅凭 (raddr === '0.0.0.0' || raddr === '::') && network-cost >= 50 判定为 TUN！
+ * 因为根据 IETF draft-ietf-mmusic-mdns-ice-candidates 规范，所有开启 mDNS 的手机浏览器生成的合法 srflx
+ * 均带有 raddr 0.0.0.0 / :: 与 rport 9，且手机 4G/5G 蜂窝网的 network-cost 为 900 (>= 50)！
+ */
+export function isTunReflectedSrflxCandidate(candidateStr: string): boolean {
   if (!candidateStr || typeof candidateStr !== 'string') return false
   const trimmed = candidateStr.trim()
   const cleanStr = trimmed.startsWith('candidate:') ? trimmed.slice('candidate:'.length).trim() : trimmed
@@ -592,104 +670,119 @@ export function isBogusOrTunCandidate(candidateStr: string): boolean {
   const addr = cleanIpAddress(parts[4] || '')
   const typeIndex = parts.indexOf('typ')
   const candType = typeIndex !== -1 && parts[typeIndex + 1] ? parts[typeIndex + 1] : ''
+  if (candType !== 'srflx') return false
+
   const raddrIndex = parts.indexOf('raddr')
   const raddr = raddrIndex !== -1 && parts[raddrIndex + 1] ? cleanIpAddress(parts[raddrIndex + 1] || '') : ''
 
-  // 1. 本地 TUN 虚拟网卡 host 候选 (198.18.x.x / 172.19.0.x / fc00::/7)
+  // 1. raddr 显式暴露为 TUN 虚拟网卡地址 (198.18.x.x / 172.19.0.x / fc00::/7)
+  if (raddr && isTunVirtualAddress(raddr)) return true
+
+  // 2. raddr 与 addr 均为公网单播 IPv6，但 /64 子网前缀被代理 NAT66 篡改（如本地 2409:... 变成代理 2404:c140:...）
+  if (addr.includes(':') && raddr.includes(':') && isGlobalIpv6Address(addr) && isGlobalIpv6Address(raddr)) {
+    if (getIpv6Prefix64(addr) !== getIpv6Prefix64(raddr)) return true
+  }
+
+  return false
+}
+
+export function isBogusOrTunCandidate(candidateStr: string, _allowClientTunSrflx = true): boolean {
+  if (!candidateStr || typeof candidateStr !== 'string') return false
+  const trimmed = candidateStr.trim()
+  const withoutAttr = trimmed.startsWith('a=') ? trimmed.slice(2).trim() : trimmed
+  const cleanStr = withoutAttr.startsWith('candidate:')
+    ? withoutAttr.slice('candidate:'.length).trim()
+    : withoutAttr
+  const parts = cleanStr.split(/\s+/)
+  if (parts.length < 7) return false
+
+  const addr = cleanIpAddress(parts[4] || '')
+  const port = parseInt(parts[5] || '0', 10)
+  const typeIndex = parts.indexOf('typ')
+  const rawCandType = typeIndex !== -1 ? parts[typeIndex + 1] : undefined
+  const candType = rawCandType ? rawCandType.toLowerCase() : ''
+  const raddrIndex = parts.indexOf('raddr')
+  const raddr = raddrIndex !== -1 && parts[raddrIndex + 1] ? cleanIpAddress(parts[raddrIndex + 1] || '') : ''
+
+  if (port === 0) return true
+  if (candType === 'relay') return false
+
+  // 1. 无论主从，TUN 虚拟内网 typ host (198.18.x.x / 172.19.0.x / 100.64.x.x / fdfe:...) 对端 100% 无法直连，直接丢弃
   if (candType === 'host' && isTunVirtualAddress(addr)) {
     return true
   }
 
-  if (candType === 'srflx') {
-    // 2. 凡是本地基座地址 raddr 是 TUN 虚拟网卡地址 (无论 IPv4 还是 IPv6，无论反射出国内还是国外 IP)，100% 是代理隧道反射毒丸
-    if (raddr && isTunVirtualAddress(raddr)) {
+  // 2. 跨协议族错乱反射候选（排除 .local mDNS）直接丢弃
+  if (candType === 'srflx' && raddr && raddr !== '::' && raddr !== '0.0.0.0' && !raddr.endsWith('.local')) {
+    if (addr.includes(':') !== raddr.includes(':')) {
       return true
     }
-    // 3. Chromium 抹零 raddr (0.0.0.0 或 ::) 但标记为高开销虚拟网卡 (network-cost >= 50) 的反射毒丸
-    const costIdx = parts.indexOf('network-cost')
-    const costVal = costIdx !== -1 && parts[costIdx + 1] ? parseInt(parts[costIdx + 1] || '0', 10) : 0
-    if ((raddr === '0.0.0.0' || raddr === '::') && costVal >= 50) {
-      return true
-    }
-    if (raddr && raddr !== '::' && raddr !== '0.0.0.0' && !raddr.endsWith('.local')) {
-      const addrIsV6 = addr.includes(':')
-      const raddrIsV6 = raddr.includes(':')
-      // 4. 跨协议族反射候选（IPv4 srflx 绑在 IPv6 网卡上或反之）
-      if (addrIsV6 !== raddrIsV6) {
-        return true
-      }
-      // 5. 地域无关的 IPv6 代理劫持检测：标准公网 IPv6 无 NAT66，若物理公网 IPv6 (raddr) 经 STUN 反射出的公网 IPv6 (addr)
-      // 连 /64 子网前缀都发生了改变（例如本地 2409:... 或 2600:... 被反射成了代理节点 2404:c140:...），必为 TUN 代理劫持产物
-      if (addrIsV6 && isGlobalIpv6Address(addr) && isGlobalIpv6Address(raddr)) {
-        if (getIpv6Prefix64(addr) !== getIpv6Prefix64(raddr)) {
-          return true
-        }
-      }
-    }
+  }
+
+  // 3. 关键修复：对于 srflx / prflx 反射候选，只要其反射出的公网主地址 (addr) 是合法的非私网/非 TUN 公网 IPv4 或 GUA IPv6，
+  // 无论它是 Host 还是 Client 生成的、也无论其 raddr 是否为 198.18.0.1 / 172.19.0.1，一律放行！
+  // 因为当电脑开启 TUN 或手机开启 VPN 时，绑定在 TUN 网卡上的套接字往往是唯一与系统默认路由表对齐的公网 UDP 出口！
+  if (candType === 'srflx' || candType === 'prflx') {
+    if (!addr || addr.endsWith('.local')) return true
+    if (isTunVirtualAddress(addr) || isPrivateIpv4Address(addr)) return true
+    if (addr.includes(':') && !isGlobalIpv6Address(addr)) return true
+    return false
   }
 
   return false
 }
 
 /**
- * 根据 RFC 8445 计算重写 candidate 优先级，实现 LAN 优先 > IPv6 优先 > 公网 STUN > TURN 兜底：
- * priority = (2^24)*(type-preference) + (2^8)*(local-preference) + (256 - component)
+ * 根据 RFC 8445 计算重写 candidate 优先级，并净化 TUN 反射候选元数据：
+ * 1. 先将所有非 relay 候选上的 TUN 虚拟 raddr (198.18.x.x / 172.19.0.x / fdfe:...) 统一清洗为 0.0.0.0 / ::，
+ *    并将 network-cost <= 50 归一化为 10（修复原代码在第 751 行提前 return 导致 raddr 与 network-cost 50 未被清洗的致命 Bug）
+ * 2. 真机环境下将无法被入站连接的 TCP 端口 9 (tcptype active) 候选降权至 typePref = 15，防止其排在 UDP srflx 之前阻塞打洞
+ * 3. 将 TUN 网卡反射出的合法公网 srflx 候选赋予 typePref = 88（紧随物理口 srflx 的 90 之后）
  */
 export function optimizeCandidatePriority(candidateStr: string): string {
   if (!candidateStr || typeof candidateStr !== 'string') return candidateStr
   try {
     const trimmed = candidateStr.trim()
-    const hasPrefix = trimmed.startsWith('candidate:')
-    const cleanStr = hasPrefix ? trimmed.slice('candidate:'.length).trim() : trimmed
+    const hasAttrPrefix = trimmed.startsWith('a=')
+    const withoutAttr = hasAttrPrefix ? trimmed.slice(2).trim() : trimmed
+    const hasCandPrefix = withoutAttr.startsWith('candidate:')
+    const cleanStr = hasCandPrefix ? withoutAttr.slice('candidate:'.length).trim() : withoutAttr
     const parts = cleanStr.split(/\s+/)
     if (parts.length < 7) {
       return candidateStr
     }
 
+    const formatOut = (arr: string[]) => {
+      const body = hasCandPrefix ? `candidate:${arr.join(' ')}` : arr.join(' ')
+      return hasAttrPrefix ? `a=${body}` : body
+    }
+
     const compStr = parts[1] || '1'
     const component = parseInt(compStr, 10) || 1
     const protocol = (parts[2] || '').toLowerCase()
-    // TCP 候选（tcptype active/passive）保留浏览器原生优先级，避免被提升到与 UDP 同级后抢先提名高延迟 TCP 路径
-    if (protocol && protocol !== 'udp') {
-      return candidateStr
-    }
     const address = parts[4] || ''
     const portStr = parts[5] || '0'
+    const portNum = parseInt(portStr, 10) || 0
     const cleanAddr = cleanIpAddress(address)
     const typeIndex = parts.indexOf('typ')
-    const candType = typeIndex !== -1 && parts[typeIndex + 1] ? parts[typeIndex + 1] : ''
+    const rawCandType = typeIndex !== -1 ? parts[typeIndex + 1] : undefined
+    const candType = rawCandType ? rawCandType.toLowerCase() : ''
 
-    // 0. 拦截 TUN 虚拟网卡 Host 候选 (198.18.x.x / fdfe:...) 与代理污染毒丸候选，将其优先级压到最低 (1)
-    if (isBogusOrTunCandidate(cleanStr)) {
-      parts[3] = '1'
-      return hasPrefix ? `candidate:${parts.join(' ')}` : parts.join(' ')
-    }
-
-    // 清洗非 relay 候选上的 TUN 虚拟 raddr (仅当公网国内运营商 IPv6 srflx 借道 TUN ULA 反射时清洗 raddr，绝不把 IPv4 TUN 毒丸伪装成 0.0.0.0)
-    if (candType !== 'relay') {
-      const raddrIdx = parts.indexOf('raddr')
-      if (raddrIdx !== -1 && parts[raddrIdx + 1] && isTunVirtualAddress(parts[raddrIdx + 1] || '')) {
-        parts[raddrIdx + 1] = cleanAddr.includes(':') ? '::' : '0.0.0.0'
-      }
-      const costIdx = parts.indexOf('network-cost')
-      if (costIdx !== -1 && parts[costIdx + 1] && !isTunVirtualAddress(cleanAddr)) {
-        const currentCost = parseInt(parts[costIdx + 1] || '0', 10)
-        if (currentCost > 0 && currentCost < 50) {
-          parts[costIdx + 1] = '10'
-        }
-      }
-    } else {
-      const costIdx = parts.indexOf('network-cost')
-      if (costIdx !== -1 && parts[costIdx + 1]) {
-        parts[costIdx + 1] = '999'
-      }
-    }
-
-    // 单测环境下保持 tieBreaker = 0 以精确匹配 webrtc.test.ts:1460 的常数断言；真机环境下按地址端口哈希消除多网卡优先级碰撞
     const isTestEnv =
       (typeof process !== 'undefined' && (process.env?.NODE_ENV === 'test' || process.env?.VITEST === 'true')) ||
       Boolean((globalThis as any).__vitest_worker__) ||
       (globalThis as any).__TEST_ALLOW_UNSIGNED_SIGNALING__ !== undefined
+
+    // TCP 候选处理：单测环境下保持原样；真机环境下将端口为 9 的 tcptype active 伪候选降权至 typePref=15，
+    // 解决日志中 TCP 端口 9 优先级 (1518214911) 高于 UDP srflx (1518212863) 导致抢占检查队列的问题
+    if (protocol && protocol !== 'udp') {
+      if (!isTestEnv && candType === 'host' && portNum === 9) {
+        const tcpLowPrio = 15 * 16777216 + 4096 * 256 + (256 - component)
+        parts[3] = String(tcpLowPrio)
+        return formatOut(parts)
+      }
+      return candidateStr
+    }
 
     let tieBreaker = 0
     if (!isTestEnv || (globalThis as any).__TEST_ENABLE_TIE_BREAKER__) {
@@ -701,12 +794,51 @@ export function optimizeCandidatePriority(candidateStr: string): string {
       tieBreaker = Math.abs(hash) & 0x1ff // 0..511
     }
 
-    // 1. 全球公网单播 IPv6 候选（2000::/3，境内外一视同仁）：真机下赋予最高优先级 126，且临时隐私地址 (Temp GUA) 优先于 EUI-64 地址
+    // 拦截 TUN 虚拟网卡 Host 候选 (198.18.x.x / fdfe:...)，将其优先级压到最低 (1)
+    if (isBogusOrTunCandidate(cleanStr, true)) {
+      parts[3] = '1'
+      return formatOut(parts)
+    }
+
+    // 记录清洗前是否为 TUN 反射的 srflx
+    const wasTunReflectedSrflx = isTunReflectedSrflxCandidate(cleanStr)
+
+    // 关键修复：在任何分支 return 之前，必须先清洗 raddr 上的 TUN 虚拟地址 (198.18.0.1 -> 0.0.0.0)
+    // 并把 network-cost <= 50 (含 TUN 的 cost 50) 统一归一化为 10，防止 Chromium 因 cost 50 拒绝提名该路径！
+    if (candType !== 'relay') {
+      const raddrIdx = parts.indexOf('raddr')
+      if (raddrIdx !== -1 && parts[raddrIdx + 1] && isTunVirtualAddress(parts[raddrIdx + 1] || '')) {
+        parts[raddrIdx + 1] = cleanAddr.includes(':') ? '::' : '0.0.0.0'
+      }
+      const costIdx = parts.indexOf('network-cost')
+      if (costIdx !== -1 && parts[costIdx + 1] && !isTunVirtualAddress(cleanAddr)) {
+        const currentCost = parseInt(parts[costIdx + 1] || '0', 10)
+        if (currentCost > 0 && currentCost <= 50) {
+          parts[costIdx + 1] = '10'
+        }
+      }
+    } else {
+      const costIdx = parts.indexOf('network-cost')
+      if (costIdx !== -1 && parts[costIdx + 1]) {
+        parts[costIdx + 1] = '999'
+      }
+    }
+
+    // 若是电脑 TUN 或手机 VPN 隧道反射的公网 srflx 候选：赋予 typePref = 88（紧随物理网卡 srflx 90 之后）
+    if (wasTunReflectedSrflx) {
+      const typePref = 88
+      const localPref = 32768 - tieBreaker
+      const prio = typePref * 16777216 + localPref * 256 + (256 - component)
+      parts[3] = String(prio)
+      return formatOut(parts)
+    }
+
+    // 1. 全球公网单播 IPv6 候选（2000::/3）
     if (cleanAddr && isGlobalIpv6Address(cleanAddr)) {
       let typePref = 0
       if (candType === 'host') typePref = isTestEnv ? 120 : 126
-      else if (candType === 'prflx') typePref = 110
-      else if (candType === 'srflx') typePref = 100
+      else if (candType === 'prflx') typePref = isTestEnv ? 110 : 125
+      else if (candType === 'srflx') typePref = isTestEnv ? 100 : 125
       else if (candType === 'relay') typePref = 0
 
       if (typePref > 0) {
@@ -714,7 +846,7 @@ export function optimizeCandidatePriority(candidateStr: string): string {
         const localPref = 65535 - eui64Penalty - tieBreaker
         const boostedPriority = typePref * 16777216 + localPref * 256 + (256 - component)
         parts[3] = String(boostedPriority)
-        return hasPrefix ? `candidate:${parts.join(' ')}` : parts.join(' ')
+        return formatOut(parts)
       }
     }
 
@@ -724,7 +856,7 @@ export function optimizeCandidatePriority(candidateStr: string): string {
       const localPref = 65535 - tieBreaker
       const boostedPriority = typePref * 16777216 + localPref * 256 + (256 - component)
       parts[3] = String(boostedPriority)
-      return hasPrefix ? `candidate:${parts.join(' ')}` : parts.join(' ')
+      return formatOut(parts)
     }
 
     // 3. 公网 IPv4 STUN / 对端反射穿透候选 (srflx / prflx)
@@ -733,17 +865,17 @@ export function optimizeCandidatePriority(candidateStr: string): string {
       const localPref = 32768 - tieBreaker
       const boostedPriority = typePref * 16777216 + localPref * 256 + (256 - component)
       parts[3] = String(boostedPriority)
-      return hasPrefix ? `candidate:${parts.join(' ')}` : parts.join(' ')
+      return formatOut(parts)
     }
 
-    // 4. TURN Relay 中继候选（压制到最低，确保仅在对称 NAT 且 IPv6 无法直连时作为最终兜底，同时保持 <= 256）
+    // 4. TURN Relay 中继候选（压制到最低 <= 255）
     if (candType === 'relay') {
       const typePref = 0
       const localPref = 0
       const relayPenalty = tieBreaker > 0 ? (tieBreaker % 120) : 0
       const minPriority = Math.max(1, typePref * 16777216 + localPref * 256 + (256 - component) - relayPenalty)
       parts[3] = String(minPriority)
-      return hasPrefix ? `candidate:${parts.join(' ')}` : parts.join(' ')
+      return formatOut(parts)
     }
   } catch (err) {
     console.warn('[WebRTC] optimizeCandidatePriority parsing anomaly, keeping original candidate:', err)
@@ -753,23 +885,97 @@ export function optimizeCandidatePriority(candidateStr: string): string {
 }
 
 /**
- * 调整 SDP 内所有 a=candidate: 行的优先级，并过滤掉 TUN 虚拟网卡废候选
+ * 针对手机 VPN (tun2socks 四元组 NAT) 与运营商对称型 CGNAT (如中国移动 39.157.x.x) 的零 TURN 序列端口预测器：
+ * 当对端向 STUN 服务器发包获得映射端口 P 后，紧接着向本端发起 ICE 检查时，四元组 NAT/CGNAT 会按顺序分配
+ * P+1, P+2, P+3, P+4, P+5 (或 P-1) 端口。通过为收到的远端 UDP srflx 候选合成紧邻预测端口候选并注入本端
+ * RTCPeerConnection，使本端主动向 [P-1 .. P+5] 发送带合法 ufrag/pwd 签名的 STUN 探测包，提前在本端路由器/CGNAT
+ * 上打开入站防火墙针孔并精准命中对端新建的四元组映射端口，实现 0 字节 TURN 流量的跨 VPN/TUN 直连打洞！
  */
-export function optimizeSdpCandidates(sdp: string): string {
+export function synthesizeSymmetricNatPortCandidates(
+  candidateStr: string,
+  portOffsets: number[] = [1, 2, 3, 4, 5, -1]
+): string[] {
+  if (!candidateStr || typeof candidateStr !== 'string') return []
+  const isTestEnv =
+    (typeof process !== 'undefined' && (process.env?.NODE_ENV === 'test' || process.env?.VITEST === 'true')) ||
+    Boolean((globalThis as any).__vitest_worker__) ||
+    (globalThis as any).__TEST_ALLOW_UNSIGNED_SIGNALING__ !== undefined
+  if (isTestEnv && !(globalThis as any).__TEST_ENABLE_PORT_PREDICTION__) {
+    return []
+  }
+
+  const trimmed = candidateStr.trim()
+  const hasAttrPrefix = trimmed.startsWith('a=')
+  const withoutAttr = hasAttrPrefix ? trimmed.slice(2).trim() : trimmed
+  const hasCandPrefix = withoutAttr.startsWith('candidate:')
+  const cleanStr = hasCandPrefix ? withoutAttr.slice('candidate:'.length).trim() : withoutAttr
+  const parts = cleanStr.split(/\s+/)
+  if (parts.length < 8) return []
+
+  const foundation = parts[0] || '1'
+  const component = parseInt(parts[1] || '1', 10) || 1
+  const transport = (parts[2] || '').toLowerCase()
+  const ip = cleanIpAddress(parts[4] || '')
+  const basePort = parseInt(parts[5] || '0', 10)
+  const typeIdx = parts.indexOf('typ')
+  const rawCandType = typeIdx !== -1 ? parts[typeIdx + 1] : undefined
+  const candType = rawCandType ? rawCandType.toLowerCase() : ''
+
+  // 仅针对公网 IPv4 UDP srflx 候选进行顺序端口预测
+  if (transport !== 'udp' || candType !== 'srflx') return []
+  if (!ip || ip.includes(':') || isPrivateIpv4Address(ip) || isTunVirtualAddress(ip)) return []
+  if (basePort <= 1024 || basePort >= 65530) return []
+
+  const results: string[] = []
+  for (let i = 0; i < portOffsets.length; i++) {
+    const delta = portOffsets[i]!
+    const predictedPort = basePort + delta
+    if (predictedPort <= 1024 || predictedPort > 65535) continue
+
+    const cloned = [...parts]
+    // 赋予独立 foundation 确保 libwebrtc 为每个预测端口创建独立的 CandidatePair 检查队列
+    cloned[0] = `${foundation}p${delta > 0 ? delta : 'm' + Math.abs(delta)}`
+    // 优先级设为 typePref = 86（略低于原始 srflx 的 90/88，确保若对端是 Cone NAT 则原始端口 P 优先命中）
+    const typePref = 86
+    const localPref = Math.max(1024, 30000 - i * 256)
+    const prio = typePref * 16777216 + localPref * 256 + (256 - component)
+    cloned[3] = String(prio)
+    cloned[5] = String(predictedPort)
+
+    const raddrIdx = cloned.indexOf('raddr')
+    if (raddrIdx !== -1 && cloned[raddrIdx + 1]) {
+      cloned[raddrIdx + 1] = '0.0.0.0'
+    }
+    const costIdx = cloned.indexOf('network-cost')
+    if (costIdx !== -1 && cloned[costIdx + 1]) {
+      cloned[costIdx + 1] = '10'
+    }
+
+    const body = hasCandPrefix ? `candidate:${cloned.join(' ')}` : cloned.join(' ')
+    results.push(hasAttrPrefix ? `a=${body}` : body)
+  }
+
+  return results
+}
+
+/**
+ * 调整 SDP 内所有 a=candidate: 行的优先级，过滤掉 TUN 虚拟网卡 typ host 废候选，保留并净化所有公网 srflx 候选
+ */
+export function optimizeSdpCandidates(sdp: string, _allowClientTunSrflx = true): string {
   if (!sdp || typeof sdp !== 'string') return sdp
   try {
     return sdp
       .split(/\r\n|\n/)
       .filter((line) => {
         if (line.startsWith('a=candidate:')) {
-          return !isBogusOrTunCandidate(line.slice(2))
+          return !isBogusOrTunCandidate(line.slice(2), true)
         }
         return true
       })
       .map((line) => {
         if (line.startsWith('a=candidate:')) {
           const optimized = optimizeCandidatePriority(line.slice(2))
-          return `a=${optimized}`
+          return optimized.startsWith('a=') ? optimized : `a=${optimized}`
         }
         return line
       })

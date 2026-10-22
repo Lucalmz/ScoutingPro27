@@ -7,6 +7,9 @@ import {
   STUN_SERVERS,
   TURN_SERVERS,
   isGlobalIpv6Address,
+  isBogusOrTunCandidate,
+  optimizeCandidatePriority,
+  synthesizeSymmetricNatPortCandidates,
   CONNECTION_TIMING,
   shouldAllowTurnForAttempt,
   shouldForceRelayForAttempt,
@@ -357,6 +360,33 @@ describe('Parallel Dual-Stack ICE & Non-Locking Hole Punching Architecture', () 
       mockPeer.connectionState = 'closed'
       mockPeer.onconnectionstatechange()
       expect(onDisconnect).toHaveBeenCalledTimes(1)
+    })
+
+    it('preserves and sanitizes TUN-derived public srflx candidates while synthesizing sequential ports for 4-tuple VPN/CGNAT', () => {
+      const tunHost = 'candidate:1 1 udp 2122260223 198.18.0.1 60488 typ host generation 0 ufrag BAjQ network-id 2 network-cost 50'
+      const tunSrflx = 'candidate:2 1 udp 1686052607 39.157.118.113 31081 typ srflx raddr 198.18.0.1 rport 60488 generation 0 ufrag BAjQ network-id 2 network-cost 50'
+
+      // TUN host must be filtered, but TUN public srflx MUST be preserved on both Host and Client
+      expect(isBogusOrTunCandidate(tunHost, false)).toBe(true)
+      expect(isBogusOrTunCandidate(tunSrflx, false)).toBe(false)
+      expect(isBogusOrTunCandidate(tunSrflx, true)).toBe(false)
+
+      // raddr 198.18.0.1 must be sanitized to 0.0.0.0 and network-cost 50 normalized to 10
+      const optimized = optimizeCandidatePriority(tunSrflx)
+      expect(optimized).toContain('raddr 0.0.0.0')
+      expect(optimized).toContain('network-cost 10')
+
+      // Verify sequential port prediction (+1..+5, -1) for traversing 4-tuple VPN / Symmetric CGNAT without TURN
+      ;(globalThis as any).__TEST_ENABLE_PORT_PREDICTION__ = true
+      try {
+        const predicted = synthesizeSymmetricNatPortCandidates(tunSrflx)
+        expect(predicted.length).toBe(6)
+        expect(predicted[0]).toContain('39.157.118.113 31082 typ srflx')
+        expect(predicted[1]).toContain('39.157.118.113 31083 typ srflx')
+        expect(predicted[5]).toContain('39.157.118.113 31080 typ srflx')
+      } finally {
+        delete (globalThis as any).__TEST_ENABLE_PORT_PREDICTION__
+      }
     })
   })
 })

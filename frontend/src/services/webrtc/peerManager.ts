@@ -5,6 +5,7 @@ import {
   optimizeCandidatePriority,
   classifyCandidatePair,
   isBogusOrTunCandidate,
+  isTunReflectedSrflxCandidate,
   isTunVirtualAddress,
   cleanIpAddress,
   isGlobalIpv6Address,
@@ -364,13 +365,9 @@ export class PeerConnectionManager {
             }
           }
 
-          const isPoisonedSrflxFromTun =
-            candType === 'srflx' &&
-            !addr.includes(':') &&
-            ((rport && poisonedTunPorts.has(rport)) ||
-              (raddr === '0.0.0.0' && netId && poisonedTunNetworkIds.has(netId)))
-
-          if (isBogusOrTunCandidate(rawCandStr) || isPoisonedSrflxFromTun) {
+          // 无论 Host（电脑端开 TUN）还是 Client（手机端开 VPN），只丢弃虚拟内网 typ host 候选 (198.18.x.x / 172.19.0.x / fdfe:...)，
+          // 100% 保留并净化双端通过 TUN/VPN 套接字反射出的公网 srflx 候选（由 optimizeCandidatePriority 清洗 raddr 为 0.0.0.0 并归一化 cost 为 10）
+          if (isBogusOrTunCandidate(rawCandStr, true)) {
             log.info(`Filtered out bogus/TUN poison ICE candidate: ${rawCandStr.trim()}`)
             return
           }

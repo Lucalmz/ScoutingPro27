@@ -186,6 +186,13 @@ export class SignalingChannel {
     if (isTestEnv && !(globalThis as any).__TEST_ENABLE_COMPANION_WS__) return
     if (typeof window === 'undefined' || typeof WebSocket === 'undefined') return
     if (!window.location?.host || isStaticCloudHost()) return
+    if (
+      this.companionLanWs &&
+      (this.companionLanWs.readyState === WebSocket.OPEN ||
+        this.companionLanWs.readyState === WebSocket.CONNECTING)
+    ) {
+      return
+    }
 
     try {
       const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:'

@@ -16,6 +16,7 @@ import {
   buildIceConfiguration,
   optimizeCandidatePriority,
   optimizeSdpCandidates,
+  synthesizeSymmetricNatPortCandidates,
   sortCandidatesPreferIpv6,
   probeLocalInterfaceIpv6,
   isGlobalIpv6Address,
@@ -179,37 +180,60 @@ export function createHostSignalingHandler(ctx: HostSessionContext) {
         const setupDcHandler = (targetPc: RTCPeerConnection) => {
           targetPc.ondatachannel = (ev) => {
             const dc = ev.channel
-            log.info(`Host DataChannel opened with ${sender} (label: ${dc.label})`)
+            log.info(`Host DataChannel received from ${sender} (label: ${dc.label}, state: ${dc.readyState})`)
             const targetHolder = stagedClients.get(sender) || clients.get(sender)
             const senderObj = new DataChannelSender(dc)
             dc.onmessage = (e) => ctx.handleChannelMessage(e, sender)
+
+            const promoteNativeDc = () => {
+              const holder = stagedClients.get(sender) || clients.get(sender)
+              if (holder) {
+                const prevDc = holder.dc
+                if (prevDc && prevDc !== dc && (prevDc as any)?.isVirtual) {
+                  log.info(`Host hot-upgrading ${sender} from VirtualDataChannel to Native UDP DataChannel!`)
+                  prevDc.onclose = null
+                  try { prevDc.close() } catch {}
+                }
+                holder.dc = dc
+                holder.sender = senderObj
+              }
+            }
+
+            // 若当前尚未挂载活跃的 VirtualDataChannel，可立即绑定；否则等到原生 dc.onopen 真正打开时再无缝热切换！
+            if (targetHolder && (!targetHolder.dc || !(targetHolder.dc as any)?.isVirtual || targetHolder.dc.readyState !== 'open')) {
+              targetHolder.dc = dc
+              targetHolder.sender = senderObj
+            }
+
             dc.onopen = () => {
               log.info(`Host DataChannel state is now OPEN with ${sender}`)
+              const hadOpenVirtual = Boolean(
+                targetHolder && (targetHolder.dc as any)?.isVirtual && targetHolder.dc?.readyState === 'open'
+              )
+              promoteNativeDc()
               ctx.updateHostStatus()
-              const currentEventMetadata = ctx.getCurrentEventMetadata()
-              if (currentEventMetadata) {
-                ctx.sendMessage(
-                  {
-                    type: 'EVENT_METADATA',
-                    event: currentEventMetadata,
-                    authCode: currentInviteCode || undefined,
-                    hostSessionId: hostSessionId || undefined
-                  },
-                  sender
-                )
+              if (!hadOpenVirtual) {
+                const currentEventMetadata = ctx.getCurrentEventMetadata()
+                if (currentEventMetadata) {
+                  ctx.sendMessage(
+                    {
+                      type: 'EVENT_METADATA',
+                      event: currentEventMetadata,
+                      authCode: currentInviteCode || undefined,
+                      hostSessionId: hostSessionId || undefined
+                    },
+                    sender
+                  )
+                }
               }
             }
             dc.onclose = () => {
+              const holder = stagedClients.get(sender) || clients.get(sender)
+              if (holder && holder.dc && holder.dc !== dc && (holder.dc as any)?.isVirtual && holder.dc.readyState === 'open') {
+                return
+              }
               log.warn(`Host DataChannel closed with ${sender}`)
               ctx.updateHostStatus()
-            }
-
-            if (targetHolder) {
-              if (targetHolder.dc && (targetHolder.dc as any).isVirtual && targetHolder.dc !== dc) {
-                try { targetHolder.dc.close() } catch {}
-              }
-              targetHolder.dc = dc
-              targetHolder.sender = senderObj
             }
           }
         }
@@ -343,6 +367,7 @@ export function createHostSignalingHandler(ctx: HostSessionContext) {
           const allowTurn = Boolean(data.allowTurn || data.offer?.allowTurn || data.forceRelay)
           const pc = ctx.peerMgr.createPeerConnection(sender, onDisconnect, false, undefined, {
             sessionTag: data.clientSessionId,
+            holdLocalCandidates: true,
             allowTurn
           })
           pcRef = pc
@@ -692,8 +717,8 @@ export function createHostSignalingHandler(ctx: HostSessionContext) {
         const answer = await pc.createAnswer()
         await pc.setLocalDescription(answer)
 
-        // 等待最多 60ms（测试环境跳过）让 Chromium 采集完本地物理网卡全球单播 IPv6 (2000::/3) host 候选（实测仅需 ~11ms），
-        // 直接内嵌进 answer.sdp 随单条信令发回从机，立即启动 IPv6 双向并发打洞 (Simultaneous Open) 穿透运营商状态防火墙
+        // 等待最多 90ms（测试环境跳过）让 Chromium 采集完本地公网 IPv6 (2000::/3) host 候选与 STUN srflx 候选（实测 ~30ms），
+        // 直接内嵌进 answer.sdp 随单条信令发回从机，立即启动双栈并发打洞
         const isTestEnv =
           (typeof process !== 'undefined' && (process.env?.NODE_ENV === 'test' || process.env?.VITEST === 'true')) ||
           Boolean((globalThis as any).__vitest_worker__)
@@ -709,17 +734,19 @@ export function createHostSignalingHandler(ctx: HostSessionContext) {
             }
             const pollTimer = setInterval(() => {
               const curSdp = pc.localDescription?.sdp || ''
-              if (pc.iceGatheringState === 'complete' || /a=candidate:[^\r\n]*\s[23][0-9a-f]{0,3}:/i.test(curSdp)) {
+              const hasV6Host = /a=candidate:[^\r\n]*\s[23][0-9a-f]{0,3}:[^\r\n]*\styp\s+host/i.test(curSdp)
+              const hasSrflx = /a=candidate:[^\r\n]*\styp\s+srflx/i.test(curSdp)
+              if (pc.iceGatheringState === 'complete' || (hasV6Host && hasSrflx)) {
                 finish()
               }
             }, 8)
-            const maxTimer = setTimeout(finish, 60)
+            const maxTimer = setTimeout(finish, 90)
           })
         }
 
         const optimizedAnswer = {
           type: answer.type,
-          sdp: optimizeSdpCandidates(pc?.localDescription?.sdp || answer.sdp || '')
+          sdp: optimizeSdpCandidates(pc?.localDescription?.sdp || answer.sdp || '', true)
         }
 
         let answerPayload: any = optimizedAnswer
@@ -756,6 +783,25 @@ export function createHostSignalingHandler(ctx: HostSessionContext) {
           sender
         )
 
+        // Answer 已发出：现在放行暂存的本地 Trickle 候选，严格保证 Answer -> Candidate 顺序
+        ctx.peerMgr.releaseLocalCandidates(pc)
+
+        // 若 Offer SDP 内已内嵌了从机的 srflx 候选，合成紧邻端口预测候选以穿透手机 VPN 四元组 NAT / CGNAT
+        if (offerData?.sdp && typeof offerData.sdp === 'string') {
+          for (const line of offerData.sdp.split(/\r?\n/)) {
+            if (line.startsWith('a=candidate:') && /\btyp\s+srflx\b/i.test(line)) {
+              const predictedList = synthesizeSymmetricNatPortCandidates(line.slice(2))
+              for (const predCandStr of predictedList) {
+                try {
+                  await pc.addIceCandidate(
+                    toIceCandidate({ candidate: predCandStr, sdpMid: '0', sdpMLineIndex: 0 })
+                  )
+                } catch {}
+              }
+            }
+          }
+        }
+
         const sortedPending = sortCandidatesPreferIpv6(clientData.pendingCandidates)
         clientData.pendingCandidates = []
         for (const c of sortedPending) {
@@ -771,10 +817,26 @@ export function createHostSignalingHandler(ctx: HostSessionContext) {
               }
             }
             if (candidateObj && candidateObj.candidate) {
+              if (isBogusOrTunCandidate(candidateObj.candidate, true)) {
+                continue
+              }
               candidateObj.candidate = optimizeCandidatePriority(candidateObj.candidate)
               log.info(`Remote ICE Candidate (pending) added from ${sender}: ${String(candidateObj.candidate).trim()}`)
             }
             await pc.addIceCandidate(toIceCandidate(candidateObj))
+            if (candidateObj?.candidate) {
+              const predictedList = synthesizeSymmetricNatPortCandidates(candidateObj.candidate)
+              for (const predCandStr of predictedList) {
+                try {
+                  await pc.addIceCandidate(
+                    toIceCandidate({
+                      ...candidateObj,
+                      candidate: predCandStr
+                    })
+                  )
+                } catch {}
+              }
+            }
           } catch (err) {
             console.warn('[WebRTC Host] Error adding pending ICE candidate:', err)
           }
@@ -849,7 +911,8 @@ export function createHostSignalingHandler(ctx: HostSessionContext) {
           }
         }
         if (candidateData && candidateData.candidate) {
-          if (isBogusOrTunCandidate(candidateData.candidate)) {
+          // 传入 allowClientTunSrflx = true 允许 Client（手机端）通过 VPN 隧道反射的二阶 srflx 候选到达，由 optimizeCandidatePriority 降权至 45 保留打洞机会
+          if (isBogusOrTunCandidate(candidateData.candidate, true)) {
             log.info(`Dropped remote bogus/TUN poison candidate from ${sender}:`, candidateData.candidate)
             return
           }
@@ -879,6 +942,19 @@ export function createHostSignalingHandler(ctx: HostSessionContext) {
               log.info(`Remote ICE Candidate added from ${sender}: ${String(candidateData.candidate).trim()}`)
             }
             await targetHolder.pc.addIceCandidate(toIceCandidate(candidateData))
+            if (candidateData?.candidate) {
+              const predictedList = synthesizeSymmetricNatPortCandidates(candidateData.candidate)
+              for (const predCandStr of predictedList) {
+                try {
+                  await targetHolder.pc.addIceCandidate(
+                    toIceCandidate({
+                      ...candidateData,
+                      candidate: predCandStr
+                    })
+                  )
+                } catch {}
+              }
+            }
           } catch {
             targetHolder.pendingCandidates.push(candidateData)
           }

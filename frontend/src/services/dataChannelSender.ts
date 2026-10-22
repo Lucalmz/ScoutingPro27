@@ -109,6 +109,9 @@ export class DataChannelSender {
         await this.safeSendInternal(task.payload)
         task.resolve()
         this.onCongestion?.(false)
+        if (this.queue.length > 0 && task.payload.length > 1120 && !(this.dc as any)?.isVirtual) {
+          await new Promise((r) => setTimeout(r, 3))
+        }
       } catch (err) {
         if (err instanceof SenderAbortedError) {
           log.info(`Send task cancelled: ${err.message}`)

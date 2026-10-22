@@ -6,9 +6,12 @@ import com.google.gson.JsonArray;
 import com.google.gson.JsonElement;
 import com.google.gson.JsonObject;
 import com.google.gson.JsonParser;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
 import java.net.InetSocketAddress;
 import java.net.ProxySelector;
+import java.net.Socket;
 import java.net.URI;
 import java.net.http.HttpClient;
 import java.net.http.HttpRequest;
@@ -20,16 +23,69 @@ import java.util.List;
 import java.util.Map;
 
 public class AiClient {
+    private static final Logger logger = LoggerFactory.getLogger(AiClient.class);
     private static final Gson gson = new Gson();
+    // 主流 VPN 客户端默认本地 HTTP 代理端口（Clash/Mihomo: 7890, Clash Verge Rev: 7897, v2rayN: 10809/10808, Shadowsocks: 1080）
+    private static final int[] COMMON_LOCAL_PROXY_PORTS = {7890, 7897, 10809, 10808, 7891, 1080};
+
+    public static java.net.Proxy resolveEffectiveProxy(String customHost, Integer customPort) {
+        // 1. 优先使用显式指定的代理主机和端口
+        if (customPort != null && customPort > 0 && customPort <= 65535) {
+            String host = (customHost != null && !customHost.isBlank()) ? customHost.trim() : "127.0.0.1";
+            return new java.net.Proxy(java.net.Proxy.Type.HTTP, new InetSocketAddress(host, customPort));
+        }
+        // 2. 其次读取环境变量 HTTPS_PROXY / HTTP_PROXY
+        String envProxy = System.getenv("HTTPS_PROXY");
+        if (envProxy == null || envProxy.isBlank()) {
+            envProxy = System.getenv("HTTP_PROXY");
+        }
+        if (envProxy != null && !envProxy.isBlank()) {
+            try {
+                URI u = URI.create(envProxy.trim());
+                if (u.getHost() != null && u.getPort() > 0) {
+                    return new java.net.Proxy(java.net.Proxy.Type.HTTP, new InetSocketAddress(u.getHost(), u.getPort()));
+                }
+            } catch (Exception ignored) {}
+        }
+        // 3. 自动探测本机正在监听的 VPN 代理端口（无论是系统代理模式还是 TUN 模式均 100% 可达）
+        for (int port : COMMON_LOCAL_PROXY_PORTS) {
+            try (Socket s = new Socket()) {
+                s.connect(new InetSocketAddress("127.0.0.1", port), 35);
+                logger.info("[AiClient] Auto-detected active local VPN proxy on 127.0.0.1:{}", port);
+                return new java.net.Proxy(java.net.Proxy.Type.HTTP, new InetSocketAddress("127.0.0.1", port));
+            } catch (Exception ignored) {}
+        }
+        // 4. 兜底使用操作系统级默认代理
+        try {
+            ProxySelector sysSelector = ProxySelector.getDefault();
+            if (sysSelector != null) {
+                List<java.net.Proxy> proxies = sysSelector.select(URI.create("https://api.openai.com"));
+                if (proxies != null && !proxies.isEmpty()) {
+                    java.net.Proxy p = proxies.get(0);
+                    if (p != null && p.type() != java.net.Proxy.Type.DIRECT) {
+                        return p;
+                    }
+                }
+            }
+        } catch (Exception ignored) {}
+        return java.net.Proxy.NO_PROXY;
+    }
+
+    private static ProxySelector resolveEffectiveProxySelector(AiSettings settings) {
+        String host = settings.getProxyHost();
+        Integer port = settings.getProxyPort();
+        java.net.Proxy proxy = resolveEffectiveProxy(host, port);
+        if (proxy != null && proxy.type() != java.net.Proxy.Type.DIRECT && proxy.address() instanceof InetSocketAddress addr) {
+            return ProxySelector.of(addr);
+        }
+        ProxySelector sys = ProxySelector.getDefault();
+        return sys != null ? sys : HttpClient.Builder.NO_PROXY;
+    }
 
     public static String chat(AiSettings settings, String systemPrompt, List<Map<String, String>> messages) throws Exception {
         HttpClient.Builder clientBuilder = HttpClient.newBuilder()
-                .connectTimeout(Duration.ofSeconds(15));
-
-        if (settings.getProxyPort() != null && settings.getProxyPort() > 0) {
-            String host = (settings.getProxyHost() != null && !settings.getProxyHost().isEmpty()) ? settings.getProxyHost() : "127.0.0.1";
-            clientBuilder.proxy(ProxySelector.of(new InetSocketAddress(host, settings.getProxyPort())));
-        }
+                .connectTimeout(Duration.ofSeconds(15))
+                .proxy(resolveEffectiveProxySelector(settings));
 
         HttpClient client = clientBuilder.build();
         String rawKey = AESUtil.decrypt(settings.getApiKeyEncrypted());
@@ -45,12 +101,8 @@ public class AiClient {
 
     public static void chatStream(AiSettings settings, String systemPrompt, List<Map<String, String>> messages, java.util.function.Consumer<String> chunkConsumer, java.util.concurrent.atomic.AtomicBoolean isCancelled) throws Exception {
         HttpClient.Builder clientBuilder = HttpClient.newBuilder()
-                .connectTimeout(Duration.ofSeconds(15));
-
-        if (settings.getProxyPort() != null && settings.getProxyPort() > 0) {
-            String host = (settings.getProxyHost() != null && !settings.getProxyHost().isEmpty()) ? settings.getProxyHost() : "127.0.0.1";
-            clientBuilder.proxy(ProxySelector.of(new InetSocketAddress(host, settings.getProxyPort())));
-        }
+                .connectTimeout(Duration.ofSeconds(15))
+                .proxy(resolveEffectiveProxySelector(settings));
 
         HttpClient client = clientBuilder.build();
         String rawKey = AESUtil.decrypt(settings.getApiKeyEncrypted());

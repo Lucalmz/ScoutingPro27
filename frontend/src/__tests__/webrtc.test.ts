@@ -1367,32 +1367,34 @@ describe('IPv6 Priority & Transport Diagnostics', () => {
     vi.clearAllMocks()
   })
 
-  it('configures HiTV domestic dual-stack STUN as the primary STUN servers and excludes non-IPv6 domestic STUNs', () => {
+  it('configures literal IPv6/IPv4 STUNs as primary, followed by high-availability dual-stack domain STUNs', () => {
     const iceServers = STUN_SERVERS.iceServers || []
-    expect(iceServers.length).toBeGreaterThanOrEqual(3)
+    expect(iceServers.length).toBeGreaterThanOrEqual(2)
     const firstServer = iceServers[0]
     expect(firstServer.urls).toEqual([
-      'stun:stun.hitv.com:3478',
       'stun:[2409:8c50:e00::1]:3478',
       'stun:[2409:8c50:e00::4]:3478',
+      'stun:[2606:4700:49::]:3478',
       'stun:111.8.3.78:3478'
     ])
-    // Secondary Cloudflare STUN
-    expect(iceServers[1].urls).toEqual(['stun:stun.cloudflare.com:3478'])
+    // Secondary domain STUNs
+    expect(iceServers[1].urls).toEqual([
+      'stun:stun.miwifi.com:3478',
+      'stun:stun.qq.com:3478',
+      'stun:stun.hitv.com:3478',
+      'stun:stun.cloudflare.com:3478',
+      'stun:stun.l.google.com:19302'
+    ])
 
-    // Flatten all configured STUN URLs to verify presence of HiTV and removal of non-IPv6 servers
+    // Flatten all configured STUN URLs to verify presence of HiTV and literal IPv6
     const allUrls = iceServers.flatMap((server) =>
       Array.isArray(server.urls) ? server.urls : [server.urls]
     )
 
-    // HiTV STUN (both domain and direct IPv6) must be present
     expect(allUrls).toContain('stun:stun.hitv.com:3478')
+    expect(allUrls).toContain('stun:[2409:8c50:e00::1]:3478')
     expect(allUrls).toContain('stun:[2409:8c50:e00::4]:3478')
-
-    // Domestic non-IPv6 STUN servers (miwifi, bilibili, qq) must not exist
-    expect(allUrls.some((u) => u.includes('miwifi'))).toBe(false)
-    expect(allUrls.some((u) => u.includes('bilibili'))).toBe(false)
-    expect(allUrls.some((u) => u.includes('stun.qq.com'))).toBe(false)
+    expect(allUrls).toContain('stun:[2606:4700:49::]:3478')
   })
 
   it('correctly validates Global Unicast IPv6 addresses and rejects local/private addresses', () => {

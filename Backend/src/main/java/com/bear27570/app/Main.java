@@ -352,8 +352,8 @@ public class Main {
             builder.getCefSettings().windowless_rendering_enabled = false;
             builder.addJcefArgs("--use-fake-ui-for-media-stream");
             builder.addJcefArgs("--disable-features=WebRtcHideLocalIpsWithMdns,WebUsb,MediaRouter,CalculateNativeWinOcclusion");
-            // 开启 Chromium libwebrtc 底层 Socket 网卡索引强绑定 (Windows IPV6_UNICAST_IF / IP_UNICAST_IF)、IPv6 默认探测与 BBR 拥塞控制
-            builder.addJcefArgs("--force-fieldtrials=WebRTC-BindUsingInterfaceIndex/Enabled/WebRTC-IPv6Default/Enabled/WebRTC-Bwe-Bbr/Enabled/");
+            // 开启 Chromium libwebrtc IPv6 默认探测、按物理网卡索引绑定 Socket、快速 ICE 提名探测与 BBR 拥塞控制
+            builder.addJcefArgs("--force-fieldtrials=WebRTC-IPv6Default/Enabled/WebRTC-BindUsingInterfaceIndex/Enabled/WebRTC-IceFieldTrials/send_ping_on_switch_ice_controlling:true,send_ping_on_selected_ice_controlling:true,send_ping_on_nomination_ice_controlled:true/WebRTC-Bwe-Bbr/Enabled/");
             builder.addJcefArgs("--disable-device-discovery-notifications");
             builder.addJcefArgs("--disable-usb-keyboard-detect");
 
