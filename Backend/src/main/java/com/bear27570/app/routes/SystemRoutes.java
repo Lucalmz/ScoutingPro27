@@ -53,6 +53,20 @@ public class SystemRoutes {
             ctx.result(gson.toJson(resp)).contentType("application/json");
         });
 
+        routes.post("/api/system/heal-ipv6-routes", ctx -> {
+            int currentPort = ctx.port();
+            boolean healed = NetworkUtil.healWindowsIpv6DirectRoutes(currentPort);
+            NetworkUtil.NetworkInfo info = NetworkUtil.getCompleteNetworkInfo();
+            Map<String, Object> resp = new HashMap<>();
+            resp.put("success", healed);
+            resp.put("ipv6DirectRoutesReady", healed);
+            resp.put("primaryIpv6", info.primaryIpv6());
+            resp.put("allIpv6s", info.allIpv6s());
+            resp.put("primaryIp", info.primaryIp());
+            resp.put("allIps", info.allIps());
+            ctx.result(gson.toJson(resp)).contentType("application/json");
+        });
+
         routes.post("/api/system/log", ctx -> {
             String body = ctx.body();
             if (body != null && !body.isBlank()) {

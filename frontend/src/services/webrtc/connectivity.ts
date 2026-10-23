@@ -79,12 +79,15 @@ export async function probePublicConnectivity(timeoutMs = 2500, bypassThrottle =
  */
 export const PURE_STUN_SERVERS: RTCConfiguration = {
   iceServers: [
-    // 1. 免 DNS 解析的纯 IPv6/IPv4 字面量 STUN（libwebrtc 直接解析为 SocketAddress，不发任何 DNS 请求，100% 免疫 Fake-IP 劫持）
+    // 1. 免 DNS 解析的纯 IPv6/IPv4 字面量 STUN（libwebrtc 直接解析为 SocketAddress，不发任何 DNS 请求，100% 免疫 Mihomo/VPN dns-hijack any:53 与 dns.ipv6:false 劫持）
     {
       urls: [
+        'stun:[2409:8c50:e00::3]:3478',
         'stun:[2409:8c50:e00::1]:3478',
         'stun:[2409:8c50:e00::4]:3478',
         'stun:[2606:4700:49::]:3478',
+        'stun:[2001:4860:4864:5:8000::1]:19302',
+        'stun:[2a01:4f8:1c1e:d769::1]:3478',
         'stun:111.8.3.78:3478'
       ]
     },
@@ -106,37 +109,54 @@ let dohResolvedStunV6Urls: string[] = []
 let dohResolvePromise: Promise<string[]> | null = null
 
 /**
- * 使用真正免鉴权且支持浏览器 CORS (Access-Control-Allow-Origin: *) 的 Cloudflare / Google DoH JSON API，
- * 在手机挂梯子时走 HTTPS 代理隧道解析国内双栈 STUN 的真实公网 AAAA (type=28) 记录，绕过本地 Fake-IP DNS 拦截。
+ * 使用真正免鉴权且支持浏览器 CORS 的阿里 DoH (国内直连毫秒级可达) 与 Cloudflare DoH (海外 VPN 隧道可达) 双源 JSON API，
+ * 并发解析境内外双栈 STUN 的真实公网 AAAA (type=28) 记录，100% 绕过 TUN/VPN 的 dns-hijack: any:53 与 dns.ipv6: false 拦截。
  */
 export function warmUpDoHStunIpv6(): Promise<string[]> {
   if (dohResolvedStunV6Urls.length > 0) return Promise.resolve(dohResolvedStunV6Urls)
   if (dohResolvePromise) return dohResolvePromise
   if (typeof fetch === 'undefined') return Promise.resolve([])
 
-  const domains = ['stun.hitv.com', 'stun.miwifi.com', 'stun.qq.com']
-  dohResolvePromise = Promise.allSettled(
-    domains.map(async (domain) => {
-      const controller = new AbortController()
-      const timer = setTimeout(() => controller.abort(), 1500)
-      try {
-        const res = await fetch(`https://cloudflare-dns.com/dns-query?name=${domain}&type=AAAA`, {
-          headers: { accept: 'application/dns-json' },
-          signal: controller.signal
-        })
-        if (!res.ok) return []
-        const data = await res.json()
-        const answers: Array<{ type: number; data: string }> = Array.isArray(data?.Answer) ? data.Answer : []
-        return answers
-          .filter((a) => a.type === 28 && isGlobalIpv6Address(a.data))
-          .map((a) => `stun:[${cleanIpAddress(a.data)}]:3478`)
-      } catch {
-        return []
-      } finally {
-        clearTimeout(timer)
-      }
-    })
-  ).then((results) => {
+  const targets: Array<{ domain: string; port: number }> = [
+    { domain: 'stun.hitv.com', port: 3478 },
+    { domain: 'stun.cloudflare.com', port: 3478 },
+    { domain: 'stun.l.google.com', port: 19302 },
+    { domain: 'stun.nextcloud.com', port: 3478 }
+  ]
+  const dohEndpoints = [
+    'https://dns.alidns.com/resolve',
+    'https://cloudflare-dns.com/dns-query'
+  ]
+
+  const tasks: Array<Promise<string[]>> = []
+  for (const { domain, port } of targets) {
+    for (const endpoint of dohEndpoints) {
+      tasks.push(
+        (async () => {
+          const controller = new AbortController()
+          const timer = setTimeout(() => controller.abort(), 1500)
+          try {
+            const res = await fetch(`${endpoint}?name=${domain}&type=AAAA`, {
+              headers: { accept: 'application/dns-json' },
+              signal: controller.signal
+            })
+            if (!res.ok) return []
+            const data = await res.json()
+            const answers: Array<{ type: number; data: string }> = Array.isArray(data?.Answer) ? data.Answer : []
+            return answers
+              .filter((a) => a.type === 28 && isGlobalIpv6Address(a.data))
+              .map((a) => `stun:[${cleanIpAddress(a.data)}]:${port}`)
+          } catch {
+            return []
+          } finally {
+            clearTimeout(timer)
+          }
+        })()
+      )
+    }
+  }
+
+  dohResolvePromise = Promise.allSettled(tasks).then((results) => {
     const urls = new Set<string>()
     for (const r of results) {
       if (r.status === 'fulfilled') {
@@ -457,42 +477,39 @@ export async function probeLocalInterfaceIpv6(): Promise<string | null> {
   })
 }
 
+let lastHostIpv6HealTime = 0
+
 /**
- * 当浏览器/JCEF 因开启 TUN (198.18.0.1 / fdfe:dcba:9876::1) 默认路由劫持而仅吐出 TUN 虚拟网卡的 typ host 候选时，
- * 利用底层通配套接字 (0.0.0.0:port / [::]:port) 在所有物理网卡相同端口同时监听的特性，
- * 将 TUN typ host 候选合成为指向本机真实物理网卡 (公网 IPv6 GUA 240e/2408/2409 与局域网 192.168.x.x) 的直连 typ host 候选。
+ * 当电脑端 Host 物理网卡存在公网 IPv6 (cachedPhysicalIpv6s 非空)，但 Chromium ICE 采集出 0 个本地 IPv6 候选时，
+ * 说明用户在软件启动后新开启或重启了 TUN 代理劫持了系统 IPv6 路由；此时自动请求后端执行路由剥离自愈。
  */
-export function synthesizePhysicalHostCandidatesFromTun(rawCandidateStr: string): string[] {
-  if (!rawCandidateStr || typeof rawCandidateStr !== 'string') return []
-  const trimmed = rawCandidateStr.trim()
-  const hasPrefix = trimmed.startsWith('candidate:')
-  const cleanStr = hasPrefix ? trimmed.slice('candidate:'.length).trim() : trimmed
-  const parts = cleanStr.split(/\s+/)
-  if (parts.length < 7) return []
-
-  const addr = cleanIpAddress(parts[4] || '')
-  const typeIndex = parts.indexOf('typ')
-  const candType = typeIndex !== -1 && parts[typeIndex + 1] ? parts[typeIndex + 1] : ''
-  if (candType !== 'host' || !isTunVirtualAddress(addr)) {
-    return []
-  }
-
-  const isV6Tun = addr.includes(':')
-  const targetIps = isV6Tun ? cachedPhysicalIpv6s : cachedPhysicalIpv4s
-  if (!targetIps || targetIps.length === 0) return []
-
-  const synthesized: string[] = []
-  for (const physIp of targetIps) {
-    const newParts = [...parts]
-    newParts[4] = physIp
-    const costIdx = newParts.indexOf('network-cost')
-    if (costIdx !== -1 && newParts[costIdx + 1]) {
-      newParts[costIdx + 1] = '10'
+export async function healHostIpv6RoutesIfNeeded(): Promise<boolean> {
+  const now = Date.now()
+  if (now - lastHostIpv6HealTime < 15000) return false
+  lastHostIpv6HealTime = now
+  try {
+    const { healIpv6DirectRoutes } = await import('@/services/api')
+    const res = await healIpv6DirectRoutes()
+    if (res && res.success) {
+      if (res.primaryIpv6 && isGlobalIpv6Address(res.primaryIpv6)) {
+        cachedLocalIpv6 = cleanIpAddress(res.primaryIpv6)
+      }
+      if (Array.isArray(res.allIpv6s)) {
+        cachedPhysicalIpv6s = res.allIpv6s
+          .filter((ip) => isGlobalIpv6Address(ip))
+          .map((ip) => cleanIpAddress(ip))
+      }
+      return true
     }
-    const candidateLine = hasPrefix ? `candidate:${newParts.join(' ')}` : newParts.join(' ')
-    synthesized.push(optimizeCandidatePriority(candidateLine))
-  }
-  return synthesized
+  } catch {}
+  return false
+}
+
+/**
+ * 历史兼容保留导出（Chromium UDPPort 绑定在具体接口 IP 上，仅靠替换 SDP 文本无法在物理网卡对应端口监听，现由 healHostIpv6RoutesIfNeeded 在系统路由层自愈）。
+ */
+export function synthesizePhysicalHostCandidatesFromTun(_rawCandidateStr: string): string[] {
+  return []
 }
 
 /**
@@ -614,8 +631,10 @@ export function isTunVirtualAddress(ip: string): boolean {
   const clean = cleanIpAddress(ip)
   if (!clean) return false
   if (clean.startsWith('198.18.') || clean.startsWith('198.19.')) return true
-  // 识别 sing-box / Mihomo (Clash Meta) / NekoBox 默认 TUN IPv4 段 (172.19.0.x) 及 Docker/WSL 虚拟网桥网关 (.0.1)
-  if (/^172\.(1[7-9]|2\d|3[0-1])\.0\.[12]$/.test(clean)) return true
+  // 识别移动端 v2rayNG / Xray / NekoBox 默认虚拟网卡地址段 (10.10.14.x / 26.26.26.x)
+  if (clean.startsWith('10.10.14.') || clean.startsWith('26.26.26.')) return true
+  // 识别 sing-box / Mihomo (Clash Meta) / NekoBox 默认 TUN IPv4 段 (172.19.0.x) 及 Docker/WSL 虚拟网桥网关 (.0.1/.0.2)
+  if (/^172\.(1[7-9]|2\d|3[0-1])\.0\.\d+$/.test(clean)) return true
   if (/^100\.(6[4-9]|[7-9]\d|1[01]\d|12[0-7])\./.test(clean)) return true
   if (clean.startsWith('fc') || clean.startsWith('fd')) return true
   return false
@@ -824,22 +843,19 @@ export function optimizeCandidatePriority(candidateStr: string): string {
       }
     }
 
-    // 若是电脑 TUN 或手机 VPN 隧道反射的公网 srflx 候选：赋予 typePref = 88（紧随物理网卡 srflx 90 之后）
-    if (wasTunReflectedSrflx) {
-      const typePref = 88
-      const localPref = 32768 - tieBreaker
-      const prio = typePref * 16777216 + localPref * 256 + (256 - component)
-      parts[3] = String(prio)
-      return formatOut(parts)
-    }
-
-    // 1. 全球公网单播 IPv6 候选（2000::/3）
+    // 1. 全球公网单播 IPv6 候选（2000::/3）：必须位于 wasTunReflectedSrflx 之前，
+    // 确保当手机 VPN 或电脑 TUN 反射出合法公网 IPv6 srflx (如 raddr fdfe:...) 时，赋予高优先级 (typePref = 122)，绝不被降权至 IPv4 之下！
     if (cleanAddr && isGlobalIpv6Address(cleanAddr)) {
       let typePref = 0
       if (candType === 'host') typePref = isTestEnv ? 120 : 126
       else if (candType === 'prflx') typePref = isTestEnv ? 110 : 125
-      else if (candType === 'srflx') typePref = isTestEnv ? 100 : 125
-      else if (candType === 'relay') typePref = 0
+      else if (candType === 'srflx') {
+        if (wasTunReflectedSrflx) {
+          typePref = isTestEnv ? 98 : 122
+        } else {
+          typePref = isTestEnv ? 100 : 125
+        }
+      } else if (candType === 'relay') typePref = 0
 
       if (typePref > 0) {
         const eui64Penalty = !isTestEnv && !isTemporaryPrivacyIpv6(cleanAddr) ? 512 : 0
@@ -848,6 +864,15 @@ export function optimizeCandidatePriority(candidateStr: string): string {
         parts[3] = String(boostedPriority)
         return formatOut(parts)
       }
+    }
+
+    // 若是电脑 TUN 或手机 VPN 隧道反射的公网 IPv4 srflx 候选：赋予 typePref = 88（紧随物理网卡 IPv4 srflx 90 之后）
+    if (wasTunReflectedSrflx) {
+      const typePref = 88
+      const localPref = 32768 - tieBreaker
+      const prio = typePref * 16777216 + localPref * 256 + (256 - component)
+      parts[3] = String(prio)
+      return formatOut(parts)
     }
 
     // 2. LAN 私有局域网 Host 候选（单测保持 126，真机设为 124 紧随公网 IPv6 之后）
@@ -1008,10 +1033,17 @@ export function sortCandidatesPreferIpv6<T extends { candidate?: string }>(candi
       if (parts.length < 7) return 0
       if (isBogusOrTunCandidate(cleanStr)) return 1
 
+      const protocol = (parts[2] || '').toLowerCase()
       const address = parts[4] || ''
+      const port = parts[5] || ''
       const cleanAddr = cleanIpAddress(address)
       const typeIndex = parts.indexOf('typ')
       const candType = typeIndex !== -1 && parts[typeIndex + 1] ? parts[typeIndex + 1] : ''
+
+      // 端口为 9 的 tcptype active 伪候选无法被对端主动连接，排在所有 UDP 候选之后、TURN relay 之前
+      if (protocol === 'tcp' && port === '9') {
+        return 10
+      }
 
       // 1. LAN 局域网私有 IPv4 Host 具备最高优先级（零公网流量、超低延迟）
       if (candType === 'host' && (isPrivateIpv4Address(cleanAddr) || cleanAddr.endsWith('.local'))) {

@@ -717,8 +717,8 @@ export function createHostSignalingHandler(ctx: HostSessionContext) {
         const answer = await pc.createAnswer()
         await pc.setLocalDescription(answer)
 
-        // 等待最多 90ms（测试环境跳过）让 Chromium 采集完本地公网 IPv6 (2000::/3) host 候选与 STUN srflx 候选（实测 ~30ms），
-        // 直接内嵌进 answer.sdp 随单条信令发回从机，立即启动双栈并发打洞
+        // 等待最多 180ms（测试环境跳过）让 Chromium 采集完本地公网 IPv6 (2000::/3) host 候选与 STUN srflx 候选（一旦集齐立即在 8ms 轮询中提前结束），
+        // 直接内嵌进 answer.sdp 随单条信令发回从机，确保双端代理环境下高延迟反射的 srflx 候选也能直接随首包下发
         const isTestEnv =
           (typeof process !== 'undefined' && (process.env?.NODE_ENV === 'test' || process.env?.VITEST === 'true')) ||
           Boolean((globalThis as any).__vitest_worker__)
@@ -740,7 +740,7 @@ export function createHostSignalingHandler(ctx: HostSessionContext) {
                 finish()
               }
             }, 8)
-            const maxTimer = setTimeout(finish, 90)
+            const maxTimer = setTimeout(finish, 180)
           })
         }
 

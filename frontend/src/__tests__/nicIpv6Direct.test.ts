@@ -8,7 +8,9 @@ import {
   TURN_SERVERS,
   isGlobalIpv6Address,
   isBogusOrTunCandidate,
+  isTunVirtualAddress,
   optimizeCandidatePriority,
+  sortCandidatesPreferIpv6,
   synthesizeSymmetricNatPortCandidates,
   CONNECTION_TIMING,
   shouldAllowTurnForAttempt,
@@ -387,6 +389,56 @@ describe('Parallel Dual-Stack ICE & Non-Locking Hole Punching Architecture', () 
       } finally {
         delete (globalThis as any).__TEST_ENABLE_PORT_PREDICTION__
       }
+    })
+
+    it('ranks VPN/TUN-reflected Global Unicast IPv6 srflx candidates above IPv4 srflx and demotes TCP active port 9', () => {
+      const tunV6Srflx =
+        'candidate:321820268 1 udp 1686055167 2404:c140:2103:11f4:7a71:35ec:cc:35ec 32463 typ srflx raddr fdfe:dcba:9876::1 rport 49266 generation 0 ufrag vVL1 network-id 4 network-cost 50'
+      const tunV4Srflx =
+        'candidate:3241306507 1 udp 1686052607 39.157.118.113 31081 typ srflx raddr 198.18.0.1 rport 60488 generation 0 ufrag BAjQ network-id 2 network-cost 50'
+      const physV4Srflx =
+        'candidate:1617423965 1 udp 1518212863 39.157.118.113 31080 typ srflx raddr 192.168.1.9 rport 60489 generation 0 ufrag BAjQ network-id 1 network-cost 10'
+      const tcpPort9V6 =
+        'candidate:1481299846 1 tcp 1518283007 2409:8a00:1852:2f10:3dfe:c0b8:9799:b044 9 typ host tcptype active generation 0 ufrag RP/N network-id 2 network-cost 10'
+
+      expect(isBogusOrTunCandidate(tunV6Srflx, true)).toBe(false)
+      const optV6 = optimizeCandidatePriority(tunV6Srflx)
+      const optTunV4 = optimizeCandidatePriority(tunV4Srflx)
+      const optPhysV4 = optimizeCandidatePriority(physV4Srflx)
+
+      expect(optV6).toContain('raddr ::')
+      expect(optV6).toContain('network-cost 10')
+
+      const prioV6 = parseInt(optV6.split(/\s+/)[3] || '0', 10)
+      const prioPhysV4 = parseInt(optPhysV4.split(/\s+/)[3] || '0', 10)
+      const prioTunV4 = parseInt(optTunV4.split(/\s+/)[3] || '0', 10)
+
+      // TUN-reflected GUA IPv6 srflx must have strictly higher priority than both physical and TUN IPv4 srflx
+      expect(prioV6).toBeGreaterThan(prioPhysV4)
+      expect(prioPhysV4).toBeGreaterThan(prioTunV4)
+
+      // sortCandidatesPreferIpv6 must place TCP port 9 active candidate below UDP srflx
+      const sorted = sortCandidatesPreferIpv6([
+        { candidate: tcpPort9V6 },
+        { candidate: physV4Srflx },
+        { candidate: tunV6Srflx }
+      ])
+      expect(sorted[0]?.candidate).toBe(tunV6Srflx)
+      expect(sorted[1]?.candidate).toBe(physV4Srflx)
+      expect(sorted[2]?.candidate).toBe(tcpPort9V6)
+
+      // Verify mobile VPN virtual subnets (v2rayNG / NekoBox) are recognized as TUN addresses
+      expect(isTunVirtualAddress('10.10.14.1')).toBe(true)
+      expect(isTunVirtualAddress('26.26.26.1')).toBe(true)
+      expect(isTunVirtualAddress('172.19.0.1')).toBe(true)
+
+      // Verify DNS-free IPv6 literals include both domestic and overseas Google/Cloudflare STUN
+      const allUrls = (PURE_STUN_SERVERS.iceServers || []).flatMap((s) =>
+        Array.isArray(s.urls) ? s.urls : [s.urls]
+      )
+      expect(allUrls).toContain('stun:[2409:8c50:e00::3]:3478')
+      expect(allUrls).toContain('stun:[2606:4700:49::]:3478')
+      expect(allUrls).toContain('stun:[2001:4860:4864:5:8000::1]:19302')
     })
   })
 })

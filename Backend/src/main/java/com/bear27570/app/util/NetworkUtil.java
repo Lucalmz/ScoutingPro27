@@ -303,6 +303,10 @@ public class NetworkUtil {
                     return;
                 }
             }
+            if (Boolean.getBoolean("scouting.skipUacPrompt")) {
+                System.out.println("[Firewall] scouting.skipUacPrompt=true，跳过 UAC 弹窗");
+                return;
+            }
             System.out.println("[Firewall] 检测到防火墙规则需更新或 VPN TUN 劫持 IPv6 路由，正在唤起 UAC 管理员提权 (<1s)...");
             if (!openWindowsFirewallPrompt(port, encodedCommand)) {
                 System.err.println("[Firewall] 警告：UAC 提权未完成或被拒绝，TUN 环境下的跨网/跨境 IPv6 WebRTC 直连可能受阻");
@@ -349,7 +353,7 @@ public class NetworkUtil {
         sb.append("Set-NetIPInterface -InterfaceIndex $_.InterfaceIndex -AddressFamily $_.AddressFamily -WeakHostSend Enabled -WeakHostReceive Enabled -ErrorAction SilentlyContinue | Out-Null ");
         sb.append("}; ");
 
-        // 5. 精准剥离 VPN TUN 虚拟网卡与 Loopback (InterfaceIndex 1) 上的 IPv6 黑洞/劫持路由（100% 保留 TUN 的 IPv4 198.18.x.x 供科学上网使用）
+        // 5. 精准剥离 VPN TUN 虚拟网卡与 Loopback (InterfaceIndex 1) 上的 IPv6 全局黑洞/劫持路由（保留 TUN 网卡自身的 IPv4/IPv6 接口地址供代理节点使用）
         sb.append("$tunIfs = @(Get-NetIPAddress -ErrorAction SilentlyContinue | Where-Object { ")
           .append("$_.IPAddress -like 'fd*' -or $_.IPAddress -like 'fc*' -or $_.IPAddress -like '198.18.*' -or $_.IPAddress -like '198.19.*' -or $_.IPAddress -like '172.19.*' -or $_.IPAddress -like '100.64.*' ")
           .append("} | Select-Object -ExpandProperty InterfaceIndex -Unique); ");
@@ -358,18 +362,19 @@ public class NetworkUtil {
           .append("} | Select-Object -ExpandProperty ifIndex -Unique); ");
         sb.append("$allTun = @($tunIfs + $tunAdapters) | Select-Object -Unique; ");
         sb.append("foreach ($tIdx in $allTun) { ");
-        sb.append("Set-NetIPInterface -InterfaceIndex $tIdx -AddressFamily IPv6 -InterfaceMetric 9999 -WeakHostSend Enabled -WeakHostReceive Enabled -ErrorAction SilentlyContinue | Out-Null; ");
-        sb.append("Remove-NetRoute -InterfaceIndex $tIdx -AddressFamily IPv6 -Confirm:$false -ErrorAction SilentlyContinue; ");
-        sb.append("Get-NetIPAddress -InterfaceIndex $tIdx -AddressFamily IPv6 -ErrorAction SilentlyContinue | Remove-NetIPAddress -Confirm:$false -ErrorAction SilentlyContinue; ");
+        sb.append("Set-NetIPInterface -InterfaceIndex $tIdx -AddressFamily IPv6 -InterfaceMetric 500 -WeakHostSend Enabled -WeakHostReceive Enabled -ErrorAction SilentlyContinue | Out-Null; ");
+        sb.append("Get-NetRoute -InterfaceIndex $tIdx -AddressFamily IPv6 -ErrorAction SilentlyContinue | Where-Object { ")
+          .append("$_.DestinationPrefix -in @('::/0','::/1','8000::/1','2000::/3','2000::/4','3000::/4','2000::/5','2000::/6','2800::/5') ")
+          .append("} | Remove-NetRoute -Confirm:$false -ErrorAction SilentlyContinue; ");
         sb.append("}; ");
-        // 清理 Loopback (InterfaceIndex 1) 上由 sing-tun 在 ipv6:false 模式下注入的 ::/1, 8000::/1, 2000::/3 黑洞路由
+        // 清理 Loopback (InterfaceIndex 1) 上由 sing-tun 在 ipv6:false 模式下注入的 ::/0, ::/1, 8000::/1, 2000::/3 黑洞路由
         sb.append("Get-NetRoute -InterfaceIndex 1 -AddressFamily IPv6 -ErrorAction SilentlyContinue | Where-Object { ")
           .append("$_.DestinationPrefix -in @('::/0','::/1','8000::/1','2000::/3','2000::/4','3000::/4') ")
           .append("} | Remove-NetRoute -Confirm:$false -ErrorAction SilentlyContinue; ");
 
         // 6. 定位拥有公网 GUA IPv6 的物理网卡：
-        // 将其 InterfaceMetric 降至 5，并挂载 2001:4860::/32 (放行 Chromium socket_manager.cc 对 2001:4860:4860::8888 的 IPv6 可达性探测！)
-        // 以及国内三大运营商 /16 前缀 (2408::/16, 2409::/16, 240e::/16, 240c::/16) 与 2000::/4, 3000::/4, ::/0
+        // 将其 InterfaceMetric 降至 5，并挂载 2001:4860::/32 (放行 Chromium socket_manager.cc 对 2001:4860:4860::8888 的 IPv6 可达性探测及 Google IPv6 STUN！)
+        // 以及 Cloudflare/Nextcloud IPv6 STUN (2606:4700::/32, 2a01:4f8::/32)、国内及亚太运营商前缀与 2000::/4, 3000::/4, 2000::/3, ::/0
         sb.append("$physIp = Get-NetIPAddress -AddressFamily IPv6 -ErrorAction SilentlyContinue | ")
           .append("Where-Object { $_.IPAddress -match '^[23][0-9a-f]{0,3}:' -and $_.InterfaceIndex -notin $allTun -and $_.DadState -eq 'Preferred' -and $_.PreferredLifetime.TotalSeconds -gt 0 } | ")
           .append("Sort-Object -Property @{Expression={$_.SuffixOrigin -eq 'Random'};Descending=$true}, @{Expression={$_.PreferredLifetime};Descending=$true} | Select-Object -First 1; ");
@@ -381,7 +386,7 @@ public class NetworkUtil {
         sb.append("if (-not $nh) { $nh = (Get-NetNeighbor -InterfaceIndex $ifIdx -AddressFamily IPv6 -ErrorAction SilentlyContinue | Where-Object { $_.IPAddress -like 'fe80:*' -and $_.IsRouter -eq $true } | Select-Object -First 1).IPAddress }; ");
         sb.append("if (-not $nh) { $nh = (Get-NetNeighbor -InterfaceIndex $ifIdx -AddressFamily IPv6 -ErrorAction SilentlyContinue | Where-Object { $_.IPAddress -like 'fe80:*' -and $_.State -ne 'Unreachable' } | Select-Object -First 1).IPAddress }; ");
         sb.append("if ($nh) { ");
-        sb.append("foreach ($pfx in @('2001:4860::/32','2408::/16','2409::/16','240e::/16','240c::/16','::/0','2000::/4','3000::/4')) { ");
+        sb.append("foreach ($pfx in @('2001:4860::/32','2606:4700::/32','2a01:4f8::/32','2400::/12','2408::/16','2409::/16','240e::/16','240c::/16','2404::/16','::/0','2000::/3','2000::/4','3000::/4')) { ");
         sb.append("Remove-NetRoute -AddressFamily IPv6 -DestinationPrefix $pfx -InterfaceIndex $ifIdx -Confirm:$false -ErrorAction SilentlyContinue; ");
         sb.append("New-NetRoute -AddressFamily IPv6 -DestinationPrefix $pfx -InterfaceIndex $ifIdx -NextHop $nh -RouteMetric 1 -PolicyStore ActiveStore -ErrorAction SilentlyContinue | Out-Null; ");
         sb.append("} } }; ");
@@ -460,26 +465,57 @@ public class NetworkUtil {
         }
     }
 
+    private static volatile long lastIpv6HealAttemptMs = 0L;
+
+    /**
+     * 当运行期检测到用户新开启或重启了 TUN 代理导致 IPv6 直连路由被覆盖时，按需触发自愈（内置 15 秒冷却防抖）。
+     */
+    public static synchronized boolean healWindowsIpv6DirectRoutes(int port) {
+        String os = System.getProperty("os.name", "").toLowerCase();
+        if (!os.contains("win")) {
+            return true;
+        }
+        if (isWindowsIpv6DirectRoutesConfigured()) {
+            return true;
+        }
+        long now = System.currentTimeMillis();
+        if (now - lastIpv6HealAttemptMs < 15_000L) {
+            return isWindowsIpv6DirectRoutesConfigured();
+        }
+        lastIpv6HealAttemptMs = now;
+        System.out.println("[Firewall] 运行期检测到 TUN 代理覆盖了 IPv6 直连路由或 WeakHost 状态，正在执行按需路由自愈...");
+        ensureWindowsFirewallPort(port);
+        return isWindowsIpv6DirectRoutesConfigured();
+    }
+
     public static boolean isWindowsIpv6DirectRoutesConfigured() {
         try {
             ProcessBuilder pb = new ProcessBuilder(
                     "powershell.exe", "-NoProfile", "-NonInteractive", "-Command",
                     "$tunIfs = @(Get-NetIPAddress -ErrorAction SilentlyContinue | Where-Object { $_.IPAddress -like 'fd*' -or $_.IPAddress -like 'fc*' -or $_.IPAddress -like '198.18.*' -or $_.IPAddress -like '198.19.*' -or $_.IPAddress -like '172.19.*' -or $_.IPAddress -like '100.64.*' } | Select-Object -ExpandProperty InterfaceIndex -Unique); " +
-                    "if ($tunIfs.Count -gt 0) { " +
-                    "  $hijack = Get-NetRoute -InterfaceIndex $tunIfs -AddressFamily IPv6 -ErrorAction SilentlyContinue | Where-Object { $_.DestinationPrefix -in @('::/0','::/1','8000::/1','2000::/3','2000::/4','3000::/4') }; " +
+                    "$tunAdapters = @(Get-NetAdapter -IncludeHidden -ErrorAction SilentlyContinue | Where-Object { $_.InterfaceDescription -match 'Tap|Tun|Wintun|Sing|Clash|Mihomo|Meta|WireGuard|nekoray' -or $_.Name -match 'Tap|Tun|Wintun|Sing|Clash|Mihomo|Meta|WireGuard|nekoray' } | Select-Object -ExpandProperty ifIndex -Unique); " +
+                    "$allTun = @($tunIfs + $tunAdapters) | Select-Object -Unique; " +
+                    "if ($allTun.Count -gt 0) { " +
+                    "  $hijack = Get-NetRoute -InterfaceIndex $allTun -AddressFamily IPv6 -ErrorAction SilentlyContinue | Where-Object { $_.DestinationPrefix -in @('::/0','::/1','8000::/1','2000::/3','2000::/4','3000::/4','2000::/5','2000::/6','2800::/5') }; " +
                     "  if ($hijack) { Write-Output 'TUN_V6_HIJACK'; exit 0 } " +
                     "}; " +
-                    "$loHijack = Get-NetRoute -InterfaceIndex 1 -AddressFamily IPv6 -ErrorAction SilentlyContinue | Where-Object { $_.DestinationPrefix -in @('::/1','8000::/1','2000::/3') }; " +
+                    "$loHijack = Get-NetRoute -InterfaceIndex 1 -AddressFamily IPv6 -ErrorAction SilentlyContinue | Where-Object { $_.DestinationPrefix -in @('::/0','::/1','8000::/1','2000::/3','2000::/4','3000::/4') }; " +
                     "if ($loHijack) { Write-Output 'LO_V6_HIJACK'; exit 0 }; " +
-                    "$physIp = Get-NetIPAddress -AddressFamily IPv6 -ErrorAction SilentlyContinue | Where-Object { $_.IPAddress -match '^[23][0-9a-f]{0,3}:' -and $_.InterfaceIndex -notin $tunIfs -and $_.DadState -eq 'Preferred' } | Select-Object -First 1; " +
-                    "if (-not $physIp) { Write-Output 'NO_IPV6_PHYS'; exit 0 }; " +
+                    "$physIp = Get-NetIPAddress -AddressFamily IPv6 -ErrorAction SilentlyContinue | Where-Object { $_.IPAddress -match '^[23][0-9a-f]{0,3}:' -and $_.InterfaceIndex -notin $allTun -and $_.DadState -eq 'Preferred' } | Select-Object -First 1; " +
+                    "if (-not $physIp) { " +
+                    "  $anyWeak = Get-NetIPInterface -AddressFamily IPv4 -ErrorAction SilentlyContinue | Where-Object { $_.ConnectionState -eq 'Connected' -and $_.InterfaceIndex -notin $allTun -and $_.WeakHostSend -eq 'Enabled' }; " +
+                    "  if ($anyWeak) { Write-Output 'ROUTE_OK' } else { Write-Output 'NO_IPV6_WEAKHOST_MISSING' }; exit 0 " +
+                    "}; " +
                     "$ifIdx = $physIp.InterfaceIndex; " +
-                    "$weak = Get-NetIPInterface -InterfaceIndex $ifIdx -AddressFamily IPv4 -ErrorAction SilentlyContinue; " +
-                    "if (-not $weak -or $weak.WeakHostReceive -ne 'Enabled' -or $weak.WeakHostSend -ne 'Enabled') { Write-Output 'WEAKHOST_MISSING'; exit 0 }; " +
+                    "$weakV4 = Get-NetIPInterface -InterfaceIndex $ifIdx -AddressFamily IPv4 -ErrorAction SilentlyContinue; " +
+                    "$weakV6 = Get-NetIPInterface -InterfaceIndex $ifIdx -AddressFamily IPv6 -ErrorAction SilentlyContinue; " +
+                    "if (-not $weakV4 -or $weakV4.WeakHostReceive -ne 'Enabled' -or $weakV4.WeakHostSend -ne 'Enabled') { Write-Output 'WEAKHOST_V4_MISSING'; exit 0 }; " +
+                    "if (-not $weakV6 -or $weakV6.WeakHostReceive -ne 'Enabled' -or $weakV6.WeakHostSend -ne 'Enabled' -or $weakV6.InterfaceMetric -gt 10) { Write-Output 'WEAKHOST_V6_MISSING'; exit 0 }; " +
                     "$rProbe = Get-NetRoute -AddressFamily IPv6 -DestinationPrefix '2001:4860::/32' -ErrorAction SilentlyContinue | Where-Object { $_.InterfaceIndex -eq $ifIdx }; " +
+                    "$r2606 = Get-NetRoute -AddressFamily IPv6 -DestinationPrefix '2606:4700::/32' -ErrorAction SilentlyContinue | Where-Object { $_.InterfaceIndex -eq $ifIdx }; " +
                     "$r2409 = Get-NetRoute -AddressFamily IPv6 -DestinationPrefix '2409::/16' -ErrorAction SilentlyContinue | Where-Object { $_.InterfaceIndex -eq $ifIdx }; " +
                     "$r1 = Get-NetRoute -AddressFamily IPv6 -DestinationPrefix '2000::/4' -ErrorAction SilentlyContinue | Where-Object { $_.InterfaceIndex -eq $ifIdx }; " +
-                    "if ($rProbe -and $r2409 -and $r1) { Write-Output 'ROUTE_OK' } else { Write-Output 'ROUTE_MISSING' }"
+                    "if ($rProbe -and $r2606 -and $r2409 -and $r1) { Write-Output 'ROUTE_OK' } else { Write-Output 'ROUTE_MISSING' }"
             );
             pb.redirectErrorStream(true);
             Process p = pb.start();

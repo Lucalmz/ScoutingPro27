@@ -9,6 +9,8 @@ import {
   isTunVirtualAddress,
   cleanIpAddress,
   isGlobalIpv6Address,
+  getCachedPhysicalAddresses,
+  healHostIpv6RoutesIfNeeded,
   CONNECTION_TIMING
 } from './connectivity'
 import type { SignalingChannel } from './signaling'
@@ -295,10 +297,11 @@ export class PeerConnectionManager {
         if (gate.open) return
         gate.open = true
         const queued = gate.queue.splice(0)
-        // 将全球公网单播 IPv6 (2000::/3) host 候选排在最前发送，使对端比同名异网 192.168.1.x 更早收到并触发 IPv6 双向并发打洞
+        // 将全球公网单播 IPv6 (2000::/3) UDP 候选排在最前发送，避免 tcp 端口 9 (tcptype active) 抢占前排
         queued.sort((a, b) => {
           const score = (c: RTCIceCandidateInit): number => {
             const s = c.candidate || ''
+            if (s.includes('tcptype active') || s.includes(' tcp ')) return 5
             const parts = s.trim().split(/\s+/)
             const addr = cleanIpAddress(parts[4] || '')
             const typIdx = parts.indexOf('typ')
@@ -341,6 +344,27 @@ export class PeerConnectionManager {
       }
     }
 
+    let localIpv6Generated = false
+    let hostIpv6RouteHealTriggered = false
+
+    const checkAndHealHostIpv6Routes = () => {
+      if (!isHost || localIpv6Generated || hostIpv6RouteHealTriggered) return
+      const physV6s = getCachedPhysicalAddresses().ipv6s
+      if (physV6s.length > 0) {
+        hostIpv6RouteHealTriggered = true
+        log.warn(
+          `[SelfHealing] Host physical NIC has GUA IPv6 (${physV6s.join(', ')}), but Chromium gathered 0 IPv6 candidates (runtime TUN route hijack detected). Triggering backend route self-healing...`
+        )
+        healHostIpv6RoutesIfNeeded().then((healed) => {
+          if (healed && peer.connectionState !== 'connected' && peer.connectionState !== 'closed') {
+            try {
+              peer.restartIce?.()
+            } catch {}
+          }
+        })
+      }
+    }
+
     peer.onicecandidate = (ev) => {
       if (ev.candidate) {
         const rawCandStr = ev.candidate.candidate || ''
@@ -352,10 +376,12 @@ export class PeerConnectionManager {
           const candType = typIdx !== -1 && parts[typIdx + 1] ? parts[typIdx + 1] : ''
           const raddrIdx = parts.indexOf('raddr')
           const raddr = raddrIdx !== -1 && parts[raddrIdx + 1] ? cleanIpAddress(parts[raddrIdx + 1] || '') : ''
-          const rportIdx = parts.indexOf('rport')
-          const rport = rportIdx !== -1 && parts[rportIdx + 1] ? parts[rportIdx + 1] : ''
           const netIdIdx = parts.indexOf('network-id')
           const netId = netIdIdx !== -1 && parts[netIdIdx + 1] ? parts[netIdIdx + 1] : ''
+
+          if (isGlobalIpv6Address(addr)) {
+            localIpv6Generated = true
+          }
 
           if (isTunVirtualAddress(addr) || isTunVirtualAddress(raddr)) {
             this.tunEnvironmentDetected = true
@@ -386,6 +412,7 @@ export class PeerConnectionManager {
         dispatchOrQueueCandidate(candObj, false)
       } else {
         log.info(`ICE Gathering Complete (null candidate received)`)
+        checkAndHealHostIpv6Routes()
       }
     }
 
@@ -553,7 +580,14 @@ export class PeerConnectionManager {
           stallNoticeTimer = setTimeout(() => {
             stallNoticeTimer = null
             if (peer.iceConnectionState === 'checking' && !this.virtualFallbackPeers.has(peer)) {
-              log.warn(`[Watchdog] ICE check taking longer than ${CONNECTION_TIMING.ICE_STALL_NOTICE_MS}ms (possible IPv6 blackhole / middlebox UDP drop). Waiting for parallel srflx/relay pairs.`)
+              checkAndHealHostIpv6Routes()
+              if (localIpv6Generated) {
+                log.warn(
+                  `[Diagnostic] 检测到本端已生成公网 IPv6 候选但握手超过 ${CONNECTION_TIMING.ICE_STALL_NOTICE_MS}ms 未响应（可能原因：移动端 VPN 开启了 IPv6 路由劫持/阻断且未将浏览器加入分应用绕过白名单）。正在自动尝试 IPv4 穿透与信令加密通道兜底。`
+                )
+              } else {
+                log.warn(`[Watchdog] ICE check taking longer than ${CONNECTION_TIMING.ICE_STALL_NOTICE_MS}ms (possible IPv6 blackhole / middlebox UDP drop). Waiting for parallel srflx/relay pairs.`)
+              }
               callbacks.onIceStalled?.(true)
             }
           }, CONNECTION_TIMING.ICE_STALL_NOTICE_MS)

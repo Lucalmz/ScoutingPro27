@@ -78,5 +78,38 @@ class NetworkUtilTest {
         boolean allowed = NetworkUtil.isWindowsFirewallPortAllowed(59998);
         assertThat(allowed).isIn(true, false);
     }
+
+    @Test
+    void testIsWindowsIpv6DirectRoutesConfigured() {
+        boolean configured = NetworkUtil.isWindowsIpv6DirectRoutesConfigured();
+        assertThat(configured).isIn(true, false);
+    }
+
+    @Test
+    void testSystemRoutesNetworkInfoAndHealIpv6Endpoint() {
+        System.setProperty("scouting.skipUacPrompt", "true");
+        try {
+            io.javalin.Javalin app = io.javalin.Javalin.create(config -> {
+                new com.bear27570.app.routes.SystemRoutes(new com.google.gson.Gson()).register(config.routes);
+            });
+            io.javalin.testtools.JavalinTest.test(app, (server, client) -> {
+                var infoRes = client.get("/api/system/network-info");
+                assertThat(infoRes.code()).isEqualTo(200);
+                String infoBody = infoRes.body().string();
+                System.out.println("[E2E-TEST] GET /api/system/network-info -> " + infoBody);
+                assertThat(infoBody).contains("\"primaryIp\":");
+                assertThat(infoBody).contains("\"allIpv6s\":");
+
+                var healRes = client.post("/api/system/heal-ipv6-routes");
+                assertThat(healRes.code()).isEqualTo(200);
+                String healBody = healRes.body().string();
+                System.out.println("[E2E-TEST] POST /api/system/heal-ipv6-routes -> " + healBody);
+                assertThat(healBody).contains("\"ipv6DirectRoutesReady\":");
+                assertThat(healBody).contains("\"allIpv6s\":");
+            });
+        } finally {
+            System.clearProperty("scouting.skipUacPrompt");
+        }
+    }
 }
 
