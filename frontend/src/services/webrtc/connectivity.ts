@@ -477,36 +477,9 @@ export async function probeLocalInterfaceIpv6(): Promise<string | null> {
   })
 }
 
-let lastHostIpv6HealTime = 0
-
 /**
- * 当电脑端 Host 物理网卡存在公网 IPv6 (cachedPhysicalIpv6s 非空)，但 Chromium ICE 采集出 0 个本地 IPv6 候选时，
- * 说明用户在软件启动后新开启或重启了 TUN 代理劫持了系统 IPv6 路由；此时自动请求后端执行路由剥离自愈。
- */
-export async function healHostIpv6RoutesIfNeeded(): Promise<boolean> {
-  const now = Date.now()
-  if (now - lastHostIpv6HealTime < 15000) return false
-  lastHostIpv6HealTime = now
-  try {
-    const { healIpv6DirectRoutes } = await import('@/services/api')
-    const res = await healIpv6DirectRoutes()
-    if (res && res.success) {
-      if (res.primaryIpv6 && isGlobalIpv6Address(res.primaryIpv6)) {
-        cachedLocalIpv6 = cleanIpAddress(res.primaryIpv6)
-      }
-      if (Array.isArray(res.allIpv6s)) {
-        cachedPhysicalIpv6s = res.allIpv6s
-          .filter((ip) => isGlobalIpv6Address(ip))
-          .map((ip) => cleanIpAddress(ip))
-      }
-      return true
-    }
-  } catch {}
-  return false
-}
-
-/**
- * 历史兼容保留导出（Chromium UDPPort 绑定在具体接口 IP 上，仅靠替换 SDP 文本无法在物理网卡对应端口监听，现由 healHostIpv6RoutesIfNeeded 在系统路由层自愈）。
+ * 历史兼容保留导出（Chromium UDPPort 绑定在具体接口 IP 上，仅靠替换 SDP 文本无法在物理网卡对应端口监听）。
+ * 注意：本应用不会修改系统路由/网卡参数，以免破坏用户的 TUN 代理。
  */
 export function synthesizePhysicalHostCandidatesFromTun(_rawCandidateStr: string): string[] {
   return []

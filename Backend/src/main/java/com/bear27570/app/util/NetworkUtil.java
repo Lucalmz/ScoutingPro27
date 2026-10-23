@@ -114,12 +114,9 @@ public class NetworkUtil {
         return getCompleteNetworkInfo();
     }
 
-    private static volatile long lastRuntimeRouteCheckTime = 0L;
-
     public static NetworkInfo getCompleteNetworkInfo() {
         List<String> validIpv4s = new ArrayList<>();
         List<String> validIpv6s = new ArrayList<>();
-        boolean tunDetectedNow = false;
 
         try {
             Enumeration<NetworkInterface> interfaces = NetworkInterface.getNetworkInterfaces();
@@ -129,17 +126,10 @@ public class NetworkUtil {
                         if (!iface.isUp() || iface.isLoopback()) {
                             continue;
                         }
-                        Enumeration<InetAddress> addrs = iface.getInetAddresses();
-                        for (InetAddress addr : Collections.list(addrs)) {
-                            String rawIp = addr.getHostAddress();
-                            if (rawIp != null && (rawIp.startsWith("198.18.") || rawIp.startsWith("198.19.") || rawIp.startsWith("172.19."))) {
-                                tunDetectedNow = true;
-                            }
-                        }
                         if (isVirtualOrIgnoredInterface(iface)) {
                             continue;
                         }
-                        addrs = iface.getInetAddresses();
+                        Enumeration<InetAddress> addrs = iface.getInetAddresses();
                         for (InetAddress addr : Collections.list(addrs)) {
                             if (addr instanceof Inet4Address && !addr.isLoopbackAddress() && addr.isSiteLocalAddress()) {
                                 String ip = addr.getHostAddress();
@@ -192,18 +182,6 @@ public class NetworkUtil {
                     .filter(ip -> ip.startsWith("240e:") || ip.startsWith("2408:") || ip.startsWith("2409:"))
                     .findFirst()
                     .orElse(validIpv6s.get(0));
-        }
-
-        if (tunDetectedNow && "windows".equals(getOsType())) {
-            long now = System.currentTimeMillis();
-            if (now - lastRuntimeRouteCheckTime > 15_000L) {
-                lastRuntimeRouteCheckTime = now;
-                new Thread(() -> {
-                    if (!isWindowsIpv6DirectRoutesConfigured()) {
-                        ensureWindowsFirewallPort(8080);
-                    }
-                }, "tun-route-healer").start();
-            }
         }
 
         return new NetworkInfo(primaryIpv4, validIpv4s, primaryIpv6, validIpv6s);
@@ -276,10 +254,9 @@ public class NetworkUtil {
         boolean tcpAllowed = isWindowsFirewallPortAllowed(port);
         boolean udpAllowed = isWindowsFirewallWebRtcUdpAllowed();
         boolean hasAppBlock = hasWindowsFirewallAppBlockRule();
-        boolean ipv6DirectRoutesOk = isWindowsIpv6DirectRoutesConfigured();
 
-        if (tcpAllowed && udpAllowed && !hasAppBlock && ipv6DirectRoutesOk) {
-            System.out.println("[Firewall] Windows 防火墙规则 (TCP " + port + " & WebRTC UDP 1024-65535 edge=yes) 及全球 GUA IPv6 物理网卡直通环境均已就绪");
+        if (tcpAllowed && udpAllowed && !hasAppBlock) {
+            System.out.println("[Firewall] Windows 防火墙规则 (TCP " + port + " & WebRTC UDP 1024-65535 edge=yes) 已就绪");
             return;
         }
 
@@ -299,24 +276,20 @@ public class NetworkUtil {
                 p.getInputStream().readAllBytes();
                 int code = p.waitFor();
                 if (code == 0 && isWindowsFirewallPortAllowed(port) && isWindowsFirewallWebRtcUdpAllowed()) {
-                    System.out.println("[Firewall] 已在管理员权限下完成 Windows 防火墙放行与 TUN IPv6 剥离/物理网卡直连路由配置");
+                    System.out.println("[Firewall] 已在管理员权限下完成 Windows 防火墙放行配置");
                     return;
                 }
             }
-            if (Boolean.getBoolean("scouting.skipUacPrompt")) {
-                System.out.println("[Firewall] scouting.skipUacPrompt=true，跳过 UAC 弹窗");
-                return;
-            }
-            System.out.println("[Firewall] 检测到防火墙规则需更新或 VPN TUN 劫持 IPv6 路由，正在唤起 UAC 管理员提权 (<1s)...");
+            System.out.println("[Firewall] 检测到防火墙规则需更新，正在唤起 UAC 管理员提权 (<1s)...");
             if (!openWindowsFirewallPrompt(port, encodedCommand)) {
-                System.err.println("[Firewall] 警告：UAC 提权未完成或被拒绝，TUN 环境下的跨网/跨境 IPv6 WebRTC 直连可能受阻");
+                System.err.println("[Firewall] 警告：UAC 提权未完成或被拒绝，入站 WebRTC 直连可能受阻");
             }
         } catch (Exception e) {
             System.err.println("[Firewall] 配置 Windows 防火墙与 IPv6 路由异常: " + e.getMessage());
         }
     }
 
-    private static String buildWindowsNetworkAndFirewallSetupScript(int port) {
+    static String buildWindowsNetworkAndFirewallSetupScript(int port) {
         String javaExe = ProcessHandle.current().info().command().orElse("");
         String jcefHelperExe = new java.io.File(
                 System.getProperty("user.home"),
@@ -348,55 +321,9 @@ public class NetworkUtil {
           .append(jcefHelperExe.replace("\"", "")).append("\" profile=any edge=yes | Out-Null; ");
         sb.append("}; ");
 
-        // 4. 开启 Windows 弱主机模型 (WeakHostSend / WeakHostReceive)，防止物理网卡与 TUN 虚拟网卡跨接口收发包被内核静默丢弃
-        sb.append("Get-NetIPInterface -ErrorAction SilentlyContinue | Where-Object { $_.ConnectionState -eq 'Connected' } | ForEach-Object { ");
-        sb.append("Set-NetIPInterface -InterfaceIndex $_.InterfaceIndex -AddressFamily $_.AddressFamily -WeakHostSend Enabled -WeakHostReceive Enabled -ErrorAction SilentlyContinue | Out-Null ");
-        sb.append("}; ");
-
-        // 5. 精准剥离 VPN TUN 虚拟网卡与 Loopback (InterfaceIndex 1) 上的 IPv6 全局黑洞/劫持路由（保留 TUN 网卡自身的 IPv4/IPv6 接口地址供代理节点使用）
-        sb.append("$tunIfs = @(Get-NetIPAddress -ErrorAction SilentlyContinue | Where-Object { ")
-          .append("$_.IPAddress -like 'fd*' -or $_.IPAddress -like 'fc*' -or $_.IPAddress -like '198.18.*' -or $_.IPAddress -like '198.19.*' -or $_.IPAddress -like '172.19.*' -or $_.IPAddress -like '100.64.*' ")
-          .append("} | Select-Object -ExpandProperty InterfaceIndex -Unique); ");
-        sb.append("$tunAdapters = @(Get-NetAdapter -IncludeHidden -ErrorAction SilentlyContinue | Where-Object { ")
-          .append("$_.InterfaceDescription -match 'Tap|Tun|Wintun|Sing|Clash|Mihomo|Meta|WireGuard|nekoray' -or $_.Name -match 'Tap|Tun|Wintun|Sing|Clash|Mihomo|Meta|WireGuard|nekoray' ")
-          .append("} | Select-Object -ExpandProperty ifIndex -Unique); ");
-        sb.append("$allTun = @($tunIfs + $tunAdapters) | Select-Object -Unique; ");
-        sb.append("foreach ($tIdx in $allTun) { ");
-        sb.append("Set-NetIPInterface -InterfaceIndex $tIdx -AddressFamily IPv6 -InterfaceMetric 500 -WeakHostSend Enabled -WeakHostReceive Enabled -ErrorAction SilentlyContinue | Out-Null; ");
-        sb.append("Get-NetRoute -InterfaceIndex $tIdx -AddressFamily IPv6 -ErrorAction SilentlyContinue | Where-Object { ")
-          .append("$_.DestinationPrefix -in @('::/0','::/1','8000::/1','2000::/3','2000::/4','3000::/4','2000::/5','2000::/6','2800::/5') ")
-          .append("} | Remove-NetRoute -Confirm:$false -ErrorAction SilentlyContinue; ");
-        sb.append("}; ");
-        // 清理 Loopback (InterfaceIndex 1) 上由 sing-tun 在 ipv6:false 模式下注入的 ::/0, ::/1, 8000::/1, 2000::/3 黑洞路由
-        sb.append("Get-NetRoute -InterfaceIndex 1 -AddressFamily IPv6 -ErrorAction SilentlyContinue | Where-Object { ")
-          .append("$_.DestinationPrefix -in @('::/0','::/1','8000::/1','2000::/3','2000::/4','3000::/4') ")
-          .append("} | Remove-NetRoute -Confirm:$false -ErrorAction SilentlyContinue; ");
-
-        // 6. 定位拥有公网 GUA IPv6 的物理网卡：
-        // 将其 InterfaceMetric 降至 5，并挂载 2001:4860::/32 (放行 Chromium socket_manager.cc 对 2001:4860:4860::8888 的 IPv6 可达性探测及 Google IPv6 STUN！)
-        // 以及 Cloudflare/Nextcloud IPv6 STUN (2606:4700::/32, 2a01:4f8::/32)、国内及亚太运营商前缀与 2000::/4, 3000::/4, 2000::/3, ::/0
-        sb.append("$physIp = Get-NetIPAddress -AddressFamily IPv6 -ErrorAction SilentlyContinue | ")
-          .append("Where-Object { $_.IPAddress -match '^[23][0-9a-f]{0,3}:' -and $_.InterfaceIndex -notin $allTun -and $_.DadState -eq 'Preferred' -and $_.PreferredLifetime.TotalSeconds -gt 0 } | ")
-          .append("Sort-Object -Property @{Expression={$_.SuffixOrigin -eq 'Random'};Descending=$true}, @{Expression={$_.PreferredLifetime};Descending=$true} | Select-Object -First 1; ");
-        sb.append("if ($physIp) { ");
-        sb.append("$ifIdx = $physIp.InterfaceIndex; ");
-        sb.append("Set-NetIPInterface -InterfaceIndex $ifIdx -AddressFamily IPv6 -InterfaceMetric 5 -WeakHostSend Enabled -WeakHostReceive Enabled -ErrorAction SilentlyContinue | Out-Null; ");
-        sb.append("Set-NetIPInterface -InterfaceIndex $ifIdx -AddressFamily IPv4 -InterfaceMetric 5 -WeakHostSend Enabled -WeakHostReceive Enabled -ErrorAction SilentlyContinue | Out-Null; ");
-        sb.append("$nh = (Get-NetRoute -InterfaceIndex $ifIdx -AddressFamily IPv6 -DestinationPrefix '::/0' -ErrorAction SilentlyContinue | Where-Object { $_.NextHop -like 'fe80:*' } | Select-Object -First 1).NextHop; ");
-        sb.append("if (-not $nh) { $nh = (Get-NetNeighbor -InterfaceIndex $ifIdx -AddressFamily IPv6 -ErrorAction SilentlyContinue | Where-Object { $_.IPAddress -like 'fe80:*' -and $_.IsRouter -eq $true } | Select-Object -First 1).IPAddress }; ");
-        sb.append("if (-not $nh) { $nh = (Get-NetNeighbor -InterfaceIndex $ifIdx -AddressFamily IPv6 -ErrorAction SilentlyContinue | Where-Object { $_.IPAddress -like 'fe80:*' -and $_.State -ne 'Unreachable' } | Select-Object -First 1).IPAddress }; ");
-        sb.append("if ($nh) { ");
-        sb.append("foreach ($pfx in @('2001:4860::/32','2606:4700::/32','2a01:4f8::/32','2400::/12','2408::/16','2409::/16','240e::/16','240c::/16','2404::/16','::/0','2000::/3','2000::/4','3000::/4')) { ");
-        sb.append("Remove-NetRoute -AddressFamily IPv6 -DestinationPrefix $pfx -InterfaceIndex $ifIdx -Confirm:$false -ErrorAction SilentlyContinue; ");
-        sb.append("New-NetRoute -AddressFamily IPv6 -DestinationPrefix $pfx -InterfaceIndex $ifIdx -NextHop $nh -RouteMetric 1 -PolicyStore ActiveStore -ErrorAction SilentlyContinue | Out-Null; ");
-        sb.append("} } }; ");
-
-        // 7. 为国内字面量 IPv4 STUN (111.8.3.78/32) 挂载物理网卡网关直连路由，使物理口 STUN 探测绕过 TUN 0.0.0.0/1 劫持
-        sb.append("$v4Gw = (Get-NetRoute -AddressFamily IPv4 -DestinationPrefix '0.0.0.0/0' -ErrorAction SilentlyContinue | Where-Object { $_.InterfaceIndex -notin $allTun -and $_.NextHop -ne '0.0.0.0' } | Sort-Object RouteMetric | Select-Object -First 1); ");
-        sb.append("if ($v4Gw) { ");
-        sb.append("Remove-NetRoute -AddressFamily IPv4 -DestinationPrefix '111.8.3.78/32' -Confirm:$false -ErrorAction SilentlyContinue; ");
-        sb.append("New-NetRoute -AddressFamily IPv4 -DestinationPrefix '111.8.3.78/32' -InterfaceIndex $v4Gw.InterfaceIndex -NextHop $v4Gw.NextHop -RouteMetric 1 -PolicyStore ActiveStore -ErrorAction SilentlyContinue | Out-Null; ");
-        sb.append("}");
+        // 注意：此脚本只允许修改 Windows 防火墙规则，严禁修改任何系统路由、接口跃点数 (InterfaceMetric)、
+        // WeakHost 模型或 TUN/Loopback 上的路由与地址。历史版本曾对此进行“自愈”，会破坏 Clash/Mihomo 等
+        // TUN 代理的自身路由与出站绑定，导致代理全部节点不可用。
 
         return sb.toString();
     }
@@ -422,7 +349,7 @@ public class NetworkUtil {
             int exitCode = p.waitFor();
             boolean bothAllowed = isWindowsFirewallPortAllowed(port) && isWindowsFirewallWebRtcUdpAllowed();
             if (exitCode == 0 && bothAllowed) {
-                System.out.println("[Firewall] Windows 防火墙 (UDP 1024-65535 edge=yes) 及全球 GUA IPv6 (2000::/4, 3000::/4) 物理直连路由已通过管理员提权配置成功");
+                System.out.println("[Firewall] Windows 防火墙 (TCP " + port + " & UDP 1024-65535 edge=yes) 已通过管理员提权配置成功");
                 return true;
             }
             System.err.println("[Firewall] UAC 提权执行结束，exitCode=" + exitCode + ", bothAllowed=" + bothAllowed);
@@ -460,68 +387,6 @@ public class NetworkUtil {
             String out = new String(p.getInputStream().readAllBytes(), java.nio.charset.StandardCharsets.UTF_8);
             p.waitFor();
             return out.contains("BLOCKED");
-        } catch (Exception e) {
-            return false;
-        }
-    }
-
-    private static volatile long lastIpv6HealAttemptMs = 0L;
-
-    /**
-     * 当运行期检测到用户新开启或重启了 TUN 代理导致 IPv6 直连路由被覆盖时，按需触发自愈（内置 15 秒冷却防抖）。
-     */
-    public static synchronized boolean healWindowsIpv6DirectRoutes(int port) {
-        String os = System.getProperty("os.name", "").toLowerCase();
-        if (!os.contains("win")) {
-            return true;
-        }
-        if (isWindowsIpv6DirectRoutesConfigured()) {
-            return true;
-        }
-        long now = System.currentTimeMillis();
-        if (now - lastIpv6HealAttemptMs < 15_000L) {
-            return isWindowsIpv6DirectRoutesConfigured();
-        }
-        lastIpv6HealAttemptMs = now;
-        System.out.println("[Firewall] 运行期检测到 TUN 代理覆盖了 IPv6 直连路由或 WeakHost 状态，正在执行按需路由自愈...");
-        ensureWindowsFirewallPort(port);
-        return isWindowsIpv6DirectRoutesConfigured();
-    }
-
-    public static boolean isWindowsIpv6DirectRoutesConfigured() {
-        try {
-            ProcessBuilder pb = new ProcessBuilder(
-                    "powershell.exe", "-NoProfile", "-NonInteractive", "-Command",
-                    "$tunIfs = @(Get-NetIPAddress -ErrorAction SilentlyContinue | Where-Object { $_.IPAddress -like 'fd*' -or $_.IPAddress -like 'fc*' -or $_.IPAddress -like '198.18.*' -or $_.IPAddress -like '198.19.*' -or $_.IPAddress -like '172.19.*' -or $_.IPAddress -like '100.64.*' } | Select-Object -ExpandProperty InterfaceIndex -Unique); " +
-                    "$tunAdapters = @(Get-NetAdapter -IncludeHidden -ErrorAction SilentlyContinue | Where-Object { $_.InterfaceDescription -match 'Tap|Tun|Wintun|Sing|Clash|Mihomo|Meta|WireGuard|nekoray' -or $_.Name -match 'Tap|Tun|Wintun|Sing|Clash|Mihomo|Meta|WireGuard|nekoray' } | Select-Object -ExpandProperty ifIndex -Unique); " +
-                    "$allTun = @($tunIfs + $tunAdapters) | Select-Object -Unique; " +
-                    "if ($allTun.Count -gt 0) { " +
-                    "  $hijack = Get-NetRoute -InterfaceIndex $allTun -AddressFamily IPv6 -ErrorAction SilentlyContinue | Where-Object { $_.DestinationPrefix -in @('::/0','::/1','8000::/1','2000::/3','2000::/4','3000::/4','2000::/5','2000::/6','2800::/5') }; " +
-                    "  if ($hijack) { Write-Output 'TUN_V6_HIJACK'; exit 0 } " +
-                    "}; " +
-                    "$loHijack = Get-NetRoute -InterfaceIndex 1 -AddressFamily IPv6 -ErrorAction SilentlyContinue | Where-Object { $_.DestinationPrefix -in @('::/0','::/1','8000::/1','2000::/3','2000::/4','3000::/4') }; " +
-                    "if ($loHijack) { Write-Output 'LO_V6_HIJACK'; exit 0 }; " +
-                    "$physIp = Get-NetIPAddress -AddressFamily IPv6 -ErrorAction SilentlyContinue | Where-Object { $_.IPAddress -match '^[23][0-9a-f]{0,3}:' -and $_.InterfaceIndex -notin $allTun -and $_.DadState -eq 'Preferred' } | Select-Object -First 1; " +
-                    "if (-not $physIp) { " +
-                    "  $anyWeak = Get-NetIPInterface -AddressFamily IPv4 -ErrorAction SilentlyContinue | Where-Object { $_.ConnectionState -eq 'Connected' -and $_.InterfaceIndex -notin $allTun -and $_.WeakHostSend -eq 'Enabled' }; " +
-                    "  if ($anyWeak) { Write-Output 'ROUTE_OK' } else { Write-Output 'NO_IPV6_WEAKHOST_MISSING' }; exit 0 " +
-                    "}; " +
-                    "$ifIdx = $physIp.InterfaceIndex; " +
-                    "$weakV4 = Get-NetIPInterface -InterfaceIndex $ifIdx -AddressFamily IPv4 -ErrorAction SilentlyContinue; " +
-                    "$weakV6 = Get-NetIPInterface -InterfaceIndex $ifIdx -AddressFamily IPv6 -ErrorAction SilentlyContinue; " +
-                    "if (-not $weakV4 -or $weakV4.WeakHostReceive -ne 'Enabled' -or $weakV4.WeakHostSend -ne 'Enabled') { Write-Output 'WEAKHOST_V4_MISSING'; exit 0 }; " +
-                    "if (-not $weakV6 -or $weakV6.WeakHostReceive -ne 'Enabled' -or $weakV6.WeakHostSend -ne 'Enabled' -or $weakV6.InterfaceMetric -gt 10) { Write-Output 'WEAKHOST_V6_MISSING'; exit 0 }; " +
-                    "$rProbe = Get-NetRoute -AddressFamily IPv6 -DestinationPrefix '2001:4860::/32' -ErrorAction SilentlyContinue | Where-Object { $_.InterfaceIndex -eq $ifIdx }; " +
-                    "$r2606 = Get-NetRoute -AddressFamily IPv6 -DestinationPrefix '2606:4700::/32' -ErrorAction SilentlyContinue | Where-Object { $_.InterfaceIndex -eq $ifIdx }; " +
-                    "$r2409 = Get-NetRoute -AddressFamily IPv6 -DestinationPrefix '2409::/16' -ErrorAction SilentlyContinue | Where-Object { $_.InterfaceIndex -eq $ifIdx }; " +
-                    "$r1 = Get-NetRoute -AddressFamily IPv6 -DestinationPrefix '2000::/4' -ErrorAction SilentlyContinue | Where-Object { $_.InterfaceIndex -eq $ifIdx }; " +
-                    "if ($rProbe -and $r2606 -and $r2409 -and $r1) { Write-Output 'ROUTE_OK' } else { Write-Output 'ROUTE_MISSING' }"
-            );
-            pb.redirectErrorStream(true);
-            Process p = pb.start();
-            String out = new String(p.getInputStream().readAllBytes(), java.nio.charset.StandardCharsets.UTF_8);
-            p.waitFor();
-            return out.contains("ROUTE_OK");
         } catch (Exception e) {
             return false;
         }

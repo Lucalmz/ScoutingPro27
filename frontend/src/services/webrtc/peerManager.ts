@@ -10,7 +10,6 @@ import {
   cleanIpAddress,
   isGlobalIpv6Address,
   getCachedPhysicalAddresses,
-  healHostIpv6RoutesIfNeeded,
   CONNECTION_TIMING
 } from './connectivity'
 import type { SignalingChannel } from './signaling'
@@ -345,23 +344,18 @@ export class PeerConnectionManager {
     }
 
     let localIpv6Generated = false
-    let hostIpv6RouteHealTriggered = false
+    let hostIpv6MissingWarned = false
 
-    const checkAndHealHostIpv6Routes = () => {
-      if (!isHost || localIpv6Generated || hostIpv6RouteHealTriggered) return
+    // 仅诊断：Host 物理网卡有公网 IPv6 但 Chromium 未采集到 IPv6 候选（通常是 TUN 代理接管了 IPv6 路由）。
+    // 绝不修改系统路由/网卡参数——那会破坏用户的 TUN 代理（历史教训）。
+    const warnIfHostIpv6Missing = () => {
+      if (!isHost || localIpv6Generated || hostIpv6MissingWarned) return
       const physV6s = getCachedPhysicalAddresses().ipv6s
       if (physV6s.length > 0) {
-        hostIpv6RouteHealTriggered = true
+        hostIpv6MissingWarned = true
         log.warn(
-          `[SelfHealing] Host physical NIC has GUA IPv6 (${physV6s.join(', ')}), but Chromium gathered 0 IPv6 candidates (runtime TUN route hijack detected). Triggering backend route self-healing...`
+          `[Diagnostic] Host physical NIC has GUA IPv6 (${physV6s.join(', ')}), but Chromium gathered 0 IPv6 candidates. A TUN proxy is likely capturing IPv6 routes; consider excluding 2000::/3 in the proxy's route-exclude-address. Falling back to IPv4 paths.`
         )
-        healHostIpv6RoutesIfNeeded().then((healed) => {
-          if (healed && peer.connectionState !== 'connected' && peer.connectionState !== 'closed') {
-            try {
-              peer.restartIce?.()
-            } catch {}
-          }
-        })
       }
     }
 
@@ -412,7 +406,7 @@ export class PeerConnectionManager {
         dispatchOrQueueCandidate(candObj, false)
       } else {
         log.info(`ICE Gathering Complete (null candidate received)`)
-        checkAndHealHostIpv6Routes()
+        warnIfHostIpv6Missing()
       }
     }
 
@@ -580,7 +574,7 @@ export class PeerConnectionManager {
           stallNoticeTimer = setTimeout(() => {
             stallNoticeTimer = null
             if (peer.iceConnectionState === 'checking' && !this.virtualFallbackPeers.has(peer)) {
-              checkAndHealHostIpv6Routes()
+              warnIfHostIpv6Missing()
               if (localIpv6Generated) {
                 log.warn(
                   `[Diagnostic] 检测到本端已生成公网 IPv6 候选但握手超过 ${CONNECTION_TIMING.ICE_STALL_NOTICE_MS}ms 未响应（可能原因：移动端 VPN 开启了 IPv6 路由劫持/阻断且未将浏览器加入分应用绕过白名单）。正在自动尝试 IPv4 穿透与信令加密通道兜底。`

@@ -556,18 +556,4 @@ export async function getNetworkInfo(): Promise<{
   }
 }
 
-export async function healIpv6DirectRoutes(): Promise<{
-  success: boolean
-  ipv6DirectRoutesReady?: boolean
-  primaryIpv6?: string | null
-  allIpv6s?: string[]
-} | null> {
-  if (isStaticCloudHost()) return null
-  try {
-    return await request('POST', '/system/heal-ipv6-routes', {})
-  } catch {
-    return null
-  }
-}
-
 

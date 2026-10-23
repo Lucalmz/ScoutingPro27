@@ -352,8 +352,8 @@ public class Main {
             builder.getCefSettings().windowless_rendering_enabled = false;
             builder.addJcefArgs("--use-fake-ui-for-media-stream");
             builder.addJcefArgs("--disable-features=WebRtcHideLocalIpsWithMdns,WebUsb,MediaRouter,CalculateNativeWinOcclusion");
-            // 开启 Chromium libwebrtc IPv6 默认探测、快速 ICE 提名探测与 BBR 拥塞控制（严禁开启 WebRTC-BindUsingInterfaceIndex，避免 TUN 环境下 IPV6_UNICAST_IF 破坏 WeakHost 跨网卡路由引发 WSAENETUNREACH）
-            builder.addJcefArgs("--force-fieldtrials=WebRTC-IPv6Default/Enabled/WebRTC-IceFieldTrials/send_ping_on_switch_ice_controlling:true,send_ping_on_selected_ice_controlling:true,send_ping_on_nomination_ice_controlled:true/WebRTC-Bwe-Bbr/Enabled/");
+            // 开启 Chromium libwebrtc IPv6 默认探测、按物理网卡索引绑定 Socket（per-socket 设置，不修改系统路由）、快速 ICE 提名探测与 BBR 拥塞控制
+            builder.addJcefArgs("--force-fieldtrials=WebRTC-IPv6Default/Enabled/WebRTC-BindUsingInterfaceIndex/Enabled/WebRTC-IceFieldTrials/send_ping_on_switch_ice_controlling:true,send_ping_on_selected_ice_controlling:true,send_ping_on_nomination_ice_controlled:true/WebRTC-Bwe-Bbr/Enabled/");
             builder.addJcefArgs("--disable-device-discovery-notifications");
             builder.addJcefArgs("--disable-usb-keyboard-detect");
 
