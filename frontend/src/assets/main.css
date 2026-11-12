@@ -45,30 +45,34 @@
 }
 
 :root {
-  /* Semantic Tokens (Shadcn/Ant Design inspired) */
-  --background: #000000;
-  --foreground: #f1f5f9;
+  color-scheme: dark;
+  /* Claude-Inspired Matte Flat Dark Surface Hierarchy (Zero Glassmorphism) */
+  --background: #0c0c0b;
+  --surface-recessed: #080807;
+  --foreground: #f0efe9;
   
-  --card: #0a0a0a;
-  --card-foreground: #f1f5f9;
+  --card: #141413;
+  --card-foreground: #f0efe9;
   
-  --popover: #111111;
-  --popover-foreground: #f1f5f9;
+  --popover: #181816;
+  --popover-foreground: #f0efe9;
   
   --primary: #39ff14; /* Fluorescent Green */
-  --primary-foreground: #000000;
+  --primary-foreground: #080807;
   
-  --muted: #1a1a1a;
-  --muted-foreground: #a3a3a3;
+  --muted: #1c1c1a;
+  --muted-foreground: #8e8d87;
   
   --accent: #39ff14;
-  --accent-foreground: #000000;
+  --accent-foreground: #080807;
   
   --destructive: #ef4444;
   --destructive-foreground: #ffffff;
   
-  --border: #262626;
-  --input: #1a1a1a;
+  --border: #262624;
+  --border-subtle: #1e1e1c;
+  --border-strong: #353532;
+  --input: #090908;
   --ring: #39ff14;
   
   /* Status Colors */
@@ -78,13 +82,25 @@
   --status-info: #38bdf8;
 
   /* Surface & Muted Helpers */
-  --surface: #0a0a0a;
-  --surface-hover: #141414;
-  --text-muted: #a3a3a3;
+  --surface: #141413;
+  --surface-hover: #1c1c1a;
+  --surface-elevated: #1c1c1a;
+  --text-muted: #8e8d87;
+
+  /* High-Energy Tactical Accents (Crimson Flame & Cobalt Lightning) */
+  --flame-red: #ef4444;
+  --flame-orange: #f97316;
+  --flame-surface: #1b1111;
+  --flame-glow: 0 0 24px rgba(239, 68, 68, 0.35), 0 0 8px rgba(249, 115, 22, 0.25);
+
+  --electric-blue: #3b82f6;
+  --electric-cyan: #38bdf8;
+  --electric-surface: #0f1622;
+  --electric-glow: 0 0 24px rgba(59, 130, 246, 0.35), 0 0 8px rgba(56, 189, 248, 0.25);
 
   /* Glow Effects */
-  --glow-primary: 0 0 10px rgba(57, 255, 20, 0.4), 0 0 20px rgba(57, 255, 20, 0.2);
-  --glow-primary-hover: 0 0 15px rgba(57, 255, 20, 0.6), 0 0 30px rgba(57, 255, 20, 0.3);
+  --glow-primary: 0 0 12px rgba(57, 255, 20, 0.35), 0 0 24px rgba(57, 255, 20, 0.16);
+  --glow-primary-hover: 0 0 16px rgba(57, 255, 20, 0.55), 0 0 32px rgba(57, 255, 20, 0.28);
 
   /* Safe Area Tokens */
   --sat: env(safe-area-inset-top, 0px);
@@ -130,6 +146,11 @@ html {
 h1, h2, h3, h4, h5, h6, .font-heading {
   font-family: 'Orbitron', 'ZCOOLQingKeHuangYou', sans-serif;
   letter-spacing: 0.05em;
+}
+
+/* Enforce Tabular Numbers for Telemetry, Scores, Rankings & Counters */
+table, th, td, input[type='number'], .tabular-nums, .score-cell, .rank-cell, .quant-val, .stat-value {
+  font-variant-numeric: tabular-nums;
 }
 
 body {
@@ -195,9 +216,141 @@ input[type='number'] {
   box-shadow: var(--glow-primary);
 }
 
-/* Utility */
+/* Utility & Safe Global Matte Button Baseline (Prevents raw white browser buttons) */
 button {
   font-family: inherit;
+  background-color: var(--muted, #1c1c1a);
+  color: var(--foreground, #f0efe9);
+  border: 1px solid var(--border, #262624);
+  border-radius: 8px;
+  cursor: pointer;
+}
+
+button:disabled {
+  cursor: not-allowed;
+}
+
+/* Safe Global Form Controls Baseline (Select, Input, Textarea, Checkbox, Radio) */
+select,
+input,
+textarea {
+  color-scheme: dark;
+}
+
+select {
+  font-family: inherit;
+  background-color: var(--card, #141413);
+  color: var(--foreground, #f0efe9);
+  border: 1px solid var(--border, #262624);
+  border-radius: 6px;
+  padding: 5px 28px 5px 10px;
+  font-size: 13px;
+  cursor: pointer;
+  outline: none;
+  -webkit-appearance: none;
+  -moz-appearance: none;
+  appearance: none;
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='14' height='14' viewBox='0 0 24 24' fill='none' stroke='%238e8d87' stroke-width='2.2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='m6 9 6 6 6-6'/%3E%3C/svg%3E");
+  background-repeat: no-repeat;
+  background-position: right 8px center;
+  background-size: 13px 13px;
+  transition: border-color var(--motion-duration-fast) var(--motion-ease-out),
+              box-shadow var(--motion-duration-fast) var(--motion-ease-out),
+              background-color var(--motion-duration-fast) var(--motion-ease-out);
+}
+
+select:hover:not(:disabled) {
+  border-color: var(--border-strong, #353532);
+  background-color: var(--surface-hover, #1c1c1a);
+}
+
+select:focus,
+select:focus-visible {
+  border-color: var(--primary, #39ff14);
+  outline: none;
+  box-shadow: 0 0 0 1px var(--primary, #39ff14), 0 0 10px rgba(57, 255, 20, 0.22);
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='14' height='14' viewBox='0 0 24 24' fill='none' stroke='%2339ff14' stroke-width='2.2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='m6 9 6 6 6-6'/%3E%3C/svg%3E");
+}
+
+select:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+select option {
+  background-color: #141413;
+  color: #f0efe9;
+  padding: 7px 12px;
+  font-size: 13px;
+}
+
+select option:checked {
+  background-color: #1c1c1a;
+  color: #39ff14;
+  font-weight: 600;
+}
+
+select optgroup {
+  background-color: #0c0c0b;
+  color: #8e8d87;
+  font-weight: 700;
+}
+
+input[type="checkbox"],
+input[type="radio"] {
+  accent-color: var(--primary, #39ff14);
+  cursor: pointer;
+}
+
+input[type='text'],
+input[type='password'],
+input[type='number'],
+input[type='search'],
+textarea {
+  font-family: inherit;
+  color: var(--foreground, #f0efe9);
+  background-color: var(--input, #090908);
+  border: 1px solid var(--border, #262624);
+  border-radius: 8px;
+  transition: border-color var(--motion-duration-fast) var(--motion-ease-out),
+              box-shadow var(--motion-duration-fast) var(--motion-ease-out);
+}
+
+input[type='text']:focus,
+input[type='password']:focus,
+input[type='number']:focus,
+input[type='search']:focus,
+textarea:focus {
+  border-color: var(--primary, #39ff14);
+  outline: none;
+  box-shadow: 0 0 0 1px var(--primary, #39ff14), 0 0 8px rgba(57, 255, 20, 0.22);
+}
+
+/* Shared Tactical Pill & Topbar Buttons (Used across DashboardView, EventView, TeamDetailView) */
+.user-tag-btn,
+.topbar-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  padding: 6px 14px;
+  border-radius: 8px;
+  background: var(--muted, #1c1c1a);
+  border: 1px solid var(--border-strong, #353532);
+  color: var(--foreground, #f0efe9);
+  font-size: 13px;
+  font-weight: 600;
+  cursor: pointer;
+  white-space: nowrap;
+  transition: all var(--motion-duration-fast) var(--motion-ease-out);
+}
+
+.user-tag-btn:hover:not(:disabled),
+.topbar-btn:hover:not(:disabled) {
+  background: #242421;
+  border-color: var(--primary, #39ff14);
+  color: var(--primary, #39ff14);
+  box-shadow: 0 0 12px rgba(57, 255, 20, 0.18);
 }
 
 /* Global Glow Utilities */
@@ -389,5 +542,70 @@ html[data-transition-type='user-profile']::view-transition-new(root) {
     scroll-behavior: auto !important;
   }
 }
+
+/* ==========================================================================
+   Tactical Initialization & High-Energy Keyframes
+   ========================================================================== */
+@keyframes tactical-stagger-rise {
+  0% {
+    opacity: 0;
+    transform: translateY(16px) scale(0.985);
+  }
+  100% {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+  }
+}
+
+@keyframes tactical-scanline-sweep {
+  0% {
+    transform: translateY(-10vh);
+    opacity: 0;
+  }
+  20% {
+    opacity: 0.85;
+  }
+  80% {
+    opacity: 0.5;
+  }
+  100% {
+    transform: translateY(105vh);
+    opacity: 0;
+  }
+}
+
+@keyframes tactical-corner-lock {
+  0% {
+    opacity: 0;
+    transform: scale(1.18);
+  }
+  50% {
+    opacity: 0.9;
+    transform: scale(0.98);
+  }
+  100% {
+    opacity: 0;
+    transform: scale(1);
+  }
+}
+
+@keyframes flame-border-pulse {
+  0%, 100% {
+    box-shadow: 0 0 14px rgba(239, 68, 68, 0.22);
+  }
+  50% {
+    box-shadow: 0 0 26px rgba(239, 68, 68, 0.42), 0 0 8px rgba(249, 115, 22, 0.3);
+  }
+}
+
+@keyframes electric-border-pulse {
+  0%, 100% {
+    box-shadow: 0 0 14px rgba(59, 130, 246, 0.22);
+  }
+  50% {
+    box-shadow: 0 0 26px rgba(59, 130, 246, 0.42), 0 0 8px rgba(56, 189, 248, 0.3);
+  }
+}
+
 
 

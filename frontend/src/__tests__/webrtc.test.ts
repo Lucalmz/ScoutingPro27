@@ -1378,7 +1378,8 @@ describe('IPv6 Priority & Transport Diagnostics', () => {
       'stun:[2606:4700:49::]:3478',
       'stun:[2001:4860:4864:5:8000::1]:19302',
       'stun:[2a01:4f8:1c1e:d769::1]:3478',
-      'stun:111.8.3.78:3478'
+      'stun:111.8.3.78:3478',
+      'stun:74.125.250.129:19302'
     ])
     // Secondary domain STUNs
     expect(iceServers[1].urls).toEqual([

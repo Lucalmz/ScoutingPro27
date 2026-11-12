@@ -244,8 +244,9 @@ async function handleLogin() {
   align-items: center;
   justify-content: center;
   min-height: 100vh;
-  background: linear-gradient(135deg, var(--background) 0%, var(--card) 50%, var(--background) 100%);
+  background-color: var(--background);
   position: relative;
+  overflow: hidden;
 }
 
 .lang-switcher {
@@ -256,15 +257,16 @@ async function handleLogin() {
 }
 
 .lang-btn {
-  background: transparent;
+  background: var(--card);
   color: var(--muted-foreground);
   border: 1px solid var(--border);
-  padding: 8px 12px;
+  padding: 8px 14px;
   border-radius: 8px;
   display: flex;
   align-items: center;
   gap: 6px;
-  font-size: 14px;
+  font-size: 13px;
+  font-weight: 600;
   cursor: pointer;
   transition: all 0.2s;
   width: auto;
@@ -274,26 +276,29 @@ async function handleLogin() {
 .lang-btn:hover {
   color: var(--foreground);
   border-color: var(--primary);
-  background: var(--card);
+  background: var(--surface-elevated);
 }
 
 .login-card {
+  position: relative;
+  z-index: 2;
   background: var(--card);
   border: 1px solid var(--border);
   border-radius: 16px;
-  padding: 48px 40px;
+  padding: 44px 38px;
   width: 100%;
   max-width: 420px;
-  box-shadow: 0 25px 50px rgba(0, 0, 0, 0.4);
-  animation: login-card-enter var(--motion-duration-slow) var(--motion-ease-out);
+  box-shadow: 0 28px 64px rgba(0, 0, 0, 0.72);
+  animation: login-card-enter 0.72s var(--motion-ease-out) both;
 }
 
 .invite-banner {
   display: flex;
   align-items: center;
   gap: 12px;
-  background: rgba(59, 130, 246, 0.12);
+  background: var(--surface-recessed);
   border: 1px solid var(--primary);
+  border-left: 3px solid var(--primary);
   border-radius: 10px;
   padding: 12px 14px;
   margin-bottom: 20px;
@@ -324,7 +329,7 @@ async function handleLogin() {
 
 .btn-rescan {
   margin-left: auto;
-  background: transparent;
+  background: var(--card);
   border: 1px solid rgba(57, 255, 20, 0.4);
   color: var(--primary);
   width: 36px;
@@ -350,14 +355,14 @@ async function handleLogin() {
 }
 
 .btn-scan-login {
-  background: transparent;
+  background: var(--surface-recessed);
   border: 1px solid var(--border);
   color: var(--muted-foreground);
   padding: 10px 16px;
   border-radius: 10px;
   width: 100%;
   font-size: 14px;
-  font-weight: 500;
+  font-weight: 600;
   display: flex;
   align-items: center;
   justify-content: center;
@@ -369,7 +374,7 @@ async function handleLogin() {
 .btn-scan-login:hover {
   border-color: var(--primary);
   color: var(--primary);
-  background: rgba(57, 255, 20, 0.06);
+  background: var(--surface-elevated);
 }
 
 .btn-scan-login .material-icons {
@@ -377,13 +382,13 @@ async function handleLogin() {
 }
 
 @keyframes login-card-enter {
-  from {
+  0% {
     opacity: 0;
-    transform: scale(0.96) translateY(20px);
+    transform: translateY(28px) scale(0.95);
   }
-  to {
+  100% {
     opacity: 1;
-    transform: scale(1) translateY(0);
+    transform: translateY(0) scale(1);
   }
 }
 
@@ -409,55 +414,64 @@ async function handleLogin() {
 
 .logo-area {
   text-align: center;
-  margin-bottom: 32px;
+  margin-bottom: 28px;
+  animation: tactical-stagger-rise 0.65s var(--motion-ease-out) 0.08s both;
 }
 
 .login-brand-logo {
-  width: 68px;
-  height: 68px;
+  width: 64px;
+  height: 64px;
   object-fit: contain;
-  margin-bottom: 10px;
   image-rendering: -webkit-optimize-contrast;
-  filter: drop-shadow(0 0 10px rgba(57, 255, 20, 0.40));
+  margin-bottom: 14px;
 }
 
 h1 {
-  font-size: 28px;
-  font-weight: 700;
+  font-size: 27px;
+  font-weight: 800;
   color: var(--foreground);
   margin: 0 0 4px;
+  letter-spacing: 0.04em;
 }
 
 .powered-by {
   color: var(--muted-foreground);
   font-size: 11px;
-  margin-top: 8px;
-  opacity: 0.8;
+  font-family: 'Orbitron', sans-serif;
+  letter-spacing: 0.08em;
+  margin-top: 6px;
+}
+
+form {
+  animation: tactical-stagger-rise 0.65s var(--motion-ease-out) 0.16s both;
 }
 
 label {
   display: block;
   color: var(--muted-foreground);
-  font-size: 14px;
-  font-weight: 500;
+  font-size: 12px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
   margin-bottom: 6px;
 }
 
 input {
   width: 100%;
   padding: 12px 16px;
-  background: var(--background);
+  background: var(--surface-recessed);
   border: 1px solid var(--border);
   border-radius: 10px;
   color: var(--foreground);
-  font-size: 16px;
+  font-size: 15px;
   outline: none;
-  transition: border-color 0.2s;
+  transition: border-color 0.2s, box-shadow 0.2s;
   box-sizing: border-box;
 }
 
 input:focus {
   border-color: var(--primary);
+  box-shadow: 0 0 0 3px rgba(57, 255, 20, 0.14);
 }
 
 input:disabled {
@@ -466,16 +480,18 @@ input:disabled {
 
 button[type="submit"] {
   width: 100%;
-  margin-top: 20px;
-  padding: 12px;
+  margin-top: 22px;
+  padding: 13px;
   background: var(--primary);
   color: var(--primary-foreground);
-  font-size: 16px;
-  font-weight: 600;
+  font-family: 'Orbitron', 'Manrope', sans-serif;
+  font-size: 15px;
+  font-weight: 800;
+  letter-spacing: 0.04em;
   border: none;
   border-radius: 10px;
   cursor: pointer;
-  transition: background 0.2s;
+  transition: transform 0.2s, box-shadow 0.2s, background 0.2s;
   display: flex;
   align-items: center;
   justify-content: center;
@@ -487,7 +503,7 @@ button[type="submit"]:hover:not(:disabled) {
 }
 
 button[type="submit"]:disabled {
-  opacity: 0.5;
+  opacity: 0.45;
   cursor: not-allowed;
 }
 

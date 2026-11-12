@@ -13,7 +13,9 @@ import { downloadCSV } from '@/utils/csvExport'
 import { sortRecordsChronologically, getRecordTournamentLevel } from '@/utils/tournament'
 import OfflineSyncModal from '@/components/common/OfflineSyncModal.vue'
 import CustomFieldsManagerModal from '@/components/customFields/CustomFieldsManagerModal.vue'
+import SendMessageModal from './SendMessageModal.vue'
 import { useCustomFieldsStore } from '@/stores/customFields'
+import { useConfirm } from '@/composables/useConfirm'
 
 const props = defineProps<{
   event: ScoutingEvent | null
@@ -27,9 +29,12 @@ const connStore = useConnectionStore()
 const inboxStore = useInboxStore()
 const toastStore = useToastStore()
 const customFieldsStore = useCustomFieldsStore()
+const { showConfirm } = useConfirm()
 
 const showOfflineSyncModal = ref(false)
 const showCustomFieldsModal = ref(false)
+const showSendMessageModal = ref(false)
+const messageTargetScout = ref<{ id: string; name?: string; isOnline?: boolean } | null>(null)
 
 // --- Database Event Members & Real-time Auto-Refresh ---
 const dbMembers = ref<EventMemberItem[]>([])
@@ -296,8 +301,14 @@ const uniqueScouts = computed(() => {
 
 async function handleRemoveMember(scoutId: string, scoutName: string) {
   if (!props.event?.id) return
-  const confirmMsg = t('event.remove_scout_confirm', { name: scoutName })
-  if (!confirm(confirmMsg)) return
+  const ok = await showConfirm({
+    title: t('event.remove_scout_title') || t('event.remove_scout') || '移除成员',
+    message: t('event.remove_scout_confirm', { name: scoutName }),
+    type: 'danger',
+    confirmText: t('event.btn_remove_confirm') || (isZh.value ? '确认移除' : 'Remove'),
+    cancelText: t('common.cancel') || (isZh.value ? '取消' : 'Cancel')
+  })
+  if (!ok) return
 
   try {
     removeKnownScout(props.event.id, scoutId)
@@ -312,19 +323,13 @@ async function handleRemoveMember(scoutId: string, scoutName: string) {
   }
 }
 
-async function sendDirectMessage(scoutId: string, scoutName?: string) {
-  if (connStore.rtcService) {
-    const promptText = t('event.msg_prompt', { name: scoutName || scoutId })
-    const msg = prompt(promptText)
-    if (msg) {
-      await inboxStore.sendDirectMessage(
-        { targetId: scoutId, targetName: scoutName, title: 'Message from Host', body: msg },
-        connStore.rtcService
-      )
-    }
-  } else {
-    toastStore.showToast(t('event.msg_not_ready'), 'warning')
+function sendDirectMessage(scoutId: string, scoutName?: string, isOnline?: boolean) {
+  messageTargetScout.value = {
+    id: scoutId,
+    name: scoutName,
+    isOnline: isOnline ?? connStore.connectedScouts.some(s => s.id === scoutId)
   }
+  showSendMessageModal.value = true
 }
 </script>
 
@@ -414,7 +419,7 @@ async function sendDirectMessage(scoutId: string, scoutName?: string) {
           </span>
         </div>
         <div class="scout-actions">
-          <button @click="sendDirectMessage(s.id, s.name)" class="btn-msg">
+          <button @click="sendDirectMessage(s.id, s.name, s.isOnline)" class="btn-msg">
             <span class="material-icons" style="font-size: 16px; vertical-align: middle; margin-right: 4px;">mail</span>
             {{ t('event.send_message') }}
           </button>
@@ -432,6 +437,12 @@ async function sendDirectMessage(scoutId: string, scoutName?: string) {
 
     <OfflineSyncModal v-model:visible="showOfflineSyncModal" :event-id="event?.id" />
     <CustomFieldsManagerModal v-model:visible="showCustomFieldsModal" :event-id="event?.id || ''" />
+    <SendMessageModal
+      v-model:visible="showSendMessageModal"
+      :target-scout-id="messageTargetScout?.id || ''"
+      :target-scout-name="messageTargetScout?.name"
+      :is-online="messageTargetScout?.isOnline"
+    />
   </div>
 </template>
 

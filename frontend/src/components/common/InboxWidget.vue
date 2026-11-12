@@ -155,9 +155,7 @@ function handleMessageClick(msg: SystemMessage) {
   left: 0;
   right: 0;
   bottom: 0;
-  background: rgba(0, 0, 0, 0.45);
-  backdrop-filter: blur(2px);
-  -webkit-backdrop-filter: blur(2px);
+  background: rgba(8, 8, 7, 0.72);
   z-index: 999;
 }
 
@@ -175,13 +173,15 @@ function handleMessageClick(msg: SystemMessage) {
   height: 56px;
   border-radius: 50%;
   background: var(--primary, #39ff14);
-  box-shadow: 0 4px 14px rgba(57, 255, 20, 0.45);
+  border: 1px solid rgba(57, 255, 20, 0.5);
+  box-shadow: 0 4px 16px rgba(57, 255, 20, 0.35);
   overflow: hidden;
   transition: width 0.5s cubic-bezier(0.25, 1, 0.5, 1), 
               height 0.5s cubic-bezier(0.25, 1, 0.5, 1), 
               border-radius 0.5s cubic-bezier(0.25, 1, 0.5, 1),
               box-shadow 0.5s cubic-bezier(0.25, 1, 0.5, 1),
-              background-color 0.4s cubic-bezier(0.25, 1, 0.5, 1);
+              background-color 0.4s cubic-bezier(0.25, 1, 0.5, 1),
+              border-color 0.4s ease;
   cursor: pointer;
   display: flex;
   flex-direction: column;
@@ -190,13 +190,15 @@ function handleMessageClick(msg: SystemMessage) {
 }
 
 .inbox-widget.is-open .inbox-morph-container {
-  width: 340px;
-  height: 420px;
+  width: 350px;
+  height: 430px;
   max-width: calc(100vw - 32px);
   max-height: calc(100vh - 120px);
   border-radius: 16px;
-  background-color: #ffffff;
-  box-shadow: 0 12px 32px rgba(0, 0, 0, 0.35);
+  background-color: var(--card, #141413);
+  border: 1px solid var(--border, #262624);
+  border-top: 2px solid var(--primary, #39ff14);
+  box-shadow: 0 24px 60px rgba(0, 0, 0, 0.78);
   cursor: default;
 }
 
@@ -206,7 +208,7 @@ function handleMessageClick(msg: SystemMessage) {
   display: flex;
   align-items: center;
   justify-content: center;
-  color: #000000;
+  color: #080807;
   position: absolute;
   top: 0;
   left: 0;
@@ -254,44 +256,45 @@ function handleMessageClick(msg: SystemMessage) {
 }
 
 .inbox-header {
-  padding: 1rem;
-  background: #f8f9fa;
-  border-bottom: 1px solid #eee;
+  padding: 0.9rem 1rem;
+  background: var(--surface-elevated, #1c1c1a);
+  border-bottom: 1px solid var(--border, #262624);
 }
 
 .inbox-header h3 {
   margin: 0;
-  font-size: 1.1rem;
+  font-size: 1rem;
   font-weight: 700;
-  color: #333333;
+  color: var(--foreground, #f0efe9);
 }
 
 .close-btn {
-  color: #666666;
+  color: var(--muted-foreground, #8e8d87);
   transition: color 0.15s;
 }
 
 .close-btn:hover {
-  color: #000000;
+  color: var(--foreground, #f0efe9);
 }
 
 .inbox-list {
   flex: 1;
   overflow-y: auto;
   padding: 0;
+  background: var(--card, #141413);
 }
 
 .empty {
-  padding: 2rem;
+  padding: 2.5rem 1.5rem;
   text-align: center;
-  color: #888888;
+  color: var(--muted-foreground, #8e8d87);
   font-size: 0.9rem;
 }
 
 .inbox-item {
-  padding: 1rem;
-  border-bottom: 1px solid #eee;
-  background: #ffffff;
+  padding: 0.95rem 1rem;
+  border-bottom: 1px solid var(--border, #262624);
+  background: var(--card, #141413);
   transition: background 0.15s;
 }
 
@@ -300,11 +303,11 @@ function handleMessageClick(msg: SystemMessage) {
 }
 
 .inbox-item.clickable:hover {
-  background: #f9f9f9;
+  background: var(--surface-elevated, #1c1c1a);
 }
 
 .inbox-item.unread {
-  background: #f0f7ff;
+  background: var(--surface-recessed, #080807);
   border-left: 3px solid var(--primary, #39ff14);
 }
 
@@ -312,35 +315,36 @@ function handleMessageClick(msg: SystemMessage) {
   display: flex;
   justify-content: space-between;
   align-items: center;
-  margin-bottom: 0.5rem;
+  margin-bottom: 0.45rem;
 }
 
 .inbox-item-header h4 {
   margin: 0;
-  font-size: 1rem;
-  font-weight: 600;
-  color: #333333;
+  font-size: 0.95rem;
+  font-weight: 700;
+  color: var(--foreground, #f0efe9);
 }
 
 .time {
-  font-size: 0.8rem;
-  color: #888888;
+  font-size: 0.75rem;
+  color: var(--muted-foreground, #8e8d87);
+  font-variant-numeric: tabular-nums;
 }
 
 .inbox-item p {
   margin: 0 0 0.5rem 0;
-  font-size: 0.9rem;
-  color: #555555;
-  line-height: 1.4;
+  font-size: 0.86rem;
+  color: var(--muted-foreground, #8e8d87);
+  line-height: 1.45;
 }
 
 .mark-read {
   background: none;
   border: none;
-  color: #007bff;
+  color: var(--primary, #39ff14);
   cursor: pointer;
-  font-size: 0.8rem;
-  font-weight: 600;
+  font-size: 0.78rem;
+  font-weight: 700;
   padding: 0;
 }
 .mark-read:hover {

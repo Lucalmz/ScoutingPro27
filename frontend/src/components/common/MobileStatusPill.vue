@@ -143,7 +143,7 @@ function toggleHud() {
               <span class="hud-value" :style="{ color: statusColor }">{{ statusLabel }} (WebRTC P2P)</span>
             </div>
             <div class="hud-item hud-transport-item">
-              <span class="hud-label">{{ t('connection.transport_type', '连接类型') }}</span>
+              <span class="hud-label">{{ t('connection.transport_type') }}</span>
               <span class="hud-value hud-transport">
                 <span class="material-icons hud-transport-icon" :class="{ spinning: connStore.status === 'connecting' }">{{ transportIcon }}</span>
                 <span class="hud-transport-label">{{ transportDisplayLabel }}</span>
@@ -179,16 +179,14 @@ function toggleHud() {
   gap: 6px;
   height: 28px;
   padding: 0 12px 0 10px;
-  background: rgba(18, 22, 34, 0.85);
-  backdrop-filter: blur(16px);
-  -webkit-backdrop-filter: blur(16px);
-  border: 1px solid rgba(255, 255, 255, 0.12);
+  background: var(--card, #141413);
+  border: 1px solid var(--border, #262624);
   border-radius: 9999px;
-  color: var(--foreground, #ffffff);
+  color: var(--foreground, #f0efe9);
   font-size: 12px;
   font-weight: 600;
   cursor: pointer;
-  box-shadow: 0 4px 14px rgba(0, 0, 0, 0.35);
+  box-shadow: 0 6px 18px rgba(0, 0, 0, 0.6);
   transition: all 0.25s cubic-bezier(0.16, 1, 0.3, 1);
   user-select: none;
   -webkit-user-select: none;
@@ -235,9 +233,7 @@ function toggleHud() {
 .hud-backdrop {
   position: fixed;
   inset: 0;
-  background: rgba(0, 0, 0, 0.5);
-  backdrop-filter: blur(4px);
-  -webkit-backdrop-filter: blur(4px);
+  background: rgba(8, 8, 7, 0.72);
   z-index: 1000;
 }
 
@@ -247,13 +243,14 @@ function toggleHud() {
   left: 50%;
   transform: translateX(-50%);
   width: min(340px, 92vw);
-  background: #161b22;
-  border: 1px solid rgba(255, 255, 255, 0.16);
-  border-radius: 16px;
+  background: var(--card, #141413);
+  border: 1px solid var(--border, #262624);
+  border-top: 2px solid var(--primary, #39ff14);
+  border-radius: 14px;
   padding: 16px 18px;
-  box-shadow: 0 16px 36px rgba(0, 0, 0, 0.5), 0 0 20px rgba(57, 255, 20, 0.12);
+  box-shadow: 0 20px 48px rgba(0, 0, 0, 0.78);
   z-index: 1001;
-  color: var(--foreground, #ffffff);
+  color: var(--foreground, #f0efe9);
 }
 
 .hud-header {

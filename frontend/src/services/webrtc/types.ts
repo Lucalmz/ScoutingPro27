@@ -74,6 +74,7 @@ export interface ClientEntry {
   pc: RTCPeerConnection
   sessionId?: string
   dc?: RTCDataChannel
+  drainingVirtualDc?: any
   sender?: DataChannelSender
   pendingCandidates: any[]
   deviceId?: string

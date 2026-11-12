@@ -1,5 +1,21 @@
 <script setup lang="ts">
 import { ref, computed, onMounted, onUnmounted, watch } from 'vue'
+import { useI18n } from 'vue-i18n'
+
+let t = (key: string): string => {
+  if (key === 'image_preview.view_original') return '查看原图'
+  if (key === 'image_preview.close') return '关闭'
+  if (key === 'image_preview.prev_image') return '上一张'
+  if (key === 'image_preview.next_image') return '下一张'
+  return key
+}
+
+try {
+  const i18n = useI18n()
+  t = i18n.t
+} catch {
+  // Fallback for isolated unit tests mounted without i18n plugin
+}
 
 const props = withDefaults(
   defineProps<{
@@ -143,8 +159,8 @@ onUnmounted(() => {
               type="button"
               class="icon-btn"
               @click="openOriginal"
-              title="查看原图"
-              aria-label="查看原图"
+              :title="t('image_preview.view_original')"
+              :aria-label="t('image_preview.view_original')"
             >
               <span class="material-icons">open_in_new</span>
             </button>
@@ -152,8 +168,8 @@ onUnmounted(() => {
               type="button"
               class="icon-btn close-btn"
               @click="close"
-              title="关闭"
-              aria-label="关闭"
+              :title="t('image_preview.close')"
+              :aria-label="t('image_preview.close')"
             >
               <span class="material-icons">close</span>
             </button>
@@ -168,7 +184,7 @@ onUnmounted(() => {
             type="button"
             class="nav-btn prev-btn"
             @click.stop="prev"
-            aria-label="上一张"
+            :aria-label="t('image_preview.prev_image')"
           >
             <span class="material-icons">chevron_left</span>
           </button>
@@ -188,7 +204,7 @@ onUnmounted(() => {
             type="button"
             class="nav-btn next-btn"
             @click.stop="next"
-            aria-label="下一张"
+            :aria-label="t('image_preview.next_image')"
           >
             <span class="material-icons">chevron_right</span>
           </button>
@@ -205,8 +221,7 @@ onUnmounted(() => {
   left: 0;
   right: 0;
   bottom: 0;
-  background: rgba(0, 0, 0, 0.88);
-  backdrop-filter: blur(8px);
+  background: rgba(8, 8, 7, 0.94);
   z-index: 9999;
   display: flex;
   flex-direction: column;

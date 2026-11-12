@@ -3,9 +3,7 @@
   position: fixed;
   inset: 0;
   z-index: 1000;
-  background: rgba(0, 0, 0, 0.65);
-  backdrop-filter: blur(6px);
-  -webkit-backdrop-filter: blur(6px);
+  background: rgba(8, 8, 7, 0.82);
   pointer-events: auto;
 }
 
@@ -17,8 +15,8 @@
   height: 100%;
   width: 400px;
   max-width: 100vw;
-  background: var(--card, #0a0a0a);
-  border-left: 1px solid var(--border, #262626);
+  background: var(--card, #141413);
+  border-left: 1px solid var(--border, #262624);
   display: flex;
   flex-direction: column;
   pointer-events: auto;

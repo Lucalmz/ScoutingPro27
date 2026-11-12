@@ -168,12 +168,12 @@ const bragLabel = computed(() => {
       v-if="photoUrl"
       class="card-thumbnail"
       @click.stop="isPreviewOpen = true"
-      title="点击查看机器人大图"
+      :title="t('pit_scout.view_robot_photo')"
     >
       <img :src="photoUrl" alt="Robot Photo" loading="lazy" />
       <div class="thumbnail-overlay">
         <span class="material-icons zoom-icon">zoom_in</span>
-        <span v-if="allPhotoUrls.length > 1" class="photo-count-badge">{{ allPhotoUrls.length }} 张</span>
+        <span v-if="allPhotoUrls.length > 1" class="photo-count-badge">{{ t('pit_scout.photo_count_badge', { count: allPhotoUrls.length }) }}</span>
       </div>
     </div>
 
@@ -189,22 +189,22 @@ const bragLabel = computed(() => {
       v-model="isPreviewOpen"
       :images="allPhotoUrls"
       :image-url="photoUrl"
-      :title="`${team.teamNumber} ${team.name ? team.name + ' ' : ''}机器人照片`"
+      :title="team.teamNumber ? t('pit_scout.robot_photo_title', { teamNumber: team.teamNumber, teamName: team.name ? team.name + ' ' : '' }) : ''"
     />
   </div>
 </template>
 
 <style scoped>
 .team-roster-card {
-  background: var(--card, #0a0a0a);
-  border: 1px solid var(--border, #262626);
+  background: var(--card, #141413);
+  border: 1px solid var(--border, #262624);
   border-radius: 12px;
   padding: 16px;
   display: flex;
   flex-direction: column;
   gap: 12px;
   cursor: pointer;
-  transition: all 0.2s cubic-bezier(0.16, 1, 0.3, 1);
+  transition: all 0.22s cubic-bezier(0.16, 1, 0.3, 1);
   position: relative;
   animation: card-cascade-in var(--motion-duration-moderate, 0.4s) var(--motion-ease-out, ease-out) both;
   animation-delay: min(calc(var(--card-index, 0) * 30ms), 240ms);
@@ -247,9 +247,10 @@ const bragLabel = computed(() => {
 }
 
 .team-roster-card:hover {
+  background: var(--surface-elevated, #1c1c1a);
   border-color: var(--primary, #39ff14);
   transform: translateY(-2px);
-  box-shadow: 0 4px 16px rgba(57, 255, 20, 0.15);
+  box-shadow: 0 12px 28px rgba(0, 0, 0, 0.6), 0 0 16px rgba(57, 255, 20, 0.14);
 }
 
 .team-roster-card.is-scouted {
@@ -332,10 +333,10 @@ const bragLabel = computed(() => {
   display: grid;
   grid-template-columns: repeat(3, 1fr);
   gap: 8px;
-  background: rgba(255, 255, 255, 0.02);
-  border: 1px solid var(--border, #262626);
+  background: var(--surface-recessed, #080807);
+  border: 1px solid var(--border, #262624);
   border-radius: 8px;
-  padding: 8px 12px;
+  padding: 10px 12px;
 }
 
 .quant-item {
@@ -346,51 +347,56 @@ const bragLabel = computed(() => {
 
 .quant-label {
   font-size: 10px;
-  color: var(--muted-foreground, #888888);
+  color: var(--muted-foreground, #8e8d87);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
 }
 
 .quant-value {
   font-size: 13px;
-  font-weight: 600;
-  color: var(--foreground, #ededed);
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+  color: var(--foreground, #f0efe9);
 }
 
 .quant-value.highlight {
   color: var(--primary, #39ff14);
-  font-weight: 700;
+  font-family: 'Orbitron', sans-serif;
+  font-weight: 800;
 }
 
 .match-reconcile-bar {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  padding: 6px 10px;
+  padding: 7px 10px;
   border-radius: 8px;
-  background: rgba(0, 0, 0, 0.3);
-  border: 1px solid var(--border, #262626);
+  background: var(--surface-recessed, #080807);
+  border: 1px solid var(--border, #262624);
   font-size: 11px;
+  font-variant-numeric: tabular-nums;
 }
 
 .reconcile-scores {
   display: flex;
   gap: 8px;
-  color: var(--muted-foreground, #888888);
+  color: var(--muted-foreground, #8e8d87);
 }
 
 .brag-tier-pill {
   display: inline-flex;
   align-items: center;
-  font-weight: 600;
+  font-weight: 700;
   padding: 2px 8px;
   border-radius: 9999px;
   font-size: 10px;
 }
 
-.tier-realistic { background: rgba(57, 255, 20, 0.15); color: #39ff14; border: 1px solid rgba(57, 255, 20, 0.3); }
-.tier-optimistic { background: rgba(234, 179, 8, 0.15); color: #eab308; border: 1px solid rgba(234, 179, 8, 0.3); }
-.tier-overclaimed { background: rgba(249, 115, 22, 0.15); color: #fb923c; border: 1px solid rgba(249, 115, 22, 0.3); }
-.tier-mythical { background: rgba(239, 68, 68, 0.15); color: #ef4444; border: 1px solid rgba(239, 68, 68, 0.3); }
-.tier-pending { background: rgba(120, 120, 120, 0.15); color: #888888; border: 1px solid rgba(120, 120, 120, 0.3); }
+.tier-realistic { background: #0d1f0e; color: #39ff14; border: 1px solid rgba(57, 255, 20, 0.45); }
+.tier-optimistic { background: #211a08; color: #facc15; border: 1px solid rgba(234, 179, 8, 0.45); }
+.tier-overclaimed { background: #231308; color: #fb923c; border: 1px solid rgba(249, 115, 22, 0.45); }
+.tier-mythical { background: #220d0d; color: #f87171; border: 1px solid #ef4444; box-shadow: 0 0 12px rgba(239, 68, 68, 0.35); }
+.tier-pending { background: #181816; color: #8e8d87; border: 1px solid #262624; }
 
 .card-thumbnail {
   width: 100%;

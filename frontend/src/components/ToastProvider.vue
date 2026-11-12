@@ -62,8 +62,6 @@ function resolveIcon(toast: Toast): string {
   border-radius: 9999px; /* pill shape */
   font-size: 13.5px;
   font-weight: 600;
-  backdrop-filter: blur(12px);
-  -webkit-backdrop-filter: blur(12px);
   white-space: nowrap;
   box-sizing: border-box;
   max-width: 100%;

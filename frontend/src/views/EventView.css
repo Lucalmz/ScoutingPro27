@@ -1,6 +1,8 @@
 .event-view {
   min-height: 100vh;
-  background: var(--background);
+  background-color: var(--background);
+  background-image: radial-gradient(#1e1e1c 1px, transparent 1px);
+  background-size: 24px 24px;
   color: var(--foreground);
   display: flex;
   flex-direction: column;
@@ -29,18 +31,19 @@
   align-items: center;
   gap: 4px;
   padding: 6px 12px;
-  background: rgba(255, 255, 255, 0.06);
-  border: 1px solid rgba(255, 255, 255, 0.12);
+  background: var(--surface-recessed);
+  border: 1px solid var(--border);
   border-radius: 20px;
-  color: var(--foreground, #ffffff);
+  color: var(--foreground);
   font-size: 13px;
+  font-weight: 600;
   cursor: pointer;
-  transition: all 0.34s ease;
+  transition: all 0.25s ease;
 }
 
 .user-tag-btn:hover,
 .topbar-btn:hover {
-  background: rgba(57, 255, 20, 0.12);
+  background: var(--surface-elevated);
   border-color: var(--primary, #39ff14);
   color: var(--primary, #39ff14);
   box-shadow: var(--glow-primary, 0 0 10px rgba(57, 255, 20, 0.35));
@@ -82,18 +85,22 @@
 }
 
 .btn-back {
-  background: var(--border);
-  border: none;
+  background: var(--surface-recessed);
+  border: 1px solid var(--border);
   color: var(--muted-foreground);
-  padding: 8px 14px;
+  padding: 7px 14px;
   border-radius: 8px;
   cursor: pointer;
-  font-size: 14px;
+  font-size: 13px;
+  font-weight: 600;
   flex-shrink: 0;
+  transition: all 0.2s ease;
 }
 
 .btn-back:hover {
-  background: var(--input);
+  background: var(--surface-elevated);
+  border-color: var(--border-strong);
+  color: var(--foreground);
 }
 
 .event-brand-logo {
@@ -157,17 +164,18 @@
 .tab-bar {
   display: flex;
   background: var(--card);
-  border-bottom: 2px solid var(--border);
+  border-bottom: 1px solid var(--border);
   position: relative;
 }
 
 .tab-indicator {
   position: absolute;
-  bottom: -2px;
+  bottom: -1px;
   left: 0;
   width: var(--indicator-width, 33.333%);
   height: 3px;
   background: var(--primary);
+  box-shadow: 0 0 12px rgba(57, 255, 20, 0.65);
   transition: transform var(--motion-duration-moderate) var(--motion-ease-out);
   z-index: 1;
 }
@@ -178,19 +186,23 @@
   background: none;
   border: none;
   color: var(--muted-foreground);
-  font-size: 14px;
-  font-weight: 500;
+  font-family: 'Orbitron', 'Manrope', sans-serif;
+  font-size: 13px;
+  font-weight: 600;
+  letter-spacing: 0.03em;
   cursor: pointer;
   z-index: 2;
-  transition: color var(--motion-duration-fast) var(--motion-ease-out);
+  transition: color var(--motion-duration-fast) var(--motion-ease-out), background-color 0.2s ease;
 }
 
 .tab-btn:hover {
   color: var(--foreground);
+  background: rgba(255, 255, 255, 0.02);
 }
 
 .tab-btn.active {
   color: var(--primary);
+  font-weight: 700;
 }
 
 /* Tab Content */

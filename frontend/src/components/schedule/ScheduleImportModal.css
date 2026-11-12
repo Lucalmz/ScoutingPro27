@@ -1,8 +1,7 @@
 .schedule-import-backdrop {
   position: fixed;
   inset: 0;
-  background: rgba(0, 0, 0, 0.75);
-  backdrop-filter: blur(8px);
+  background: rgba(8, 8, 7, 0.82);
   z-index: 1100;
   display: flex;
   align-items: center;

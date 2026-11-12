@@ -22,6 +22,8 @@ import { createHostSignalingHandler } from './hostSession'
 import { createClientSession } from './clientSession'
 import { createMessageDispatcher } from './messageDispatcher'
 import { setupSelfHealing } from './selfHealing'
+import { compareHostAuthority, createHostElectionController } from './hostElection'
+import { probeLocalInterfaceIpv6, warmUpDoHStunIpv6 } from './connectivity'
 import { createLogger } from '@/utils/logger'
 import { isMobileDevice } from '@/composables/useIsMobile'
 
@@ -34,34 +36,7 @@ export * from './offlineQueue'
 export * from './sdpUtil'
 export * from './messageDispatcher'
 export * from './selfHealing'
-
-/**
- * 确定性全序主机权威比较器 (Deterministic Total-Order Host Authority Comparator)
- * 返回值:
- *   > 0: A 的权威高于 B (A 胜出保持/当选主机，B 必须降级从机)
- *   < 0: B 的权威高于 A (B 胜出，A 必须降级从机)
- *   = 0: 同一会话
- */
-export function compareHostAuthority(
-  epochA: number,
-  deviceIdA: string,
-  sessionIdA: string,
-  epochB: number,
-  deviceIdB: string,
-  sessionIdB: string
-): number {
-  // 1. 任期号优先：高任期号绝对压制低任期号
-  if (epochA !== epochB) {
-    return epochA - epochB
-  }
-  // 2. 仲裁第一平局项：SessionId 字典序 (更小更早创设的先占会话权威更高)
-  const sessionCmp = sessionIdB.localeCompare(sessionIdA)
-  if (sessionCmp !== 0) {
-    return sessionCmp
-  }
-  // 3. 仲裁第二平局项：设备 ID 字典序
-  return deviceIdB.localeCompare(deviceIdA)
-}
+export { compareHostAuthority }
 
 export function createWebRtcService(callbacks: WebRtcCallbacks): WebRtcService {
   let isHostMode = false
@@ -75,16 +50,6 @@ export function createWebRtcService(callbacks: WebRtcCallbacks): WebRtcService {
   let currentEventMetadata: ScoutingEvent | null = null
   let currentUsername = ''
   let currentUserId = ''
-
-  // Host Mutex & Standby State
-  let isStandbyHostMode = false
-  let isProbing = false
-  let probeTimer: any = null
-  let hostHeartbeatTimer: any = null
-  let standbyWatchdogTimer: any = null
-  let lastActiveHostHeartbeat = 0
-  let activeHostSessionId = ''
-  let activeHostDeviceId = ''
 
   // Ephemeral / Persistent ECDH Key Pair & Identity State
   let localEcdhKeyPair: CryptoKeyPair | null = null
@@ -131,56 +96,6 @@ export function createWebRtcService(callbacks: WebRtcCallbacks): WebRtcService {
   }
 
   let hostSeqCounter = 0
-  let localEpoch = 0
-  try {
-    const savedEpoch = localStorage.getItem('scoutingpro_host_epoch')
-    if (savedEpoch) localEpoch = parseInt(savedEpoch, 10) || 0
-  } catch (_) {}
-
-  function setLocalEpoch(ep: number) {
-    localEpoch = ep
-    try {
-      localStorage.setItem('scoutingpro_host_epoch', String(ep))
-    } catch (_) {}
-  }
-
-  let inTakeoverReconciliation = false
-  let takeoverReconciliationResolvers: Array<() => void> = []
-  let takeoverReconciliationTimer: any = null
-
-  function startTakeoverReconciliation(timeoutMs = 2000) {
-    inTakeoverReconciliation = true
-    if (takeoverReconciliationTimer) clearTimeout(takeoverReconciliationTimer)
-    takeoverReconciliationTimer = setTimeout(() => {
-      finishTakeoverReconciliation('timeout')
-    }, timeoutMs)
-  }
-
-  function finishTakeoverReconciliation(reason = 'completed') {
-    if (!inTakeoverReconciliation) return
-    console.log(`[WebRTC Host] Takeover reconciliation finished (${reason})`)
-    inTakeoverReconciliation = false
-    if (takeoverReconciliationTimer) {
-      clearTimeout(takeoverReconciliationTimer)
-      takeoverReconciliationTimer = null
-    }
-    const resolvers = [...takeoverReconciliationResolvers]
-    takeoverReconciliationResolvers = []
-    for (const resolve of resolvers) {
-      try {
-        resolve()
-      } catch (e) {
-        console.error(e)
-      }
-    }
-  }
-
-  function waitForTakeoverReconciliation(): Promise<void> {
-    if (!inTakeoverReconciliation) return Promise.resolve()
-    return new Promise((resolve) => {
-      takeoverReconciliationResolvers.push(resolve)
-    })
-  }
 
   function enqueueHostTask(sender: string, task: () => Promise<void>): Promise<void> {
     const q = hostQueues.get(sender) || Promise.resolve()
@@ -241,6 +156,10 @@ export function createWebRtcService(callbacks: WebRtcCallbacks): WebRtcService {
       if (peer && current && current.pc !== peer) {
         log.info(`Ignoring closure of superseded PeerConnection for ${targetSender}`)
         return
+      }
+      if (current?.drainingVirtualDc) {
+        try { current.drainingVirtualDc.close() } catch {}
+        current.drainingVirtualDc = undefined
       }
       clients.delete(targetSender)
       sas.cleanupPeerResources(targetSender)
@@ -370,6 +289,8 @@ export function createWebRtcService(callbacks: WebRtcCallbacks): WebRtcService {
     }
   }
 
+  let electionCtrl: ReturnType<typeof createHostElectionController>
+
   const rawHandleChannelMessage = createChannelMessageHandler({
     isHostMode: () => isHostMode,
     currentInviteCode: () => currentInviteCode,
@@ -424,9 +345,9 @@ export function createWebRtcService(callbacks: WebRtcCallbacks): WebRtcService {
       }
     },
     setStatus,
-    isTakeoverReconciling: () => inTakeoverReconciliation,
-    waitForTakeoverReconciliation,
-    finishTakeoverReconciliation,
+    isTakeoverReconciling: () => electionCtrl.isTakeoverReconciling,
+    waitForTakeoverReconciliation: () => electionCtrl.waitForTakeoverReconciliation(),
+    finishTakeoverReconciliation: (reason?: string) => electionCtrl.finishTakeoverReconciliation(reason),
     getUsername: () => currentUsername,
     getUserId: () => currentUserId,
     onPongReceived: (ts: number) => clientSession.handlePong(ts)
@@ -515,6 +436,10 @@ export function createWebRtcService(callbacks: WebRtcCallbacks): WebRtcService {
       (targetPeerId: string) => {
         const client = clients.get(targetPeerId) || stagedClients.get(targetPeerId)
         if (client) {
+          if (client.drainingVirtualDc) {
+            try { client.drainingVirtualDc.close() } catch {}
+            client.drainingVirtualDc = undefined
+          }
           try {
             if (client.dc) client.dc.close()
           } catch {}
@@ -663,194 +588,44 @@ export function createWebRtcService(callbacks: WebRtcCallbacks): WebRtcService {
     callbacks
   })
 
-  function startHostHeartbeat() {
-    stopHostHeartbeat()
-    const payload = {
-      type: 'host_heartbeat',
-      hostSessionId,
-      deviceId: localDeviceId,
-      ecdhPublicKey: localEcdhPubHex,
-      timestamp: Date.now(),
-      hostEpoch: localEpoch,
-      username: resolveCurrentUsername(),
-      userId: resolveCurrentUserId()
-    }
-    if (isHostMode && signaling) {
-      signaling.send(payload)
-    }
-    hostHeartbeatTimer = setInterval(() => {
-      if (isHostMode && signaling) {
-        signaling.send({
-          ...payload,
-          timestamp: Date.now(),
-          hostEpoch: localEpoch,
-          username: resolveCurrentUsername(),
-          userId: resolveCurrentUserId()
-        })
-      }
-    }, 3000)
-  }
+  electionCtrl = createHostElectionController({
+    getSignaling: () => signaling,
+    getIsHostMode: () => isHostMode,
+    setIsHostMode: (val) => {
+      isHostMode = val
+    },
+    getHostSessionId: () => hostSessionId,
+    setHostSessionId: (id) => {
+      hostSessionId = id
+    },
+    setCurrentHostSessionId: (id) => {
+      currentHostSessionId = id
+    },
+    getLocalDeviceId: () => localDeviceId,
+    getLocalEcdhPubHex: () => localEcdhPubHex,
+    getHostIpv6: () => (hostSignalingHandler as any)?.getHostIpv6?.(),
+    resolveCurrentUsername,
+    resolveCurrentUserId,
+    getClientPc: () => clientPc,
+    getClientDc: () => clientDc,
+    setClientSender: (sender) => {
+      clientSender = sender
+    },
+    clients,
+    stagedClients,
+    scoutIdToClientIds,
+    clientIdToScoutId,
+    clientIdToScoutName,
+    hostQueues,
+    preOfferCandidates,
+    peerMgr,
+    setStatus,
+    updateHostStatus,
+    callbacks,
+    clientSession,
+    hostSignalingHandler
+  })
 
-  function stopHostHeartbeat() {
-    if (hostHeartbeatTimer) {
-      clearInterval(hostHeartbeatTimer)
-      hostHeartbeatTimer = null
-    }
-  }
-
-  function startStandbyWatchdog() {
-    lastActiveHostHeartbeat = Date.now()
-    if (!standbyWatchdogTimer) {
-      const timeoutMs = (globalThis as any).__TEST_WATCHDOG_TIMEOUT_MS__ ?? 5000
-      const checkIntervalMs = (globalThis as any).__TEST_WATCHDOG_INTERVAL_MS__ ?? 2000
-      standbyWatchdogTimer = setInterval(() => {
-        if (isStandbyHostMode && lastActiveHostHeartbeat > 0 && Date.now() - lastActiveHostHeartbeat > timeoutMs) {
-          log.warn(`[Standby Watchdog] Active host heartbeat missing for >${timeoutMs}ms, notifying active host left`)
-          peerMgr.resetTransportInfo()
-          setStatus('degraded')
-          callbacks.onActiveHostLeft?.()
-        }
-      }, checkIntervalMs)
-    }
-  }
-
-  function stopStandbyWatchdog() {
-    if (standbyWatchdogTimer) {
-      clearInterval(standbyWatchdogTimer)
-      standbyWatchdogTimer = null
-    }
-    lastActiveHostHeartbeat = 0
-  }
-
-  async function enterStandbyMode(existingHostSessionId: string, existingDeviceId?: string) {
-    if (isMobileDevice()) {
-      log.info('Mobile device ignored enterStandbyMode; strictly acting as scout client.')
-      return
-    }
-    log.info(`Entering standby mode. Existing active host: ${existingHostSessionId}`)
-    stopHostHeartbeat()
-    startStandbyWatchdog()
-    if (probeTimer) {
-      clearTimeout(probeTimer)
-      probeTimer = null
-    }
-    isProbing = false
-    isHostMode = false
-    isStandbyHostMode = true
-    activeHostSessionId = existingHostSessionId
-    currentHostSessionId = existingHostSessionId
-    activeHostDeviceId = existingDeviceId || ''
-    callbacks.onHostStandby?.({ hostSessionId: existingHostSessionId, hostDeviceId: existingDeviceId })
-
-    if (localEcdhPubHex) {
-      signaling?.send({ type: 'client_hello', ecdhPublicKey: localEcdhPubHex, deviceId: localDeviceId })
-    }
-    const isConnectedAndOpen = clientPc && clientPc.connectionState === 'connected' && clientDc && clientDc.readyState === 'open'
-    if (!isConnectedAndOpen) {
-      await clientSession.setupClientConnection()
-    }
-  }
-
-  async function demoteToStandby(newHostSessionId: string, newDeviceId?: string) {
-    if (isMobileDevice()) {
-      log.info('Mobile device ignored demoteToStandby.')
-      return
-    }
-    log.info(`Demoted to Standby by new host: ${newHostSessionId}`)
-    stopHostHeartbeat()
-    startStandbyWatchdog()
-    isHostMode = false
-    isStandbyHostMode = true
-    activeHostSessionId = newHostSessionId
-    currentHostSessionId = newHostSessionId
-    activeHostDeviceId = newDeviceId || ''
-
-    clients.forEach((c) => {
-      if (c.dc) c.dc.onclose = null
-      c.pc.onconnectionstatechange = null
-      c.pc.oniceconnectionstatechange = null
-      c.dc?.close()
-      c.pc.close()
-    })
-    clients.clear()
-    stagedClients.forEach((c) => {
-      if (c.dc) c.dc.onclose = null
-      c.pc.onconnectionstatechange = null
-      c.pc.oniceconnectionstatechange = null
-      c.dc?.close()
-      c.pc.close()
-    })
-    stagedClients.clear()
-    scoutIdToClientIds.clear()
-    clientIdToScoutId.clear()
-    clientIdToScoutName.clear()
-    hostQueues.clear()
-    preOfferCandidates.clear()
-
-    callbacks.onHostDemoted?.({ hostSessionId: newHostSessionId, hostDeviceId: newDeviceId })
-
-    if (localEcdhPubHex) {
-      signaling?.send({ type: 'client_hello', ecdhPublicKey: localEcdhPubHex, deviceId: localDeviceId })
-    }
-    await clientSession.setupClientConnection()
-  }
-
-  async function takeoverHost(): Promise<void> {
-    if (isMobileDevice()) {
-      log.warn('Mobile devices are strictly prohibited from acting as host or taking over host.')
-      return
-    }
-    log.info('Standby device initiating takeover to become Active Host!')
-    stopStandbyWatchdog()
-    clientSession.stopDataChannelHeartbeat()
-    peerMgr.resetTransportInfo()
-    setStatus('waiting')
-    const newHostSessionId = `host-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`
-    hostSessionId = newHostSessionId
-    const nextEpoch = localEpoch + 1
-    setLocalEpoch(nextEpoch)
-    startTakeoverReconciliation(2000)
-
-    await signaling?.send({
-      type: 'host_takeover',
-      oldHostSessionId: activeHostSessionId,
-      newHostSessionId,
-      deviceId: localDeviceId,
-      hostEpoch: nextEpoch,
-      username: resolveCurrentUsername(),
-      userId: resolveCurrentUserId()
-    })
-
-    clientSession.hardResetChannels()
-    clientSender = null
-
-    scoutIdToClientIds.clear()
-    clientIdToScoutId.clear()
-    clientIdToScoutName.clear()
-    hostQueues.clear()
-    preOfferCandidates.clear()
-
-    isStandbyHostMode = false
-    isHostMode = true
-
-    await signaling?.send({
-      type: 'host_hello',
-      hostSessionId: newHostSessionId,
-      hostIpv6: (hostSignalingHandler as any)?.getHostIpv6?.() || undefined,
-      ecdhPublicKey: localEcdhPubHex,
-      deviceId: localDeviceId,
-      hostEpoch: nextEpoch,
-      username: resolveCurrentUsername(),
-      userId: resolveCurrentUserId()
-    })
-    startHostHeartbeat()
-    callbacks.onHostPromoted?.()
-    updateHostStatus()
-  }
-
-  // =====================================================
-  // Host: create room & wait for client offer
-  // =====================================================
   function resolveTargetSignalingEndpoint(preferredBroker?: string): string {
     const activeTarget = preferredBroker || (typeof sessionStorage !== 'undefined' ? sessionStorage.getItem('sp27-active-broker') : null) || undefined
     return resolveBrokerUrl(activeTarget)
@@ -861,29 +636,24 @@ export function createWebRtcService(callbacks: WebRtcCallbacks): WebRtcService {
       log.warn('Mobile devices are strictly prohibited from acting as host. Falling back to join() client mode.')
       return join(inviteCode, username, userId, preferredBroker)
     }
-    if (probeTimer) {
-      clearTimeout(probeTimer)
-      probeTimer = null
-    }
-    stopHostHeartbeat()
-    stopStandbyWatchdog()
+    electionCtrl.prepareForHostStart()
     if (signaling) {
       try { signaling.close() } catch {}
       signaling = null
     }
 
     isHostMode = true
-    isStandbyHostMode = false
-    isProbing = true
     isExplicitlyClosed = false
     currentInviteCode = inviteCode
-    setLocalEpoch(Math.max(localEpoch, 1))
     if (username) currentUsername = username
     if (userId) currentUserId = userId
     if (eventMetadata) {
       currentEventMetadata = eventMetadata
     }
     clients.forEach((c) => {
+      if (c.drainingVirtualDc) {
+        try { c.drainingVirtualDc.close() } catch {}
+      }
       if (c.dc) c.dc.onclose = null
       c.pc.onconnectionstatechange = null
       c.pc.oniceconnectionstatechange = null
@@ -891,7 +661,16 @@ export function createWebRtcService(callbacks: WebRtcCallbacks): WebRtcService {
       c.pc.close()
     })
     clients.clear()
-    stagedClients.clear()
+    stagedClients.forEach((c) => {
+      if (c.drainingVirtualDc) {
+        try { c.drainingVirtualDc.close() } catch {}
+      }
+      if (c.dc) c.dc.onclose = null
+      c.pc.onconnectionstatechange = null
+      c.pc.oniceconnectionstatechange = null
+      c.dc?.close()
+      c.pc.close()
+    })
     scoutIdToClientIds.clear()
     clientIdToScoutId.clear()
     clientIdToScoutName.clear()
@@ -924,226 +703,14 @@ export function createWebRtcService(callbacks: WebRtcCallbacks): WebRtcService {
 
     const sessionStartTime = Date.now()
 
-    const onHostSignalingMessage = async (data: any) => {
-      if (!data) return
-
-      // When another device is actively probing, if this device is the Active Host, reply immediately!
-      if (data.type === 'host_probe') {
-        if (data.sender === signaling?.clientId || data.hostSessionId === hostSessionId) {
-          return
-        }
-        if (isHostMode && !isStandbyHostMode && data.hostSessionId !== hostSessionId) {
-          await signaling?.send({
-            type: 'host_heartbeat',
-            hostSessionId,
-            deviceId: localDeviceId,
-            ecdhPublicKey: localEcdhPubHex,
-            timestamp: Date.now(),
-            hostEpoch: localEpoch,
-            username: resolveCurrentUsername(),
-            userId: resolveCurrentUserId()
-          })
-        }
-        return
-      }
-
-      if (isProbing) {
-        if (
-          (data.type === 'host_heartbeat' || data.type === 'host_hello') &&
-          data.hostSessionId !== hostSessionId
-        ) {
-          if (data.sender === signaling?.clientId) {
-            return
-          }
-          // Stale messages from own device's prior session (e.g. before page reload) must NOT trigger standby demotion
-          if (data.deviceId && data.deviceId === localDeviceId) {
-            const msgTs = Number(data.timestamp || 0)
-            if (msgTs && msgTs < sessionStartTime - 100) {
-              log.info(`Ignoring stale host message from same device prior session during probe: ${data.hostSessionId}`)
-              return
-            }
-          }
-          log.info(`Discovered existing host during probe: ${data.hostSessionId} (sender: ${data.sender})`)
-          if (probeTimer) {
-            clearTimeout(probeTimer)
-            probeTimer = null
-          }
-          isProbing = false
-          await enterStandbyMode(data.hostSessionId, data.deviceId)
-          return
-        }
-      }
-
-      if (data.type === 'host_heartbeat' || data.type === 'host_hello') {
-        const hasIncomingEpoch = data.hostEpoch !== undefined && data.hostEpoch !== null
-        const incomingEpoch = hasIncomingEpoch ? Number(data.hostEpoch) : localEpoch
-        const incomingDeviceId = String(data.deviceId ?? '')
-        const incomingSessionId = String(data.hostSessionId ?? '')
-
-        if (incomingSessionId && incomingSessionId !== hostSessionId) {
-          if (data.sender === signaling?.clientId) {
-            return
-          }
-          if (isStandbyHostMode) {
-            activeHostSessionId = incomingSessionId
-            activeHostDeviceId = incomingDeviceId
-            if (hasIncomingEpoch) {
-              setLocalEpoch(Math.max(localEpoch, incomingEpoch))
-            }
-            lastActiveHostHeartbeat = Date.now()
-            if (data.type === 'host_hello') {
-              await clientSession.handleClientSignalingMessage(data)
-            }
-            return
-          }
-          if (isHostMode) {
-            // 使用严格全序比较器判定胜负，杜绝低 Epoch 旧心跳错误降级新任期主机！
-            const cmp = compareHostAuthority(
-              localEpoch,
-              localDeviceId,
-              hostSessionId,
-              incomingEpoch,
-              incomingDeviceId,
-              incomingSessionId
-            )
-            if (cmp < 0) {
-              log.info(
-                `Local host session yields to higher-authority host: ${incomingSessionId} (epoch ${incomingEpoch} vs local ${localEpoch})`
-              )
-              if (hasIncomingEpoch) {
-                setLocalEpoch(incomingEpoch)
-              }
-              await demoteToStandby(incomingSessionId, incomingDeviceId)
-              return
-            } else if (cmp > 0) {
-              // 本地主机权威更高，压制低权威对端并重发心跳通知其降级
-              log.warn(
-                `Suppressed lower-authority heartbeat/hello (epoch: ${incomingEpoch} vs local ${localEpoch}, sender: ${incomingSessionId})`
-              )
-              await signaling?.send({
-                type: 'host_heartbeat',
-                hostSessionId,
-                deviceId: localDeviceId,
-                ecdhPublicKey: localEcdhPubHex,
-                timestamp: Date.now(),
-                hostEpoch: localEpoch,
-                username: resolveCurrentUsername(),
-                userId: resolveCurrentUserId()
-              })
-              return
-            }
-          }
-        }
-        return
-      }
-
-      if (data.type === 'host_takeover') {
-        if (data.sender === signaling?.clientId || data.newHostSessionId === hostSessionId) {
-          return
-        }
-        const hasIncomingEpoch = data.hostEpoch !== undefined && data.hostEpoch !== null
-        const incomingEpoch = Number(data.hostEpoch ?? 0)
-        const incomingDeviceId = String(data.deviceId ?? '')
-        const incomingSessionId = String(data.newHostSessionId ?? '')
-
-        if (isHostMode && data.sender !== signaling?.clientId) {
-          const cmp = compareHostAuthority(
-            localEpoch,
-            localDeviceId,
-            hostSessionId,
-            incomingEpoch,
-            incomingDeviceId,
-            incomingSessionId
-          )
-
-          const incomingWins = !hasIncomingEpoch || cmp < 0
-
-          if (incomingWins) {
-            log.info(
-              `Yielding to higher-authority takeover: ${incomingSessionId} (epoch ${incomingEpoch} vs local ${localEpoch})`
-            )
-            setLocalEpoch(Math.max(localEpoch, incomingEpoch))
-            await demoteToStandby(incomingSessionId, incomingDeviceId)
-            return
-          } else {
-            log.warn(
-              `Suppressed lower-authority takeover (epoch: ${incomingEpoch} vs local ${localEpoch}, deviceId: ${incomingDeviceId} vs ${localDeviceId})`
-            )
-            signaling?.send({
-              type: 'host_hello',
-              hostSessionId,
-              ecdhPublicKey: localEcdhPubHex,
-              deviceId: localDeviceId,
-              hostEpoch: localEpoch,
-              username: resolveCurrentUsername(),
-              userId: resolveCurrentUserId()
-            })
-            return
-          }
-        } else {
-          activeHostSessionId = incomingSessionId
-          activeHostDeviceId = incomingDeviceId
-          if (hasIncomingEpoch) {
-            setLocalEpoch(Math.max(localEpoch, incomingEpoch))
-          }
-          lastActiveHostHeartbeat = Date.now()
-        }
-        return
-      }
-
-      if (data.type === 'HOST_LEAVING') {
-        if (data.sender === signaling?.clientId || data.hostSessionId === hostSessionId) {
-          return
-        }
-        if (isStandbyHostMode && data.hostSessionId === activeHostSessionId) {
-          callbacks.onActiveHostLeft?.()
-        }
-        return
-      }
-
-      if (isHostMode) {
-        hostSignalingHandler(data)
-      } else {
-        await clientSession.handleClientSignalingMessage(data)
-      }
-    }
-
     signaling.connect({
       onConnect: () => {
-        const probeMs = (globalThis as any).__TEST_PROBE_MS__ ?? 1200
-        isProbing = true
-        // Actively probe for existing active host
-        signaling!.send({
-          type: 'host_probe',
-          hostSessionId,
-          deviceId: localDeviceId
-        })
-        probeTimer = setTimeout(() => {
-          if (isProbing) {
-            isProbing = false
-            probeTimer = null
-            isStandbyHostMode = false
-            isHostMode = true
-            updateHostStatus()
-            signaling!.send({
-              type: 'host_hello',
-              hostSessionId,
-              hostIpv6: (hostSignalingHandler as any)?.getHostIpv6?.() || undefined,
-              ecdhPublicKey: localEcdhPubHex,
-              deviceId: localDeviceId,
-              hostEpoch: localEpoch,
-              username: resolveCurrentUsername(),
-              userId: resolveCurrentUserId()
-            })
-            startHostHeartbeat()
-            callbacks.onHostPromoted?.()
-          }
-        }, probeMs)
+        electionCtrl.startHostProbeWindow()
       },
       onError: () => {
         updateHostStatus()
       },
-      onMessage: onHostSignalingMessage
+      onMessage: electionCtrl.createHostSignalingMessageHandler(sessionStartTime)
     })
   }
 
@@ -1157,6 +724,8 @@ export function createWebRtcService(callbacks: WebRtcCallbacks): WebRtcService {
     if (username) currentUsername = username
     if (userId) currentUserId = userId
     setStatus('connecting')
+    void probeLocalInterfaceIpv6().catch(() => {})
+    void warmUpDoHStunIpv6().catch(() => {})
 
     try {
       localDeviceIdentity = await getOrCreateDeviceIdentity()
@@ -1304,15 +873,7 @@ export function createWebRtcService(callbacks: WebRtcCallbacks): WebRtcService {
     isExplicitlyClosed = true
     selfHealing.dispose()
     clientSession.clearReconnectTimer()
-
-    if (probeTimer) {
-      clearTimeout(probeTimer)
-      probeTimer = null
-    }
-    isProbing = false
-    stopHostHeartbeat()
-    stopStandbyWatchdog()
-    isStandbyHostMode = false
+    electionCtrl.stopAllElectionTimers()
 
     const closingSignaling = signaling
     signaling = null
@@ -1329,6 +890,9 @@ export function createWebRtcService(callbacks: WebRtcCallbacks): WebRtcService {
           .catch(() => {})
       }
       clients.forEach((c) => {
+        if (c.drainingVirtualDc) {
+          try { c.drainingVirtualDc.close() } catch {}
+        }
         if (c.dc) c.dc.onclose = null
         c.pc.onconnectionstatechange = null
         c.pc.oniceconnectionstatechange = null
@@ -1338,6 +902,9 @@ export function createWebRtcService(callbacks: WebRtcCallbacks): WebRtcService {
       clients.clear()
 
       stagedClients.forEach((c) => {
+        if (c.drainingVirtualDc) {
+          try { c.drainingVirtualDc.close() } catch {}
+        }
         if (c.dc) c.dc.onclose = null
         c.pc.onconnectionstatechange = null
         c.pc.oniceconnectionstatechange = null
@@ -1354,7 +921,7 @@ export function createWebRtcService(callbacks: WebRtcCallbacks): WebRtcService {
       pendingTakeovers.forEach((p) => clearTimeout(p.timeoutTimer))
       pendingTakeovers.clear()
       takeoverCooldowns.clear()
-      finishTakeoverReconciliation('closed')
+      electionCtrl.finishTakeoverReconciliation('closed')
     } else {
       if (clientSender) {
         try { clientSender.abort('Service disconnected') } catch (_) {}
@@ -1404,12 +971,12 @@ export function createWebRtcService(callbacks: WebRtcCallbacks): WebRtcService {
     requestTakeover,
     sendTakeoverDecision,
     sendIdentityMigration,
-    takeoverHost,
+    takeoverHost: () => electionCtrl.takeoverHost(),
     sendHostHandoffBatch,
     sendHostHandoffAck,
     getHostSeqCounter: () => hostSeqCounter,
     getCurrentHostSessionId: () => currentHostSessionId,
-    isStandbyHost: () => isStandbyHostMode,
+    isStandbyHost: () => electionCtrl.isStandbyHostMode,
     pingPeer: async (timeoutMs?: number) => (isHostMode ? true : clientSession.pingHost(timeoutMs ?? 800)),
     reconnectNow,
     disconnect,

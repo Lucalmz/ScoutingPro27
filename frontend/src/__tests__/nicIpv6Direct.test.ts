@@ -3,6 +3,16 @@ import {
   probeLocalInterfaceIpv6,
   resetLocalIpv6ProbeCache,
   buildIceConfiguration,
+  selectStunUrls,
+  extractStunUrlHost,
+  classifyStunUrlOrigin,
+  warmUpDoHStunIpv6,
+  waitForDoHStunIpv6Bounded,
+  resetDoHStunCache,
+  applyProxyExitDemotionToBatch,
+  demoteProxyExitCandidatePriority,
+  DOMESTIC_LITERAL_STUN_URLS,
+  OVERSEAS_LITERAL_STUN_URLS,
   PURE_STUN_SERVERS,
   STUN_SERVERS,
   TURN_SERVERS,
@@ -19,6 +29,7 @@ import {
   getSilentUpgradeDelayMs
 } from '@/services/webrtc/connectivity'
 import { PeerConnectionManager, type PeerConnectionFactoryOptions } from '@/services/webrtc/peerManager'
+import { createClientSession } from '@/services/webrtc/clientSession'
 import * as api from '@/services/api'
 
 vi.mock('@/services/api', () => ({
@@ -439,6 +450,329 @@ describe('Parallel Dual-Stack ICE & Non-Locking Hole Punching Architecture', () 
       expect(allUrls).toContain('stun:[2409:8c50:e00::3]:3478')
       expect(allUrls).toContain('stun:[2606:4700:49::]:3478')
       expect(allUrls).toContain('stun:[2001:4860:4864:5:8000::1]:19302')
+      expect(allUrls).toContain('stun:74.125.250.129:19302')
+    })
+
+    it('selectStunUrls merges domestic, overseas, and DoH IPv6 literals with deduplication', () => {
+      const urls = selectStunUrls({
+        dohUrls: ['stun:[2409:8c50:e00::1]:3478', 'stun:[240e:928:1400::1]:3478']
+      })
+      for (const u of DOMESTIC_LITERAL_STUN_URLS) {
+        expect(urls).toContain(u)
+      }
+      for (const u of OVERSEAS_LITERAL_STUN_URLS) {
+        expect(urls).toContain(u)
+      }
+      expect(urls).toContain('stun:[240e:928:1400::1]:3478')
+      expect(new Set(urls).size).toBe(urls.length)
+    })
+
+    it('warmUpDoHStunIpv6 retries after total failure instead of permanently caching empty result', async () => {
+      resetDoHStunCache()
+      const origFetch = globalThis.fetch
+      ;(globalThis as any).__TEST_ALLOW_DOH_WARMUP__ = true
+      try {
+        // 1st attempt: all DoH requests fail
+        globalThis.fetch = vi.fn().mockRejectedValue(new Error('network down')) as any
+        const firstRes = await warmUpDoHStunIpv6()
+        expect(firstRes).toEqual([])
+
+        // Advance past cooldown (5000ms) and succeed on 2nd attempt
+        await vi.advanceTimersByTimeAsync(6000)
+        globalThis.fetch = vi.fn().mockResolvedValue({
+          ok: true,
+          json: async () => ({
+            Answer: [{ type: 28, data: '2409:8c50:e00::99' }]
+          })
+        }) as any
+
+        const secondRes = await warmUpDoHStunIpv6()
+        expect(secondRes).toContain('stun:[2409:8c50:e00::99]:3478')
+
+        // Bounded wait returns immediately once cached
+        const boundedRes = await waitForDoHStunIpv6Bounded(100)
+        expect(boundedRes).toContain('stun:[2409:8c50:e00::99]:3478')
+      } finally {
+        globalThis.fetch = origFetch
+        delete (globalThis as any).__TEST_ALLOW_DOH_WARMUP__
+        resetDoHStunCache()
+      }
+    })
+
+    it('waitForDoHStunIpv6Bounded respects maxWaitMs timeout when DoH is slow', async () => {
+      resetDoHStunCache()
+      const origFetch = globalThis.fetch
+      ;(globalThis as any).__TEST_ALLOW_DOH_WARMUP__ = true
+      try {
+        globalThis.fetch = vi.fn().mockImplementation(
+          () =>
+            new Promise((resolve) => {
+              setTimeout(
+                () =>
+                  resolve({
+                    ok: true,
+                    json: async () => ({ Answer: [{ type: 28, data: '2409:8c50:e00::88' }] })
+                  }),
+                1000
+              )
+            })
+        ) as any
+
+        const p = waitForDoHStunIpv6Bounded(300)
+        await vi.advanceTimersByTimeAsync(310)
+        const earlyRes = await p
+        expect(earlyRes).toEqual([])
+
+        // After 1000ms total, background DoH finishes and populates cache
+        await vi.advanceTimersByTimeAsync(750)
+        expect(selectStunUrls()).toContain('stun:[2409:8c50:e00::88]:3478')
+      } finally {
+        globalThis.fetch = origFetch
+        delete (globalThis as any).__TEST_ALLOW_DOH_WARMUP__
+        resetDoHStunCache()
+      }
+    })
+
+    it('applyProxyExitDemotionToBatch demotes overseas proxy-exit srflx only when domestic srflx differs on same family', () => {
+      expect(classifyStunUrlOrigin('stun:111.8.3.78:3478')).toBe('domestic')
+      expect(classifyStunUrlOrigin('stun:[2409:8c50:e00::3]:3478')).toBe('domestic')
+      expect(classifyStunUrlOrigin('stun:74.125.250.129:19302')).toBe('overseas')
+      expect(classifyStunUrlOrigin('stun:[2606:4700:49::]:3478')).toBe('overseas')
+
+      const directSrflx = optimizeCandidatePriority(
+        'candidate:1 1 udp 1686052607 39.157.118.113 41000 typ srflx raddr 192.168.1.9 rport 55000 generation 0 ufrag abcd network-id 1 network-cost 10'
+      )
+      const proxySrflx = optimizeCandidatePriority(
+        'candidate:2 1 udp 1686052607 103.152.112.88 52000 typ srflx raddr 192.168.1.9 rport 55000 generation 0 ufrag abcd network-id 1 network-cost 10'
+      )
+
+      // Case 1: Split-tunnel VPN/TUN (domestic STUN -> 39.157.118.113, overseas STUN -> 103.152.112.88)
+      const batchSplit = applyProxyExitDemotionToBatch([
+        {
+          candObj: { candidate: directSrflx },
+          stunUrl: 'stun:111.8.3.78:3478',
+          rawRaddr: '192.168.1.9',
+          rawRport: '55000',
+          rawNetId: '1'
+        },
+        {
+          candObj: { candidate: proxySrflx },
+          stunUrl: 'stun:74.125.250.129:19302',
+          rawRaddr: '192.168.1.9',
+          rawRport: '55000',
+          rawNetId: '1'
+        }
+      ])
+      const prioDirect = parseInt(batchSplit[0]!.candidate!.split(/\s+/)[3] || '0', 10)
+      const prioProxy = parseInt(batchSplit[1]!.candidate!.split(/\s+/)[3] || '0', 10)
+      expect(prioDirect).toBeGreaterThan(prioProxy)
+      // Proxy exit is demoted to typePref 80 (80 * 16777216 = 1342177280..1350565887)
+      expect(Math.floor(prioProxy / 16777216)).toBe(80)
+
+      // Case 2: Overseas user or Global VPN (only overseas STUN responded, or same IP) -> NO demotion
+      const batchOverseasOnly = applyProxyExitDemotionToBatch([
+        {
+          candObj: { candidate: proxySrflx },
+          stunUrl: 'stun:74.125.250.129:19302',
+          rawRaddr: '192.168.1.9',
+          rawRport: '55000',
+          rawNetId: '1'
+        }
+      ])
+      const prioOverseasOnly = parseInt(batchOverseasOnly[0]!.candidate!.split(/\s+/)[3] || '0', 10)
+      expect(Math.floor(prioOverseasOnly / 16777216)).toBe(90)
+
+      // Case 3: Browser did not provide event.url -> NO demotion
+      const batchNoUrl = applyProxyExitDemotionToBatch([
+        { candObj: { candidate: directSrflx } },
+        { candObj: { candidate: proxySrflx } }
+      ])
+      const prioNoUrl = parseInt(batchNoUrl[1]!.candidate!.split(/\s+/)[3] || '0', 10)
+      expect(Math.floor(prioNoUrl / 16777216)).toBe(90)
+
+      // Verify libwebrtc unbracketed IPv6 STUN URL format (stun_port.cc: "stun:" << hostname << ":" << port)
+      expect(extractStunUrlHost('stun:2409:8c50:e00::3:3478')).toBe('2409:8c50:e00::3')
+      expect(extractStunUrlHost('stun:2606:4700:49:::3478')).toBe('2606:4700:49::')
+      expect(classifyStunUrlOrigin('stun:2409:8c50:e00::3:3478')).toBe('domestic')
+      expect(classifyStunUrlOrigin('stun:2606:4700:49:::3478')).toBe('overseas')
+      expect(classifyStunUrlOrigin('stun:2001:4860:4864:5:8000::1:19302')).toBe('overseas')
+    })
+
+    it('finalizeLocalSdp demotes split-tunnel proxy-exit srflx embedded in Offer/Answer SDP (via RTCIceCandidate.url and getStats fallback)', async () => {
+      const mockPeer = createMockPeer()
+      global.RTCPeerConnection = vi.fn().mockImplementation(() => mockPeer) as any
+
+      const mockOptions = createMockOptions()
+      const manager = new PeerConnectionManager(mockOptions)
+      const pc = manager.createPeerConnection('host-target', undefined, false, undefined, {
+        sessionTag: 'sess-sdp',
+        holdLocalCandidates: true
+      })
+
+      const directLine =
+        'candidate:1 1 udp 1686052607 39.157.118.113 41000 typ srflx raddr 198.18.0.1 rport 55000 generation 0 ufrag abcd network-id 2 network-cost 50'
+      const proxyLine =
+        'candidate:2 1 udp 1686052607 103.152.112.88 52000 typ srflx raddr 198.18.0.1 rport 55000 generation 0 ufrag abcd network-id 2 network-cost 50'
+
+      // 1. Simulate Chromium 123+ RTCIceCandidate.url recorded during onicecandidate
+      mockPeer.onicecandidate({
+        candidate: {
+          candidate: directLine,
+          url: 'stun:111.8.3.78:3478',
+          toJSON: () => ({ candidate: directLine })
+        }
+      })
+      mockPeer.onicecandidate({
+        candidate: {
+          candidate: proxyLine,
+          url: 'stun:74.125.250.129:19302',
+          toJSON: () => ({ candidate: proxyLine })
+        }
+      })
+
+      const rawSdp = ['v=0', `a=${directLine}`, `a=${proxyLine}`].join('\r\n')
+      const finalized = await manager.finalizeLocalSdp(pc, rawSdp)
+      const outLines = finalized.split(/\r\n/)
+      const outDirectPrio = parseInt(outLines[1]!.split(/\s+/)[3] || '0', 10)
+      const outProxyPrio = parseInt(outLines[2]!.split(/\s+/)[3] || '0', 10)
+      // Direct TUN-reflected srflx stays at typePref 88, while proxy-exit srflx in SDP is demoted to typePref 80
+      expect(Math.floor(outDirectPrio / 16777216)).toBe(88)
+      expect(Math.floor(outProxyPrio / 16777216)).toBe(80)
+
+      // 2. Simulate legacy browser without candidate.url, falling back to getStats() local-candidate.url
+      const mockPeerLegacy = createMockPeer()
+      const v6DirectLine =
+        'candidate:3 1 udp 1686055167 2409:8a00:1234::10 61000 typ srflx raddr fdfe:dcba:9876::1 rport 56000 generation 0 ufrag abcd network-id 4 network-cost 50'
+      const v6ProxyLine =
+        'candidate:4 1 udp 1686055167 2404:c140:2103::99 62000 typ srflx raddr fdfe:dcba:9876::1 rport 56000 generation 0 ufrag abcd network-id 4 network-cost 50'
+
+      mockPeerLegacy.getStats = vi.fn().mockResolvedValue([
+        {
+          type: 'local-candidate',
+          candidateType: 'srflx',
+          address: '2409:8a00:1234::10',
+          port: 61000,
+          relatedAddress: 'fdfe:dcba:9876::1',
+          relatedPort: 56000,
+          // Unbracketed libwebrtc format from stun_port.cc
+          url: 'stun:2409:8c50:e00::3:3478'
+        },
+        {
+          type: 'local-candidate',
+          candidateType: 'srflx',
+          address: '2404:c140:2103::99',
+          port: 62000,
+          relatedAddress: 'fdfe:dcba:9876::1',
+          relatedPort: 56000,
+          url: 'stun:2606:4700:49:::3478'
+        }
+      ])
+
+      global.RTCPeerConnection = vi.fn().mockImplementation(() => mockPeerLegacy) as any
+      const pcLegacy = manager.createPeerConnection('host-target-2')
+      const legacySdp = ['v=0', `a=${v6DirectLine}`, `a=${v6ProxyLine}`].join('\r\n')
+      const finalizedLegacy = await manager.finalizeLocalSdp(pcLegacy, legacySdp)
+      const legacyLines = finalizedLegacy.split(/\r\n/)
+      const v6DirectPrio = parseInt(legacyLines[1]!.split(/\s+/)[3] || '0', 10)
+      const v6ProxyPrio = parseInt(legacyLines[2]!.split(/\s+/)[3] || '0', 10)
+      expect(v6DirectPrio).toBeGreaterThan(v6ProxyPrio)
+      expect(Math.floor(v6DirectPrio / 16777216)).toBe(98)
+      expect(Math.floor(v6ProxyPrio / 16777216)).toBe(95)
+    })
+
+    it('triggers 1800ms late SLAAC GUA IPv6 reconnect when initial offer lacked IPv6 and DC is still connecting', async () => {
+      resetLocalIpv6ProbeCache()
+      ;(globalThis as any).__TEST_ENABLE_LATE_SLAAC__ = true
+
+      // 1st probe during initial setup returns no IPv6
+      vi.mocked(api.getNetworkInfo).mockResolvedValueOnce({
+        primaryIp: '192.168.1.50',
+        allIps: ['192.168.1.50'],
+        primaryIpv6: '',
+        allIpv6s: [],
+        port: 8080,
+        joinBaseUrl: 'http://192.168.1.50:8080'
+      })
+
+      let createdPeers = 0
+      global.RTCPeerConnection = vi.fn().mockImplementation(() => {
+        createdPeers++
+        const peer = createMockPeer()
+        peer.localDescription = { type: 'offer', sdp: 'v=0\r\na=candidate:1 1 udp 2113937151 192.168.1.50 50000 typ host\r\n' }
+        peer.createOffer = vi.fn().mockResolvedValue(peer.localDescription)
+        peer.setLocalDescription = vi.fn().mockResolvedValue(undefined)
+        return peer
+      }) as any
+
+      let curPc: any = null
+      let curDc: any = null
+      const mockSignaling = { send: vi.fn(), isConnected: () => true }
+      const mockOptions = createMockOptions()
+      mockOptions.getSignaling = () => mockSignaling as any
+      const peerMgr = new PeerConnectionManager(mockOptions)
+
+      const session = createClientSession({
+        peerMgr,
+        sas: {
+          clientSasState: 'VERIFIED',
+          clientSharedAesKey: null,
+          clientHostEcdhPubHex: '',
+          clientHostDeviceId: '',
+          clientSecurityFingerprint: ''
+        } as any,
+        getSignaling: () => mockSignaling as any,
+        getLocalEcdhKeyPair: () => null,
+        getLocalEcdhPubHex: () => '',
+        getLocalDeviceId: () => 'dev-1',
+        getCurrentInviteCode: () => 'INV1',
+        getCurrentHostSessionId: () => 'host-1',
+        setCurrentHostSessionId: () => {},
+        getClientSessionId: () => 'sess-1',
+        setClientSessionId: () => {},
+        getClientHostSenderId: () => 'host-sender',
+        setClientHostSenderId: () => {},
+        getClientPc: () => curPc,
+        setClientPc: (pc) => {
+          curPc = pc
+        },
+        getClientDc: () => curDc,
+        setClientDc: (dc) => {
+          curDc = dc
+        },
+        setClientSender: () => {},
+        getClientPendingCandidates: () => [],
+        setClientPendingCandidates: () => {},
+        getClientForceRelay: () => false,
+        setClientForceRelay: () => {},
+        isExplicitlyClosed: () => false,
+        isHostMode: () => false,
+        getStatus: () => 'connecting',
+        setStatus: () => {},
+        handleChannelMessage: async () => {},
+        rejectSas: () => {},
+        callbacks: mockOptions.callbacks
+      })
+
+      try {
+        await session.setupClientConnection()
+        expect(createdPeers).toBe(1)
+
+        // Now SLAAC finishes at 1800ms and assigns a GUA IPv6 address
+        vi.mocked(api.getNetworkInfo).mockResolvedValue({
+          primaryIp: '192.168.1.50',
+          allIps: ['192.168.1.50'],
+          primaryIpv6: '2409:8a00:1234::88',
+          allIpv6s: ['2409:8a00:1234::88'],
+          port: 8080,
+          joinBaseUrl: 'http://192.168.1.50:8080'
+        })
+
+        await vi.advanceTimersByTimeAsync(1900)
+        // Must have triggered a new handshake (2nd PeerConnection created)
+        expect(createdPeers).toBe(2)
+      } finally {
+        delete (globalThis as any).__TEST_ENABLE_LATE_SLAAC__
+      }
     })
   })
 })

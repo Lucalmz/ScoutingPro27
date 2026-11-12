@@ -141,7 +141,7 @@ onUnmounted(() => {
             <h3 class="modal-title">
               {{ isDuplicateName ? t('conflict.duplicate_name_title') : t('conflict.title') }}
             </h3>
-            <button class="btn-close-modal" @click="handleClose" :title="t('common.close', '关闭')">
+            <button class="btn-close-modal" @click="handleClose" :title="t('common.close')">
               <span class="material-icons">close</span>
             </button>
           </div>
@@ -300,9 +300,7 @@ onUnmounted(() => {
   left: 0;
   right: 0;
   bottom: 0;
-  background: rgba(0, 0, 0, 0.75);
-  backdrop-filter: blur(8px);
-  -webkit-backdrop-filter: blur(8px);
+  background: rgba(8, 8, 7, 0.84);
   display: flex;
   align-items: center;
   justify-content: center;
@@ -312,14 +310,16 @@ onUnmounted(() => {
 }
 
 .modal-card {
-  background: var(--card, #0a0a0a);
-  border: 1px solid var(--border, #262626);
-  border-radius: 12px;
+  position: relative;
+  background: var(--card, #141413);
+  border: 1px solid var(--border, #262624);
+  border-top: 3px solid #f59e0b;
+  border-radius: 14px;
   max-width: 520px;
   width: 100%;
   padding: 1.75rem;
-  box-shadow: 0 16px 40px rgba(0, 0, 0, 0.8), 0 0 24px rgba(57, 255, 20, 0.08);
-  color: var(--foreground, #f1f5f9);
+  box-shadow: 0 24px 60px rgba(0, 0, 0, 0.85), 0 0 24px rgba(245, 158, 11, 0.08);
+  color: var(--foreground, #f0efe9);
   max-height: 90vh;
   overflow-y: auto;
   box-sizing: border-box;
@@ -329,62 +329,68 @@ onUnmounted(() => {
   display: flex;
   align-items: center;
   gap: 0.75rem;
-  margin-bottom: 0.75rem;
+  margin-bottom: 0.85rem;
+  padding-bottom: 0.85rem;
+  border-bottom: 1px solid #262624;
 }
 
 .btn-close-modal {
   margin-left: auto;
-  background: transparent;
-  border: none;
-  color: var(--text-muted, #8b949e);
+  background: #1c1c1a;
+  border: 1px solid #353532;
+  color: var(--text-muted, #9e9d95);
   cursor: pointer;
-  padding: 4px;
-  border-radius: 6px;
+  width: 32px;
+  height: 32px;
+  padding: 0;
+  border-radius: 8px;
   display: flex;
   align-items: center;
   justify-content: center;
-  transition: all 0.2s;
+  transition: all 0.16s ease;
 }
 
 .btn-close-modal:hover {
-  background: rgba(255, 255, 255, 0.1);
-  color: #ffffff;
+  background: #262624;
+  border-color: #4a4a46;
+  color: #f0efe9;
 }
 
 .modal-footer-actions {
   margin-top: 1.25rem;
   display: flex;
   justify-content: flex-end;
-  border-top: 1px solid var(--border, #262626);
+  border-top: 1px solid var(--border, #262624);
   padding-top: 1rem;
 }
 
 .btn-secondary-exit {
-  background: rgba(255, 255, 255, 0.08);
-  color: #c9d1d9;
-  border: 1px solid rgba(255, 255, 255, 0.15);
+  background: #1c1c1a;
+  color: #f0efe9;
+  border: 1px solid #353532;
   display: inline-flex;
   align-items: center;
   gap: 6px;
   padding: 8px 14px;
   border-radius: 8px;
   font-size: 13px;
-  font-weight: 600;
+  font-weight: 700;
   cursor: pointer;
-  transition: all 0.2s;
+  transition: all 0.16s ease;
 }
 
 .btn-secondary-exit:hover {
-  background: rgba(255, 255, 255, 0.16);
+  background: #262624;
+  border-color: #4a4a46;
   color: #ffffff;
 }
 
 .header-icon {
-  width: 36px;
-  height: 36px;
-  border-radius: 8px;
-  background: rgba(245, 158, 11, 0.15);
-  border: 1px solid rgba(245, 158, 11, 0.35);
+  width: 38px;
+  height: 38px;
+  border-radius: 9px;
+  background: #19140c;
+  border: 1px solid rgba(245, 158, 11, 0.4);
   color: #f59e0b;
   display: flex;
   align-items: center;
@@ -394,15 +400,15 @@ onUnmounted(() => {
 
 .modal-title {
   font-family: 'Orbitron', 'ZCOOLQingKeHuangYou', sans-serif;
-  font-size: 1.25rem;
+  font-size: 1.2rem;
   font-weight: 700;
-  color: var(--foreground, #f1f5f9);
+  color: var(--foreground, #f0efe9);
   margin: 0;
 }
 
 .modal-desc {
   font-size: 0.9rem;
-  color: var(--muted-foreground, #a3a3a3);
+  color: var(--muted-foreground, #9e9d95);
   line-height: 1.5;
   margin-bottom: 1.25rem;
 }
@@ -418,8 +424,8 @@ onUnmounted(() => {
 }
 
 .alert-banner.error {
-  background: rgba(239, 68, 68, 0.15);
-  border: 1px solid rgba(239, 68, 68, 0.3);
+  background: #1b1111;
+  border: 1px solid rgba(239, 68, 68, 0.35);
   color: #f87171;
 }
 
@@ -430,15 +436,15 @@ onUnmounted(() => {
 }
 
 .option-block {
-  background: var(--input, #1a1a1a);
-  border: 1px solid var(--border, #262626);
-  border-radius: 8px;
+  background: #080807;
+  border: 1px solid #262624;
+  border-radius: 10px;
   padding: 1rem;
 }
 
 .option-block.merge-block {
-  border-color: rgba(245, 158, 11, 0.3);
-  background: rgba(245, 158, 11, 0.04);
+  border-color: rgba(245, 158, 11, 0.35);
+  background: #120f0a;
 }
 
 .alert-banner.compact {
@@ -449,13 +455,14 @@ onUnmounted(() => {
 
 .btn-accent {
   background: #f59e0b;
-  color: #000000;
-  box-shadow: 0 0 10px rgba(245, 158, 11, 0.3);
+  color: #080807;
+  border: 1px solid #f59e0b;
+  box-shadow: 0 0 12px rgba(245, 158, 11, 0.25);
 }
 
 .btn-accent:hover:not(:disabled) {
-  filter: brightness(1.1);
-  box-shadow: 0 0 15px rgba(245, 158, 11, 0.5);
+  filter: brightness(1.08);
+  box-shadow: 0 0 18px rgba(245, 158, 11, 0.45);
 }
 
 .spinner-small {
@@ -471,14 +478,14 @@ onUnmounted(() => {
 
 .option-title {
   font-size: 0.95rem;
-  font-weight: 600;
-  color: var(--foreground, #f1f5f9);
+  font-weight: 700;
+  color: var(--foreground, #f0efe9);
   margin: 0 0 0.35rem 0;
 }
 
 .option-hint {
   font-size: 0.8rem;
-  color: var(--muted-foreground, #a3a3a3);
+  color: var(--muted-foreground, #9e9d95);
   margin: 0 0 0.75rem 0;
   line-height: 1.4;
 }
@@ -490,11 +497,11 @@ onUnmounted(() => {
 
 .form-input {
   flex: 1;
-  background: var(--background, #000000);
-  border: 1px solid var(--border, #262626);
-  border-radius: 6px;
-  color: var(--foreground, #f1f5f9);
-  padding: 0.5rem 0.75rem;
+  background: #141413;
+  border: 1px solid #2e2e2b;
+  border-radius: 8px;
+  color: var(--foreground, #f0efe9);
+  padding: 0.55rem 0.75rem;
   font-size: 0.9rem;
   outline: none;
   transition: border-color 0.2s;
@@ -502,40 +509,42 @@ onUnmounted(() => {
 
 .form-input:focus {
   border-color: var(--primary, #39ff14);
-  box-shadow: 0 0 8px rgba(57, 255, 20, 0.3);
+  box-shadow: 0 0 8px rgba(57, 255, 20, 0.25);
 }
 
 .btn {
-  padding: 0.5rem 1rem;
-  border-radius: 6px;
+  padding: 0.55rem 1rem;
+  border-radius: 8px;
   font-size: 0.875rem;
-  font-weight: 600;
+  font-weight: 700;
   cursor: pointer;
-  border: none;
-  transition: all 0.2s;
+  border: 1px solid transparent;
+  transition: all 0.16s ease;
   white-space: nowrap;
 }
 
 .btn-primary {
   background: var(--primary, #39ff14);
-  color: var(--primary-foreground, #000000);
+  color: #080807;
+  border-color: var(--primary, #39ff14);
   box-shadow: var(--glow-primary);
 }
 
 .btn-primary:hover:not(:disabled) {
-  filter: brightness(1.1);
+  filter: brightness(1.08);
   box-shadow: var(--glow-primary-hover);
 }
 
 .btn-secondary {
   width: 100%;
-  background: var(--muted, #1a1a1a);
-  border: 1px solid var(--border, #262626);
-  color: var(--foreground, #f1f5f9);
+  background: #1c1c1a;
+  border: 1px solid #353532;
+  color: var(--foreground, #f0efe9);
 }
 
 .btn-secondary:hover:not(:disabled) {
-  background: var(--surface-hover, #141414);
+  background: #262624;
+  border-color: #4a4a46;
 }
 
 .btn:disabled {

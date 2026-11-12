@@ -344,13 +344,43 @@ async function testConnection() {
 .api-link:hover {
   text-decoration: underline;
 }
-.form-group input, .form-group select, .form-group textarea {
+.form-group input, .form-group textarea {
   padding: 10px;
-  border: 1px solid var(--border);
+  border: 1px solid var(--border, #262624);
   border-radius: 6px;
-  background: var(--input);
-  color: var(--foreground);
+  background: var(--input, #090908);
+  color: var(--foreground, #f0efe9);
   font-family: inherit;
+}
+.form-group select {
+  padding: 9px 30px 9px 12px;
+  border: 1px solid var(--border, #262624);
+  border-radius: 6px;
+  background: var(--input, #090908);
+  color: var(--foreground, #f0efe9);
+  font-family: inherit;
+  font-size: 13px;
+  cursor: pointer;
+  outline: none;
+  color-scheme: dark;
+  -webkit-appearance: none;
+  -moz-appearance: none;
+  appearance: none;
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='14' height='14' viewBox='0 0 24 24' fill='none' stroke='%238e8d87' stroke-width='2.2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='m6 9 6 6 6-6'/%3E%3C/svg%3E");
+  background-repeat: no-repeat;
+  background-position: right 10px center;
+  background-size: 13px 13px;
+  transition: border-color 0.15s ease, box-shadow 0.15s ease;
+}
+.form-group select:focus {
+  border-color: var(--primary, #39ff14);
+  box-shadow: 0 0 0 1px var(--primary, #39ff14), 0 0 8px rgba(57, 255, 20, 0.2);
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='14' height='14' viewBox='0 0 24 24' fill='none' stroke='%2339ff14' stroke-width='2.2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='m6 9 6 6 6-6'/%3E%3C/svg%3E");
+}
+.form-group select option {
+  background-color: #141413;
+  color: #f0efe9;
+  padding: 8px 12px;
 }
 .hint {
   font-size: 12px;

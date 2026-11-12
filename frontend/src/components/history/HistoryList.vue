@@ -334,8 +334,8 @@ function enter(el: Element, done: () => void) {
   position: absolute;
   left: -4px;
   right: -4px;
-  background: rgba(128, 128, 128, 0.1);
-  backdrop-filter: brightness(1.1);
+  background: rgba(255, 255, 255, 0.04);
+  border: 1px solid rgba(255, 255, 255, 0.08);
   pointer-events: none;
   transition: top var(--motion-duration-moderate) var(--motion-ease-out), height var(--motion-duration-moderate) var(--motion-ease-out), opacity var(--motion-duration-fast) ease;
   z-index: 10;
@@ -480,30 +480,40 @@ function enter(el: Element, done: () => void) {
   font-size: 12px;
   font-weight: 600;
   cursor: pointer;
-  border: none;
+  border: 1px solid transparent;
+  transition: all 0.15s ease;
 }
 
 .btn-edit {
-  background: var(--border);
-  color: var(--muted-foreground);
+  background: #1c1c1a;
+  border: 1px solid #353532;
+  color: var(--foreground, #f0efe9);
 }
 
 .btn-edit:hover {
-  background: var(--input);
+  background: #262624;
+  border-color: #4a4a46;
 }
 
 .btn-save {
-  background: var(--primary);
-  color: var(--primary-foreground);
+  background: var(--primary, #39ff14);
+  color: #080807;
+  font-weight: 700;
 }
 
 .btn-save:hover {
-  background: var(--primary);
+  filter: brightness(1.1);
 }
 
 .btn-cancel {
-  background: var(--border);
-  color: var(--muted-foreground);
+  background: #1c1c1a;
+  border: 1px solid #353532;
+  color: var(--muted-foreground, #9e9d95);
+}
+
+.btn-cancel:hover {
+  background: #262624;
+  color: var(--foreground, #f0efe9);
 }
 
 .sync-badge.is-synced {

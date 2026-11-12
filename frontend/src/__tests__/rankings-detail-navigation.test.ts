@@ -8,6 +8,7 @@ import TeamDetailView from '../views/TeamDetailView.vue'
 import RenameModal from '../components/common/RenameModal.vue'
 import { useNavigationStore } from '../stores/navigation'
 import { useEventStore } from '../stores/events'
+import { useRecordStore } from '../stores/records'
 import { useUserStore } from '../stores/user'
 import { useConnectionStore } from '../stores/connection'
 import { useEventWebRtcBridge } from '../views/useEventWebRtcBridge'
@@ -370,5 +371,174 @@ describe('Rankings & Detail Navigation Integration', () => {
     expect(mockRtc.disconnect).toHaveBeenCalled()
     expect(connStore.rtcService).toBeNull()
     expect(connStore.status).toBe('offline')
+  })
+
+  it('RankingsTable removes tags from rows but preserves tag filtering', async () => {
+    const recordStore = useRecordStore()
+    recordStore.teamTags = [
+      { id: 't1', teamNumber: 27570, tag: 'Fast', color: 'green', isPreset: false, eventId: 'evt-123' },
+      { id: 't2', teamNumber: 9999, tag: 'Defense', color: 'red', isPreset: false, eventId: 'evt-123' }
+    ]
+
+    const wrapper = mount(RankingsTable, {
+      props: {
+        rankings: [
+          { teamNumber: 27570, matchCount: 5, brokenCount: 0, avgAutoScore: 30, avgTeleopScore: 50, avgEndgameScore: 20, maxScore: 100, avgRating: 90, trend: 'up' },
+          { teamNumber: 9999, matchCount: 4, brokenCount: 1, avgAutoScore: 20, avgTeleopScore: 40, avgEndgameScore: 10, maxScore: 80, avgRating: 70, trend: 'down' }
+        ],
+        loading: false
+      },
+      global: {
+        plugins: [i18n]
+      }
+    })
+
+    // 1. Tags must NOT be rendered in the table rows
+    expect(wrapper.find('.row-tags-list').exists()).toBe(false)
+    expect(wrapper.find('.row-tag-badge').exists()).toBe(false)
+
+    // 2. Tag filter bar MUST be present
+    const filterBar = wrapper.find('.tag-filter-bar')
+    expect(filterBar.exists()).toBe(true)
+
+    const chips = wrapper.findAll('.filter-chip')
+    expect(chips.length).toBe(3) // All, Fast, Defense
+
+    // Both rows initially visible
+    expect(wrapper.find('[data-team-row="27570"]').exists()).toBe(true)
+    expect(wrapper.find('[data-team-row="9999"]').exists()).toBe(true)
+
+    // Click Fast chip
+    const fastChip = chips.find(c => c.text().includes('Fast'))
+    expect(fastChip).toBeDefined()
+    await fastChip!.trigger('click')
+
+    // Only 27570 is displayed
+    expect(wrapper.find('[data-team-row="27570"]').exists()).toBe(true)
+    expect(wrapper.find('[data-team-row="9999"]').exists()).toBe(false)
+
+    // Click All chip
+    const allChip = chips.find(c => c.text().includes('All'))
+    await allChip!.trigger('click')
+    expect(wrapper.find('[data-team-row="27570"]').exists()).toBe(true)
+    expect(wrapper.find('[data-team-row="9999"]').exists()).toBe(true)
+  })
+
+  it('RankingsTable executes staggered entrance animation hooks (beforeEnter & enter)', () => {
+    vi.useFakeTimers()
+    const wrapper = mount(RankingsTable, {
+      props: {
+        rankings: [
+          { teamNumber: 27570, matchCount: 5, brokenCount: 0, avgAutoScore: 30, avgTeleopScore: 50, avgEndgameScore: 20, maxScore: 100, avgRating: 90, trend: 'up' }
+        ],
+        loading: false
+      },
+      global: {
+        plugins: [i18n]
+      }
+    })
+
+    const vm = wrapper.vm as any
+    const dummyEl = document.createElement('tr')
+    dummyEl.dataset.index = '1'
+    document.body.appendChild(dummyEl)
+
+    const rafSpy = vi.spyOn(window, 'requestAnimationFrame').mockImplementation((cb) => {
+      cb(0)
+      return 0
+    })
+
+    // 1. beforeEnter sets opacity 0 and translateY(20px)
+    vm.beforeEnter(dummyEl)
+    expect(dummyEl.style.opacity).toBe('0')
+    expect(dummyEl.style.transform).toBe('translateY(20px)')
+
+    // 2. enter applies staggered transition and clears inline properties on completion
+    let doneCalled = false
+    vm.enter(dummyEl, () => {
+      doneCalled = true
+    })
+
+    // Fast-forward 1 * 40ms delay + 360ms
+    vi.advanceTimersByTime(500)
+    expect(doneCalled).toBe(true)
+    expect(dummyEl.style.opacity).toBe('')
+    expect(dummyEl.style.transform).toBe('')
+    expect(dummyEl.style.transition).toBe('')
+
+    rafSpy.mockRestore()
+    document.body.removeChild(dummyEl)
+    vi.useRealTimers()
+  })
+
+  it('RankingsTable updates hover-highlight on row mouseenter and hides on list mouseleave', async () => {
+    const wrapper = mount(RankingsTable, {
+      props: {
+        rankings: [
+          { teamNumber: 27570, matchCount: 5, brokenCount: 0, avgAutoScore: 30, avgTeleopScore: 50, avgEndgameScore: 20, maxScore: 100, avgRating: 90, trend: 'up' }
+        ],
+        loading: false
+      },
+      global: {
+        plugins: [i18n]
+      }
+    })
+
+    const highlightEl = wrapper.find('.hover-highlight')
+    expect(highlightEl.exists()).toBe(true)
+    expect((highlightEl.element as HTMLElement).style.opacity).toBe('0')
+
+    const row = wrapper.find('.ranking-row')
+    expect(row.exists()).toBe(true)
+
+    Object.defineProperty(row.element, 'offsetTop', { value: 48, configurable: true })
+    Object.defineProperty(row.element, 'offsetHeight', { value: 52, configurable: true })
+
+    await row.trigger('mouseenter')
+    expect((highlightEl.element as HTMLElement).style.opacity).toBe('1')
+    expect((highlightEl.element as HTMLElement).style.top).toBe('48px')
+    expect((highlightEl.element as HTMLElement).style.height).toBe('52px')
+
+    // Mouse leave table container
+    const tableContainer = wrapper.find('.table-container')
+    await tableContainer.trigger('mouseleave')
+    expect((highlightEl.element as HTMLElement).style.opacity).toBe('0')
+
+    // Mouse enter row again then hover thead
+    await row.trigger('mouseenter')
+    expect((highlightEl.element as HTMLElement).style.opacity).toBe('1')
+
+    const thead = wrapper.find('thead')
+    await thead.trigger('mouseenter')
+    expect((highlightEl.element as HTMLElement).style.opacity).toBe('0')
+  })
+
+  it('RankingsTable clicking .team-cell navigates to team detail view', async () => {
+    const eventStore = useEventStore()
+    eventStore.setCurrentEvent({
+      id: 'evt-123',
+      name: 'Championship 2026',
+      inviteCode: 'TEST26',
+      hostId: 'host-1'
+    })
+
+    const wrapper = mount(RankingsTable, {
+      props: {
+        rankings: [
+          { teamNumber: 27570, matchCount: 5, brokenCount: 0, avgAutoScore: 30, avgTeleopScore: 50, avgEndgameScore: 20, maxScore: 100, avgRating: 90, trend: 'up' }
+        ],
+        loading: false
+      },
+      global: {
+        plugins: [i18n]
+      }
+    })
+
+    mockRouterPush.mockClear()
+    const teamCell = wrapper.find('.team-cell')
+    expect(teamCell.exists()).toBe(true)
+    await teamCell.trigger('click')
+
+    expect(mockRouterPush).toHaveBeenCalledWith('/event/evt-123/team/27570')
   })
 })

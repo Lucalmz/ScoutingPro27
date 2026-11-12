@@ -305,6 +305,69 @@ describe('ScoutingForm', () => {
       expect(wrapper.vm.isDraftRestored).toBe(false)
       expect(localStorage.getItem('sp27_active_draft_event-1')).toBeNull()
     })
+
+    it('discards stale draft older than 24 hours', async () => {
+      const staleDraft = {
+        matchNumber: '10',
+        allianceColor: 'red',
+        teamsData: [{ teamNumber: '1111', notes: 'ancient draft' }],
+        savedAt: Date.now() - (25 * 60 * 60 * 1000) // 25 hours ago
+      }
+      localStorage.setItem('sp27_active_draft_event-1', JSON.stringify(staleDraft))
+
+      const wrapper = mount(ScoutingForm, { props: defaultProps })
+      await wrapper.vm.$nextTick()
+
+      expect(wrapper.vm.isDraftRestored).toBe(false)
+      expect(localStorage.getItem('sp27_active_draft_event-1')).toBeNull()
+    })
+
+    it('saves draft when user edits data even if initially loaded with assignedTask', async () => {
+      vi.useFakeTimers()
+      const wrapper = mount(ScoutingForm, {
+        props: {
+          ...defaultProps,
+          assignedTask: { matchNumber: 5, teamNumber: 27570, allianceColor: 'red', tournamentLevel: 'QUALIFICATION' }
+        }
+      })
+      await wrapper.vm.$nextTick()
+
+      // User enters notes / scoring during assigned match
+      wrapper.vm.teamsData[0].notes = 'Great defense during match 5'
+      await wrapper.vm.$nextTick()
+
+      vi.advanceTimersByTime(500)
+
+      const saved = localStorage.getItem('sp27_active_draft_event-1')
+      expect(saved).not.toBeNull()
+      const parsed = JSON.parse(saved!)
+      expect(parsed.matchNumber).toBe('5')
+      expect(parsed.teamsData[0].notes).toBe('Great defense during match 5')
+
+      vi.useRealTimers()
+    })
+
+    it('flushes pending draft immediately upon component unmount', async () => {
+      vi.useFakeTimers()
+      localStorage.removeItem('sp27_active_draft_event-1')
+
+      const wrapper = mount(ScoutingForm, { props: defaultProps })
+      await wrapper.vm.$nextTick()
+
+      wrapper.vm.teamsData[0].teamNumber = '27570'
+      wrapper.vm.teamsData[0].notes = 'Unmounting without waiting 400ms'
+      await wrapper.vm.$nextTick()
+
+      // Unmount before 400ms timer elapses
+      wrapper.unmount()
+
+      const saved = localStorage.getItem('sp27_active_draft_event-1')
+      expect(saved).not.toBeNull()
+      const parsed = JSON.parse(saved!)
+      expect(parsed.teamsData[0].notes).toBe('Unmounting without waiting 400ms')
+
+      vi.useRealTimers()
+    })
   })
 })
 

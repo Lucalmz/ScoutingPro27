@@ -16,9 +16,21 @@ vi.mock('vue-router', () => ({
   })
 }))
 
+const mockSwitchLanguage = vi.fn()
+vi.mock('@/i18n', () => ({
+  switchLanguage: (...args: any[]) => mockSwitchLanguage(...args),
+  i18n: {
+    global: {
+      t: (key: string) => key,
+      locale: { value: 'zh' }
+    }
+  }
+}))
+
 vi.mock('vue-i18n', () => ({
   useI18n: () => ({
-    t: (key: string) => key
+    t: (key: string) => key,
+    locale: { value: 'zh' }
   }),
   createI18n: () => ({
     global: {
@@ -363,5 +375,21 @@ describe('DashboardView.vue', () => {
 
     expect(wrapper.find('.scan-btn').exists()).toBe(false)
     expect(wrapper.find('.btn-scan-input').exists()).toBe(false)
+  })
+
+  it('renders language toggle button and toggles language on click', async () => {
+    const userStore = useUserStore()
+    userStore.user = { id: 'u1', username: 'Tester', token: 'token' }
+    const eventStore = useEventStore()
+    eventStore.events = []
+    vi.spyOn(eventStore, 'fetchEvents').mockResolvedValue(undefined)
+
+    const wrapper = mount(DashboardView)
+    await new Promise((r) => setTimeout(r, 10))
+
+    const langBtn = wrapper.find('.lang-topbar-btn')
+    expect(langBtn.exists()).toBe(true)
+    await langBtn.trigger('click')
+    expect(mockSwitchLanguage).toHaveBeenCalledWith('en')
   })
 })

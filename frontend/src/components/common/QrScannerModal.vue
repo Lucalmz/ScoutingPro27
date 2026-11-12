@@ -367,8 +367,7 @@ onUnmounted(() => {
   position: fixed;
   inset: 0;
   z-index: 1000;
-  background: rgba(0, 0, 0, 0.85);
-  backdrop-filter: blur(10px);
+  background: rgba(8, 8, 7, 0.88);
   display: flex;
   align-items: center;
   justify-content: center;
@@ -585,16 +584,16 @@ onUnmounted(() => {
   bottom: 16px;
   left: 50%;
   transform: translateX(-50%);
-  background: rgba(0, 0, 0, 0.8);
-  border: 1px solid var(--border, #262626);
-  color: var(--foreground, #f1f5f9);
+  background: #141413;
+  border: 1px solid var(--border, #262624);
+  color: var(--foreground, #f0efe9);
   padding: 6px 14px;
   border-radius: 20px;
   font-size: 12px;
-  font-weight: 500;
+  font-weight: 600;
   white-space: nowrap;
   pointer-events: none;
-  backdrop-filter: blur(6px);
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.7);
 }
 
 /* 摄像头不可用卡片 */

@@ -78,9 +78,17 @@ export function createMessageDispatcher(ctx: MessageDispatcherContext) {
           return Promise.resolve()
         }
         const c = ctx.clients.get(targetId) || ctx.stagedClients?.get(targetId)
-        if (c && c.dc && c.dc.readyState === 'open') {
-          if (!c.sender) c.sender = new DataChannelSender(c.dc)
-          return c.sender.enqueueSend(payload)
+        if (c) {
+          if (c.dc && c.dc.readyState === 'open') {
+            if (!c.sender || (c.sender as any).channel !== c.dc) {
+              c.sender = new DataChannelSender(c.dc)
+            }
+            return c.sender.enqueueSend(payload)
+          } else if (c.drainingVirtualDc && c.drainingVirtualDc.readyState === 'open') {
+            // Draining fallback: use local sender, do not mutate c.sender
+            const localSender = new DataChannelSender(c.drainingVirtualDc)
+            return localSender.enqueueSend(payload)
+          }
         }
         return Promise.resolve()
       } else {
@@ -96,8 +104,13 @@ export function createMessageDispatcher(ctx: MessageDispatcherContext) {
           }
           if (peerSas === 'REJECTED') return
           if (c.dc && c.dc.readyState === 'open') {
-            if (!c.sender) c.sender = new DataChannelSender(c.dc)
+            if (!c.sender || (c.sender as any).channel !== c.dc) {
+              c.sender = new DataChannelSender(c.dc)
+            }
             promises.push(c.sender.enqueueSend(payload))
+          } else if (c.drainingVirtualDc && c.drainingVirtualDc.readyState === 'open') {
+            const localSender = new DataChannelSender(c.drainingVirtualDc)
+            promises.push(localSender.enqueueSend(payload))
           }
         })
         return Promise.all(promises).then(() => {})
@@ -145,6 +158,10 @@ export function createMessageDispatcher(ctx: MessageDispatcherContext) {
       )
       const old = ctx.clients.get(oldClientId)
       if (old) {
+        if (old.drainingVirtualDc) {
+          try { old.drainingVirtualDc.close() } catch {}
+          old.drainingVirtualDc = undefined
+        }
         if (old.dc) old.dc.onclose = null
         old.pc.onconnectionstatechange = null
         old.pc.oniceconnectionstatechange = null
@@ -161,6 +178,10 @@ export function createMessageDispatcher(ctx: MessageDispatcherContext) {
     if (staged) {
       const oldActive = ctx.clients.get(newClientId)
       if (oldActive && oldActive !== staged) {
+        if (oldActive.drainingVirtualDc) {
+          try { oldActive.drainingVirtualDc.close() } catch {}
+          oldActive.drainingVirtualDc = undefined
+        }
         if (oldActive.dc) oldActive.dc.onclose = null
         oldActive.pc.onconnectionstatechange = null
         oldActive.pc.oniceconnectionstatechange = null
@@ -330,21 +351,36 @@ export function createMessageDispatcher(ctx: MessageDispatcherContext) {
     if (ctx.isHostMode()) {
       const targetClientIds = ctx.scoutIdToClientIds.get(payload.targetId)
       let sent = false
+
+      const deliverToClient = async (targetClient: ClientEntry): Promise<boolean> => {
+        if (targetClient.dc && targetClient.dc.readyState === 'open') {
+          if (!targetClient.sender || (targetClient.sender as any).channel !== targetClient.dc) {
+            targetClient.sender = new DataChannelSender(targetClient.dc)
+          }
+          await targetClient.sender.enqueueSend(JSON.stringify(directMsg))
+          return true
+        } else if (targetClient.drainingVirtualDc && targetClient.drainingVirtualDc.readyState === 'open') {
+          // Fallback to draining channel using a local sender without mutating targetClient.sender
+          const localSender = new DataChannelSender(targetClient.drainingVirtualDc)
+          await localSender.enqueueSend(JSON.stringify(directMsg))
+          return true
+        }
+        return false
+      }
+
       if (targetClientIds && targetClientIds.size > 0) {
         for (const cid of targetClientIds) {
           const targetClient = ctx.clients.get(cid)
-          if (targetClient && targetClient.dc && targetClient.dc.readyState === 'open') {
-            if (!targetClient.sender) targetClient.sender = new DataChannelSender(targetClient.dc)
-            await targetClient.sender.enqueueSend(JSON.stringify(directMsg))
-            sent = true
+          if (targetClient) {
+            const ok = await deliverToClient(targetClient)
+            if (ok) sent = true
           }
         }
       } else {
         const targetClient = ctx.clients.get(payload.targetId)
-        if (targetClient && targetClient.dc && targetClient.dc.readyState === 'open') {
-          if (!targetClient.sender) targetClient.sender = new DataChannelSender(targetClient.dc)
-          await targetClient.sender.enqueueSend(JSON.stringify(directMsg))
-          sent = true
+        if (targetClient) {
+          const ok = await deliverToClient(targetClient)
+          if (ok) sent = true
         }
       }
 

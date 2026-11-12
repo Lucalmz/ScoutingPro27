@@ -24,6 +24,9 @@ export class VirtualDataChannel {
   public bufferedAmount = 0
   public bufferedAmountLowThreshold = 0
   public readonly isVirtual = true
+  public isDraining = false
+  private drainTimer: any = null
+  private pendingSendAborts = new Set<(err: Error) => void>()
 
   public onopen: ((this: RTCDataChannel, ev: Event) => any) | null = null
   public onclose: ((this: RTCDataChannel, ev: Event) => any) | null = null
@@ -47,42 +50,93 @@ export class VirtualDataChannel {
     this.dispatchEvent('open', ev)
   }
 
+  public startDrain(graceMs: number = 5000, flushCapMs: number = 1000, onDrainComplete?: () => void): void {
+    if (this.readyState === 'closed' || this.isDraining) return
+    this.isDraining = true
+    log.info(`VirtualDataChannel '${this.label}' started draining mode (graceMs: ${graceMs}, flushCapMs: ${flushCapMs})`)
+    if (this.drainTimer) {
+      clearTimeout(this.drainTimer)
+      this.drainTimer = null
+    }
+    this.drainTimer = setTimeout(async () => {
+      this.drainTimer = null
+      try {
+        await this.flush(flushCapMs)
+      } finally {
+        this.close()
+        try {
+          onDrainComplete?.()
+        } catch {}
+      }
+    }, graceMs)
+  }
+
+  public async flush(capMs: number = 1000): Promise<void> {
+    const settlement = this.sendChain
+    if (!settlement) return
+    let timeoutHandle: any
+    const timeoutPromise = new Promise<void>((resolve) => {
+      timeoutHandle = setTimeout(resolve, capMs)
+    })
+    try {
+      await Promise.race([settlement, timeoutPromise])
+    } finally {
+      clearTimeout(timeoutHandle)
+    }
+  }
+
   public sendAsync(data: string): Promise<void> {
-    if (this.readyState !== 'open') {
+    if (this.readyState !== 'open' && !this.isDraining) {
       return Promise.reject(new Error(`VirtualDataChannel is not open (state: ${this.readyState})`))
     }
     const byteLen = typeof data === 'string' ? data.length : 0
     this.bufferedAmount += byteLen
 
-    const task = this.sendChain
-      .then(async () => {
-        if (this.readyState !== 'open') return
-        const signaling = this.options.getSignaling()
-        const aesKey = this.options.getSharedAesKey()
-        const target = this.options.getTargetPeerId()
-        if (!signaling || !aesKey) {
-          log.warn('Cannot send over VirtualDataChannel: signaling or ECDH AES key missing')
-          return
+    const currentTask = (async () => {
+      // 等待前序排队任务解决（无论成功与否，均允许后续任务继续执行）
+      try {
+        await this.sendChain
+      } catch {}
+
+      if (this.readyState !== 'open' && !this.isDraining) {
+        throw new Error(`VirtualDataChannel closed before queued frame could be sent (state: ${this.readyState})`)
+      }
+      const signaling = this.options.getSignaling()
+      const aesKey = this.options.getSharedAesKey()
+      const target = this.options.getTargetPeerId()
+      if (!signaling || !aesKey) {
+        throw new Error('Cannot send over VirtualDataChannel: signaling or ECDH AES key missing')
+      }
+      const encrypted = await encryptSignalingData(
+        aesKey,
+        JSON.stringify({
+          vdc: 'data',
+          sessionId: this.sessionId,
+          payload: data
+        })
+      )
+      let abortCallback: ((err: Error) => void) | null = null
+      const closeRace = new Promise<never>((_, reject) => {
+        abortCallback = reject
+        this.pendingSendAborts.add(reject)
+      })
+
+      const sendPromise = signaling.send(
+        {
+          encrypted,
+          clientSessionId: this.sessionId
+        },
+        target
+      )
+
+      try {
+        await Promise.race([sendPromise, closeRace])
+      } finally {
+        if (abortCallback) {
+          this.pendingSendAborts.delete(abortCallback)
         }
-        const encrypted = await encryptSignalingData(
-          aesKey,
-          JSON.stringify({
-            vdc: 'data',
-            sessionId: this.sessionId,
-            payload: data
-          })
-        )
-        await signaling.send(
-          {
-            encrypted,
-            clientSessionId: this.sessionId
-          },
-          target
-        )
-      })
-      .catch((err) => {
-        log.warn('VirtualDataChannel encrypted frame send error:', err)
-      })
+      }
+    })()
       .finally(() => {
         this.bufferedAmount = Math.max(0, this.bufferedAmount - byteLen)
         if (this.bufferedAmount <= this.bufferedAmountLowThreshold) {
@@ -90,16 +144,25 @@ export class VirtualDataChannel {
         }
       })
 
-    this.sendChain = task
-    return task
+    // Advance sendChain, catching rejection on the internal chain
+    this.sendChain = currentTask.catch(() => {})
+    return currentTask
   }
 
   public send(data: string): void {
-    void this.sendAsync(data)
+    this.sendAsync(data).catch((err) => {
+      log.warn('VirtualDataChannel send failed:', err)
+      const ev =
+        typeof ErrorEvent !== 'undefined'
+          ? new ErrorEvent('error', { error: err, message: err?.message || String(err) })
+          : Object.assign(new Event('error'), { error: err, message: err?.message || String(err) })
+      this.onerror?.call(this as unknown as RTCDataChannel, ev)
+      this.dispatchEvent('error', ev)
+    })
   }
 
   public receiveDecryptedPayload(payload: string): void {
-    if (this.readyState === 'closed') return
+    if (this.readyState === 'closed' && !this.isDraining) return
     if (this.readyState === 'connecting') {
       this.open()
     }
@@ -109,9 +172,24 @@ export class VirtualDataChannel {
   }
 
   public close(): void {
+    if (this.drainTimer) {
+      clearTimeout(this.drainTimer)
+      this.drainTimer = null
+    }
+    this.isDraining = false
     if (this.readyState === 'closed') return
     this.readyState = 'closed'
     this.bufferedAmount = 0
+
+    // Abort any in-flight sends immediately
+    const abortErr = new Error(`VirtualDataChannel closed before queued frame could be sent (state: ${this.readyState})`)
+    for (const abort of Array.from(this.pendingSendAborts)) {
+      try {
+        abort(abortErr)
+      } catch {}
+    }
+    this.pendingSendAborts.clear()
+
     const ev = new Event('close')
     this.onclose?.call(this as unknown as RTCDataChannel, ev)
     this.dispatchEvent('close', ev)

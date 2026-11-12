@@ -789,14 +789,14 @@ onUnmounted(() => {
               :key="p.key"
               class="photo-item"
               @click="openPhotoPreview(idx)"
-              title="点击查看高清大图"
+              :title="t('pit_scout.drawer.view_photo_full')"
             >
               <img :src="p.url" alt="Preview" />
               <button
                 type="button"
                 class="photo-del-btn"
                 @click.stop="removePhoto(p.key)"
-                title="删除此照片"
+                :title="t('pit_scout.drawer.delete_photo')"
               >×</button>
             </div>
             <label class="photo-upload-box">
@@ -839,6 +839,6 @@ onUnmounted(() => {
     v-model="isPreviewOpen"
     :images="photoPreviews.map((p) => p.url)"
     :initial-index="previewIndex"
-    :title="teamNumber ? `${teamNumber} 展位特写照片` : '展位特写照片'"
+    :title="teamNumber ? t('pit_scout.drawer.photos_title', { teamNumber }) : t('pit_scout.drawer.photos_title_default')"
   />
 </template>

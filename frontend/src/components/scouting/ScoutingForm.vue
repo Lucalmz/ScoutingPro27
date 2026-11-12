@@ -6,8 +6,6 @@ import { useScheduleStore } from '@/stores/schedule'
 import { usePitScoutStore } from '@/stores/pitScout'
 import {
   hapticFeedback,
-  hapticLight,
-  hapticMedium,
   hapticSelection,
   hapticSuccess,
   hapticWarning
@@ -19,10 +17,15 @@ import PhaseCycleTracker from './PhaseCycleTracker.vue'
 import DynamicFieldsRenderer from '@/components/customFields/DynamicFieldsRenderer.vue'
 import { useCustomFieldsStore } from '@/stores/customFields'
 import { isAssignmentCompleted, getRecordTournamentLevel } from '@/utils/tournament'
-import { useBumpAnimation } from '@/composables/useBumpAnimation'
 import { formatUserFriendlyError } from '@/utils/errorHelper'
 import { useScreenWakeLock } from '@/utils/wakeLock'
-import { onMounted } from 'vue'
+import {
+  createEmptyTeam,
+  hasAnyScoutData,
+  useScoutingDraft,
+  type TeamScoutData
+} from './composables/useScoutingDraft'
+import { useScoutingFormCycles } from './composables/useScoutingFormCycles'
 
 const { t, te } = useI18n()
 
@@ -42,6 +45,7 @@ const emit = defineEmits<{
 const scheduleStore = useScheduleStore()
 const pitStore = usePitScoutStore()
 const customFieldsStore = useCustomFieldsStore()
+const recordStore = useRecordStore()
 
 function formatDrivetrain(dt?: string) {
   if (!dt) return '-'
@@ -74,388 +78,62 @@ const scoutMode = ref<'single' | 'alliance'>('single')
 const allianceColor = ref<'none' | 'red' | 'blue'>('none')
 const matchNumber = ref('1')
 const currentTournamentLevel = ref<string>('QUALIFICATION')
-
-interface TeamScoutData {
-  teamNumber: string
-  // Auto
-  autoLeave: boolean
-  autoBalls: number
-  autoCycles: number[]
-  autoMissedCycles: number[]
-  autoPark: boolean
-
-  // TeleOp (Cycle Tracker)
-  teleopCycles: number[]
-  teleopMissedCycles: number[]
-
-  // Endgame
-  flowerPlaced: boolean
-  flowerBottomBonus: boolean
-  teleopPark: boolean
-
-  isBroken: boolean
-  notes: string
-  customFields: Record<string, any>
-}
-
-function createEmptyTeam(): TeamScoutData {
-  return {
-    teamNumber: '',
-    autoLeave: false,
-    autoBalls: 0,
-    autoCycles: [],
-    autoMissedCycles: [],
-    autoPark: false,
-    teleopCycles: [],
-    teleopMissedCycles: [],
-    flowerPlaced: false,
-    flowerBottomBonus: false,
-    teleopPark: false,
-    isBroken: false,
-    notes: '',
-    customFields: {}
-  }
-}
-
 const teamsData = ref<TeamScoutData[]>([createEmptyTeam()])
+
+const submitting = ref(false)
+const submitStatus = ref<'none' | 'success' | 'error'>('none')
+const submitErrorMsg = ref('')
+const previousScoutMode = ref<'single' | 'alliance'>('single')
 
 // 1. 移动端打分期间常亮保活，防止意外息屏导致记分中断
 useScreenWakeLock()
 
 // 2. 表单草稿自动保存与息屏杀后台恢复机制
-const draftKey = computed(() => `sp27_active_draft_${props.eventId}`)
-const isDraftRestored = ref(false)
-let draftDebounceTimer: any = null
-
-function saveDraft() {
-  if (props.editRecord || props.assignedTask) return
-  if (typeof localStorage === 'undefined') return
-  clearTimeout(draftDebounceTimer)
-  draftDebounceTimer = setTimeout(() => {
-    try {
-      const activeTeams = scoutMode.value === 'single' ? teamsData.value.slice(0, 1) : teamsData.value
-      const hasData = activeTeams.some(t => t.teamNumber || t.autoCycles.length > 0 || t.teleopCycles.length > 0 || t.notes)
-      if (!hasData) {
-        localStorage.removeItem(draftKey.value)
-        return
-      }
-      const draftPayload = {
-        matchNumber: matchNumber.value,
-        allianceColor: allianceColor.value,
-        currentTournamentLevel: currentTournamentLevel.value,
-        scoutMode: scoutMode.value,
-        teamsData: teamsData.value,
-        savedAt: Date.now()
-      }
-      localStorage.setItem(draftKey.value, JSON.stringify(draftPayload))
-    } catch {}
-  }, 400)
-}
-
-function restoreDraft() {
-  if (props.editRecord || props.assignedTask) return
-  if (typeof localStorage === 'undefined') return
-  try {
-    const raw = localStorage.getItem(draftKey.value)
-    if (!raw) return
-    const parsed = JSON.parse(raw)
-    if (parsed && Array.isArray(parsed.teamsData) && parsed.teamsData.length > 0) {
-      matchNumber.value = parsed.matchNumber || '1'
-      allianceColor.value = parsed.allianceColor || 'none'
-      currentTournamentLevel.value = parsed.currentTournamentLevel || 'QUALIFICATION'
-      scoutMode.value = parsed.scoutMode || 'single'
-      teamsData.value = parsed.teamsData
-      isDraftRestored.value = true
-    }
-  } catch {}
-}
-
-function clearDraft() {
-  clearTimeout(draftDebounceTimer)
-  if (typeof localStorage !== 'undefined') {
-    localStorage.removeItem(draftKey.value)
-  }
-  isDraftRestored.value = false
-}
-
-onMounted(() => {
-  restoreDraft()
+const {
+  draftKey,
+  isDraftRestored,
+  saveDraft,
+  restoreDraft,
+  clearDraft
+} = useScoutingDraft({
+  getEventId: () => props.eventId,
+  getEditRecord: () => props.editRecord,
+  getAssignedTask: () => props.assignedTask,
+  submitting,
+  scoutMode,
+  allianceColor,
+  matchNumber,
+  currentTournamentLevel,
+  teamsData
 })
 
-watch(
-  [matchNumber, allianceColor, currentTournamentLevel, scoutMode, teamsData],
-  () => {
-    saveDraft()
-  },
-  { deep: true }
-)
-
-const { bump, getBumpClass, clearBump } = useBumpAnimation()
-
-interface CycleTapState {
-  teamIndex: number
-  phase: 'auto' | 'teleop'
-  timestamp: number
-  timer?: any
-}
-
-const activeCycleTap = ref<CycleTapState | null>(null)
-const TAP_WINDOW_MS = 2000
-
-function syncAutoBalls(team: TeamScoutData) {
-  team.autoBalls = team.autoCycles.reduce((sum, b) => sum + b, 0)
-}
-
-function isCycleTapping(teamIndex: number, phase: 'auto' | 'teleop'): boolean {
-  return (
-    !!activeCycleTap.value &&
-    activeCycleTap.value.teamIndex === teamIndex &&
-    activeCycleTap.value.phase === phase
-  )
-}
-
-function getLastCycleBalls(team: TeamScoutData, phase: 'auto' | 'teleop'): number {
-  const cycles = phase === 'auto' ? team.autoCycles : team.teleopCycles
-  return cycles.length > 0 ? (cycles[cycles.length - 1] ?? 0) : 0
-}
-
-function addCycle(
-  team: TeamScoutData,
-  ballsOrPhase: number | 'auto' | 'teleop' = 1,
-  phaseOrIndex: 'auto' | 'teleop' | number = 'teleop',
-  teamIndex: number = 0
-) {
-  let initialBalls = 1
-  let phase: 'auto' | 'teleop' = 'teleop'
-  let idx = teamIndex
-  let isExplicitBalls = false
-
-  if (typeof ballsOrPhase === 'number') {
-    initialBalls = ballsOrPhase
-    isExplicitBalls = true
-    if (typeof phaseOrIndex === 'string') {
-      phase = phaseOrIndex
-    } else if (typeof phaseOrIndex === 'number') {
-      idx = phaseOrIndex
-    }
-  } else {
-    phase = ballsOrPhase
-    if (typeof phaseOrIndex === 'number') {
-      idx = phaseOrIndex
-    }
-  }
-
-  const cycles = phase === 'auto' ? team.autoCycles : team.teleopCycles
-  const now = Date.now()
-
-  // 显式指定球数调用 (如单测 addCycle(team, 2))：直接添加并返回
-  if (isExplicitBalls) {
-    cycles.push(initialBalls)
-    hapticMedium()
-    if (phase === 'auto') {
-      syncAutoBalls(team)
-    }
-    if (activeCycleTap.value?.timer) clearTimeout(activeCycleTap.value.timer)
-    activeCycleTap.value = null
-    return
-  }
-
-  const isRecent =
-    activeCycleTap.value &&
-    activeCycleTap.value.teamIndex === idx &&
-    activeCycleTap.value.phase === phase &&
-    now - activeCycleTap.value.timestamp < TAP_WINDOW_MS &&
-    cycles.length > 0
-
-  if (isRecent) {
-    // 连续点击：在同一轮次累加球数 (0 -> 1 -> 2 -> 3 -> 4)
-    const lastIdx = cycles.length - 1
-    const current = cycles[lastIdx] ?? 0
-    if (current < 4) {
-      cycles[lastIdx] = current + 1
-      hapticMedium()
-      bump(lastIdx, phase === 'auto' ? 'autoCycle' : 'teleopCycle', 'up')
-      if (phase === 'auto') {
-        syncAutoBalls(team)
-      }
-    } else {
-      hapticLight()
-    }
-  } else {
-    // 开启新一轮打球，默认从 0 开始
-    cycles.push(0)
-    hapticMedium()
-    if (phase === 'auto') {
-      syncAutoBalls(team)
-    }
-  }
-
-  if (activeCycleTap.value?.timer) {
-    clearTimeout(activeCycleTap.value.timer)
-  }
-
-  const timer = setTimeout(() => {
-    if (
-      activeCycleTap.value &&
-      activeCycleTap.value.teamIndex === idx &&
-      activeCycleTap.value.phase === phase
-    ) {
-      activeCycleTap.value = null
-    }
-  }, TAP_WINDOW_MS)
-
-  activeCycleTap.value = {
-    teamIndex: idx,
-    phase,
-    timestamp: now,
-    timer
-  }
-}
-
-function setLastCycleBalls(
-  team: TeamScoutData,
-  balls: number,
-  phase: 'auto' | 'teleop' = 'teleop',
-  teamIndex: number = 0
-) {
-  const cycles = phase === 'auto' ? team.autoCycles : team.teleopCycles
-  if (phase === 'auto' && balls === 0) {
-    team.autoCycles = []
-    syncAutoBalls(team)
-    if (activeCycleTap.value?.timer) clearTimeout(activeCycleTap.value.timer)
-    activeCycleTap.value = null
-    hapticSelection()
-    return
-  }
-
-  if (cycles.length === 0) {
-    cycles.push(balls)
-  } else {
-    cycles[cycles.length - 1] = balls
-  }
-
-  bump(cycles.length - 1, phase === 'auto' ? 'autoCycle' : 'teleopCycle', 'up')
-  if (phase === 'auto') {
-    syncAutoBalls(team)
-  }
-  hapticSelection()
-
-  if (activeCycleTap.value?.timer) clearTimeout(activeCycleTap.value.timer)
-  activeCycleTap.value = null
-}
-
-function undoLastCycle(
-  team: TeamScoutData,
-  phase: 'auto' | 'teleop' = 'teleop',
-  teamIndex: number = 0
-) {
-  const cycles = phase === 'auto' ? team.autoCycles : team.teleopCycles
-  if (cycles.length > 0) {
-    cycles.pop()
-    if (phase === 'auto') {
-      syncAutoBalls(team)
-    }
-    hapticLight()
-  }
-  if (activeCycleTap.value?.timer) clearTimeout(activeCycleTap.value.timer)
-  activeCycleTap.value = null
-}
-
-function incrementCycle(
-  team: TeamScoutData,
-  cIndex: number,
-  phase: 'auto' | 'teleop' = 'teleop',
-  teamIndex: number = 0
-) {
-  const cycles = phase === 'auto' ? team.autoCycles : team.teleopCycles
-  const current = cycles[cIndex]
-  if (current !== undefined && current < 4) {
-    cycles[cIndex] = current + 1
-    hapticMedium()
-    bump(cIndex, phase === 'auto' ? 'autoCycle' : 'teleopCycle', 'up')
-    if (phase === 'auto') {
-      syncAutoBalls(team)
-    }
-  }
-}
-
-function decrementCycle(
-  team: TeamScoutData,
-  cIndex: number,
-  phase: 'auto' | 'teleop' = 'teleop',
-  teamIndex: number = 0
-) {
-  const cycles = phase === 'auto' ? team.autoCycles : team.teleopCycles
-  const current = cycles[cIndex]
-  if (current !== undefined && current > 0) {
-    cycles[cIndex] = current - 1
-    hapticLight()
-    bump(cIndex, phase === 'auto' ? 'autoCycle' : 'teleopCycle', 'down')
-    if (phase === 'auto') {
-      syncAutoBalls(team)
-    }
-  }
-}
-
-function getCycleBallsTotal(team: TeamScoutData, phase: 'auto' | 'teleop' = 'teleop'): number {
-  const cycles = phase === 'auto' ? team.autoCycles : team.teleopCycles
-  return cycles.reduce((sum, b) => sum + b, 0)
-}
-
-function getAvgBallsPerCycle(team: TeamScoutData, phase: 'auto' | 'teleop' = 'teleop'): string {
-  const cycles = phase === 'auto' ? team.autoCycles : team.teleopCycles
-  if (cycles.length === 0) return '0.0'
-  return (getCycleBallsTotal(team, phase) / cycles.length).toFixed(1)
-}
-
-function incrementAutoBalls(team: TeamScoutData, index: number = 0) {
-  if (team.autoCycles.length === 0) {
-    team.autoCycles.push(1)
-  } else {
-    const lastIdx = team.autoCycles.length - 1
-    const cur = team.autoCycles[lastIdx]
-    if (cur !== undefined && cur < 4) {
-      team.autoCycles[lastIdx] = cur + 1
-    } else {
-      team.autoCycles.push(1)
-    }
-  }
-  syncAutoBalls(team)
-  hapticMedium()
-  bump(index, 'autoBalls', 'up')
-}
-
-function decrementAutoBalls(team: TeamScoutData, index: number = 0) {
-  if (team.autoBalls > 0) {
-    if (team.autoCycles.length > 0) {
-      const lastIdx = team.autoCycles.length - 1
-      const cur = team.autoCycles[lastIdx]
-      if (cur !== undefined && cur > 1) {
-        team.autoCycles[lastIdx] = cur - 1
-      } else {
-        team.autoCycles.pop()
-      }
-    }
-    syncAutoBalls(team)
-    hapticLight()
-    bump(index, 'autoBalls', 'down')
-  }
-}
-
-function setAutoBalls(team: TeamScoutData, val: number, index: number = 0) {
-  setLastCycleBalls(team, val, 'auto', index)
-}
+// 3. Cycle 记分与球数控制逻辑
+const {
+  bump,
+  getBumpClass,
+  clearBump,
+  activeCycleTap,
+  syncAutoBalls,
+  isCycleTapping,
+  getLastCycleBalls,
+  addCycle,
+  setLastCycleBalls,
+  undoLastCycle,
+  incrementCycle,
+  decrementCycle,
+  getCycleBallsTotal,
+  getAvgBallsPerCycle,
+  incrementAutoBalls,
+  decrementAutoBalls,
+  setAutoBalls,
+  calcTeamTotal
+} = useScoutingFormCycles()
 
 watch(scoutMode, (mode) => {
   if (mode === 'alliance' && teamsData.value.length === 1) {
     teamsData.value.push(createEmptyTeam())
   }
 })
-
-const submitting = ref(false)
-const submitStatus = ref<'none' | 'success' | 'error'>('none')
-const submitErrorMsg = ref('')
-const previousScoutMode = ref<'single' | 'alliance'>('single')
 
 watch(() => props.editRecord, (rec: ScoutingRecord | null | undefined) => {
   if (rec) {
@@ -545,18 +223,6 @@ const nextPendingAssignment = computed(() => {
   return null
 })
 
-function calcTeamTotal(team: TeamScoutData) {
-  const auto = (team.autoLeave ? 3 : 0) +
-               ((team.autoBalls || 0) * 3) +
-               (team.autoPark ? 5 : 0)
-  const totalBalls = getCycleBallsTotal(team)
-  const teleop = totalBalls * 2
-  const endgame = (team.flowerPlaced ? 10 : 0) +
-                  (team.flowerBottomBonus ? 5 : 0) +
-                  (team.teleopPark ? 5 : 0)
-  return auto + teleop + endgame
-}
-
 const isFormValid = computed(() => {
   const isMatchValid = /^\d{1,8}$/.test(matchNumber.value) && parseInt(matchNumber.value) > 0
   const activeTeams = scoutMode.value === 'single' ? teamsData.value.slice(0, 1) : teamsData.value
@@ -580,8 +246,7 @@ async function handleSubmit() {
     setTimeout(() => { submitStatus.value = 'none' }, 2000)
     return
   }
-  
-  const recordStore = useRecordStore()
+
   const activeTeams = scoutMode.value === 'single' ? teamsData.value.slice(0, 1) : teamsData.value
 
   for (const team of activeTeams) {
@@ -662,8 +327,8 @@ async function handleSubmit() {
         createdAt: props.editRecord ? props.editRecord.createdAt : new Date().toISOString(),
         updatedAt: new Date().toISOString(),
         isBroken: team.isBroken,
-        version: props.editRecord ? (props.editRecord.version || 0) : 0,  // addRecord 会将其 +1
-        hostSeq: props.editRecord ? props.editRecord.hostSeq : undefined,
+        version: props.editRecord ? (props.editRecord.version || 0) : 0,
+        hostSeq: props.editRecord ? props.editRecord.hostSeq : undefined
       }
     })
 
@@ -700,9 +365,7 @@ async function handleSubmit() {
     const { message } = formatUserFriendlyError(err, t('scouting.submit_failed') || '提交失败，请重试')
     submitErrorMsg.value = message
   } finally {
-    setTimeout(() => {
-      submitting.value = false
-    }, 1000)
+    submitting.value = false
     setTimeout(() => {
       submitStatus.value = 'none'
     }, 2000)
@@ -717,8 +380,6 @@ const wrapperClass = computed(() => {
     scoutMode.value === 'alliance' ? 'alliance-mode' : ''
   ]
 })
-
-const recordStore = useRecordStore()
 </script>
 
 <template>
@@ -779,13 +440,13 @@ const recordStore = useRecordStore()
             <input v-model="matchNumber" type="text" inputmode="numeric" placeholder="1-999" :class="{ 'invalid-field': isInvalidFormat(matchNumber) }" />
           </label>
           <div class="setting-group" style="margin-bottom: 2px;">
-            <span style="font-size: 12px; color: var(--muted-foreground); margin-right: 8px;">{{ (te && te('wizard.tournament_level')) ? t('wizard.tournament_level') : '赛事阶段' }}</span>
+            <span style="font-size: 12px; color: var(--muted-foreground); margin-right: 8px;">{{ t('wizard.tournament_level') }}</span>
             <div class="segmented-control">
               <button type="button" :class="{ active: currentTournamentLevel === 'QUALIFICATION' }" @click="currentTournamentLevel = 'QUALIFICATION'; hapticSelection()">
-                {{ (te && te('wizard.level_qual')) ? t('wizard.level_qual') : '资格赛 (Q)' }}
+                {{ t('wizard.level_qual') }}
               </button>
               <button type="button" :class="{ active: currentTournamentLevel === 'PLAYOFF' }" @click="currentTournamentLevel = 'PLAYOFF'; hapticSelection()">
-                {{ (te && te('wizard.level_playoff')) ? t('wizard.level_playoff') : '淘汰赛 (P)' }}
+                {{ t('wizard.level_playoff') }}
               </button>
             </div>
           </div>
@@ -983,5 +644,3 @@ const recordStore = useRecordStore()
     </form>
   </div>
 </template>
-
-<style scoped src="./ScoutingForm.css"></style>

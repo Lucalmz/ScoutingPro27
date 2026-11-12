@@ -52,7 +52,8 @@
     "clear_cache_title": "Clear Offline Cache",
     "clear_cache_confirm": "This will clear all locally saved events, unsynced drafts, and offline cache. Are you sure?",
     "clear_cache_confirm_btn": "Confirm Clear",
-    "cache_cleared_toast": "Offline cache cleared successfully"
+    "cache_cleared_toast": "Offline cache cleared successfully",
+    "lang_btn_title": "Switch Language (中/EN)"
   },
   "qr_scanner": {
     "title": "Scan QR Code",
@@ -103,6 +104,17 @@
     "scouts_refresh": "Refresh List",
     "scouts_records_count": "Records: {count}",
     "send_message": "Send Message",
+    "msg_modal_title": "Send Direct Message",
+    "msg_recipient_label": "Recipient",
+    "msg_content_label": "Message Content",
+    "msg_input_placeholder": "Type your message here... (Press Enter to send, Shift + Enter for new line)",
+    "msg_send_btn": "Send",
+    "msg_sending": "Sending...",
+    "msg_sent_success": "Message sent successfully",
+    "msg_queued_notice": "Realtime channel not ready. Message will be queued in outbox and delivered upon connection.",
+    "msg_queued_toast": "Realtime channel not ready. Message saved to outbox.",
+    "msg_shortcut_tip": "Enter to send, Shift+Enter for new line",
+    "msg_empty_warning": "Please enter a message",
     "msg_prompt": "Enter message to send to {name}:",
     "msg_not_ready": "Direct messaging not ready.",
     "status_online": "Online",
@@ -127,6 +139,8 @@
     "standby_host_toast": "Active host detected for this event. Entered Standby Monitor Mode automatically.",
     "sas_rejected_toast": "Safety code mismatch or connection disconnected: {reason}",
     "remove_scout": "Remove from Event",
+    "remove_scout_title": "Remove Member",
+    "btn_remove_confirm": "Remove",
     "remove_scout_confirm": "Are you sure you want to remove scout \"{name}\" from this event?",
     "scout_removed_success": "Scout removed successfully",
     "scout_removed_local": "Removed from local known list"
@@ -457,7 +471,8 @@
       "ollama_desc": "Run open-source models locally and completely offline",
       "custom": "Custom Provider",
       "custom_desc": "Enter custom Base URL and model name manually"
-    }
+    },
+    "team_chip_aria": "View Team {team} details"
   },
   "team_drawer": {
     "title": "Team {team}",
@@ -927,7 +942,11 @@
       "teleop_cycles_label": "Claimed TeleOp Cycles",
       "unit_cycles": "cycles",
       "endgame_score_label": "Claimed Endgame Score (pts)",
-      "sec_custom_overall": "Overall Custom Metrics"
+      "sec_custom_overall": "Overall Custom Metrics",
+      "view_photo_full": "Click to view full image",
+      "delete_photo": "Delete this photo",
+      "photos_title": "#{teamNumber} Pit Close-up Photos",
+      "photos_title_default": "Pit Close-up Photos"
     },
     "launcher_presets": {
       "dual_flywheel": "Dual Flywheel",
@@ -973,7 +992,10 @@
     },
     "claimed_pts_unit": "{pts} pts",
     "flower_verified": "Flower Verified",
-    "flower_pending_verify": "Flower Unverified"
+    "flower_pending_verify": "Flower Unverified",
+    "view_robot_photo": "Click to view full robot image",
+    "photo_count_badge": "{count} photos",
+    "robot_photo_title": "#{teamNumber} {teamName}Robot Photo"
   },
   "custom_fields": {
     "title": "Custom Fields Management",
@@ -1173,7 +1195,8 @@
     "cap_reached_tip": "4 balls reached. Tap [+ Next Cycle] to continue",
     "cannot_start_empty_cycle": "Current cycle has no balls shot yet",
     "dismiss_draft": "Dismiss",
-    "missed_short": " Missed"
+    "missed_short": " Missed",
+    "review_submit": "Review & Submit"
   },
   "webrtc": {
     "single_record_received": "Received match record for #{team} Match {match}",
@@ -1187,5 +1210,11 @@
     "mark_read": "Mark Read",
     "delete": "Delete",
     "enter_event_to_view_conflict": "Please enter the corresponding event to view conflict records"
+  },
+  "image_preview": {
+    "view_original": "View Original",
+    "close": "Close",
+    "prev_image": "Previous Image",
+    "next_image": "Next Image"
   }
 }

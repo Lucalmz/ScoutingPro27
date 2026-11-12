@@ -1,9 +1,12 @@
-﻿import { setActivePinia, createPinia } from 'pinia'
+import { setActivePinia, createPinia } from 'pinia'
 import { describe, it, expect, beforeEach, vi } from 'vitest'
 import { mount, flushPromises } from '@vue/test-utils'
 import EventScoutsPanel from '../components/scouting/EventScoutsPanel.vue'
+import SendMessageModal from '../components/scouting/SendMessageModal.vue'
 import { useConnectionStore } from '../stores/connection'
 import { useRecordStore } from '../stores/records'
+import { useEventStore } from '../stores/events'
+import { useConfirm } from '../composables/useConfirm'
 import * as api from '../services/api'
 import type { ScoutingRecord } from '../types'
 
@@ -12,7 +15,8 @@ vi.mock('../services/api', async () => {
   return {
     ...actual,
     fetchEventMembers: vi.fn(),
-    updateEventFtcConfig: vi.fn()
+    updateEventFtcConfig: vi.fn(),
+    removeEventMember: vi.fn()
   }
 })
 
@@ -144,5 +148,103 @@ describe('EventScoutsPanel.vue', () => {
     expect(wrapper.text()).toContain('Records: 2')
     const charlieDot = wrapper.find('.dot-online')
     expect(charlieDot.exists()).toBe(true)
+  })
+
+  it('opens custom SendMessageModal when clicking send message button', async () => {
+    const mockMembers = [
+      { id: 'u_alice', username: 'Alice', host: true },
+      { id: 'u_bob', username: 'Bob', host: false }
+    ]
+    vi.mocked(api.fetchEventMembers).mockResolvedValue(mockMembers)
+
+    const wrapper = mount(EventScoutsPanel, {
+      props: {
+        event: {
+          id: 'event-test-1',
+          name: 'Test Regional',
+          inviteCode: 'TEST01',
+          creatorId: 'u_alice',
+          createdAt: '',
+          updatedAt: ''
+        }
+      }
+    })
+
+    await flushPromises()
+
+    // Find the Send Message button for Bob (second scout item)
+    const scoutItems = wrapper.findAll('.scout-item')
+    const bobItem = scoutItems[1]
+    const msgBtn = bobItem.find('.btn-msg')
+    expect(msgBtn.exists()).toBe(true)
+
+    // Initially SendMessageModal is not visible
+    const modalComponent = wrapper.findComponent(SendMessageModal)
+    expect(modalComponent.exists()).toBe(true)
+    expect(modalComponent.props('visible')).toBe(false)
+
+    // Click Send Message button
+    await msgBtn.trigger('click')
+    await flushPromises()
+
+    // Modal is now open and targeted at Bob
+    expect(modalComponent.props('visible')).toBe(true)
+    expect(modalComponent.props('targetScoutId')).toBe('u_bob')
+    expect(modalComponent.props('targetScoutName')).toBe('Bob')
+  })
+
+  it('triggers custom ConfirmModal instead of native window.confirm when removing a member', async () => {
+    const mockMembers = [
+      { id: 'u_alice', username: 'Alice', host: true },
+      { id: 'u_bob', username: 'Bob', host: false }
+    ]
+    vi.mocked(api.fetchEventMembers).mockResolvedValue(mockMembers)
+    vi.mocked(api.removeEventMember).mockResolvedValue({ success: true } as any)
+
+    const eventStore = useEventStore()
+    const connStore = useConnectionStore()
+    connStore.rtcService = { isHostMode: () => true } as any
+
+    // Alice is current host
+    eventStore.currentEvent = {
+      id: 'event-test-1',
+      name: 'Test Regional',
+      inviteCode: 'TEST01',
+      creatorId: 'u_alice',
+      createdAt: '',
+      updatedAt: ''
+    }
+
+    const { confirmState, handleConfirm } = useConfirm()
+    expect(confirmState.value).toBeNull()
+
+    const wrapper = mount(EventScoutsPanel, {
+      props: {
+        event: eventStore.currentEvent
+      }
+    })
+
+    await flushPromises()
+
+    // Bob item has remove button for host
+    const scoutItems = wrapper.findAll('.scout-item')
+    const bobItem = scoutItems[1]
+    const removeBtn = bobItem.find('.btn-remove-scout')
+    expect(removeBtn.exists()).toBe(true)
+
+    // Trigger remove
+    await removeBtn.trigger('click')
+
+    // Verify custom confirmState was opened with danger type
+    expect(confirmState.value).toBeTruthy()
+    expect(confirmState.value?.isOpen).toBe(true)
+    expect(confirmState.value?.type).toBe('danger')
+
+    // Confirm the action
+    handleConfirm()
+    await flushPromises()
+
+    // Verify member removal API was called
+    expect(api.removeEventMember).toHaveBeenCalledWith('event-test-1', 'u_bob')
   })
 })

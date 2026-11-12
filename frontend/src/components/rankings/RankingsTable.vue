@@ -1,17 +1,18 @@
 <script setup lang="ts">
-import { ref, computed, defineComponent, toRef, h, nextTick } from 'vue'
+import { ref, computed, defineComponent, toRef, h, nextTick, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
-import type { RankingRow, CustomFieldDefinition } from '@/types'
+import type { RankingRow } from '@/types'
 import { useEventStore } from '@/stores/events'
 import { useRecordStore } from '@/stores/records'
-import { useCustomFieldsStore } from '@/stores/customFields'
 import { useToastStore } from '@/stores/toast'
 import { useRouter } from 'vue-router'
 import { transitionState } from '@/utils/transitionState'
 import { useTween } from '@/composables/useTween'
 import { useNavigationStore } from '@/stores/navigation'
-import { hapticLight, hapticSelection } from '@/utils/haptics'
+import { hapticLight } from '@/utils/haptics'
 import { useConfirm } from '@/composables/useConfirm'
+import RankingsTableToolbar from './RankingsTableToolbar.vue'
+import { useRankingsCustomColumns } from './useRankingsCustomColumns'
 
 // Inline component for animated numbers
 const AnimatedNumber = defineComponent({
@@ -23,10 +24,9 @@ const AnimatedNumber = defineComponent({
   }
 })
 
-const { t, te } = useI18n()
+const { t } = useI18n()
 const eventStore = useEventStore()
 const recordStore = useRecordStore()
-const customFieldsStore = useCustomFieldsStore()
 const toastStore = useToastStore()
 const router = useRouter()
 const navStore = useNavigationStore()
@@ -53,148 +53,16 @@ function formatTagLabel(tagKey?: string | null): string {
 }
 
 // 自定义列配置与聚合
-const availableCustomFields = computed<CustomFieldDefinition[]>(() => {
-  const eventId = eventStore.currentEvent?.id
-  if (!eventId) return []
-  return customFieldsStore.getActiveFields(eventId, 'MATCH').filter(
-    f => f.fieldType === 'number' || f.fieldType === 'level' || f.fieldType === 'boolean'
-  )
-})
-
-const showCustomColsDropdown = ref(false)
-const selectedCustomKeys = ref<string[]>(loadCustomColKeys())
-
-function loadCustomColKeys(): string[] {
-  try {
-    const raw = localStorage.getItem('scoutingpro_rankings_custom_cols')
-    if (raw) return JSON.parse(raw)
-  } catch {}
-  return []
-}
-
-function saveCustomColKeys(keys: string[]) {
-  try {
-    localStorage.setItem('scoutingpro_rankings_custom_cols', JSON.stringify(keys))
-  } catch {}
-}
-
-function toggleCustomCol(key: string) {
-  hapticLight()
-  const idx = selectedCustomKeys.value.indexOf(key)
-  if (idx !== -1) {
-    selectedCustomKeys.value.splice(idx, 1)
-  } else {
-    selectedCustomKeys.value.push(key)
-  }
-  saveCustomColKeys(selectedCustomKeys.value)
-}
-
-function selectAllCustomCols() {
-  hapticLight()
-  selectedCustomKeys.value = availableCustomFields.value.map(f => f.fieldKey)
-  saveCustomColKeys(selectedCustomKeys.value)
-}
-
-function clearAllCustomCols() {
-  hapticLight()
-  selectedCustomKeys.value = []
-  saveCustomColKeys([])
-}
-
-const visibleCustomFields = computed(() => {
-  return availableCustomFields.value.filter(f => selectedCustomKeys.value.includes(f.fieldKey))
-})
-
-function parseCustomFields(record: { customFields?: Record<string, any>; rawData?: string } | null | undefined): Record<string, any> {
-  if (!record) return {}
-  if (record.customFields && Object.keys(record.customFields).length > 0) {
-    return record.customFields
-  }
-  if (record.rawData) {
-    try {
-      const parsed = typeof record.rawData === 'string' ? JSON.parse(record.rawData) : record.rawData
-      return parsed.customFields || {}
-    } catch {
-      return {}
-    }
-  }
-  return {}
-}
-
-interface TeamCustomStat {
-  value: number
-  display: string
-  count: number
-}
-
-const teamCustomStats = computed(() => {
-  const map = new Map<number, Record<string, TeamCustomStat>>()
-  const eventId = eventStore.currentEvent?.id
-  const records = recordStore.activeRecords.filter(r => !eventId || r.eventId === eventId)
-  const fields = availableCustomFields.value
-  if (fields.length === 0) return map
-
-  const teamRecords = new Map<number, typeof records>()
-  for (const r of records) {
-    if (!teamRecords.has(r.teamNumber)) {
-      teamRecords.set(r.teamNumber, [])
-    }
-    teamRecords.get(r.teamNumber)!.push(r)
-  }
-
-  for (const [teamNum, recs] of teamRecords.entries()) {
-    const stats: Record<string, TeamCustomStat> = {}
-
-    for (const f of fields) {
-      if (f.fieldType === 'number' || f.fieldType === 'level') {
-        let sum = 0
-        let count = 0
-        for (const r of recs) {
-          const cf = parseCustomFields(r)
-          const val = cf[f.fieldKey]
-          if (val !== undefined && val !== null && val !== '') {
-            const num = Number(val)
-            if (!isNaN(num)) {
-              sum += num
-              count++
-            }
-          }
-        }
-        if (count > 0) {
-          const avg = sum / count
-          stats[f.fieldKey] = {
-            value: avg,
-            display: avg.toFixed(1),
-            count
-          }
-        }
-      } else if (f.fieldType === 'boolean') {
-        let trueCount = 0
-        let count = 0
-        for (const r of recs) {
-          const cf = parseCustomFields(r)
-          const val = cf[f.fieldKey]
-          if (val !== undefined && val !== null) {
-            count++
-            if (val === true || val === 'true' || val === 1) {
-              trueCount++
-            }
-          }
-        }
-        if (count > 0) {
-          const rate = (trueCount / count) * 100
-          stats[f.fieldKey] = {
-            value: rate,
-            display: `${rate.toFixed(0)}%`,
-            count
-          }
-        }
-      }
-    }
-    map.set(teamNum, stats)
-  }
-  return map
-})
+const {
+  availableCustomFields,
+  showCustomColsDropdown,
+  selectedCustomKeys,
+  visibleCustomFields,
+  teamCustomStats,
+  toggleCustomCol,
+  selectAllCustomCols,
+  clearAllCustomCols
+} = useRankingsCustomColumns()
 
 function setSort(key: SortKey) {
   hapticLight()
@@ -243,12 +111,28 @@ const sorted = computed<RankingRow[]>(() => {
   return arr
 })
 
+const maxMetrics = computed(() => {
+  const rows = props.rankings
+  if (!rows || rows.length === 0) {
+    return { auto: 100, tele: 100, end: 50, rating: 200 }
+  }
+  return {
+    auto: Math.max(10, ...rows.map(r => r.avgAutoScore || 0)),
+    tele: Math.max(10, ...rows.map(r => r.avgTeleopScore || 0)),
+    end: Math.max(10, ...rows.map(r => r.avgEndgameScore || 0)),
+    rating: Math.max(20, ...rows.map(r => r.avgRating || 0)),
+  }
+})
+
+function barPct(val: number, maxVal: number): string {
+  if (!val || val <= 0 || !maxVal) return '0%'
+  return `${Math.min(100, Math.round((val / maxVal) * 100))}%`
+}
+
 function sortIndicator(key: SortKey): string {
   if (sortKey.value !== key) return ''
   return sortDir.value === 'asc' ? 'arrow_drop_up' : 'arrow_drop_down'
 }
-
-
 
 const { showConfirm } = useConfirm()
 
@@ -309,6 +193,65 @@ function viewTeamDetails(teamNumber: number) {
     })
   }
 }
+
+const highlightTop = ref(0)
+const highlightHeight = ref(0)
+const highlightVisible = ref(false)
+
+function onRowEnter(e: MouseEvent) {
+  const target = e.currentTarget as HTMLElement
+  if (target) {
+    highlightTop.value = target.offsetTop
+    highlightHeight.value = target.offsetHeight
+    highlightVisible.value = true
+  }
+}
+
+function onCardEnter(e: MouseEvent) {
+  onRowEnter(e)
+}
+
+function onListLeave() {
+  highlightVisible.value = false
+}
+
+const highlightStyle = computed(() => ({
+  top: `${highlightTop.value}px`,
+  height: `${highlightHeight.value}px`,
+  opacity: highlightVisible.value ? 1 : 0
+}))
+
+watch([sortKey, sortDir, selectedTagFilter], () => {
+  highlightVisible.value = false
+})
+
+// Staggered Entrance Handlers
+function beforeEnter(el: Element) {
+  const htmlEl = el as HTMLElement
+  htmlEl.style.opacity = '0'
+  htmlEl.style.transform = 'translateY(20px)'
+}
+
+function enter(el: Element, done: () => void) {
+  const htmlEl = el as HTMLElement
+  const index = parseInt(htmlEl.dataset.index || '0', 10)
+  const delay = Math.min(index, 10) * 40
+
+  requestAnimationFrame(() => {
+    setTimeout(() => {
+      htmlEl.style.setProperty('transition', 'all var(--motion-duration-normal) var(--motion-ease-out)', 'important')
+      htmlEl.style.opacity = '1'
+      htmlEl.style.transform = 'translateY(0)'
+
+      setTimeout(() => {
+        htmlEl.style.removeProperty('transition')
+        htmlEl.style.removeProperty('opacity')
+        htmlEl.style.removeProperty('transform')
+        done()
+      }, 360)
+    }, delay)
+  })
+}
 </script>
 
 <template>
@@ -318,221 +261,194 @@ function viewTeamDetails(teamNumber: number) {
       <p>{{ t('rankings.no_data') }}</p>
     </div>
     <div v-else class="table-wrapper">
-      <div class="table-toolbar">
-        <!-- 战术标签筛选栏 -->
-        <div v-if="availableFilterTags.length > 0" class="tag-filter-bar">
-          <span class="filter-title">{{ t('tags.filter_by_tag') }}:</span>
-          <button
-            class="filter-chip"
-            :class="{ active: selectedTagFilter === null }"
-            @click="selectedTagFilter = null; hapticSelection()"
-          >
-            {{ t('tags.all') }}
-          </button>
-          <button
-            v-for="tagKey in availableFilterTags"
-            :key="tagKey"
-            class="filter-chip"
-            :class="{ active: selectedTagFilter === tagKey }"
-            @click="selectedTagFilter = (selectedTagFilter === tagKey ? null : tagKey); hapticSelection()"
-          >
-            {{ formatTagLabel(tagKey) }}
-          </button>
-        </div>
+      <RankingsTableToolbar
+        :available-filter-tags="availableFilterTags"
+        v-model:selected-tag-filter="selectedTagFilter"
+        :available-custom-fields="availableCustomFields"
+        :visible-custom-fields="visibleCustomFields"
+        :selected-custom-keys="selectedCustomKeys"
+        v-model:show-custom-cols-dropdown="showCustomColsDropdown"
+        @toggle-custom-col="toggleCustomCol"
+        @select-all-custom-cols="selectAllCustomCols"
+        @clear-all-custom-cols="clearAllCustomCols"
+      />
 
-        <!-- 自定义列下拉选择器 -->
-        <div v-if="availableCustomFields.length > 0" class="custom-cols-picker-wrapper">
-          <button
-            type="button"
-            class="btn-custom-cols"
-            :class="{ 'has-selected': visibleCustomFields.length > 0 }"
-            @click="showCustomColsDropdown = !showCustomColsDropdown; hapticLight()"
-          >
-            <span class="material-icons" style="font-size: 16px;">view_column</span>
-            <span>{{ t('custom_fields.rankings_custom_cols_btn') }}</span>
-            <span v-if="visibleCustomFields.length > 0" class="badge-col-count">({{ visibleCustomFields.length }})</span>
-            <span class="material-icons" style="font-size: 16px;">{{ showCustomColsDropdown ? 'expand_less' : 'expand_more' }}</span>
-          </button>
-
-          <div v-if="showCustomColsDropdown" class="cols-dropdown-card">
-            <div class="dropdown-header">
-              <span class="dropdown-title">{{ t('custom_fields.rankings_custom_cols_title') }}</span>
-              <div class="header-links">
-                <button type="button" class="btn-link" @click="selectAllCustomCols">{{ t('custom_fields.select_all') }}</button>
-                <span class="sep">/</span>
-                <button type="button" class="btn-link" @click="clearAllCustomCols">{{ t('custom_fields.clear_all') }}</button>
-              </div>
-            </div>
-            <div class="dropdown-options">
-              <label
-                v-for="f in availableCustomFields"
+      <div class="table-container" style="position: relative;" @mouseleave="onListLeave">
+        <div class="hover-highlight" :style="highlightStyle" key="highlight-bg"></div>
+        <table>
+          <thead @mouseenter="onListLeave">
+            <tr>
+              <th @click="setSort('teamNumber')" class="sortable">
+                {{ t('rankings.team') }}<span class="material-icons sort-icon" :class="{ 'is-active': sortKey === 'teamNumber', 'is-asc': sortKey === 'teamNumber' && sortDir === 'asc' }">arrow_drop_down</span>
+              </th>
+              <th @click="setSort('matchCount')" class="sortable">
+                {{ t('rankings.matches') }}<span class="material-icons sort-icon" :class="{ 'is-active': sortKey === 'matchCount', 'is-asc': sortKey === 'matchCount' && sortDir === 'asc' }">arrow_drop_down</span>
+              </th>
+              <th @click="setSort('brokenCount')" class="sortable">
+                {{ t('rankings.breakdown') }}<span class="material-icons sort-icon" :class="{ 'is-active': sortKey === 'brokenCount', 'is-asc': sortKey === 'brokenCount' && sortDir === 'asc' }">arrow_drop_down</span>
+              </th>
+              <th @click="setSort('avgAutoScore')" class="sortable">
+                {{ t('rankings.avg_auto') }}<span class="material-icons sort-icon" :class="{ 'is-active': sortKey === 'avgAutoScore', 'is-asc': sortKey === 'avgAutoScore' && sortDir === 'asc' }">arrow_drop_down</span>
+              </th>
+              <th @click="setSort('avgTeleopScore')" class="sortable">
+                {{ t('rankings.avg_tele') }}<span class="material-icons sort-icon" :class="{ 'is-active': sortKey === 'avgTeleopScore', 'is-asc': sortKey === 'avgTeleopScore' && sortDir === 'asc' }">arrow_drop_down</span>
+              </th>
+              <th @click="setSort('avgEndgameScore')" class="sortable">
+                {{ t('rankings.avg_endgame') }}<span class="material-icons sort-icon" :class="{ 'is-active': sortKey === 'avgEndgameScore', 'is-asc': sortKey === 'avgEndgameScore' && sortDir === 'asc' }">arrow_drop_down</span>
+              </th>
+              <th @click="setSort('avgTipsPerMatch')" class="sortable" :title="t('rankings.avg_tips_desc')">
+                {{ t('rankings.avg_tips') }}<span class="material-icons sort-icon" :class="{ 'is-active': sortKey === 'avgTipsPerMatch', 'is-asc': sortKey === 'avgTipsPerMatch' && sortDir === 'asc' }">arrow_drop_down</span>
+              </th>
+              <th @click="setSort('maxScore')" class="sortable">
+                {{ t('rankings.max') }}<span class="material-icons sort-icon" :class="{ 'is-active': sortKey === 'maxScore', 'is-asc': sortKey === 'maxScore' && sortDir === 'asc' }">arrow_drop_down</span>
+              </th>
+              <th @click="setSort('avgRating')" class="sortable">
+                {{ t('rankings.rating') }}<span class="material-icons sort-icon" :class="{ 'is-active': sortKey === 'avgRating', 'is-asc': sortKey === 'avgRating' && sortDir === 'asc' }">arrow_drop_down</span>
+              </th>
+              <th
+                v-for="f in visibleCustomFields"
                 :key="f.fieldKey"
-                class="col-option-row"
+                class="sortable custom-col-th"
+                @click="setSort('cf_' + f.fieldKey)"
+                :title="f.unit ? `${f.name} (${f.unit})` : f.name"
               >
-                <input
-                  type="checkbox"
-                  :checked="selectedCustomKeys.includes(f.fieldKey)"
-                  @change="toggleCustomCol(f.fieldKey)"
-                />
-                <span class="opt-name">{{ f.name }}</span>
-                <span class="opt-tag">{{ f.fieldType === 'boolean' ? '%' : (f.unit || t('custom_fields.renderer.numeric_unit')) }}</span>
-              </label>
-            </div>
-          </div>
-        </div>
-      </div>
-
-      <table>
-        <thead>
-          <tr>
-            <th @click="setSort('teamNumber')" class="sortable">
-              {{ t('rankings.team') }}<span class="material-icons sort-icon" :class="{ 'is-active': sortKey === 'teamNumber', 'is-asc': sortKey === 'teamNumber' && sortDir === 'asc' }">arrow_drop_down</span>
-            </th>
-            <th @click="setSort('matchCount')" class="sortable">
-              {{ t('rankings.matches') }}<span class="material-icons sort-icon" :class="{ 'is-active': sortKey === 'matchCount', 'is-asc': sortKey === 'matchCount' && sortDir === 'asc' }">arrow_drop_down</span>
-            </th>
-            <th @click="setSort('brokenCount')" class="sortable">
-              {{ t('rankings.breakdown') }}<span class="material-icons sort-icon" :class="{ 'is-active': sortKey === 'brokenCount', 'is-asc': sortKey === 'brokenCount' && sortDir === 'asc' }">arrow_drop_down</span>
-            </th>
-            <th @click="setSort('avgAutoScore')" class="sortable">
-              {{ t('rankings.avg_auto') }}<span class="material-icons sort-icon" :class="{ 'is-active': sortKey === 'avgAutoScore', 'is-asc': sortKey === 'avgAutoScore' && sortDir === 'asc' }">arrow_drop_down</span>
-            </th>
-            <th @click="setSort('avgTeleopScore')" class="sortable">
-              {{ t('rankings.avg_tele') }}<span class="material-icons sort-icon" :class="{ 'is-active': sortKey === 'avgTeleopScore', 'is-asc': sortKey === 'avgTeleopScore' && sortDir === 'asc' }">arrow_drop_down</span>
-            </th>
-            <th @click="setSort('avgEndgameScore')" class="sortable">
-              {{ t('rankings.avg_endgame') }}<span class="material-icons sort-icon" :class="{ 'is-active': sortKey === 'avgEndgameScore', 'is-asc': sortKey === 'avgEndgameScore' && sortDir === 'asc' }">arrow_drop_down</span>
-            </th>
-            <th @click="setSort('avgTipsPerMatch')" class="sortable" :title="t('rankings.avg_tips_desc')">
-              {{ t('rankings.avg_tips') }}<span class="material-icons sort-icon" :class="{ 'is-active': sortKey === 'avgTipsPerMatch', 'is-asc': sortKey === 'avgTipsPerMatch' && sortDir === 'asc' }">arrow_drop_down</span>
-            </th>
-            <th @click="setSort('maxScore')" class="sortable">
-              {{ t('rankings.max') }}<span class="material-icons sort-icon" :class="{ 'is-active': sortKey === 'maxScore', 'is-asc': sortKey === 'maxScore' && sortDir === 'asc' }">arrow_drop_down</span>
-            </th>
-            <th @click="setSort('avgRating')" class="sortable">
-              {{ t('rankings.rating') }}<span class="material-icons sort-icon" :class="{ 'is-active': sortKey === 'avgRating', 'is-asc': sortKey === 'avgRating' && sortDir === 'asc' }">arrow_drop_down</span>
-            </th>
-            <th
-              v-for="f in visibleCustomFields"
-              :key="f.fieldKey"
-              class="sortable custom-col-th"
-              @click="setSort('cf_' + f.fieldKey)"
-              :title="f.unit ? `${f.name} (${f.unit})` : f.name"
-            >
-              {{ f.name }}<span class="material-icons sort-icon" :class="{ 'is-active': sortKey === 'cf_' + f.fieldKey, 'is-asc': sortKey === 'cf_' + f.fieldKey && sortDir === 'asc' }">arrow_drop_down</span>
-            </th>
-            <th>{{ t('rankings.trend') }}</th>
-            <th>{{ t('rankings.details') }}</th>
-            <th v-if="eventStore.isHost">{{ t('rankings.actions') }}</th>
-          </tr>
-        </thead>
-        <transition-group tag="tbody" name="list" appear>
-          <tr 
-            v-for="(row, index) in sorted" 
-            :key="row.teamNumber" 
-            :data-index="index"
-            :data-team-row="row.teamNumber"
+                {{ f.name }}<span class="material-icons sort-icon" :class="{ 'is-active': sortKey === 'cf_' + f.fieldKey, 'is-asc': sortKey === 'cf_' + f.fieldKey && sortDir === 'asc' }">arrow_drop_down</span>
+              </th>
+              <th>{{ t('rankings.trend') }}</th>
+              <th>{{ t('rankings.details') }}</th>
+              <th v-if="eventStore.isHost">{{ t('rankings.actions') }}</th>
+            </tr>
+          </thead>
+          <transition-group 
+            tag="tbody" 
+            appear 
+            :css="false"
+            @before-enter="beforeEnter" 
+            @enter="enter" 
+            @before-appear="beforeEnter"
+            @appear="enter"
           >
-            <td class="team-cell">
-              <div 
-                class="team-cell-content" 
-                style="display: block; width: 100%;"
-                :style="{ viewTransitionName: transitionState.sharedElementId === `team-card-${row.teamNumber}` ? `team-card-${row.teamNumber}` : 'none' }"
-              >
-                <div class="team-header-line">
-                  <span class="team-num">{{ row.teamNumber }}</span>
-                  <span v-if="recordStore.bannedTeams.includes(row.teamNumber)" class="banned-badge">{{ t('rankings.banned_badge') }}</span>
-                </div>
-                <!-- 战术标签徽章 -->
-                <div v-if="recordStore.getTagsForTeam(row.teamNumber).length > 0" class="row-tags-list">
-                  <span
-                    v-for="tItem in recordStore.getTagsForTeam(row.teamNumber).slice(0, 3)"
-                    :key="tItem.id || tItem.tag"
-                    class="row-tag-badge"
-                    :class="`tag-${tItem.color || 'blue'}`"
-                  >
-                    {{ formatTagLabel(tItem.tag) }}
-                  </span>
-                  <span
-                    v-if="recordStore.getTagsForTeam(row.teamNumber).length > 3"
-                    class="row-tag-more"
-                  >
-                    +{{ recordStore.getTagsForTeam(row.teamNumber).length - 3 }}
-                  </span>
-                </div>
-              </div>
-            </td>
-            <td>{{ row.matchCount }}</td>
-            <td :class="{'high-breakdown': row.brokenCount > 0 && row.brokenCount / row.matchCount >= 0.5}">{{ row.brokenCount }} / {{ row.matchCount }}</td>
-            <td><AnimatedNumber :value="row.avgAutoScore" /></td>
-            <td><AnimatedNumber :value="row.avgTeleopScore" /></td>
-            <td><AnimatedNumber :value="row.avgEndgameScore" /></td>
-            <td><AnimatedNumber :value="row.avgTipsPerMatch ?? 0" /></td>
-            <td><AnimatedNumber :value="row.maxScore" /></td>
-            <td class="total-cell"><AnimatedNumber :value="row.avgRating" /></td>
-            <td
-              v-for="f in visibleCustomFields"
-              :key="f.fieldKey"
-              class="custom-col-td"
+            <tr 
+              v-for="(row, index) in sorted" 
+              :key="row.teamNumber" 
+              :data-index="index"
+              :data-team-row="row.teamNumber"
+              class="ranking-row"
+              @mouseenter="onRowEnter"
             >
-              <span v-if="teamCustomStats.get(row.teamNumber)?.[f.fieldKey]" class="custom-col-val">
-                {{ teamCustomStats.get(row.teamNumber)?.[f.fieldKey]?.display }}
-                <span v-if="f.unit && f.fieldType !== 'boolean'" class="unit-text">{{ f.unit }}</span>
-              </span>
-              <span v-else class="empty-cell">-</span>
-            </td>
-            <td class="trend-cell">
-              <span v-if="row.trend === 'up'" class="material-icons" style="color: var(--status-success); font-size: 18px;" title="Trending Up">trending_up</span>
-              <span v-else-if="row.trend === 'down'" class="material-icons" style="color: var(--status-error); font-size: 18px;" title="Trending Down">trending_down</span>
-              <span v-else-if="row.trend === 'stable'" class="material-icons" style="color: var(--muted-foreground); font-size: 18px;" title="Stable">trending_flat</span>
-              <span v-else class="material-icons" style="color: var(--status-warning); font-size: 18px;" title="New">fiber_new</span>
-            </td>
-            <td>
-              <button class="details-btn" @click="viewTeamDetails(row.teamNumber)" :title="t('rankings.details')">
-                <span class="material-icons" style="font-size: 16px;">visibility</span>
-              </button>
-            </td>
-            <td v-if="eventStore.isHost">
-              <button 
-                v-if="recordStore.bannedTeams.includes(row.teamNumber)" 
-                class="unban-btn" 
-                @click="unbanTeam(row.teamNumber)"
-                :title="t('rankings.unban_team')"
+              <td class="team-cell" @click="viewTeamDetails(row.teamNumber)" style="cursor: pointer;">
+                <div 
+                  class="team-cell-content" 
+                  style="display: block; width: 100%;"
+                  :style="{ viewTransitionName: transitionState.sharedElementId === `team-card-${row.teamNumber}` ? `team-card-${row.teamNumber}` : 'none' }"
+                >
+                  <div class="team-header-line">
+                    <span
+                      class="rank-index-badge"
+                      :class="{
+                        'rank-gold': index === 0,
+                        'rank-silver': index === 1,
+                        'rank-bronze': index === 2
+                      }"
+                    >{{ index + 1 }}</span>
+                    <span class="team-num">{{ row.teamNumber }}</span>
+                    <span v-if="recordStore.bannedTeams.includes(row.teamNumber)" class="banned-badge">{{ t('rankings.banned_badge') }}</span>
+                  </div>
+                </div>
+              </td>
+              <td>{{ row.matchCount }}</td>
+              <td :class="{'high-breakdown': row.brokenCount > 0 && row.brokenCount / row.matchCount >= 0.5}">{{ row.brokenCount }} / {{ row.matchCount }}</td>
+              <td>
+                <div class="telemetry-cell">
+                  <AnimatedNumber :value="row.avgAutoScore" />
+                  <div class="telemetry-bar-track"><div class="telemetry-bar-fill bar-cyan" :style="{ width: barPct(row.avgAutoScore, maxMetrics.auto) }"></div></div>
+                </div>
+              </td>
+              <td>
+                <div class="telemetry-cell">
+                  <AnimatedNumber :value="row.avgTeleopScore" />
+                  <div class="telemetry-bar-track"><div class="telemetry-bar-fill bar-green" :style="{ width: barPct(row.avgTeleopScore, maxMetrics.tele) }"></div></div>
+                </div>
+              </td>
+              <td>
+                <div class="telemetry-cell">
+                  <AnimatedNumber :value="row.avgEndgameScore" />
+                  <div class="telemetry-bar-track"><div class="telemetry-bar-fill bar-amber" :style="{ width: barPct(row.avgEndgameScore, maxMetrics.end) }"></div></div>
+                </div>
+              </td>
+              <td><AnimatedNumber :value="row.avgTipsPerMatch ?? 0" /></td>
+              <td><AnimatedNumber :value="row.maxScore" /></td>
+              <td class="total-cell">
+                <div class="telemetry-cell">
+                  <AnimatedNumber :value="row.avgRating" />
+                  <div class="telemetry-bar-track"><div class="telemetry-bar-fill bar-primary" :style="{ width: barPct(row.avgRating, maxMetrics.rating) }"></div></div>
+                </div>
+              </td>
+              <td
+                v-for="f in visibleCustomFields"
+                :key="f.fieldKey"
+                class="custom-col-td"
               >
-                {{ t('rankings.unban_team') }}
-              </button>
-              <button 
-                v-else-if="row.matchCount >= 3" 
-                class="ban-btn" 
-                @click="banTeam(row.teamNumber)"
-                :title="t('rankings.ban_team')"
-              >
-                {{ t('rankings.ban_team') }}
-              </button>
-            </td>
-          </tr>
-        </transition-group>
-      </table>
+                <span v-if="teamCustomStats.get(row.teamNumber)?.[f.fieldKey]" class="custom-col-val">
+                  {{ teamCustomStats.get(row.teamNumber)?.[f.fieldKey]?.display }}
+                  <span v-if="f.unit && f.fieldType !== 'boolean'" class="unit-text">{{ f.unit }}</span>
+                </span>
+                <span v-else class="empty-cell">-</span>
+              </td>
+              <td class="trend-cell">
+                <span v-if="row.trend === 'up'" class="material-icons" style="color: var(--status-success); font-size: 18px;" title="Trending Up">trending_up</span>
+                <span v-else-if="row.trend === 'down'" class="material-icons" style="color: var(--status-error); font-size: 18px;" title="Trending Down">trending_down</span>
+                <span v-else-if="row.trend === 'stable'" class="material-icons" style="color: var(--muted-foreground); font-size: 18px;" title="Stable">trending_flat</span>
+                <span v-else class="material-icons" style="color: var(--status-warning); font-size: 18px;" title="New">fiber_new</span>
+              </td>
+              <td>
+                <button class="details-btn" @click="viewTeamDetails(row.teamNumber)" :title="t('rankings.details')">
+                  <span class="material-icons" style="font-size: 16px;">visibility</span>
+                </button>
+              </td>
+              <td v-if="eventStore.isHost">
+                <button 
+                  v-if="recordStore.bannedTeams.includes(row.teamNumber)" 
+                  class="unban-btn" 
+                  @click="unbanTeam(row.teamNumber)"
+                  :title="t('rankings.unban_team')"
+                >
+                  {{ t('rankings.unban_team') }}
+                </button>
+                <button 
+                  v-else-if="row.matchCount >= 3" 
+                  class="ban-btn" 
+                  @click="banTeam(row.teamNumber)"
+                  :title="t('rankings.ban_team')"
+                >
+                  {{ t('rankings.ban_team') }}
+                </button>
+              </td>
+            </tr>
+          </transition-group>
+        </table>
+      </div>
     </div>
   </div>
 </template>
 
 <style scoped>
-/* FLIP Animations */
-.list-move,
-.list-enter-active,
-.list-leave-active {
-  transition: all var(--motion-duration-normal) var(--motion-ease-out);
+.table-container {
+  position: relative;
+  width: max-content;
+  min-width: 100%;
 }
 
-.list-leave-active {
+.hover-highlight {
   position: absolute;
-}
-
-.list-enter-from,
-.list-leave-to {
-  opacity: 0;
-  transform: translateX(20px);
+  left: 0;
+  right: 0;
+  background: rgba(255, 255, 255, 0.04);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  pointer-events: none;
+  transition: top var(--motion-duration-moderate) var(--motion-ease-out), height var(--motion-duration-moderate) var(--motion-ease-out), opacity var(--motion-duration-fast) ease;
+  z-index: 5;
+  border-radius: 6px;
 }
 
 .rankings-panel {
@@ -571,12 +487,14 @@ thead th {
   color: var(--muted-foreground);
   border-bottom: 2px solid var(--border);
   white-space: nowrap;
+  position: relative;
+  z-index: 6;
 }
 
 thead th:first-child {
   position: sticky;
   left: 0;
-  z-index: 3;
+  z-index: 12;
   background: var(--card);
   box-shadow: 2px 0 6px -2px rgba(0, 0, 0, 0.4);
 }
@@ -623,18 +541,72 @@ tbody td:first-child {
   box-shadow: 2px 0 6px -2px rgba(0, 0, 0, 0.4);
 }
 
-tbody tr:hover td {
-  background: rgba(255, 255, 255, 0.04);
+.rank-index-badge {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 22px;
+  height: 20px;
+  padding: 0 5px;
+  border-radius: 5px;
+  font-family: 'Orbitron', sans-serif;
+  font-size: 11px;
+  font-weight: 800;
+  background: var(--surface-recessed, #080807);
+  border: 1px solid var(--border, #262624);
+  color: var(--muted-foreground);
 }
 
-tbody tr:hover td:first-child {
-  background: #111111;
+.rank-index-badge.rank-gold {
+  background: #231c07;
+  border-color: #eab308;
+  color: #facc15;
+  box-shadow: 0 0 10px rgba(234, 179, 8, 0.28);
 }
+
+.rank-index-badge.rank-silver {
+  background: #181b20;
+  border-color: #94a3b8;
+  color: #e2e8f0;
+}
+
+.rank-index-badge.rank-bronze {
+  background: #221409;
+  border-color: #f97316;
+  color: #fb923c;
+}
+
+.telemetry-cell {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  min-width: 58px;
+}
+
+.telemetry-bar-track {
+  width: 100%;
+  max-width: 68px;
+  height: 3px;
+  background: var(--surface-recessed, #080807);
+  border-radius: 2px;
+  overflow: hidden;
+}
+
+.telemetry-bar-fill {
+  height: 100%;
+  border-radius: 2px;
+  transition: width 0.45s var(--motion-ease-out);
+}
+
+.telemetry-bar-fill.bar-cyan { background: #38bdf8; }
+.telemetry-bar-fill.bar-green { background: #22c55e; }
+.telemetry-bar-fill.bar-amber { background: #f59e0b; }
+.telemetry-bar-fill.bar-primary { background: var(--primary, #39ff14); box-shadow: 0 0 6px rgba(57, 255, 20, 0.6); }
 
 .team-cell {
   font-weight: 700;
   color: var(--foreground);
-  min-width: 130px;
+  min-width: 145px;
 }
 
 .total-cell {
@@ -645,169 +617,6 @@ tbody tr:hover td:first-child {
 .high-breakdown {
   color: var(--status-error);
   font-weight: bold;
-}
-
-.ban-btn {
-  background: var(--status-error);
-  color: white;
-  border: none;
-  border-radius: 4px;
-  padding: 4px 8px;
-  font-size: 12px;
-  cursor: pointer;
-  transition: opacity 0.2s;
-}
-
-.ban-btn:hover {
-  opacity: 0.8;
-}
-
-/* ── 表格工具栏与自定义列选择器 ── */
-.table-toolbar {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 12px;
-  margin-bottom: 12px;
-  flex-wrap: wrap;
-}
-
-.table-toolbar .tag-filter-bar {
-  margin-bottom: 0;
-  flex: 1;
-}
-
-.custom-cols-picker-wrapper {
-  position: relative;
-  display: inline-block;
-}
-
-.btn-custom-cols {
-  display: inline-flex;
-  align-items: center;
-  gap: 6px;
-  background: var(--card);
-  border: 1px solid var(--border);
-  color: var(--muted-foreground);
-  padding: 6px 12px;
-  border-radius: 8px;
-  font-size: 12px;
-  font-weight: 500;
-  cursor: pointer;
-  transition: all 0.2s ease;
-}
-
-.btn-custom-cols:hover {
-  border-color: var(--primary);
-  color: var(--foreground);
-}
-
-.btn-custom-cols.has-selected {
-  border-color: rgba(57, 255, 20, 0.4);
-  color: var(--primary, #39ff14);
-}
-
-.badge-col-count {
-  font-weight: 700;
-  color: var(--primary, #39ff14);
-}
-
-.cols-dropdown-card {
-  position: absolute;
-  top: calc(100% + 6px);
-  right: 0;
-  z-index: 100;
-  width: 260px;
-  background: var(--card, #121212);
-  border: 1px solid var(--border);
-  border-radius: 8px;
-  padding: 10px;
-  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.6);
-  display: flex;
-  flex-direction: column;
-  gap: 8px;
-}
-
-.dropdown-header {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  padding-bottom: 6px;
-  border-bottom: 1px solid var(--border);
-}
-
-.dropdown-title {
-  font-size: 11px;
-  font-weight: 600;
-  color: var(--muted-foreground);
-  text-transform: uppercase;
-}
-
-.header-links {
-  display: flex;
-  align-items: center;
-  gap: 4px;
-  font-size: 11px;
-}
-
-.header-links .sep {
-  color: var(--muted-foreground);
-}
-
-.btn-link {
-  background: none;
-  border: none;
-  color: var(--primary, #39ff14);
-  padding: 0;
-  font-size: 11px;
-  cursor: pointer;
-}
-
-.btn-link:hover {
-  text-decoration: underline;
-}
-
-.dropdown-options {
-  max-height: 200px;
-  overflow-y: auto;
-  display: flex;
-  flex-direction: column;
-  gap: 4px;
-}
-
-.col-option-row {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  padding: 4px 6px;
-  border-radius: 4px;
-  cursor: pointer;
-  font-size: 12px;
-  transition: background 0.15s ease;
-}
-
-.col-option-row:hover {
-  background: rgba(255, 255, 255, 0.05);
-}
-
-.col-option-row input[type="checkbox"] {
-  accent-color: var(--primary, #39ff14);
-}
-
-.col-option-row .opt-name {
-  flex: 1;
-  color: var(--foreground);
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.col-option-row .opt-tag {
-  font-size: 10px;
-  color: var(--muted-foreground);
-  background: rgba(255, 255, 255, 0.06);
-  padding: 1px 4px;
-  border-radius: 3px;
 }
 
 /* Custom column header & cell */
@@ -835,89 +644,12 @@ td.custom-col-td {
   color: var(--muted-foreground);
 }
 
-/* ── 战术标签筛选栏 ── */
-.tag-filter-bar {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  flex-wrap: wrap;
-  padding: 10px 14px;
-  background: var(--card);
-  border: 1px solid var(--border);
-  border-radius: 8px;
-  margin-bottom: 12px;
-}
-
-.filter-title {
-  font-size: 0.75rem;
-  font-weight: 600;
-  color: var(--muted-foreground);
-  text-transform: uppercase;
-  letter-spacing: 0.05em;
-  margin-right: 4px;
-}
-
-.filter-chip {
-  padding: 3px 9px;
-  border-radius: 12px;
-  font-size: 0.75rem;
-  background: rgba(255, 255, 255, 0.05);
-  border: 1px solid var(--border);
-  color: var(--muted-foreground);
-  cursor: pointer;
-  transition: all 0.15s ease;
-}
-
-.filter-chip:hover {
-  border-color: var(--primary);
-  color: var(--foreground);
-}
-
-.filter-chip.active {
-  background: var(--primary);
-  color: var(--primary-foreground);
-  border-color: var(--primary);
-  font-weight: 600;
-}
-
 /* ── 表格内队伍单元格标签展示 ── */
 .team-header-line {
   display: flex;
   align-items: center;
   gap: 6px;
 }
-
-.row-tags-list {
-  display: flex;
-  align-items: center;
-  gap: 4px;
-  flex-wrap: wrap;
-  margin-top: 3px;
-}
-
-.row-tag-badge {
-  display: inline-flex;
-  align-items: center;
-  padding: 1px 5px;
-  border-radius: 8px;
-  font-size: 0.68rem;
-  font-weight: 500;
-  border: 1px solid transparent;
-  line-height: 1.2;
-}
-
-.row-tag-more {
-  font-size: 0.65rem;
-  color: var(--muted-foreground);
-}
-
-.tag-green  { background: rgba(57, 255, 20, 0.12); color: #39ff14; border-color: rgba(57, 255, 20, 0.35); }
-.tag-blue   { background: rgba(56, 189, 248, 0.12); color: #38bdf8; border-color: rgba(56, 189, 248, 0.35); }
-.tag-purple { background: rgba(192, 132, 252, 0.12); color: #c084fc; border-color: rgba(192, 132, 252, 0.35); }
-.tag-orange { background: rgba(251, 146, 60, 0.12); color: #fb923c; border-color: rgba(251, 146, 60, 0.35); }
-.tag-red    { background: rgba(248, 113, 113, 0.12); color: #f87171; border-color: rgba(248, 113, 113, 0.35); }
-.tag-yellow { background: rgba(250, 204, 21, 0.12); color: #facc15; border-color: rgba(250, 204, 21, 0.35); }
-.tag-gray   { background: rgba(156, 163, 175, 0.12); color: #9ca3af; border-color: rgba(156, 163, 175, 0.35); }
 
 .details-btn {
   background: var(--card);
@@ -988,14 +720,5 @@ td.custom-col-td {
   thead th, tbody td {
     padding: 10px 12px;
   }
-  .tag-filter-bar {
-    padding: 8px 10px;
-    gap: 4px;
-  }
-  .filter-chip {
-    padding: 4px 8px;
-    font-size: 0.7rem;
-  }
 }
 </style>
-

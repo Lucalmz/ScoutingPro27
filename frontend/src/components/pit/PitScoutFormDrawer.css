@@ -1,9 +1,7 @@
 .drawer-overlay {
   position: fixed;
   inset: 0;
-  background: rgba(0, 0, 0, 0.75);
-  backdrop-filter: blur(4px);
-  -webkit-backdrop-filter: blur(4px);
+  background: rgba(8, 8, 7, 0.82);
   z-index: 1100;
   display: flex;
   justify-content: flex-end;
@@ -14,11 +12,11 @@
   width: 100%;
   max-width: 540px;
   height: 100%;
-  background: var(--card, #0a0a0a);
-  border-left: 1px solid var(--border, #262626);
+  background: var(--card, #141413);
+  border-left: 1px solid var(--border, #262624);
   display: flex;
   flex-direction: column;
-  box-shadow: -8px 0 24px rgba(0, 0, 0, 0.6);
+  box-shadow: -12px 0 32px rgba(0, 0, 0, 0.75);
   box-sizing: border-box;
 }
 

@@ -281,8 +281,7 @@ async function handleSave() {
 .modal-overlay {
   position: fixed;
   inset: 0;
-  background: rgba(0, 0, 0, 0.85);
-  backdrop-filter: blur(8px);
+  background: rgba(8, 8, 7, 0.86);
   display: flex;
   align-items: center;
   justify-content: center;
@@ -293,13 +292,14 @@ async function handleSave() {
 }
 
 .modal-card {
-  background: var(--card, #0a0a0a);
-  border: 1px solid var(--border, #262626);
-  border-radius: 16px;
+  background: var(--card, #141413);
+  border: 1px solid var(--border, #262624);
+  border-top: 2px solid var(--primary, #39ff14);
+  border-radius: 14px;
   max-width: 480px;
   width: 100%;
   padding: 24px;
-  box-shadow: 0 16px 40px rgba(0, 0, 0, 0.8), 0 0 20px rgba(57, 255, 20, 0.05);
+  box-shadow: 0 24px 60px rgba(0, 0, 0, 0.82);
   max-height: 90vh;
   overflow-y: auto;
   box-sizing: border-box;

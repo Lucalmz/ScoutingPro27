@@ -11,6 +11,8 @@ import { getActivePinia } from 'pinia'
 import { useUserStore } from '@/stores/user'
 import type { WebRtcCallbacks, ClientEntry } from './types'
 import type { OfflineMessageManager } from './offlineQueue'
+import { handleChannelPhotoMessage, isChannelPhotoMessageType } from './channelPhotoHandler'
+import { handleChannelIdentityAndTakeoverMessage, isChannelIdentityAndTakeoverMessageType } from './channelIdentityHandler'
 import { createLogger } from '@/utils/logger'
 
 const log = createLogger('WebRTC:Data')
@@ -48,18 +50,6 @@ export interface ChannelMessageHandlerContext {
   finishTakeoverReconciliation?: (reason?: string) => void
   onPongReceived?: (timestamp: number) => void
 }
-
-interface PhotoChunkBuffer {
-  transferId: string
-  eventId: string
-  key: string
-  totalChunks: number
-  chunks: string[]
-  receivedCount: number
-  updatedAt: number
-}
-
-const photoChunkBuffers = new Map<string, PhotoChunkBuffer>()
 
 export type ChannelMessageHandler = ((ev: MessageEvent, senderId?: string) => Promise<void>) & {
   isQuarantinedPeer: (senderId: string) => boolean
@@ -131,6 +121,16 @@ export function createChannelMessageHandler(ctx: ChannelMessageHandlerContext): 
       }
     }
 
+    if (isChannelPhotoMessageType(msg.type)) {
+      await handleChannelPhotoMessage(ctx, msg, senderId)
+      return
+    }
+
+    if (isChannelIdentityAndTakeoverMessageType(msg.type)) {
+      await handleChannelIdentityAndTakeoverMessage(ctx, quarantinedSenders, msg, senderId)
+      return
+    }
+
     switch (msg.type) {
       case 'PING' as any: {
         if (isHostMode) {
@@ -176,7 +176,6 @@ export function createChannelMessageHandler(ctx: ChannelMessageHandlerContext): 
 
             // Mode 2: DUPLICATE NAME Conflict (Different Person, Same Display Name)
             if (senderUserName) {
-              let duplicateNameClientId: string | null = null
               let conflictingExistingId: string | null = null
 
               // 1. Check against Host's own user identity
@@ -216,7 +215,6 @@ export function createChannelMessageHandler(ctx: ChannelMessageHandlerContext): 
                         if (boundName && boundName.trim().toLowerCase() === senderUserName.trim().toLowerCase()) {
                           const peerClient = ctx.clients.get(boundClientId)
                           if (peerClient && peerClient.dc && peerClient.dc.readyState === 'open') {
-                            duplicateNameClientId = boundClientId
                             conflictingExistingId = boundScoutId
                             break
                           }
@@ -819,452 +817,12 @@ export function createChannelMessageHandler(ctx: ChannelMessageHandlerContext): 
         break
       }
 
-      case 'TAKEOVER_REQUEST': {
-        if (!isHostMode || !senderId) break
-        const username = msg.username
-        let userId: string | undefined = msg.userId
-        if (!userId && username) {
-          for (const [cid, name] of ctx.clientIdToScoutName.entries()) {
-            if (name.trim().toLowerCase() === username.trim().toLowerCase()) {
-              userId = ctx.clientIdToScoutId.get(cid)
-              break
-            }
-          }
-        }
-        if (!username || !userId) break
-
-        // 30s Cooldown check
-        const now = Date.now()
-        const lastReq = ctx.takeoverCooldowns.get(username) || 0
-        if (now - lastReq < 30000) {
-          console.warn(`[WebRTC Host] Takeover request rate limited for "${username}"`)
-          ctx.sendMessage(
-            {
-              type: 'SESSION_CONFLICT',
-              conflictingUsername: username,
-              conflictingUserId: userId,
-              rejected: true,
-              authCode: currentInviteCode
-            },
-            senderId
-          )
-          break
-        }
-        ctx.takeoverCooldowns.set(username, now)
-
-        const clientIds = ctx.scoutIdToClientIds.get(userId)
-        const oldClientId = clientIds ? Array.from(clientIds).find((cid) => cid !== senderId) : undefined
-        const oldClient = oldClientId ? ctx.clients.get(oldClientId) : undefined
-
-        if (!oldClientId || !oldClient || !oldClient.dc || oldClient.dc.readyState !== 'open') {
-          // Old client is not connected, immediately permit takeover
-          ctx.promoteTakeover(userId, username, senderId, oldClientId, 'TAKEOVER_PERMITTED')
-          break
-        }
-
-        // Send 15s takeover prompt to old client
-        ctx.sendMessage(
-          {
-            type: 'TAKEOVER_PROMPT',
-            requesterUsername: username,
-            timeoutSeconds: 15,
-            authCode: currentInviteCode
-          },
-          oldClientId
-        )
-
-        const existingPending = ctx.pendingTakeovers.get(userId)
-        if (existingPending) {
-          clearTimeout(existingPending.timeoutTimer)
-        }
-
-        const timer = setTimeout(() => {
-          console.log(`[WebRTC Host] 15s takeover prompt timed out for "${username}". Auto-permitting takeover.`)
-          ctx.pendingTakeovers.delete(userId)
-          ctx.promoteTakeover(userId, username, senderId, oldClientId, 'TAKEOVER_TIMEOUT')
-        }, 15000)
-
-        ctx.pendingTakeovers.set(userId, {
-          newClientId: senderId,
-          oldClientId,
-          username,
-          timeoutTimer: timer
-        })
-        break
-      }
-
-      case 'TAKEOVER_DECISION': {
-        if (!isHostMode || !senderId) break
-        const username = msg.username
-        const boundUserId = senderId ? ctx.clientIdToScoutId.get(senderId) : undefined
-
-        let pendingKey: string | undefined = boundUserId
-        let pending = boundUserId ? ctx.pendingTakeovers.get(boundUserId) : undefined
-        if (!pending) {
-          for (const [key, p] of ctx.pendingTakeovers.entries()) {
-            if ((username && p.username.toLowerCase() === username.toLowerCase()) || p.oldClientId === senderId) {
-              pending = p
-              pendingKey = key
-              break
-            }
-          }
-        }
-        if (!pending || !pendingKey) break
-
-        const targetUserId = pendingKey
-
-        clearTimeout(pending.timeoutTimer)
-        ctx.pendingTakeovers.delete(pendingKey)
-
-        if (msg.permit) {
-          ctx.promoteTakeover(targetUserId, pending.username, pending.newClientId, pending.oldClientId, 'TAKEOVER_PERMITTED')
-        } else {
-          console.log(`[WebRTC Host] Takeover rejected by old client for "${username}"`)
-          ctx.sendMessage(
-            {
-              type: 'SESSION_CONFLICT',
-              conflictingUsername: pending.username,
-              conflictingUserId: targetUserId,
-              rejected: true,
-              authCode: currentInviteCode
-            },
-            pending.newClientId
-          )
-        }
-        break
-      }
-
-      case 'SESSION_CONFLICT':
-        callbacks.onSessionConflict?.(
-          msg.conflictingUsername,
-          msg.conflictingUserId,
-          msg.rejected,
-          msg.conflictType,
-          msg.suggestedName
-        )
-        break
-
-      case 'TAKEOVER_PROMPT':
-        callbacks.onTakeoverPrompt?.(msg.requesterUsername, msg.timeoutSeconds)
-        break
-
-      case 'TAKEOVER_SUCCESS':
-        console.log('[WebRTC] Session takeover was successful!')
-        callbacks.onTakeoverSuccess?.()
-        break
-
-      case 'SESSION_KICKED':
-        console.warn(`[WebRTC] Session kicked by host. Reason: ${msg.reason}`)
-        callbacks.onSessionKicked?.(msg.reason)
-        ctx.closeClient()
-        ctx.setStatus('offline')
-        break
-
-      case 'IDENTITY_MIGRATION':
-        if (msg.eventId && msg.oldScoutId && msg.newScoutId && msg.newScoutName) {
-          console.log(
-            `[WebRTC] Received IDENTITY_MIGRATION for event ${msg.eventId}: ${msg.oldScoutId} -> ${msg.newScoutId} (${msg.newScoutName})`
-          )
-          if (callbacks.onIdentityMigration) {
-            await callbacks.onIdentityMigration(msg.eventId, msg.oldScoutId, msg.newScoutId, msg.newScoutName)
-          }
-          if (isHostMode) {
-            if (senderId) {
-              quarantinedSenders.delete(senderId)
-              const oldSet = ctx.scoutIdToClientIds.get(msg.oldScoutId)
-              ctx.scoutIdToClientIds.delete(msg.oldScoutId)
-              let targetSet = ctx.scoutIdToClientIds.get(msg.newScoutId)
-              if (!targetSet) {
-                targetSet = new Set<string>()
-                ctx.scoutIdToClientIds.set(msg.newScoutId, targetSet)
-              }
-              if (oldSet) {
-                for (const cid of oldSet) {
-                  targetSet.add(cid)
-                  ctx.clientIdToScoutId.set(cid, msg.newScoutId)
-                  ctx.clientIdToScoutName.set(cid, msg.newScoutName)
-                }
-              }
-              targetSet.add(senderId)
-              ctx.clientIdToScoutId.set(senderId, msg.newScoutId)
-              ctx.clientIdToScoutName.set(senderId, msg.newScoutName)
-            }
-            // Broadcast IDENTITY_MIGRATION to all other clients
-            ctx.clients.forEach((c, cid) => {
-              if (cid !== senderId && c.dc && c.dc.readyState === 'open') {
-                if (!c.sender) c.sender = new DataChannelSender(c.dc)
-                c.sender.enqueueSendQuiet(JSON.stringify(msg), 'IDENTITY_MIGRATION broadcast')
-              }
-            })
-            if (senderId) {
-              ctx.sendMessage(
-                {
-                  type: 'ACK_MIGRATION',
-                  eventId: msg.eventId,
-                  newScoutId: msg.newScoutId,
-                  authCode: currentInviteCode
-                },
-                senderId
-              )
-            }
-          }
-        }
-        break
-
-      case 'ACK_MIGRATION':
-        console.log(`[WebRTC] Host acknowledged identity migration for newScoutId ${msg.newScoutId}`)
-        break
-
       case 'EVENT_METADATA':
         if (msg.event) {
           console.log(`[WebRTC] Received EVENT_METADATA for event ${msg.event.id} (${msg.event.name})`)
           callbacks.onEventMetadataReceived?.(msg.event)
         }
         break
-
-      case 'PIT_PHOTO_UPLOAD': {
-        if (isHostMode && msg.eventId && msg.key && msg.dataUrl) {
-          try {
-            const { uploadPitPhoto } = await import('@/services/api')
-            await uploadPitPhoto(msg.eventId, msg.key, msg.dataUrl)
-            console.log(`[WebRTC Host] Successfully saved pit photo ${msg.key} for event ${msg.eventId}`)
-            await ctx.sendMessage(
-              {
-                type: 'PIT_PHOTO_ACK',
-                eventId: msg.eventId,
-                key: msg.key,
-                success: true,
-                authCode: currentInviteCode
-              },
-              senderId
-            )
-          } catch (err) {
-            console.error(`[WebRTC Host] Failed to save pit photo ${msg.key}:`, err)
-            await ctx.sendMessage(
-              {
-                type: 'PIT_PHOTO_ACK',
-                eventId: msg.eventId,
-                key: msg.key,
-                success: false,
-                authCode: currentInviteCode
-              },
-              senderId
-            )
-          }
-        }
-        break
-      }
-
-      case 'PIT_PHOTO_CHUNK': {
-        if (!isHostMode) break
-        const { transferId, eventId, key, chunkIndex, totalChunks, chunkData } = msg
-        if (
-          !transferId ||
-          !eventId ||
-          !key ||
-          typeof chunkIndex !== 'number' ||
-          typeof totalChunks !== 'number' ||
-          !Number.isInteger(chunkIndex) ||
-          !Number.isInteger(totalChunks) ||
-          totalChunks <= 0 ||
-          totalChunks > 500 ||
-          chunkIndex < 0 ||
-          chunkIndex >= totalChunks ||
-          typeof chunkData !== 'string'
-        ) {
-          break
-        }
-
-        const hostAuthEventId = ctx.getCurrentEventId?.()
-        const rawEventUpper = eventId.trim().toUpperCase()
-        const codeUpper = (currentInviteCode || '').trim().toUpperCase()
-        const effectiveEventId =
-          hostAuthEventId &&
-          codeUpper &&
-          (rawEventUpper === `EVT-${codeUpper}` || rawEventUpper === `EXT_${codeUpper}`)
-            ? hostAuthEventId
-            : eventId
-
-        // 清理超过 5 分钟未完成的过期分片缓冲
-        const now = Date.now()
-        for (const [tId, buf] of photoChunkBuffers.entries()) {
-          if (now - buf.updatedAt > 300000) {
-            photoChunkBuffers.delete(tId)
-          }
-        }
-
-        let buffer = photoChunkBuffers.get(transferId)
-        if (!buffer) {
-          buffer = {
-            transferId,
-            eventId: effectiveEventId,
-            key,
-            totalChunks,
-            chunks: new Array(totalChunks),
-            receivedCount: 0,
-            updatedAt: now
-          }
-          photoChunkBuffers.set(transferId, buffer)
-        }
-
-        if (buffer.chunks[chunkIndex] === undefined) {
-          buffer.chunks[chunkIndex] = chunkData
-          buffer.receivedCount++
-          buffer.updatedAt = now
-        }
-
-        if (buffer.receivedCount === buffer.totalChunks) {
-          photoChunkBuffers.delete(transferId)
-          const assembledDataUrl = buffer.chunks.join('')
-          try {
-            const { uploadPitPhoto } = await import('@/services/api')
-            await uploadPitPhoto(buffer.eventId, buffer.key, assembledDataUrl)
-            console.log(`[WebRTC Host] Successfully assembled and saved pit photo ${buffer.key} (${buffer.totalChunks} chunks)`)
-            await ctx.sendMessage(
-              {
-                type: 'PIT_PHOTO_ACK',
-                eventId: buffer.eventId,
-                key: buffer.key,
-                success: true,
-                authCode: currentInviteCode
-              },
-              senderId
-            )
-          } catch (err) {
-            console.error(`[WebRTC Host] Failed to save assembled pit photo ${buffer.key}:`, err)
-            await ctx.sendMessage(
-              {
-                type: 'PIT_PHOTO_ACK',
-                eventId: buffer.eventId,
-                key: buffer.key,
-                success: false,
-                authCode: currentInviteCode
-              },
-              senderId
-            )
-          }
-        }
-        break
-      }
-
-      case 'PIT_PHOTO_ACK': {
-        if (!isHostMode && msg.key && msg.success) {
-          try {
-            const { markMobilePhotoSynced } = await import('@/services/mobilePhotoCache')
-            await markMobilePhotoSynced(msg.key)
-            console.log(`[WebRTC Client] Pit photo ${msg.key} acknowledged and marked synced`)
-          } catch (err) {
-            console.warn('[WebRTC Client] Failed to mark photo synced upon ACK:', err)
-          }
-        }
-        break
-      }
-
-      case 'MERGE_ACCOUNT_REQUEST': {
-        if (!isHostMode) break
-        const { requestId, targetUsername, targetPassword, sourceUserId, sourceUsername } = msg
-        try {
-          const cleanUser = (targetUsername || '').trim()
-          const cleanPwd = (targetPassword || '').trim()
-          const { login: apiLogin } = await import('@/services/api')
-          const authRes = await apiLogin({
-            username: cleanUser,
-            password: cleanPwd
-          })
-
-          if (!authRes || !authRes.id) {
-            throw new Error('Invalid credentials')
-          }
-
-          const currentEventId = ctx.getCurrentEventId?.() || ctx.currentInviteCode()
-          if (callbacks.onIdentityMigration && currentEventId && sourceUserId && sourceUserId !== authRes.id) {
-            await callbacks.onIdentityMigration(currentEventId, sourceUserId, authRes.id, authRes.username)
-          }
-
-          if (senderId) {
-            quarantinedSenders.delete(senderId)
-            let targetSet = ctx.scoutIdToClientIds.get(authRes.id)
-            if (!targetSet) {
-              targetSet = new Set<string>()
-              ctx.scoutIdToClientIds.set(authRes.id, targetSet)
-            }
-            if (sourceUserId && sourceUserId !== authRes.id) {
-              const oldSet = ctx.scoutIdToClientIds.get(sourceUserId)
-              ctx.scoutIdToClientIds.delete(sourceUserId)
-              if (oldSet) {
-                for (const cid of oldSet) {
-                  targetSet.add(cid)
-                  ctx.clientIdToScoutId.set(cid, authRes.id)
-                  ctx.clientIdToScoutName.set(cid, authRes.username)
-                }
-              }
-            }
-            targetSet.add(senderId)
-            ctx.clientIdToScoutId.set(senderId, authRes.id)
-            ctx.clientIdToScoutName.set(senderId, authRes.username)
-          }
-
-          // Broadcast IDENTITY_MIGRATION to all other connected clients if ID changed
-          if (currentEventId && sourceUserId && sourceUserId !== authRes.id) {
-            const migrationMsg = {
-              type: 'IDENTITY_MIGRATION' as const,
-              eventId: currentEventId,
-              oldScoutId: sourceUserId,
-              newScoutId: authRes.id,
-              newScoutName: authRes.username,
-              authCode: currentInviteCode
-            }
-            ctx.clients.forEach((c, cid) => {
-              if (cid !== senderId && c.dc && c.dc.readyState === 'open') {
-                if (!c.sender) c.sender = new DataChannelSender(c.dc)
-                c.sender.enqueueSendQuiet(JSON.stringify(migrationMsg), 'IDENTITY_MIGRATION broadcast')
-              }
-            })
-          }
-
-          if (senderId) {
-            await ctx.sendMessage(
-              {
-                type: 'MERGE_ACCOUNT_RESPONSE',
-                requestId,
-                success: true,
-                newId: authRes.id,
-                newUsername: authRes.username,
-                token: authRes.token,
-                authCode: currentInviteCode
-              },
-              senderId
-            )
-          }
-        } catch (err: any) {
-          console.warn('[WebRTC Host] Account merge failed for request:', requestId, err?.message)
-          let errorMsg = err?.message || 'Invalid target account password'
-          if (err?.status === 401 || errorMsg.includes('401') || errorMsg.includes('Invalid credentials')) {
-            errorMsg = 'Invalid target account password'
-          }
-          if (senderId) {
-            await ctx.sendMessage(
-              {
-                type: 'MERGE_ACCOUNT_RESPONSE',
-                requestId,
-                success: false,
-                error: errorMsg,
-                authCode: currentInviteCode
-              },
-              senderId
-            )
-          }
-        }
-        break
-      }
-
-      case 'MERGE_ACCOUNT_RESPONSE': {
-        if (isHostMode) break
-        if (ctx.handleMergeAccountResponse) {
-          ctx.handleMergeAccountResponse(msg)
-        }
-        break
-      }
     }
   }
 

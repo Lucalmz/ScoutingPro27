@@ -197,9 +197,7 @@ function handleLeaveEvent() {
   left: 0;
   right: 0;
   bottom: 0;
-  background: rgba(0, 0, 0, 0.75);
-  backdrop-filter: blur(8px);
-  -webkit-backdrop-filter: blur(8px);
+  background: rgba(8, 8, 7, 0.84);
   z-index: 100000;
   display: flex;
   align-items: center;
@@ -209,11 +207,12 @@ function handleLeaveEvent() {
 }
 
 .sas-modal-card {
-  background: var(--card, #0a0a0a);
-  color: var(--foreground, #f1f5f9);
-  border-radius: 12px;
-  border: 1px solid var(--border, #262626);
-  box-shadow: 0 20px 30px rgba(0, 0, 0, 0.8), 0 0 24px rgba(57, 255, 20, 0.08);
+  background: var(--card, #141413);
+  color: var(--foreground, #f0efe9);
+  border-radius: 14px;
+  border: 1px solid var(--border, #262624);
+  border-top: 3px solid var(--primary, #39ff14);
+  box-shadow: 0 24px 60px rgba(0, 0, 0, 0.85), 0 0 24px rgba(57, 255, 20, 0.08);
   width: 100%;
   max-width: 480px;
   overflow-y: auto;
@@ -224,28 +223,31 @@ function handleLeaveEvent() {
 .sas-modal-header {
   display: flex;
   align-items: center;
-  gap: 0.5rem;
-  padding: 1.25rem;
-  background: var(--input, #111111);
-  border-bottom: 1px solid var(--border, #262626);
+  gap: 0.65rem;
+  padding: 1.15rem 1.25rem;
+  background: #0c0c0b;
+  border-bottom: 1px solid var(--border, #262624);
 }
 
 .btn-close-sas {
   margin-left: auto;
-  background: transparent;
-  border: none;
-  color: var(--text-muted, #8b949e);
+  background: #1c1c1a;
+  border: 1px solid #353532;
+  color: var(--text-muted, #9e9d95);
   cursor: pointer;
-  padding: 4px;
-  border-radius: 6px;
+  width: 32px;
+  height: 32px;
+  padding: 0;
+  border-radius: 8px;
   display: flex;
   align-items: center;
   justify-content: center;
-  transition: all 0.2s;
+  transition: all 0.16s ease;
 }
 
 .btn-close-sas:hover {
-  background: rgba(255, 255, 255, 0.1);
+  background: #262624;
+  border-color: #4a4a46;
   color: #ffffff;
 }
 
@@ -332,8 +334,8 @@ function handleLeaveEvent() {
   flex-direction: column;
   align-items: center;
   justify-content: center;
-  background: var(--background, #000000);
-  border: 1px solid var(--border, #262626);
+  background: #080807;
+  border: 1px solid #262624;
   padding: 1.25rem;
   border-radius: 10px;
   gap: 0.5rem;
@@ -341,7 +343,7 @@ function handleLeaveEvent() {
 
 .sas-code-label {
   font-size: 0.8rem;
-  color: var(--text-muted, #a3a3a3);
+  color: var(--text-muted, #9e9d95);
   text-align: center;
 }
 
@@ -353,14 +355,14 @@ function handleLeaveEvent() {
   color: var(--primary, #39ff14);
   text-shadow: var(--glow-primary);
   padding: 0.5rem 1rem;
-  background: rgba(57, 255, 20, 0.08);
+  background: #10160f;
   border-radius: 8px;
-  border: 1px dashed rgba(57, 255, 20, 0.4);
+  border: 1px dashed rgba(57, 255, 20, 0.45);
 }
 
 .sas-countdown {
   font-size: 0.8rem;
-  color: var(--text-muted, #a3a3a3);
+  color: var(--text-muted, #9e9d95);
 }
 
 .sas-countdown strong {
@@ -372,8 +374,8 @@ function handleLeaveEvent() {
   justify-content: flex-end;
   gap: 0.75rem;
   padding: 1rem 1.25rem;
-  background: var(--input, #111111);
-  border-top: 1px solid var(--border, #262626);
+  background: #0c0c0b;
+  border-top: 1px solid var(--border, #262624);
   flex-wrap: wrap;
 }
 
@@ -384,21 +386,22 @@ function handleLeaveEvent() {
   gap: 0.35rem;
   padding: 0.55rem 1rem;
   font-size: 0.9rem;
-  font-weight: 600;
-  border-radius: 6px;
-  border: none;
+  font-weight: 700;
+  border-radius: 8px;
+  border: 1px solid transparent;
   cursor: pointer;
   transition: all 0.15s ease;
 }
 
 .btn-secondary {
-  background: rgba(255, 255, 255, 0.1);
-  color: #c9d1d9;
-  border: 1px solid rgba(255, 255, 255, 0.15);
+  background: #1c1c1a;
+  color: #f0efe9;
+  border: 1px solid #353532;
 }
 
 .btn-secondary:hover {
-  background: rgba(255, 255, 255, 0.18);
+  background: #262624;
+  border-color: #4a4a46;
   color: #ffffff;
 }
 

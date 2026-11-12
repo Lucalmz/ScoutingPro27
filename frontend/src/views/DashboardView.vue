@@ -2,6 +2,7 @@
 import { ref, computed, onMounted, nextTick } from 'vue'
 import { useRouter } from 'vue-router'
 import { useI18n } from 'vue-i18n'
+import { switchLanguage } from '@/i18n'
 import { useUserStore } from '@/stores/user'
 import { useEventStore } from '@/stores/events'
 import { parseEventPackage } from '@/utils/offlineSync'
@@ -16,7 +17,19 @@ import RenameModal from '@/components/common/RenameModal.vue'
 import QrScannerModal from '@/components/common/QrScannerModal.vue'
 import MobileQrModal from '@/components/common/MobileQrModal.vue'
 
-const { t } = useI18n()
+const { t, locale } = useI18n()
+
+const isZh = computed(() => {
+  const loc = (locale && (locale.value || locale)) || 'zh'
+  return String(loc).startsWith('zh')
+})
+
+function toggleLang() {
+  const current = (locale && (locale.value || locale)) || 'en'
+  const newLang = String(current).startsWith('zh') ? 'en' : 'zh'
+  switchLanguage(newLang)
+  hapticLight()
+}
 const toastStore = useToastStore()
 const router = useRouter()
 const userStore = useUserStore()
@@ -241,6 +254,15 @@ function handleOpenRenameModal() {
         </span>
       </div>
       <div class="topbar-right">
+        <button
+          class="topbar-btn lang-topbar-btn"
+          type="button"
+          @click="toggleLang"
+          :title="t('dashboard.lang_btn_title')"
+        >
+          <span class="material-icons" style="font-size: 18px; margin-right: 4px;">language</span>
+          <span class="topbar-btn-text">{{ isZh ? t('login.lang_en') : t('login.lang_zh') }}</span>
+        </button>
         <button
           class="topbar-btn inbox-topbar-btn"
           @click="inboxStore.toggleOpen()"

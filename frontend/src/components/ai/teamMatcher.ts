@@ -16,6 +16,17 @@
  *          knownTeams 变化时重建一次，渲染时直接复用）
  */
 
+import { i18n } from '@/i18n'
+
+function getTeamChipAria(team: string): string {
+  try {
+    if (i18n?.global?.t) {
+      return i18n.global.t('ai.team_chip_aria', { team })
+    }
+  } catch {}
+  return `Team ${team}`
+}
+
 /**
  * 根据白名单构建正则表达式（结果应由调用方缓存，仅在 knownTeams 变化时重建 - V22）。
  *
@@ -125,7 +136,7 @@ function replaceTextNodeWithChips(textNode: Text, regex: RegExp): void {
 
     chip.setAttribute('role', 'button')
     chip.setAttribute('tabindex', '0')
-    chip.setAttribute('aria-label', `查看队伍 ${team} 详情`)
+    chip.setAttribute('aria-label', getTeamChipAria(team))
     fragment.appendChild(chip)
 
     lastIndex = matchEnd
@@ -185,6 +196,7 @@ export function applyTeamChipsToHtml(html: string, regex: RegExp | null): string
     const team = match.trim()
     if (!team) return match
 
-    return `<span class="team-chip" data-team="${team}" role="button" tabindex="0" aria-label="查看队伍 ${team} 详情">${team}</span>`
+    const ariaLabel = getTeamChipAria(team)
+    return `<span class="team-chip" data-team="${team}" role="button" tabindex="0" aria-label="${ariaLabel}">${team}</span>`
   })
 }

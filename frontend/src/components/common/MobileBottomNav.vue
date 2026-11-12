@@ -245,12 +245,10 @@ function handleExit() {
   height: calc(56px + var(--sab, env(safe-area-inset-bottom, 0px)));
   padding-bottom: var(--sab, env(safe-area-inset-bottom, 0px));
   box-sizing: border-box;
-  background: rgba(18, 18, 22, 0.92);
-  backdrop-filter: blur(20px);
-  -webkit-backdrop-filter: blur(20px);
-  border-top: 1px solid rgba(255, 255, 255, 0.12);
+  background: var(--card, #141413);
+  border-top: 1px solid var(--border, #262624);
   z-index: 850;
-  box-shadow: 0 -4px 20px rgba(0, 0, 0, 0.45);
+  box-shadow: 0 -6px 24px rgba(0, 0, 0, 0.65);
   user-select: none;
 }
 
@@ -359,9 +357,7 @@ function handleExit() {
 .more-sheet-backdrop {
   position: fixed;
   inset: 0;
-  background: rgba(0, 0, 0, 0.6);
-  backdrop-filter: blur(4px);
-  -webkit-backdrop-filter: blur(4px);
+  background: rgba(8, 8, 7, 0.76);
   z-index: 840;
 }
 
@@ -373,17 +369,15 @@ function handleExit() {
   right: 0;
   margin: 0 auto;
   max-width: 540px;
-  background: rgba(24, 24, 28, 0.98);
-  backdrop-filter: blur(24px);
-  -webkit-backdrop-filter: blur(24px);
+  background: var(--card, #141413);
   border-top-left-radius: 20px;
   border-top-right-radius: 20px;
-  border: 1px solid rgba(255, 255, 255, 0.12);
+  border: 1px solid var(--border, #262624);
   border-bottom: none;
   padding: 12px 16px 20px;
   box-sizing: border-box;
   z-index: 845;
-  box-shadow: 0 -8px 30px rgba(0, 0, 0, 0.6);
+  box-shadow: 0 -12px 36px rgba(0, 0, 0, 0.78);
 }
 
 .sheet-header {

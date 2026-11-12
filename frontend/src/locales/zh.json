@@ -52,7 +52,8 @@
     "clear_cache_title": "清空离线缓存",
     "clear_cache_confirm": "此操作将清空本地保存的所有赛事、打分暂存及离线缓存。确定要清空吗？",
     "clear_cache_confirm_btn": "确认清空",
-    "cache_cleared_toast": "本地离线缓存已全部清空"
+    "cache_cleared_toast": "本地离线缓存已全部清空",
+    "lang_btn_title": "切换系统语言 (中/EN)"
   },
   "qr_scanner": {
     "title": "扫描二维码",
@@ -103,6 +104,17 @@
     "scouts_refresh": "刷新名单",
     "scouts_records_count": "已提交记录: {count}",
     "send_message": "发送私信",
+    "msg_modal_title": "发送私信",
+    "msg_recipient_label": "收件人",
+    "msg_content_label": "私信内容",
+    "msg_input_placeholder": "请输入私信内容...（按 Enter 发送，Shift + Enter 换行）",
+    "msg_send_btn": "发送",
+    "msg_sending": "发送中...",
+    "msg_sent_success": "私信已成功发送",
+    "msg_queued_notice": "实时通讯未建立，消息将存入离线发件箱并在连接后自动送达。",
+    "msg_queued_toast": "未连接至通信中继，私信已存入离线发件箱",
+    "msg_shortcut_tip": "Enter 发送，Shift+Enter 换行",
+    "msg_empty_warning": "请输入私信内容",
     "msg_prompt": "输入发送给 {name} 的私信内容：",
     "msg_not_ready": "实时通讯未建立，暂无法发送私信。",
     "status_online": "在线",
@@ -127,6 +139,8 @@
     "standby_host_toast": "检测到当前赛事已有活跃主机，本机已自动进入【备用监控模式】",
     "sas_rejected_toast": "检测到安全码不匹配或已切断连接: {reason}",
     "remove_scout": "从赛事中移除",
+    "remove_scout_title": "移除成员",
+    "btn_remove_confirm": "确认移除",
     "remove_scout_confirm": "确定要从当前赛事移除考察员 \"{name}\" 吗？",
     "scout_removed_success": "已成功移除该考察员",
     "scout_removed_local": "已从本地名单中移除"
@@ -457,7 +471,8 @@
       "ollama_desc": "本地运行开源模型，完全离线运行",
       "custom": "自定义服务商",
       "custom_desc": "自定义填写 Base URL 与模型名称"
-    }
+    },
+    "team_chip_aria": "查看队伍 {team} 详情"
   },
   "team_drawer": {
     "title": "队伍 {team}",
@@ -927,7 +942,11 @@
       "teleop_cycles_label": "自述手动轮次预估 (轮)",
       "unit_cycles": "轮",
       "endgame_score_label": "自述终局得分预估 (分)",
-      "sec_custom_overall": "综合自定义指标 (Overall)"
+      "sec_custom_overall": "综合自定义指标 (Overall)",
+      "view_photo_full": "点击查看高清大图",
+      "delete_photo": "删除此照片",
+      "photos_title": "#{teamNumber} 展位特写照片",
+      "photos_title_default": "展位特写照片"
     },
     "launcher_presets": {
       "dual_flywheel": "差速双飞轮",
@@ -973,7 +992,10 @@
     },
     "claimed_pts_unit": "{pts}分",
     "flower_verified": "花朵已证实",
-    "flower_pending_verify": "花朵待验证"
+    "flower_pending_verify": "花朵待验证",
+    "view_robot_photo": "点击查看机器人大图",
+    "photo_count_badge": "{count} 张",
+    "robot_photo_title": "#{teamNumber} {teamName}机器人照片"
   },
   "custom_fields": {
     "title": "自定义字段管理",
@@ -1173,7 +1195,8 @@
     "cap_reached_tip": "单轮已满 4 球，请点击【+ 下一轮】继续记录",
     "cannot_start_empty_cycle": "当前轮尚未出球，无需切换新轮次",
     "dismiss_draft": "忽略",
-    "missed_short": "丢"
+    "missed_short": "丢",
+    "review_submit": "核对提交"
   },
   "webrtc": {
     "single_record_received": "收到 #{team} 第 {match} 场正赛记录",
@@ -1187,5 +1210,11 @@
     "mark_read": "标为已读",
     "delete": "删除",
     "enter_event_to_view_conflict": "请先进入对应赛事以查看冲突记录"
+  },
+  "image_preview": {
+    "view_original": "查看原图",
+    "close": "关闭",
+    "prev_image": "上一张",
+    "next_image": "下一张"
   }
 }

@@ -3,6 +3,11 @@ import { encryptSignalingData } from '@/utils/crypto'
 import {
   buildIceConfiguration,
   optimizeCandidatePriority,
+  optimizeSdpCandidates,
+  applyProxyExitDemotionToBatch,
+  demoteProxyExitCandidatePriority,
+  classifyStunUrlOrigin,
+  type TaggedIceCandidateItem,
   classifyCandidatePair,
   isBogusOrTunCandidate,
   isTunReflectedSrflxCandidate,
@@ -63,8 +68,34 @@ export interface CreatePeerConnectionExtras {
 
 interface CandidateGate {
   open: boolean
-  queue: RTCIceCandidateInit[]
+  queue: TaggedIceCandidateItem[]
   release: () => void
+}
+
+/** 本地候选的来源元数据（采集它的 STUN URL 与清洗前的原始 raddr/rport/network-id） */
+interface CandidateOriginMeta {
+  stunUrl?: string
+  rawRaddr?: string
+  rawRport?: string
+  rawNetId?: string
+}
+
+/**
+ * 候选唯一键：地址:端口:类型（与 libwebrtc 远端去重口径一致——同一地址端口的重复候选只有第一次生效）
+ */
+function candidateKeyOf(candidateStr: string | undefined | null): string {
+  if (!candidateStr) return ''
+  const trimmed = candidateStr.trim()
+  const withoutAttr = trimmed.startsWith('a=') ? trimmed.slice(2).trim() : trimmed
+  const cleanStr = withoutAttr.startsWith('candidate:') ? withoutAttr.slice('candidate:'.length).trim() : withoutAttr
+  const parts = cleanStr.split(/\s+/)
+  if (parts.length < 7) return ''
+  const addr = cleanIpAddress(parts[4] || '').toLowerCase()
+  const port = parts[5] || ''
+  const typIdx = parts.indexOf('typ')
+  const typ = typIdx !== -1 && parts[typIdx + 1] ? parts[typIdx + 1]!.toLowerCase() : ''
+  if (!addr || !port || !typ) return ''
+  return `${addr}:${port}:${typ}`
 }
 
 export class PeerConnectionManager {
@@ -74,6 +105,7 @@ export class PeerConnectionManager {
   private readonly candidateGates = new WeakMap<RTCPeerConnection, CandidateGate>()
   private readonly silentUpgradePeers = new WeakSet<RTCPeerConnection>()
   private readonly virtualFallbackPeers = new WeakSet<RTCPeerConnection>()
+  private readonly candidateOrigins = new WeakMap<RTCPeerConnection, Map<string, CandidateOriginMeta>>()
 
   constructor(options: PeerConnectionFactoryOptions) {
     this.options = options
@@ -204,6 +236,123 @@ export class PeerConnectionManager {
     this.candidateGates.get(peer)?.release()
   }
 
+  private ensureOriginMeta(peer: RTCPeerConnection): Map<string, CandidateOriginMeta> {
+    let meta = this.candidateOrigins.get(peer)
+    if (!meta) {
+      meta = new Map<string, CandidateOriginMeta>()
+      this.candidateOrigins.set(peer, meta)
+    }
+    return meta
+  }
+
+  /** 用已记录的来源元数据（含 getStats 回填）补全候选条目缺失的 stunUrl / raddr 等字段 */
+  private withOriginMeta(peer: RTCPeerConnection, item: TaggedIceCandidateItem): TaggedIceCandidateItem {
+    const meta = this.candidateOrigins.get(peer)?.get(candidateKeyOf(item.candObj.candidate))
+    if (!meta) return item
+    return {
+      candObj: item.candObj,
+      stunUrl: item.stunUrl || meta.stunUrl,
+      rawRaddr: item.rawRaddr || meta.rawRaddr,
+      rawRport: item.rawRport || meta.rawRport,
+      rawNetId: item.rawNetId || meta.rawNetId
+    }
+  }
+
+  /** 同地址族下是否已有国内来源的 srflx，且其反射地址与 addr 不同（即 addr 为分流代理出口） */
+  private isProxyExitAgainstKnownDomestic(meta: Map<string, CandidateOriginMeta>, addr: string): boolean {
+    const target = cleanIpAddress(addr).toLowerCase()
+    const isV6 = target.includes(':')
+    let hasDomestic = false
+    for (const [key, m] of meta) {
+      if (!key.endsWith(':srflx')) continue
+      if (classifyStunUrlOrigin(m.stunUrl) !== 'domestic') continue
+      const domAddr = key.slice(0, key.lastIndexOf(':', key.length - ':srflx'.length - 1))
+      if (domAddr.includes(':') !== isV6) continue
+      if (domAddr === target) return false
+      hasDomestic = true
+    }
+    return hasDomestic
+  }
+
+  /**
+   * 回退通道：浏览器未在 RTCIceCandidate 上暴露 url 时（Chrome < 123 / 部分 WebKit），
+   * 从 getStats() 的 local-candidate.url 回填 srflx 候选来源（libwebrtc rtc_stats_collector 对本地候选填充 url）。
+   */
+  private async refreshCandidateOriginsFromStats(peer: RTCPeerConnection): Promise<void> {
+    if (typeof (peer as any).getStats !== 'function') return
+    const meta = this.ensureOriginMeta(peer)
+    let timer: ReturnType<typeof setTimeout> | null = null
+    try {
+      const stats: any = await Promise.race([
+        peer.getStats(),
+        new Promise<null>((resolve) => {
+          timer = setTimeout(() => resolve(null), 150)
+        })
+      ])
+      if (!stats || typeof stats.forEach !== 'function') return
+      stats.forEach((r: any) => {
+        if (r?.type !== 'local-candidate' || (r.candidateType || '').toLowerCase() !== 'srflx' || !r.url) return
+        const addr = cleanIpAddress(r.address || r.ip || '').toLowerCase()
+        if (!addr || r.port === undefined || r.port === null) return
+        const key = `${addr}:${r.port}:srflx`
+        const prev = meta.get(key)
+        meta.set(key, {
+          stunUrl: prev?.stunUrl || String(r.url),
+          rawRaddr: prev?.rawRaddr || (r.relatedAddress ? cleanIpAddress(String(r.relatedAddress)) : undefined),
+          rawRport: prev?.rawRport || (r.relatedPort !== undefined && r.relatedPort !== null ? String(r.relatedPort) : undefined),
+          rawNetId: prev?.rawNetId
+        })
+      })
+    } catch {
+      // getStats 失败不影响建连，保持原优先级
+    } finally {
+      if (timer) clearTimeout(timer)
+    }
+  }
+
+  /**
+   * 生成随 Offer/Answer 一并发送的本地 SDP：在 optimizeSdpCandidates 的基础上，对内嵌的 srflx 候选执行分流代理出口降权。
+   * 必须在 SDP 层降权的原因（libwebrtc p2p_transport_channel.cc）：远端收到与已有连接同地址的候选时
+   * （GetConnection(remote_candidate.address()) 命中且 generation 未提升）不会新建连接，也不会更新已有远端候选的优先级，
+   * 只记录 "Attempt to change a remote candidate" 日志；因此 SDP 内嵌候选的优先级“先到先得”，事后 trickle 的降权版本无效。
+   */
+  async finalizeLocalSdp(peer: RTCPeerConnection | null | undefined, sdp: string): Promise<string> {
+    const optimized = optimizeSdpCandidates(sdp, true)
+    if (!peer || !optimized) return optimized
+    const meta = this.ensureOriginMeta(peer)
+    const lines = optimized.split(/\r\n|\n/)
+    const candIdx: number[] = []
+    for (let i = 0; i < lines.length; i++) {
+      if (lines[i]!.startsWith('a=candidate:')) candIdx.push(i)
+    }
+    if (candIdx.length === 0) return optimized
+
+    const missingSrflxOrigin = candIdx.some((i) => {
+      const key = candidateKeyOf(lines[i])
+      return key.endsWith(':srflx') && !meta.get(key)?.stunUrl
+    })
+    if (missingSrflxOrigin) {
+      await this.refreshCandidateOriginsFromStats(peer)
+    }
+
+    const items: TaggedIceCandidateItem[] = candIdx.map((i) =>
+      this.withOriginMeta(peer, { candObj: { candidate: lines[i]!.slice(2) } })
+    )
+    const evaluated = applyProxyExitDemotionToBatch(items)
+    let demoted = 0
+    candIdx.forEach((lineIdx, k) => {
+      const next = evaluated[k]?.candidate
+      if (next && next !== items[k]!.candObj.candidate) {
+        demoted++
+        lines[lineIdx] = `a=${next}`
+      }
+    })
+    if (demoted > 0) {
+      log.info(`Demoted ${demoted} split-tunnel proxy-exit srflx candidate(s) embedded in local SDP`)
+    }
+    return lines.join('\r\n')
+  }
+
   /**
    * 重新关闭候选闸门（ICE restart 的 Offer 发出前调用）：restart 会产生带新 ufrag 的候选，
    * 若先于 Offer 抵达对端会因 ufrag 未知而被丢弃，因此与首次握手一样必须保证 Offer → Candidates 的顺序。
@@ -259,8 +408,7 @@ export class PeerConnectionManager {
     )
     const peer = new RTCPeerConnection(config)
     const emittedCandidateKeys = new Set<string>()
-    const poisonedTunPorts = new Set<string>()
-    const poisonedTunNetworkIds = new Set<string>()
+    const originMeta = this.ensureOriginMeta(peer)
 
     // ---------------- 本地候选发送（顺序化 + 会话标签 + 可选暂存闸门） ----------------
     let sendChain: Promise<void> = Promise.resolve()
@@ -295,9 +443,11 @@ export class PeerConnectionManager {
       release: () => {
         if (gate.open) return
         gate.open = true
-        const queued = gate.queue.splice(0)
+        const queuedItems = gate.queue.splice(0).map((it) => this.withOriginMeta(peer, it))
+        // 先基于来源 (RTCIceCandidate.url / getStats local-candidate.url) 识别分流代理出口 srflx 候选并降权（直连优先、VPN 出口兜底）
+        const evaluated = applyProxyExitDemotionToBatch(queuedItems)
         // 将全球公网单播 IPv6 (2000::/3) UDP 候选排在最前发送，避免 tcp 端口 9 (tcptype active) 抢占前排
-        queued.sort((a, b) => {
+        evaluated.sort((a, b) => {
           const score = (c: RTCIceCandidateInit): number => {
             const s = c.candidate || ''
             if (s.includes('tcptype active') || s.includes(' tcp ')) return 5
@@ -313,33 +463,48 @@ export class PeerConnectionManager {
           }
           return score(a) - score(b)
         })
-        if (queued.length > 0) {
-          log.info(`Releasing ${queued.length} held local ICE candidates after offer dispatch (target: ${targetSender || 'host'})`)
+        if (evaluated.length > 0) {
+          log.info(`Releasing ${evaluated.length} held local ICE candidates after offer dispatch (target: ${targetSender || 'host'})`)
         }
-        for (const c of queued) sendLocalCandidate(c)
+        for (const c of evaluated) sendLocalCandidate(c)
       }
     }
     this.candidateGates.set(peer, gate)
 
-    const dispatchOrQueueCandidate = (candObj: RTCIceCandidateInit, isSynthesized = false) => {
+    const dispatchOrQueueCandidate = (item: TaggedIceCandidateItem) => {
+      const candObj = item.candObj
       const cStr = candObj.candidate || ''
+      let cAddr = ''
+      let cType = ''
       if (cStr) {
         const p = cStr.trim().split(/\s+/)
-        const cAddr = cleanIpAddress(p[4] || '')
+        cAddr = cleanIpAddress(p[4] || '')
         const cPort = p[5] || ''
         const tIdx = p.indexOf('typ')
-        const cType = tIdx !== -1 && p[tIdx + 1] ? p[tIdx + 1] : ''
+        cType = tIdx !== -1 && p[tIdx + 1] ? p[tIdx + 1]!.toLowerCase() : ''
         const dedupKey = `${cAddr}:${cPort}:${cType}`
         if (emittedCandidateKeys.has(dedupKey)) return
         emittedCandidateKeys.add(dedupKey)
       }
+
+      if (gate.open && cType === 'srflx' && cAddr && candObj.candidate) {
+        // 闸门已打开后才到达的 srflx：与已知的国内来源反射地址比对，命中分流代理出口则降权后再发送
+        const tagged = this.withOriginMeta(peer, item)
+        if (
+          classifyStunUrlOrigin(tagged.stunUrl) === 'overseas' &&
+          this.isProxyExitAgainstKnownDomestic(originMeta, cAddr)
+        ) {
+          candObj.candidate = demoteProxyExitCandidatePriority(candObj.candidate)
+        }
+      }
+
       log.info(
-        `Local ICE Candidate generated${isSynthesized ? ' [NIC-Direct]' : ''}: ${candObj.candidate ? candObj.candidate.trim() : 'null'} (target: ${targetSender || 'host'}, held: ${!gate.open})`
+        `Local ICE Candidate generated${item.stunUrl ? ` [via ${item.stunUrl}]` : ''}: ${candObj.candidate ? candObj.candidate.trim() : 'null'} (target: ${targetSender || 'host'}, held: ${!gate.open})`
       )
       if (gate.open) {
         sendLocalCandidate(candObj)
       } else {
-        gate.queue.push(candObj)
+        gate.queue.push(item)
       }
     }
 
@@ -362,27 +527,25 @@ export class PeerConnectionManager {
     peer.onicecandidate = (ev) => {
       if (ev.candidate) {
         const rawCandStr = ev.candidate.candidate || ''
+        let rawRaddr = ''
+        let rawRport = ''
+        let rawNetId = ''
         if (rawCandStr) {
           const parts = rawCandStr.trim().split(/\s+/)
           const addr = cleanIpAddress(parts[4] || '')
-          const port = parts[5] || ''
-          const typIdx = parts.indexOf('typ')
-          const candType = typIdx !== -1 && parts[typIdx + 1] ? parts[typIdx + 1] : ''
           const raddrIdx = parts.indexOf('raddr')
-          const raddr = raddrIdx !== -1 && parts[raddrIdx + 1] ? cleanIpAddress(parts[raddrIdx + 1] || '') : ''
+          rawRaddr = raddrIdx !== -1 && parts[raddrIdx + 1] ? cleanIpAddress(parts[raddrIdx + 1] || '') : ''
+          const rportIdx = parts.indexOf('rport')
+          rawRport = rportIdx !== -1 && parts[rportIdx + 1] ? parts[rportIdx + 1] || '' : ''
           const netIdIdx = parts.indexOf('network-id')
-          const netId = netIdIdx !== -1 && parts[netIdIdx + 1] ? parts[netIdIdx + 1] : ''
+          rawNetId = netIdIdx !== -1 && parts[netIdIdx + 1] ? parts[netIdIdx + 1] || '' : ''
 
           if (isGlobalIpv6Address(addr)) {
             localIpv6Generated = true
           }
 
-          if (isTunVirtualAddress(addr) || isTunVirtualAddress(raddr)) {
+          if (isTunVirtualAddress(addr) || isTunVirtualAddress(rawRaddr)) {
             this.tunEnvironmentDetected = true
-            if (candType === 'host') {
-              if (port) poisonedTunPorts.add(port)
-              if (netId) poisonedTunNetworkIds.add(netId)
-            }
           }
 
           // 无论 Host（电脑端开 TUN）还是 Client（手机端开 VPN），只丢弃虚拟内网 typ host 候选 (198.18.x.x / 172.19.0.x / fdfe:...)，
@@ -403,7 +566,26 @@ export class PeerConnectionManager {
         if (candObj.candidate) {
           candObj.candidate = optimizeCandidatePriority(candObj.candidate)
         }
-        dispatchOrQueueCandidate(candObj, false)
+        // Chrome 123+ 在 RTCIceCandidate.url 上暴露采集该 srflx 的 STUN 服务器（旧规范为 event.url，Chromium 未实现）；
+        // libwebrtc 拼接格式为 "stun:" + hostname + ":" + port，IPv6 字面量不带中括号，由 extractStunUrlHost 兼容解析。
+        const stunUrl: string | undefined = (ev.candidate as any).url || (ev as any).url || undefined
+        const key = candidateKeyOf(candObj.candidate || rawCandStr)
+        if (key) {
+          const prev = originMeta.get(key)
+          originMeta.set(key, {
+            stunUrl: stunUrl || prev?.stunUrl,
+            rawRaddr: rawRaddr || prev?.rawRaddr,
+            rawRport: rawRport || prev?.rawRport,
+            rawNetId: rawNetId || prev?.rawNetId
+          })
+        }
+        dispatchOrQueueCandidate({
+          candObj,
+          stunUrl,
+          rawRaddr,
+          rawRport,
+          rawNetId
+        })
       } else {
         log.info(`ICE Gathering Complete (null candidate received)`)
         warnIfHostIpv6Missing()

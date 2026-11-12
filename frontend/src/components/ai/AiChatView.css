@@ -44,17 +44,18 @@
   display: flex;
   flex-direction: column;
   flex: 1;
-  background: var(--card);
-  border: 1px solid var(--border);
+  background: var(--card, #141413);
+  border: 1px solid var(--border, #262624);
+  border-top: 2px solid #38bdf8;
   border-radius: 12px;
   overflow: hidden;
-  box-shadow: 0 4px 20px rgba(0, 0, 0, 0.4);
+  box-shadow: 0 12px 36px rgba(0, 0, 0, 0.65);
 }
 
 /* Header & Collapsible Prompt Bar */
 .chat-header {
-  background: var(--popover);
-  border-bottom: 1px solid var(--border);
+  background: var(--surface-elevated, #1c1c1a);
+  border-bottom: 1px solid var(--border, #262624);
   padding: 8px 14px;
   display: flex;
   flex-direction: column;
@@ -243,31 +244,31 @@
 
 .chat-input-area {
   padding: 10px 14px;
-  border-top: 1px solid var(--border);
+  border-top: 1px solid var(--border, #262624);
   display: flex;
   gap: 10px;
-  background: var(--popover);
+  background: var(--surface-elevated, #1c1c1a);
   flex-shrink: 0;
 }
 
 .chat-input-area textarea {
   flex: 1;
   padding: 10px 12px;
-  border: 1px solid var(--border);
+  border: 1px solid var(--border, #262624);
   border-radius: 8px;
-  background: var(--input);
+  background: var(--surface-recessed, #080807);
   color: var(--foreground);
   font-family: inherit;
   resize: none;
   font-size: 13.5px;
   line-height: 1.45;
-  transition: border-color 0.15s, box-shadow 0.15s;
+  transition: border-color 0.2s, box-shadow 0.2s;
 }
 
 .chat-input-area textarea:focus {
   outline: none;
   border-color: var(--primary);
-  box-shadow: 0 0 0 1px var(--primary);
+  box-shadow: 0 0 0 2px rgba(57, 255, 20, 0.18);
 }
 
 .input-buttons {

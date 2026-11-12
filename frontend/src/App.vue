@@ -1,5 +1,5 @@
-<script setup lang="ts">
-import { watch } from 'vue'
+﻿<script setup lang="ts">
+import { ref, onMounted, watch } from 'vue'
 import ToastProvider from '@/components/ToastProvider.vue'
 import ConfirmModal from '@/components/common/ConfirmModal.vue'
 import InboxWidget from '@/components/common/InboxWidget.vue'
@@ -10,6 +10,13 @@ const inboxStore = useInboxStore()
 const toastStore = useToastStore()
 
 const isViewTransitionSupported = typeof document !== 'undefined' && 'startViewTransition' in document
+const bootActive = ref(true)
+
+onMounted(() => {
+  setTimeout(() => {
+    bootActive.value = false
+  }, 1100)
+})
 
 watch(() => inboxStore.messages.length, (newLen, oldLen) => {
   if (newLen > oldLen) {
@@ -24,6 +31,10 @@ watch(() => inboxStore.messages.length, (newLen, oldLen) => {
 <template>
   <ToastProvider />
   <ConfirmModal />
+  <!-- Minimal non-blocking boot line (no text) -->
+  <div v-if="bootActive" class="tactical-boot-overlay" aria-hidden="true">
+    <div class="tactical-boot-scanline"></div>
+  </div>
   <div class="router-view-container">
     <router-view v-slot="{ Component, route }">
       <transition 
@@ -411,5 +422,32 @@ watch(() => inboxStore.messages.length, (newLen, oldLen) => {
 @keyframes modal-pull-forward {
   from { transform: scale(0.94); opacity: 0.65; border-radius: 16px; }
   to { transform: scale(1); opacity: 1; border-radius: 0; }
+}
+
+/* ==============================================================
+   Minimal boot line (non-blocking, no text)
+   ============================================================== */
+.tactical-boot-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 99990;
+  pointer-events: none;
+  overflow: hidden;
+  animation: boot-overlay-fade 0.9s var(--motion-ease-out) forwards;
+}
+
+.tactical-boot-scanline {
+  position: absolute;
+  left: 0;
+  right: 0;
+  height: 1px;
+  background: linear-gradient(90deg, transparent 0%, #39ff14 50%, transparent 100%);
+  animation: tactical-scanline-sweep 0.85s var(--motion-ease-out) forwards;
+}
+
+@keyframes boot-overlay-fade {
+  0% { opacity: 1; }
+  70% { opacity: 1; }
+  100% { opacity: 0; }
 }
 </style>

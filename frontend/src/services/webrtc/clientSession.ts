@@ -5,16 +5,12 @@ import {
   importEcdhPublicKey,
   deriveSharedAesKey,
   encryptSignalingData,
-  decryptSignalingData,
-  computeSecurityFingerprint
+  decryptSignalingData
 } from '@/utils/crypto'
-import { evaluatePeerKeyTrust, savePeerTrustRecord } from '@/utils/identityStore'
 
 import type { WebRtcCallbacks } from './types'
 import {
-  buildIceConfiguration,
   optimizeCandidatePriority,
-  optimizeSdpCandidates,
   synthesizeSymmetricNatPortCandidates,
   sortCandidatesPreferIpv6,
   isGlobalIpv6Address,
@@ -22,29 +18,26 @@ import {
   cleanIpAddress,
   shouldAllowTurnForAttempt,
   shouldForceRelayForAttempt,
-  getSilentUpgradeDelayMs,
-  getTransportTier,
-  SILENT_UPGRADE,
   probeLocalInterfaceIpv6,
   resetLocalIpv6ProbeCache,
-  warmUpDoHStunIpv6,
+  getCachedPhysicalAddresses,
+  waitForDoHStunIpv6Bounded,
   CONNECTION_TIMING
 } from './connectivity'
 import type { SignalingChannel } from './signaling'
 import { toSessionDescription, toIceCandidate } from './sdpUtil'
 import type { SasSecurityManager } from './sasManager'
 import type { PeerConnectionManager } from './peerManager'
-import { VirtualDataChannel, tryDecryptVirtualFrame } from './virtualDataChannel'
+import { evaluateAndApplyClientTrust } from './clientTrustHelper'
+import { createClientSilentUpgradeManager } from './clientSilentUpgrade'
+import { createClientHeartbeatManager } from './clientHeartbeat'
+import { createClientVirtualFallbackController } from './clientVirtualFallback'
 import { createLogger } from '@/utils/logger'
 
 const log = createLogger('WebRTC:Client')
 
 /** 连续失败多少次后进入 long_offline（之后仅由 Host 心跳 / 自愈事件唤醒） */
 const MAX_RECONNECT_ATTEMPTS = 6
-/** DataChannel 心跳：连续丢失多少次判定为“降级”（仅 UI 提示，持续观察） */
-const HEARTBEAT_DEGRADE_MISSES = 2
-/** DataChannel 心跳：连续丢失多少次判定为 SCTP 僵死，触发重建（ICE consent 仍存活但通道卡死的兜底） */
-const HEARTBEAT_REBUILD_MISSES = 8
 
 export interface ClientSessionContext {
   peerMgr: PeerConnectionManager
@@ -100,17 +93,16 @@ export function createClientSession(ctx: ClientSessionContext) {
   let reconnectAttempts = 0
   let reconnectTimer: ReturnType<typeof setTimeout> | null = null
   let connectWatchdog: ReturnType<typeof setTimeout> | null = null
+  let lateSlaacTimer: ReturnType<typeof setTimeout> | null = null
   let virtualFallbackTimer: ReturnType<typeof setTimeout> | null = null
-  let virtualNativeUpgradeTimer: ReturnType<typeof setTimeout> | null = null
-  let activeVirtualDc: VirtualDataChannel | null = null
   let lastOfferTimestamp = 0
   let lastHostIpv6: string | null = null
-  let injectedHostIpv6Ports = new Set<string>()
   let attemptEpoch = 0
   let failedEpoch = -1
   let activeSetupPromise: Promise<void> | null = null
   let lastPresenceRecoveryAt = 0
   let signalingQueue: Promise<void> = Promise.resolve()
+  let silentUpgradeProbeCount = 0
 
   function clearReconnectTimer() {
     if (reconnectTimer) {
@@ -124,14 +116,15 @@ export function createClientSession(ctx: ClientSessionContext) {
       clearTimeout(connectWatchdog)
       connectWatchdog = null
     }
+    if (lateSlaacTimer) {
+      clearTimeout(lateSlaacTimer)
+      lateSlaacTimer = null
+    }
     if (virtualFallbackTimer) {
       clearTimeout(virtualFallbackTimer)
       virtualFallbackTimer = null
     }
-    if (virtualNativeUpgradeTimer) {
-      clearTimeout(virtualNativeUpgradeTimer)
-      virtualNativeUpgradeTimer = null
-    }
+    clearVirtualNativeUpgradeTimer()
   }
 
   function resetReconnectAttempts() {
@@ -207,56 +200,71 @@ export function createClientSession(ctx: ClientSessionContext) {
     triggerClientReconnect(reason)
   }
 
-  let silentUpgradeTimer: ReturnType<typeof setTimeout> | null = null
-  let silentUpgradeSettleTimer: ReturnType<typeof setTimeout> | null = null
-  let silentUpgradeSettlePollTimer: ReturnType<typeof setInterval> | null = null
-  let silentUpgradeProbeCount = 0
-  let isSilentUpgradeInFlight = false
+  const silentUpgradeMgr = createClientSilentUpgradeManager({
+    ctx,
+    getAttemptEpoch: () => attemptEpoch,
+    getProbeCount: () => silentUpgradeProbeCount,
+    incrementProbeCount: () => ++silentUpgradeProbeCount
+  })
 
-  function clearSilentUpgradeTimers() {
-    if (silentUpgradeTimer) {
-      clearTimeout(silentUpgradeTimer)
-      silentUpgradeTimer = null
-    }
-    if (silentUpgradeSettleTimer) {
-      clearTimeout(silentUpgradeSettleTimer)
-      silentUpgradeSettleTimer = null
-    }
-    if (silentUpgradeSettlePollTimer) {
-      clearInterval(silentUpgradeSettlePollTimer)
-      silentUpgradeSettlePollTimer = null
-    }
-  }
+  const { checkAndScheduleSilentUpgrade, clearSilentUpgradeTimers, resetSilentUpgradeState } = silentUpgradeMgr
+
+  const heartbeatMgr = createClientHeartbeatManager({
+    ctx,
+    getAttemptEpoch: () => attemptEpoch,
+    getActiveVirtualDc: () => getActiveVirtualDc(),
+    failAttempt
+  })
+
+  const {
+    handlePong,
+    pingHost,
+    startDataChannelHeartbeat,
+    stopDataChannelHeartbeat,
+    abortPendingPings
+  } = heartbeatMgr
+
+  const virtualFallbackCtrl = createClientVirtualFallbackController({
+    ctx,
+    getAttemptEpoch: () => attemptEpoch,
+    clearFailedEpochIfMatch: (epoch) => {
+      if (failedEpoch === epoch) failedEpoch = -1
+    },
+    clearConnectWatchdog,
+    clearReconnectTimer,
+    startDataChannelHeartbeat,
+    checkAndScheduleSilentUpgrade,
+    getSilentUpgradeProbeCount: () => silentUpgradeProbeCount,
+    incrementSilentUpgradeProbeCount: () => ++silentUpgradeProbeCount
+  })
+
+  const {
+    getActiveVirtualDc,
+    isVirtualDcOpen,
+    isVirtualDcActiveOnClient,
+    clearVirtualNativeUpgradeTimer,
+    closeActiveVirtualDc,
+    scheduleBackgroundNativeP2pRetry,
+    activateVirtualFallbackChannel,
+    handleIncomingEncryptedVirtualFrame
+  } = virtualFallbackCtrl
 
   function hardResetChannels() {
     // 递增纪元：所有旧尝试的异步续体与回调从此刻起全部失效
     attemptEpoch++
     clearReconnectTimer()
     clearConnectWatchdog()
-    clearSilentUpgradeTimers()
+    resetSilentUpgradeState()
     stopDataChannelHeartbeat()
     silentUpgradeProbeCount = 0
-    isSilentUpgradeInFlight = false
-    injectedHostIpv6Ports.clear()
 
     const oldSender = ctx.getClientSender?.()
     if (oldSender) {
       try { oldSender.abort('Client channels hard-reset') } catch (_) {}
     }
 
-    for (const [, resolve] of pendingPings.entries()) {
-      resolve(false)
-    }
-    pendingPings.clear()
-
-    if (activeVirtualDc) {
-      activeVirtualDc.onmessage = null
-      activeVirtualDc.onopen = null
-      activeVirtualDc.onerror = null
-      activeVirtualDc.onclose = null
-      try { activeVirtualDc.close() } catch (_) {}
-      activeVirtualDc = null
-    }
+    abortPendingPings()
+    closeActiveVirtualDc()
 
     const oldDc = ctx.getClientDc()
     if (oldDc) {
@@ -313,150 +321,6 @@ export function createClientSession(ctx: ClientSessionContext) {
     return startSetup(forceRelay)
   }
 
-  function scheduleBackgroundNativeP2pRetry(epoch: number) {
-    if (virtualNativeUpgradeTimer) {
-      clearTimeout(virtualNativeUpgradeTimer)
-      virtualNativeUpgradeTimer = null
-    }
-    const delayMs = SILENT_UPGRADE.RELAY_PROBE_DELAYS_MS[Math.min(silentUpgradeProbeCount, SILENT_UPGRADE.RELAY_PROBE_DELAYS_MS.length - 1)] || 20000
-    silentUpgradeProbeCount++
-    virtualNativeUpgradeTimer = setTimeout(async () => {
-      virtualNativeUpgradeTimer = null
-      if (epoch !== attemptEpoch || ctx.isHostMode?.() || ctx.isExplicitlyClosed()) return
-      if (!activeVirtualDc || activeVirtualDc.readyState !== 'open') return
-
-      const currentSessionId = ctx.getClientSessionId()
-      log.info(`[WebRTC Client] Launching background native P2P upgrade probe while VirtualDataChannel is active (sessionId: ${currentSessionId})`)
-      const bgPc = ctx.peerMgr.createPeerConnection(
-        undefined,
-        () => {
-          if (epoch === attemptEpoch && activeVirtualDc && activeVirtualDc.readyState === 'open') {
-            scheduleBackgroundNativeP2pRetry(epoch)
-          }
-        },
-        false,
-        ctx.getClientHostSenderId(),
-        { sessionTag: currentSessionId, holdLocalCandidates: true, allowTurn: false }
-      )
-      ctx.peerMgr.markVirtualChannelActive(bgPc)
-      ctx.setClientPc(bgPc)
-
-      const bgDc = bgPc.createDataChannel('scoutingpro-data')
-      const bgSender = new DataChannelSender(bgDc)
-      bgDc.onmessage = (e) => ctx.handleChannelMessage(e)
-      bgDc.onopen = () => {
-        if (epoch !== attemptEpoch) return
-        log.info('Hot-upgrading active session from VirtualDataChannel to Native UDP P2P DataChannel!')
-        if (activeVirtualDc) {
-          activeVirtualDc.onclose = null
-          try { activeVirtualDc.close() } catch {}
-          activeVirtualDc = null
-        }
-        ctx.setClientDc(bgDc)
-        ctx.setClientSender(bgSender)
-        void ctx.peerMgr.updateTransportInfo(bgPc)
-        void checkAndScheduleSilentUpgrade()
-      }
-
-      try {
-        const offer = await bgPc.createOffer()
-        if (epoch !== attemptEpoch) return
-        await bgPc.setLocalDescription(offer)
-        if (epoch !== attemptEpoch) return
-        const rawOffer = {
-          type: offer.type,
-          sdp: optimizeSdpCandidates(bgPc?.localDescription?.sdp || offer.sdp || '', true),
-          deviceId: ctx.getLocalDeviceId(),
-          username: ctx.getUsername?.() || '',
-          userId: ctx.getUserId?.() || '',
-          allowTurn: false,
-          forceRelay: false
-        }
-        let offerPayload: any = rawOffer
-        if (ctx.sas.clientSharedAesKey) {
-          try {
-            offerPayload = await encryptSignalingData(ctx.sas.clientSharedAesKey, JSON.stringify(rawOffer))
-          } catch {}
-        }
-        ctx.getSignaling()?.send(
-          {
-            offer: offerPayload,
-            ecdhPublicKey: ctx.getLocalEcdhPubHex(),
-            deviceId: ctx.getLocalDeviceId(),
-            clientSessionId: currentSessionId,
-            hostSessionId: ctx.getCurrentHostSessionId(),
-            username: ctx.getUsername?.() || '',
-            userId: ctx.getUserId?.() || '',
-            allowTurn: false,
-            forceRelay: false
-          },
-          ctx.getClientHostSenderId()
-        )
-        ctx.peerMgr.releaseLocalCandidates(bgPc)
-      } catch {
-        try { bgPc.close() } catch {}
-      }
-    }, delayMs)
-  }
-
-  function activateVirtualFallbackChannel(epoch: number, sessionId: string) {
-    if (epoch !== attemptEpoch) return
-    const curDc = ctx.getClientDc()
-    if (curDc && curDc.readyState === 'open') return
-    if (!ctx.sas.clientSharedAesKey || !ctx.getClientHostSenderId()) return
-
-    log.info(`[WebRTC Client] Native UDP ICE blocked or slow (>3.8s, e.g. mobile VPN blocking IPv6/UDP). Activating ECDH-encrypted VirtualDataChannel for session ${sessionId} while continuing native P2P in background!`)
-    ctx.peerMgr.markVirtualChannelActive(ctx.getClientPc())
-    const vdc = new VirtualDataChannel({
-      label: 'scoutingpro-data-virtual',
-      sessionId,
-      getSignaling: ctx.getSignaling,
-      getSharedAesKey: () => ctx.sas.clientSharedAesKey,
-      getTargetPeerId: ctx.getClientHostSenderId
-    })
-    activeVirtualDc = vdc
-    vdc.onmessage = (e) => ctx.handleChannelMessage(e)
-    vdc.onopen = () => {
-      if (epoch !== attemptEpoch) return
-      if (failedEpoch === epoch) failedEpoch = -1
-      clearConnectWatchdog()
-      clearReconnectTimer()
-      ctx.callbacks.onIceStalled?.(false)
-      ctx.setClientDc(vdc as unknown as RTCDataChannel)
-      ctx.setClientSender(new DataChannelSender(vdc as unknown as RTCDataChannel))
-      const vdcTransportInfo = {
-        type: 'relay' as const,
-        label: 'ECDH Tunnel (TLS)',
-        localAddress: 'virtual-e2ee',
-        remoteAddress: 'wss-broker:8084',
-        localCandidateType: 'virtual',
-        remoteCandidateType: 'virtual',
-        protocol: 'wss/tls',
-        isIpv6: false,
-        rttMs: null as number | null,
-        securityFingerprint: ctx.sas.clientSecurityFingerprint || undefined
-      }
-      ctx.peerMgr.currentTransportInfo = vdcTransportInfo
-      ;(ctx.callbacks.onTransportInfoChanged || ctx.callbacks.onTransportChange)?.(vdcTransportInfo)
-      ctx.setStatus('connected')
-      startDataChannelHeartbeat()
-    }
-
-    // 通知 Host 激活对应会话的虚拟通道，并立即打开本地通道
-    void encryptSignalingData(
-      ctx.sas.clientSharedAesKey,
-      JSON.stringify({ vdc: 'open', sessionId })
-    )
-      .then((encrypted) => {
-        ctx.getSignaling()?.send(
-          { encrypted, clientSessionId: sessionId },
-          ctx.getClientHostSenderId()
-        )
-        vdc.open()
-      })
-      .catch(() => {})
-  }
-
   function armConnectWatchdog(epoch: number, dc: RTCDataChannel, sessionId?: string) {
     clearConnectWatchdog()
     const isTestEnv =
@@ -464,33 +328,48 @@ export function createClientSession(ctx: ClientSessionContext) {
       Boolean((globalThis as any).__vitest_worker__) ||
       (globalThis as any).__TEST_ALLOW_UNSIGNED_SIGNALING__ !== undefined
 
-    if (!isTestEnv && sessionId) {
+    if ((!isTestEnv || (globalThis as any).__TEST_ENABLE_LATE_SLAAC__) && sessionId) {
+      // 记录首包发出瞬间网卡是否已探测到公网 GUA IPv6（兼顾 mDNS 混淆下 SDP 不含明文 IPv6 host 的情况）
+      const initialPhysV6s = getCachedPhysicalAddresses().ipv6s
+      const hadInitialNicV6 = initialPhysV6s.some((ip) => isGlobalIpv6Address(ip))
+
       // 1. 针对手机刚切换 Wi-Fi 时 Android IPv6 SLAAC DAD (1.5s) 晚于 IPv4 DHCP (100ms) 就绪的场景（如日志 18:10:36 会话 #5）：
-      // 若发出的首包 Offer 未包含本地公网 IPv6，在 1800ms 时重新探测网卡，一旦发现 SLAAC 已分配 GUA IPv6 则立即触发新握手！
-      setTimeout(async () => {
-        if (epoch !== attemptEpoch || dc.readyState !== 'open') return
+      // 若发出的首包 Offer 未包含本地公网 IPv6 且首包时刻网卡尚未分配 GUA IPv6，在 1800ms 时重新探测网卡，一旦发现新分配了 GUA IPv6 则立即触发新握手！
+      lateSlaacTimer = setTimeout(async () => {
+        lateSlaacTimer = null
+        const isDcOpen = () => dc.readyState === 'open' || ctx.getClientDc()?.readyState === 'open'
+        if (epoch !== attemptEpoch || isDcOpen()) return
+        if (isVirtualDcOpen()) return
         const curPc = ctx.getClientPc()
         if (!curPc || curPc.connectionState === 'connected') return
         const localSdp = curPc.localDescription?.sdp || ''
-        const hadInitialV6 = /a=candidate:[^\r\n]*\s[23][0-9a-f]{0,3}:/i.test(localSdp)
-        if (!hadInitialV6) {
+        const hadInitialSdpV6 = /a=candidate:[^\r\n]*\s[23][0-9a-f]{0,3}:/i.test(localSdp)
+        if (!hadInitialSdpV6 && !hadInitialNicV6) {
           resetLocalIpv6ProbeCache()
           const freshV6 = await probeLocalInterfaceIpv6()
-          if (freshV6 && isGlobalIpv6Address(freshV6) && epoch === attemptEpoch && dc.readyState !== 'open') {
+          if (
+            freshV6 &&
+            isGlobalIpv6Address(freshV6) &&
+            epoch === attemptEpoch &&
+            !isDcOpen() &&
+            !isVirtualDcOpen()
+          ) {
             log.info(`[WebRTC Client] Late SLAAC GUA IPv6 (${freshV6}) became ready after Wi-Fi switch; restarting handshake to inject IPv6!`)
             void restartClientConnection(ctx.getClientForceRelay())
           }
         }
       }, 1800)
 
-      // 2. 给足零 TURN 原生双栈 (IPv6 + IPv4 srflx + 序列端口预测打洞) 3.8 秒黄金窗口；
-      // 若移动端 VPN 彻底封死所有 IPv6/UDP 报文，在 3.8 秒时极速启用基于 WSS TLS 的 VirtualDataChannel，同时后台继续尝试静默升级原生 P2P
-      virtualFallbackTimer = setTimeout(() => {
-        virtualFallbackTimer = null
-        if (epoch === attemptEpoch && dc.readyState !== 'open') {
-          activateVirtualFallbackChannel(epoch, sessionId)
-        }
-      }, 3800)
+      if (!isTestEnv) {
+        // 2. 给足零 TURN 原生双栈 (IPv6 + IPv4 srflx + 序列端口预测打洞) 3.8 秒黄金窗口；
+        // 若移动端 VPN 彻底封死所有 IPv6/UDP 报文，在 3.8 秒时极速启用基于 WSS TLS 的 VirtualDataChannel，同时后台继续尝试静默升级原生 P2P
+        virtualFallbackTimer = setTimeout(() => {
+          virtualFallbackTimer = null
+          if (epoch === attemptEpoch && dc.readyState !== 'open') {
+            activateVirtualFallbackChannel(epoch, sessionId)
+          }
+        }, 3800)
+      }
     }
 
     connectWatchdog = setTimeout(() => {
@@ -503,183 +382,6 @@ export function createClientSession(ctx: ClientSessionContext) {
       )
       failAttempt(epoch, 'connect_timeout')
     }, CONNECTION_TIMING.CLIENT_CONNECT_TIMEOUT_MS)
-  }
-
-  async function checkAndScheduleSilentUpgrade(immediate = false) {
-    if (ctx.isHostMode?.() || ctx.isExplicitlyClosed()) return
-    const pc = ctx.getClientPc()
-    const dc = ctx.getClientDc()
-    if (!pc || pc.connectionState !== 'connected' || !dc || dc.readyState !== 'open') return
-    if (isSilentUpgradeInFlight) return
-
-    const curInfo = ctx.peerMgr.currentTransportInfo
-    const curType = curInfo?.type
-    const curTier = getTransportTier(curType)
-    // 已经处于最优直连链路（lan_p2p / ipv6_p2p），无需升级
-    if (curTier >= 2) {
-      clearSilentUpgradeTimers()
-      return
-    }
-
-    let hasLocalIpv6 = false
-    try {
-      const localIpv6 = await probeLocalInterfaceIpv6()
-      hasLocalIpv6 = Boolean(localIpv6 && isGlobalIpv6Address(localIpv6))
-    } catch {}
-
-    const delayMs = immediate ? 0 : getSilentUpgradeDelayMs(curType, silentUpgradeProbeCount, hasLocalIpv6)
-    if (delayMs === null) {
-      return
-    }
-
-    if (silentUpgradeTimer) {
-      clearTimeout(silentUpgradeTimer)
-      silentUpgradeTimer = null
-    }
-
-    log.info(
-      `[WebRTC Client] Scheduling silent upgrade probe #${silentUpgradeProbeCount + 1} in ${delayMs}ms (current: ${curType || 'unknown'})`
-    )
-    silentUpgradeTimer = setTimeout(() => {
-      silentUpgradeTimer = null
-      void executeSilentUpgrade()
-    }, delayMs)
-  }
-
-  async function executeSilentUpgrade() {
-    if (isSilentUpgradeInFlight) return
-    const pc = ctx.getClientPc()
-    const dc = ctx.getClientDc()
-    if (!pc || pc.connectionState !== 'connected' || !dc || dc.readyState !== 'open') return
-
-    const curInfo = ctx.peerMgr.currentTransportInfo
-    const baselineTier = getTransportTier(curInfo?.type)
-    if (baselineTier >= 2) return
-
-    isSilentUpgradeInFlight = true
-    silentUpgradeProbeCount++
-    const probeSeq = silentUpgradeProbeCount
-    log.info(
-      `[WebRTC Client] Executing silent in-place ICE restart probe #${probeSeq} (baseline transport: ${curInfo?.type || 'unknown'})`
-    )
-
-    ctx.peerMgr.beginSilentUpgrade(pc)
-    ctx.peerMgr.holdLocalCandidates(pc)
-
-    const epoch = attemptEpoch
-    const currentSessionId = ctx.getClientSessionId()
-
-    try {
-      try {
-        if (typeof pc.setConfiguration === 'function') {
-          pc.setConfiguration(buildIceConfiguration(false, false))
-        }
-      } catch {}
-
-      const offer = await pc.createOffer({ iceRestart: true })
-      if (epoch !== attemptEpoch || ctx.getClientPc() !== pc) {
-        ctx.peerMgr.endSilentUpgrade(pc)
-        isSilentUpgradeInFlight = false
-        return
-      }
-
-      await pc.setLocalDescription(offer)
-      if (epoch !== attemptEpoch || ctx.getClientPc() !== pc) {
-        ctx.peerMgr.endSilentUpgrade(pc)
-        isSilentUpgradeInFlight = false
-        return
-      }
-
-      const rawOffer = {
-        type: offer.type,
-        sdp: optimizeSdpCandidates(pc?.localDescription?.sdp || offer.sdp || '', true),
-        deviceId: ctx.getLocalDeviceId(),
-        username: ctx.getUsername?.() || '',
-        userId: ctx.getUserId?.() || '',
-        allowTurn: false,
-        forceRelay: false,
-        iceRestart: true
-      }
-
-      let offerPayload: any = rawOffer
-      if (ctx.sas.clientSharedAesKey) {
-        try {
-          offerPayload = await encryptSignalingData(ctx.sas.clientSharedAesKey, JSON.stringify(rawOffer))
-        } catch (err) {
-          log.warn('Failed to encrypt silent upgrade offer, sending plaintext fallback:', err)
-        }
-      }
-
-      ctx.getSignaling()?.send(
-        {
-          offer: offerPayload,
-          ecdhPublicKey: ctx.getLocalEcdhPubHex(),
-          deviceId: ctx.getLocalDeviceId(),
-          clientSessionId: currentSessionId,
-          hostSessionId: ctx.getCurrentHostSessionId(),
-          username: ctx.getUsername?.() || '',
-          userId: ctx.getUserId?.() || '',
-          allowTurn: false,
-          forceRelay: false,
-          iceRestart: true
-        },
-        ctx.getClientHostSenderId()
-      )
-
-      ctx.peerMgr.releaseLocalCandidates(pc)
-
-      const startTime = Date.now()
-      let upgradeFinished = false
-
-      const finishUpgrade = (succeeded: boolean, newType?: string) => {
-        if (upgradeFinished) return
-        upgradeFinished = true
-        if (silentUpgradeSettleTimer) {
-          clearTimeout(silentUpgradeSettleTimer)
-          silentUpgradeSettleTimer = null
-        }
-        if (silentUpgradeSettlePollTimer) {
-          clearInterval(silentUpgradeSettlePollTimer)
-          silentUpgradeSettlePollTimer = null
-        }
-        ctx.peerMgr.endSilentUpgrade(pc)
-        isSilentUpgradeInFlight = false
-
-        if (succeeded) {
-          log.info(`[WebRTC Client] Silent upgrade SUCCEEDED! Upgraded to ${newType} (in ${Date.now() - startTime}ms)`)
-          if (getTransportTier(newType as any) >= 2) {
-            clearSilentUpgradeTimers()
-          } else {
-            void checkAndScheduleSilentUpgrade()
-          }
-        } else {
-          log.info(`[WebRTC Client] Silent upgrade #${probeSeq} finished without path improvement. Maintaining existing transport.`)
-          void checkAndScheduleSilentUpgrade()
-        }
-      }
-
-      silentUpgradeSettlePollTimer = setInterval(async () => {
-        if (epoch !== attemptEpoch || ctx.getClientPc() !== pc) {
-          finishUpgrade(false)
-          return
-        }
-        await ctx.peerMgr.updateTransportInfo(pc)
-        const newInfo = ctx.peerMgr.currentTransportInfo
-        const newTier = getTransportTier(newInfo?.type)
-        if (newTier > baselineTier) {
-          finishUpgrade(true, newInfo?.type)
-        }
-      }, SILENT_UPGRADE.SETTLE_POLL_MS)
-
-      silentUpgradeSettleTimer = setTimeout(() => {
-        finishUpgrade(false)
-      }, SILENT_UPGRADE.SETTLE_MS)
-    } catch (err) {
-      log.warn(`[WebRTC Client] Silent upgrade offer creation failed:`, err)
-      ctx.peerMgr.endSilentUpgrade(pc)
-      isSilentUpgradeInFlight = false
-      void checkAndScheduleSilentUpgrade()
-    }
   }
 
   async function doSetupClientConnection(forceRelay = false) {
@@ -701,9 +403,10 @@ export function createClientSession(ctx: ClientSessionContext) {
       Boolean((globalThis as any).__vitest_worker__) ||
       (globalThis as any).__TEST_ALLOW_UNSIGNED_SIGNALING__ !== undefined
 
-    if (!isTestEnv) {
+    if (!isTestEnv || (globalThis as any).__TEST_ALLOW_DOH_WARMUP__) {
       void probeLocalInterfaceIpv6().catch(() => {})
-      void warmUpDoHStunIpv6().catch(() => {})
+      await waitForDoHStunIpv6Bounded(300)
+      if (epoch !== attemptEpoch) return
     }
 
     const turnDisabledByUser =
@@ -717,7 +420,7 @@ export function createClientSession(ctx: ClientSessionContext) {
     const pc = ctx.peerMgr.createPeerConnection(
       undefined,
       (reason?: string) => {
-        if (activeVirtualDc && activeVirtualDc.readyState === 'open' && ctx.getClientDc() === (activeVirtualDc as any)) {
+        if (isVirtualDcActiveOnClient()) {
           log.info(`Native PC reported ${reason}, but VirtualDataChannel is active and healthy; scheduling background native P2P retry.`)
           scheduleBackgroundNativeP2pRetry(epoch)
           return
@@ -746,11 +449,9 @@ export function createClientSession(ctx: ClientSessionContext) {
       log.info(`Native DataChannel 'scoutingpro-data' OPENED! Client connected via direct WebRTC (epoch: ${epoch}).`)
       if (failedEpoch === epoch) failedEpoch = -1
       // 若此前已激活了虚拟通道，无缝热切换升级到原生 UDP DataChannel！
-      if (activeVirtualDc) {
+      if (getActiveVirtualDc()) {
         log.info('Hot-upgrading active session from VirtualDataChannel to Native UDP DataChannel!')
-        activeVirtualDc.onclose = null
-        try { activeVirtualDc.close() } catch {}
-        activeVirtualDc = null
+        closeActiveVirtualDc(true, true)
       }
       ctx.setClientDc(dc)
       ctx.setClientSender(sender)
@@ -763,13 +464,12 @@ export function createClientSession(ctx: ClientSessionContext) {
     }
     dc.onclose = () => {
       if (epoch !== attemptEpoch) return
-      if (activeVirtualDc && activeVirtualDc.readyState === 'open' && ctx.getClientDc() === (activeVirtualDc as any)) {
+      if (isVirtualDcActiveOnClient()) {
         return
       }
       log.warn(`DataChannel 'scoutingpro-data' CLOSED (epoch: ${epoch}, sasState: ${ctx.sas.clientSasState})`)
       stopDataChannelHeartbeat()
-      clearSilentUpgradeTimers()
-      isSilentUpgradeInFlight = false
+      resetSilentUpgradeState()
       const curSender = ctx.getClientSender?.()
       curSender?.abort('DataChannel closed')
       ctx.setClientSender(null)
@@ -813,10 +513,6 @@ export function createClientSession(ctx: ClientSessionContext) {
         if (epoch !== attemptEpoch) return
       }
 
-      const isTestEnv =
-        (typeof process !== 'undefined' && (process.env?.NODE_ENV === 'test' || process.env?.VITEST === 'true')) ||
-        Boolean((globalThis as any).__vitest_worker__) ||
-        (globalThis as any).__TEST_ALLOW_UNSIGNED_SIGNALING__ !== undefined
       if (!isTestEnv && pc.iceGatheringState !== 'complete') {
         await new Promise<void>((resolve) => {
           let done = false
@@ -840,10 +536,16 @@ export function createClientSession(ctx: ClientSessionContext) {
         if (epoch !== attemptEpoch) return
       }
 
+      const finalizedOfferSdp = await ctx.peerMgr.finalizeLocalSdp(
+        pc,
+        pc?.localDescription?.sdp || offer.sdp || ''
+      )
+      if (epoch !== attemptEpoch) return
+
       const rawOffer = {
         type: offer.type,
         // 读取 localDescription 以携带已收集到的公网 IPv6 与 VPN/STUN srflx 候选（与后续 trickle 候选互为冗余）
-        sdp: optimizeSdpCandidates(pc?.localDescription?.sdp || offer.sdp || '', true),
+        sdp: finalizedOfferSdp,
         ticket: handshakeTicket,
         deviceId: localDeviceId,
         username: ctx.getUsername?.() || '',
@@ -888,108 +590,6 @@ export function createClientSession(ctx: ClientSessionContext) {
       }
       log.error('Error creating offer:', err)
       failAttempt(epoch, 'offer_failed')
-    }
-  }
-
-  async function evaluateAndApplyClientTrust(
-    hostPubKey: string,
-    hostDeviceId?: string,
-    hostUsername?: string,
-    hostUserId?: string
-  ) {
-    const sas = ctx.sas
-    const previousHostPubHex = sas.clientHostEcdhPubHex
-    if (sas.clientSasState === 'PENDING_VERIFICATION' && previousHostPubHex === hostPubKey) {
-      return
-    }
-
-    const localEcdhPubHex = ctx.getLocalEcdhPubHex()
-    const currentInviteCode = ctx.getCurrentInviteCode()
-    if (!localEcdhPubHex || !currentInviteCode) return
-
-    // 确定性 Host 设备 ID：若信令未显式提供，依据公钥指纹前缀唯一绑定，支持主备多机并存
-    const effectiveHostDeviceId = hostDeviceId || `host_dev_${hostPubKey.slice(0, 16)}`
-    sas.clientHostDeviceId = effectiveHostDeviceId
-    sas.clientSecurityFingerprint = await computeSecurityFingerprint(localEcdhPubHex, hostPubKey, currentInviteCode)
-    log.info(`Computed SAS Fingerprint for Host: ${sas.clientSecurityFingerprint} (Device: ${effectiveHostDeviceId})`)
-
-    const effectiveHostUserId = hostUserId || sas.clientHostUserId || ''
-    const effectiveHostUsername = hostUsername || sas.clientHostUsername || (effectiveHostUserId ? `User ${effectiveHostUserId.slice(0, 8)}` : 'Host')
-    if (effectiveHostUserId) sas.clientHostUserId = effectiveHostUserId
-    if (effectiveHostUsername) sas.clientHostUsername = effectiveHostUsername
-
-    const isFlapping = Boolean(
-      previousHostPubHex &&
-      previousHostPubHex !== hostPubKey &&
-      sas.clientSasState === 'VERIFIED'
-    )
-
-    sas.clientHostEcdhPubHex = hostPubKey
-
-    // 检查本地 localStorage 显式核验记录（赛事 + 公钥）
-    let isLocallyApproved = false
-    try {
-      const storedSas = localStorage.getItem(`scoutingpro_verified_sas_${currentInviteCode}_${hostPubKey}`)
-      if (storedSas && storedSas === sas.clientSecurityFingerprint) {
-        isLocallyApproved = true
-      }
-    } catch {}
-
-    const trustEval = await evaluatePeerKeyTrust({
-      eventId: currentInviteCode || 'default_event',
-      userId: effectiveHostUserId,
-      username: effectiveHostUsername,
-      deviceId: sas.clientHostDeviceId,
-      publicKeyHex: hostPubKey,
-      isInSessionFlapping: isFlapping
-    })
-
-    if (trustEval.status === 'TRUSTED_MATCH' || trustEval.status === 'TOFU_FIRST_SEEN' || isLocallyApproved) {
-      log.info(
-        `Establishing baseline trust for Host device ${sas.clientHostDeviceId} (${effectiveHostUsername}). Auto-approving SAS. Status: ${trustEval.status} (localApproved: ${isLocallyApproved})`
-      )
-      if (trustEval.status === 'TOFU_FIRST_SEEN' || isLocallyApproved) {
-        await savePeerTrustRecord({
-          eventId: currentInviteCode || 'default_event',
-          userId: effectiveHostUserId,
-          username: effectiveHostUsername,
-          deviceId: sas.clientHostDeviceId,
-          publicKeyHex: hostPubKey,
-          firstSeenAt: Date.now(),
-          lastSeenAt: Date.now(),
-          trustedAt: Date.now(),
-          trustLevel: isLocallyApproved ? 'MANUAL_VERIFIED' : 'TOFU_TRUSTED'
-        })
-      }
-      sas.clientSasState = 'VERIFIED'
-      const pendingOut = [...sas.clientPendingOutgoing]
-      sas.clientPendingOutgoing = []
-      for (const item of pendingOut) {
-        ctx.sendMessage(item.msg, item.targetId)
-      }
-      const pendingIn = [...sas.clientPendingIncoming]
-      sas.clientPendingIncoming = []
-      for (const item of pendingIn) {
-        ctx.handleChannelMessage(item.ev, item.senderId)
-      }
-      ctx.callbacks.onSasVerified?.('host')
-    } else if (trustEval.status === 'KEY_ROTATION_ALERT') {
-      // 当已建立信任的设备公钥发生变动时，挂起通信并弹出安全核验，由用户核对安全码后决定同意还是拒绝
-      log.warn(`Security Notice [${trustEval.level}]: ${trustEval.message}. Gating client verification.`)
-      sas.clientSasState = 'PENDING_VERIFICATION'
-      if (sas.sasTimeoutTimers.has('host')) {
-        clearTimeout(sas.sasTimeoutTimers.get('host'))
-        sas.sasTimeoutTimers.delete('host')
-      }
-
-      ctx.callbacks.onSasVerificationRequired?.(
-        {
-          peerId: 'host',
-          username: effectiveHostUsername,
-          ecdhPublicKey: hostPubKey
-        },
-        sas.clientSecurityFingerprint
-      )
     }
   }
 
@@ -1045,7 +645,7 @@ export function createClientSession(ctx: ClientSessionContext) {
         try {
           const hostPub = await importEcdhPublicKey(data.ecdhPublicKey)
           sas.clientSharedAesKey = await deriveSharedAesKey(localEcdhKeyPair.privateKey, hostPub)
-          await evaluateAndApplyClientTrust(data.ecdhPublicKey, data.deviceId, data.username, data.userId)
+          await evaluateAndApplyClientTrust(ctx, data.ecdhPublicKey, data.deviceId, data.username, data.userId)
         } catch {}
       }
       // 若从机发出的首包 Offer 因订阅时序或无线丢包未被主机收到（卡在 have-local-offer 超过 3.5s），借主机心跳立即重发握手
@@ -1086,7 +686,7 @@ export function createClientSession(ctx: ClientSessionContext) {
         try {
           const hostPub = await importEcdhPublicKey(data.ecdhPublicKey)
           sas.clientSharedAesKey = await deriveSharedAesKey(localEcdhKeyPair.privateKey, hostPub)
-          await evaluateAndApplyClientTrust(data.ecdhPublicKey, data.deviceId, data.username, data.userId)
+          await evaluateAndApplyClientTrust(ctx, data.ecdhPublicKey, data.deviceId, data.username, data.userId)
         } catch (e) {
           log.warn('Failed to derive shared AES key or evaluate trust from host_hello:', e)
         }
@@ -1191,7 +791,7 @@ export function createClientSession(ctx: ClientSessionContext) {
           } catch {}
         }
         if (data.ecdhPublicKey) {
-          await evaluateAndApplyClientTrust(data.ecdhPublicKey, data.deviceId, data.username, data.userId)
+          await evaluateAndApplyClientTrust(ctx, data.ecdhPublicKey, data.deviceId, data.username, data.userId)
         }
 
         let answerData = data.answer
@@ -1281,15 +881,7 @@ export function createClientSession(ctx: ClientSessionContext) {
     }
 
     if (data.encrypted) {
-      const frame = await tryDecryptVirtualFrame(sas.clientSharedAesKey, data.encrypted)
-      if (frame && frame.sessionId === ctx.getClientSessionId()) {
-        if (!activeVirtualDc) {
-          activateVirtualFallbackChannel(attemptEpoch, frame.sessionId)
-        }
-        if (frame.vdc === 'data' && typeof frame.payload === 'string') {
-          activeVirtualDc?.receiveDecryptedPayload(frame.payload)
-        }
-      }
+      await handleIncomingEncryptedVirtualFrame(data.encrypted)
       return
     }
 
@@ -1385,115 +977,6 @@ export function createClientSession(ctx: ClientSessionContext) {
     } else if (data.type === 'sas_rejected') {
       log.warn(`Host rejected SAS verification. Reason: ${data.reason}`)
     }
-  }
-
-  const pendingPings = new Map<number, (ok: boolean) => void>()
-
-  function handlePong(timestamp: number) {
-    if (pendingPings.has(timestamp)) {
-      const resolve = pendingPings.get(timestamp)
-      pendingPings.delete(timestamp)
-      if (activeVirtualDc && ctx.getClientDc() === (activeVirtualDc as any) && ctx.peerMgr.currentTransportInfo) {
-        const rtt = Math.max(1, Date.now() - timestamp)
-        ctx.peerMgr.currentTransportInfo = {
-          ...ctx.peerMgr.currentTransportInfo,
-          rttMs: rtt,
-          securityFingerprint: ctx.sas.clientSecurityFingerprint || ctx.peerMgr.currentTransportInfo.securityFingerprint
-        }
-        ;(ctx.callbacks.onTransportInfoChanged || ctx.callbacks.onTransportChange)?.(ctx.peerMgr.currentTransportInfo)
-      }
-      resolve?.(true)
-    }
-  }
-
-  async function pingHost(timeoutMs = 800): Promise<boolean> {
-    const dc = ctx.getClientDc()
-    const pc = ctx.getClientPc()
-    const isVirtualOpen = Boolean((dc as any)?.isVirtual && dc?.readyState === 'open')
-    if (!dc || dc.readyState !== 'open' || (!isVirtualOpen && (!pc || pc.connectionState !== 'connected'))) {
-      return false
-    }
-    const ts = Date.now()
-    return new Promise((resolve) => {
-      const timer = setTimeout(() => {
-        pendingPings.delete(ts)
-        resolve(false)
-      }, timeoutMs)
-
-      pendingPings.set(ts, (ok) => {
-        clearTimeout(timer)
-        resolve(ok)
-      })
-
-      try {
-        ctx.sendMessage({ type: 'PING' as any, timestamp: ts })
-      } catch {
-        clearTimeout(timer)
-        pendingPings.delete(ts)
-        resolve(false)
-      }
-    })
-  }
-
-  let dataChannelHeartbeatTimer: ReturnType<typeof setInterval> | null = null
-  let consecutiveFailedPings = 0
-
-  function startDataChannelHeartbeat() {
-    stopDataChannelHeartbeat()
-    consecutiveFailedPings = 0
-    const epoch = attemptEpoch
-    const intervalMs = (globalThis as any).__TEST_HEARTBEAT_INTERVAL_MS__ ?? 2000
-    const defaultPingTimeoutMs = (globalThis as any).__TEST_PING_TIMEOUT_MS__
-
-    dataChannelHeartbeatTimer = setInterval(async () => {
-      if (epoch !== attemptEpoch) {
-        stopDataChannelHeartbeat()
-        return
-      }
-      const dc = ctx.getClientDc()
-      const pc = ctx.getClientPc()
-      const isVirtualOpen = Boolean((dc as any)?.isVirtual && dc?.readyState === 'open')
-      if (!dc || dc.readyState !== 'open' || (!isVirtualOpen && (!pc || pc.connectionState !== 'connected'))) {
-        return
-      }
-      // VirtualDataChannel 走公共 MQTT Broker + 手机 VPN 时偶发 2~3s 抖动，放宽单次 Ping 超时至 3500ms
-      const effectiveTimeoutMs = defaultPingTimeoutMs ?? (isVirtualOpen ? 3500 : 1200)
-      const isAlive = await pingHost(effectiveTimeoutMs)
-      if (epoch !== attemptEpoch) return
-      if (!isAlive) {
-        consecutiveFailedPings++
-        log.warn(`DataChannel heartbeat ping timeout (${consecutiveFailedPings} consecutive misses)`)
-        if (consecutiveFailedPings === HEARTBEAT_DEGRADE_MISSES) {
-          // 关键修复：仅标记 degraded 并触发 onHostDisconnected，绝不调用 onActiveHostLeft()！
-          // 因为 onActiveHostLeft 会直接把 connStore.status 强行设为 'offline' 并弹出“主机离开房间”的错误提示，
-          // 导致后续 PONG 到达时因状态分裂无法恢复（日志 18:10:59 假离线断联的元凶）。
-          log.warn('Active host unresponsive via DataChannel heartbeat. Marking degraded and continuing to probe.')
-          ctx.peerMgr.resetTransportInfo()
-          ctx.setStatus('degraded')
-          ctx.callbacks.onHostDisconnected?.()
-        } else if (consecutiveFailedPings >= HEARTBEAT_REBUILD_MISSES) {
-          log.warn('DataChannel heartbeat dead for an extended period (SCTP wedged). Forcing connection rebuild.')
-          stopDataChannelHeartbeat()
-          failAttempt(epoch, 'heartbeat_timeout')
-        }
-      } else {
-        if (consecutiveFailedPings > 0 && ctx.getStatus() === 'degraded') {
-          log.info('DataChannel heartbeat restored, updating status to connected.')
-          ctx.setStatus('connected')
-          const pc2 = ctx.getClientPc()
-          if (pc2) void ctx.peerMgr.updateTransportInfo(pc2)
-        }
-        consecutiveFailedPings = 0
-      }
-    }, intervalMs)
-  }
-
-  function stopDataChannelHeartbeat() {
-    if (dataChannelHeartbeatTimer) {
-      clearInterval(dataChannelHeartbeatTimer)
-      dataChannelHeartbeatTimer = null
-    }
-    consecutiveFailedPings = 0
   }
 
   if (typeof window !== 'undefined') {

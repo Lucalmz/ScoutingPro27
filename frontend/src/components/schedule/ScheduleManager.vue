@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref, computed, onMounted, onUnmounted } from 'vue'
+import { ref, computed, onMounted, onUnmounted, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import type { ScoutingEvent, StationType, MatchScheduleItem, ScoutAssignment } from '@/types'
 import { useScheduleStore } from '@/stores/schedule'
@@ -86,7 +86,10 @@ function onRowMouseDown(matchNumber: number, e: MouseEvent, tournamentLevel?: st
   dragStartLevel = tournamentLevel
 }
 
-function onRowMouseEnter(matchNumber: number, tournamentLevel?: string) {
+function onRowMouseEnter(matchNumber: number, tournamentLevel?: string, e?: MouseEvent) {
+  if (e) {
+    onRowEnter(e)
+  }
   if (isMouseDown.value && props.isHost) {
     if (!dragMoved && dragStartMatch !== null) {
       dragMoved = true
@@ -344,6 +347,65 @@ async function handleClearSchedule() {
     toastStore.showToast(t('schedule.clear_success') || '赛程已清空', 'info')
   }
 }
+
+const highlightTop = ref(0)
+const highlightHeight = ref(0)
+const highlightVisible = ref(false)
+
+function onRowEnter(e: MouseEvent) {
+  const target = e.currentTarget as HTMLElement
+  if (target) {
+    highlightTop.value = target.offsetTop
+    highlightHeight.value = target.offsetHeight
+    highlightVisible.value = true
+  }
+}
+
+function onCardEnter(e: MouseEvent) {
+  onRowEnter(e)
+}
+
+function onListLeave() {
+  highlightVisible.value = false
+}
+
+const highlightStyle = computed(() => ({
+  top: `${highlightTop.value}px`,
+  height: `${highlightHeight.value}px`,
+  opacity: highlightVisible.value ? 1 : 0
+}))
+
+watch([searchQuery, filterMode], () => {
+  highlightVisible.value = false
+})
+
+// Staggered Entrance Handlers
+function beforeEnter(el: Element) {
+  const htmlEl = el as HTMLElement
+  htmlEl.style.opacity = '0'
+  htmlEl.style.transform = 'translateY(20px)'
+}
+
+function enter(el: Element, done: () => void) {
+  const htmlEl = el as HTMLElement
+  const index = parseInt(htmlEl.dataset.index || '0', 10)
+  const delay = Math.min(index, 10) * 40
+
+  requestAnimationFrame(() => {
+    setTimeout(() => {
+      htmlEl.style.setProperty('transition', 'all var(--motion-duration-normal) var(--motion-ease-out)', 'important')
+      htmlEl.style.opacity = '1'
+      htmlEl.style.transform = 'translateY(0)'
+
+      setTimeout(() => {
+        htmlEl.style.removeProperty('transition')
+        htmlEl.style.removeProperty('opacity')
+        htmlEl.style.removeProperty('transform')
+        done()
+      }, 360)
+    }, delay)
+  })
+}
 </script>
 
 <template>
@@ -499,27 +561,38 @@ async function handleClearSchedule() {
         <span>{{ t('schedule.drag_wheel_hint') }}</span>
       </div>
 
-      <table class="schedule-table">
-        <thead>
-          <tr>
-            <th class="th-match">{{ t('schedule.col_match') }}</th>
-            <th class="th-alliance red-hdr">{{ t('schedule.red_alliance') }}</th>
-            <th class="th-alliance blue-hdr">{{ t('schedule.blue_alliance') }}</th>
-            <th class="th-score">{{ t('schedule.col_official_score') }}</th>
-          </tr>
-        </thead>
-        <tbody>
-          <tr
-            v-for="sched in displayedSchedules"
-            :key="`${sched.tournamentLevel || 'QUALIFICATION'}_${sched.matchNumber}`"
-            :data-match-num="sched.matchNumber"
-            :data-level="sched.tournamentLevel || 'QUALIFICATION'"
-            class="match-row"
-            :class="{ selected: scheduleStore.isMatchSelected(sched.matchNumber, sched.tournamentLevel) }"
-            @mousedown="onRowMouseDown(sched.matchNumber, $event, sched.tournamentLevel)"
-            @mouseenter="onRowMouseEnter(sched.matchNumber, sched.tournamentLevel)"
-            @click="onRowClick(sched.matchNumber, $event, sched.tournamentLevel)"
+      <div class="schedule-table-wrapper" style="position: relative;" @mouseleave="onListLeave">
+        <div class="hover-highlight" :style="highlightStyle" key="highlight-bg"></div>
+        <table class="schedule-table">
+          <thead @mouseenter="onListLeave">
+            <tr>
+              <th class="th-match">{{ t('schedule.col_match') }}</th>
+              <th class="th-alliance red-hdr">{{ t('schedule.red_alliance') }}</th>
+              <th class="th-alliance blue-hdr">{{ t('schedule.blue_alliance') }}</th>
+              <th class="th-score">{{ t('schedule.col_official_score') }}</th>
+            </tr>
+          </thead>
+          <transition-group
+            tag="tbody"
+            appear
+            :css="false"
+            @before-enter="beforeEnter"
+            @enter="enter"
+            @before-appear="beforeEnter"
+            @appear="enter"
           >
+            <tr
+              v-for="(sched, index) in displayedSchedules"
+              :key="`${sched.tournamentLevel || 'QUALIFICATION'}_${sched.matchNumber}`"
+              :data-index="index"
+              :data-match-num="sched.matchNumber"
+              :data-level="sched.tournamentLevel || 'QUALIFICATION'"
+              class="match-row"
+              :class="{ selected: scheduleStore.isMatchSelected(sched.matchNumber, sched.tournamentLevel) }"
+              @mousedown="onRowMouseDown(sched.matchNumber, $event, sched.tournamentLevel)"
+              @mouseenter="onRowMouseEnter(sched.matchNumber, sched.tournamentLevel, $event)"
+              @click="onRowClick(sched.matchNumber, $event, sched.tournamentLevel)"
+            >
             <!-- 场次标识 -->
             <td class="td-match">
               <div class="match-badge">{{ (sched.tournamentLevel || '').toUpperCase() === 'PLAYOFF' ? 'P' : 'Q' }}{{ sched.matchNumber }}</div>
@@ -647,8 +720,9 @@ async function handleClearSchedule() {
               </div>
             </td>
           </tr>
-        </tbody>
+        </transition-group>
       </table>
+    </div>
     </div>
 
     <!-- 导入弹窗 -->

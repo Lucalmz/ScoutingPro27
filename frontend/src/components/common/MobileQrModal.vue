@@ -240,8 +240,7 @@ function close() {
   position: fixed;
   inset: 0;
   z-index: 1000;
-  background: rgba(0, 0, 0, 0.85);
-  backdrop-filter: blur(10px);
+  background: rgba(8, 8, 7, 0.86);
   display: flex;
   align-items: center;
   justify-content: center;
@@ -251,15 +250,16 @@ function close() {
 }
 
 .qr-modal-dialog {
-  background: var(--card, #0a0a0a);
-  border: 1px solid var(--border, #262626);
-  border-radius: 16px;
+  background: var(--card, #141413);
+  border: 1px solid var(--border, #262624);
+  border-top: 2px solid var(--primary, #39ff14);
+  border-radius: 14px;
   width: 100%;
   max-width: 440px;
-  box-shadow: 0 24px 60px rgba(0, 0, 0, 0.8), 0 0 0 1px rgba(255, 255, 255, 0.05);
+  box-shadow: 0 24px 60px rgba(0, 0, 0, 0.85);
   display: flex;
   flex-direction: column;
-  color: var(--foreground, #f1f5f9);
+  color: var(--foreground, #f0efe9);
   font-family: inherit;
   overflow: hidden;
   animation: modalPop 0.25s cubic-bezier(0.16, 1, 0.3, 1);

@@ -100,10 +100,10 @@ const transportTooltip = computed(() => {
     <div
       v-if="conn.isIceStalled"
       class="ice-stall-badge"
-      :title="t('connection.ice_stalled_tooltip', '链路连接检测中，正在自动尝试重试或备用通道...')"
+      :title="t('connection.ice_stalled_tooltip')"
     >
       <span class="material-icons stall-icon spinning">sync</span>
-      <span class="stall-text">{{ t('connection.ice_stalled', '线路探测中...') }}</span>
+      <span class="stall-text">{{ t('connection.ice_stalled') }}</span>
     </div>
 
     <!-- Long Offline Reconnect Button -->
@@ -123,7 +123,7 @@ const transportTooltip = computed(() => {
     <button
       v-if="conn.pendingSasQueue.length > 0 && !conn.isSasModalOpen"
       class="pending-sas-btn"
-      :title="t('connection.sas_pending_badge_tooltip', '有新节点等待安全核验，点击打开核验窗口')"
+      :title="t('connection.sas_pending_badge_tooltip')"
       @click="conn.openSasModal"
     >
       <span class="material-icons pending-icon">shield</span>

@@ -102,23 +102,31 @@ onUnmounted(() => {
   display: flex;
   align-items: center;
   justify-content: center;
-  background: rgba(0, 0, 0, 0.72);
-  backdrop-filter: blur(8px);
+  background: rgba(8, 8, 7, 0.82);
   padding: 16px;
 }
 
 .confirm-modal-card {
   width: 100%;
   max-width: 440px;
-  background: var(--card, #131826);
-  border: 1px solid var(--border, rgba(255, 255, 255, 0.12));
-  border-radius: 16px;
+  background: var(--card, #141413);
+  border: 1px solid var(--border, #262624);
+  border-top: 3px solid #f59e0b;
+  border-radius: 14px;
   padding: 24px;
-  box-shadow: 0 16px 40px rgba(0, 0, 0, 0.6);
+  box-shadow: 0 24px 60px rgba(0, 0, 0, 0.82);
   display: flex;
   flex-direction: column;
   gap: 16px;
   animation: card-pop 0.2s cubic-bezier(0.34, 1.56, 0.64, 1);
+}
+
+.confirm-modal-card.danger {
+  border-top-color: #ef4444;
+}
+
+.confirm-modal-card.info {
+  border-top-color: #38bdf8;
 }
 
 @keyframes card-pop {
@@ -213,18 +221,19 @@ onUnmounted(() => {
 }
 
 .btn-secondary {
-  background: rgba(255, 255, 255, 0.08);
-  color: var(--foreground, #f8fafc);
-  border: 1px solid var(--border, rgba(255, 255, 255, 0.12));
+  background: #1c1c1a;
+  color: var(--foreground, #f0efe9);
+  border: 1px solid #353532;
 }
 
 .btn-secondary:hover {
-  background: rgba(255, 255, 255, 0.14);
+  background: #262624;
+  border-color: #4a4a46;
 }
 
 .btn-primary {
-  background: var(--primary, #38bdf8);
-  color: #000;
+  background: var(--primary, #39ff14);
+  color: #080807;
   font-weight: 700;
 }
 

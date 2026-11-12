@@ -3,8 +3,8 @@ package com.bear27570.app;
 import javax.imageio.ImageIO;
 import javax.swing.*;
 import java.awt.*;
-import java.awt.geom.Line2D;
-import java.awt.geom.RoundRectangle2D;
+import java.awt.geom.Point2D;
+import java.awt.geom.Rectangle2D;
 import java.awt.image.BufferedImage;
 import java.io.IOException;
 import java.io.InputStream;
@@ -12,21 +12,22 @@ import java.io.InputStream;
 /**
  * Splash screen shown while the app initializes.
  *
- * Visual language matches the main app's theme (see frontend/src/assets/main.css):
- *   background : #000000 (pure black)
- *   accent     : #39ff14 (fluorescent green)
- *   foreground : #f1f5f9
- *   muted text : #a3a3a3
- *   border     : #262626
- *   font       : Segoe UI / Helvetica Neue / Arial
+ * Deliberately minimal:
+ *   - flat black window, no border, no decoration
+ *   - the title and credit line are written out by a typewriter animation
+ *     (with a blinking fluorescent-green cursor), then the team logo fades in
+ *   - progress is a single borderless fluorescent-green bar (#39ff14) whose
+ *     left and right ends fade out to transparent
+ *
+ *   foreground : #f0efe9
+ *   muted text : #9e9d95
+ *   accent     : #39ff14
+ *   font       : Segoe UI
  *
  * Title + credit are stacked and centered as one tight group:
  *
  *              ScoutingPro27
  *          Led by 27570 [logo]
- *
- * Minimalist "hacker" look: no gradients, no gloss, no shine sweep — just
- * solid black and a single glowing green progress line.
  *
  * Guarantees at least MIN_VISIBLE_MS on screen regardless of how fast
  * initialization actually finishes (see closeSmoothly()).
@@ -47,16 +48,33 @@ import java.io.InputStream;
 public class SplashScreen extends JWindow {
 
     private static final long MIN_VISIBLE_MS = 3000; // hard floor: always show for at least 3s
-    private static final long ENTRANCE_MS = 650;
 
-    // ------- theme, matches frontend/src/assets/main.css tokens -------
+    // ------- typewriter timeline (ms since the splash was created) -------
+    private static final String TITLE = "ScoutingPro27";
+    private static final String CREDIT = "Led by 27570";
+    private static final long TITLE_START_MS = 300;
+    private static final long TITLE_CHAR_MS = 85;
+    private static final long CREDIT_START_MS = TITLE_START_MS + TITLE.length() * TITLE_CHAR_MS + 180;
+    private static final long CREDIT_CHAR_MS = 55;
+    private static final long LOGO_FADE_START_MS = CREDIT_START_MS + CREDIT.length() * CREDIT_CHAR_MS;
+    private static final long LOGO_FADE_MS = 450;
+    private static final long CURSOR_BLINK_MS = 530;
+
+    // ------- theme -------
     private static final Color BG_BLACK = new Color(0x00, 0x00, 0x00);
-    private static final Color BORDER = new Color(0x26, 0x26, 0x26);
-    private static final Color TEXT_PRIMARY = new Color(0xf1, 0xf5, 0xf9);
-    private static final Color TEXT_MUTED = new Color(0xa3, 0xa3, 0xa3);
+    private static final Color TEXT_PRIMARY = new Color(0xf0, 0xef, 0xe9);
+    private static final Color TEXT_MUTED = new Color(0x9e, 0x9d, 0x95);
     private static final Color GREEN = new Color(0x39, 0xff, 0x14); // --primary / --accent
+    private static final Color GREEN_CLEAR = new Color(0x39, 0xff, 0x14, 0);
 
-    private static final String FONT_FAMILY = "Segoe UI";
+    private static final String FONT_RESOURCE = "/assets/Orbitron-VariableFont_wght-CYB_IVAf.ttf";
+    private static final String FONT_FALLBACK_FAMILY = "Segoe UI";
+
+    private static final int BAR_HEIGHT = 2;
+    private static final float BAR_FADE_PX = 12f;
+
+    private final Font titleFont;
+    private final Font capFont;
 
     private final ContentPanel contentPanel = new ContentPanel();
     private final long startTime = System.currentTimeMillis();
@@ -74,6 +92,9 @@ public class SplashScreen extends JWindow {
         setBackground(BG_BLACK); // solid black window, no transparency needed
         setLayout(new BorderLayout());
 
+        titleFont = loadFont(FONT_RESOURCE, Font.BOLD, 32f);
+        capFont = loadFont(FONT_RESOURCE, Font.PLAIN, 15f);
+
         bearLogo = loadImage("/assets/logo-bear.png");
 
         add(contentPanel, BorderLayout.CENTER);
@@ -86,6 +107,19 @@ public class SplashScreen extends JWindow {
             contentPanel.repaint();
         });
         animTimer.start();
+    }
+
+    private Font loadFont(String classpathResource, int style, float size) {
+        try (InputStream in = SplashScreen.class.getResourceAsStream(classpathResource)) {
+            if (in != null) {
+                Font base = Font.createFont(Font.TRUETYPE_FONT, in);
+                GraphicsEnvironment.getLocalGraphicsEnvironment().registerFont(base);
+                return base.deriveFont(style, size);
+            }
+        } catch (Exception e) {
+            System.err.println("Could not load font " + classpathResource + ": " + e.getMessage() + ", falling back to " + FONT_FALLBACK_FAMILY);
+        }
+        return new Font(FONT_FALLBACK_FAMILY, style, (int) size);
     }
 
     private BufferedImage loadImage(String classpathResource) {
@@ -148,10 +182,10 @@ public class SplashScreen extends JWindow {
         super.dispose();
     }
 
-    private float entranceProgress() {
-        long elapsed = System.currentTimeMillis() - startTime;
-        float t = Math.min(1f, elapsed / (float) ENTRANCE_MS);
-        return 1 - (float) Math.pow(1 - t, 3);
+    /** Number of characters of {@code text} revealed at {@code elapsedMs}. */
+    private static int typedChars(String text, long elapsedMs, long startMs, long charMs) {
+        if (elapsedMs < startMs) return 0;
+        return (int) Math.min(text.length(), (elapsedMs - startMs) / charMs + 1);
     }
 
     private class ContentPanel extends JPanel {
@@ -180,125 +214,99 @@ public class SplashScreen extends JWindow {
 
             int w = getWidth();
             int h = getHeight();
+            long elapsed = System.currentTimeMillis() - startTime;
+            Composite oldComposite = g2.getComposite();
 
             g2.setColor(BG_BLACK);
             g2.fillRect(0, 0, w, h);
 
-            // thin, quiet border for edge definition — no glow, no color, matches --border token
-            g2.setColor(BORDER);
-            g2.setStroke(new BasicStroke(1f));
-            g2.draw(new RoundRectangle2D.Double(0.5, 0.5, w - 1, h - 1, 8, 8));
+            int titleTyped = typedChars(TITLE, elapsed, TITLE_START_MS, TITLE_CHAR_MS);
+            int creditTyped = typedChars(CREDIT, elapsed, CREDIT_START_MS, CREDIT_CHAR_MS);
 
-            float entrance = entranceProgress();
-            int slideOffset = (int) ((1 - entrance) * 16);
-
-            Composite oldComposite = g2.getComposite();
-
-            // ---------- title + credit line, stacked and centered as one tight group ----------
-            int groupTop = 110 - slideOffset;
-
-            // app title, with a soft green text-glow (matches .text-glow in main.css)
-            g2.setFont(new Font(FONT_FAMILY, Font.BOLD, 32));
-            String title = "ScoutingPro27";
+            // ---------- title: positions are computed from the FULL string so that the
+            // text stays put while it is being typed (no re-centering jitter) ----------
+            g2.setFont(titleFont);
             FontMetrics tfm = g2.getFontMetrics();
-            int titleX = (w - tfm.stringWidth(title)) / 2;
+            int titleX = (w - tfm.stringWidth(TITLE)) / 2;
+            int groupTop = 100;
             int titleY = groupTop + tfm.getAscent();
-            drawGlowText(g2, title, titleX, titleY);
 
-            // credit line directly underneath, close spacing, centered as a unit: "Led by 27570" + logo
-            // logo area 4x the previous size => linear dimensions 2x (50 -> 100)
-            int logoH = 100;
-            int gap = 14;
+            g2.setColor(TEXT_PRIMARY);
+            g2.drawString(TITLE.substring(0, titleTyped), titleX, titleY);
+            int titleEndX = titleX + tfm.stringWidth(TITLE.substring(0, titleTyped));
+
+            // ---------- credit line: "Led by 27570" + logo ----------
+            int logoH = 80;
+            int gap = 12;
             int creditGapFromTitle = 18;
 
-            g2.setComposite(AlphaComposite.getInstance(AlphaComposite.SRC_OVER, entrance));
-
-            Font capFont = new Font(FONT_FAMILY, Font.PLAIN, 19);
             g2.setFont(capFont);
             FontMetrics capFm = g2.getFontMetrics();
-            String creditText = "Led by 27570";
-            int textW = capFm.stringWidth(creditText);
+            int textW = capFm.stringWidth(CREDIT);
             int logoW = bearLogo != null ? scaledWidth(bearLogo, logoH) : 0;
             int groupW = textW + (bearLogo != null ? gap + logoW : 0);
 
             int rowTop = titleY + creditGapFromTitle;
             int rowCenterY = rowTop + logoH / 2;
             int rowX = (w - groupW) / 2;
-
             int capBaseline = rowCenterY + (capFm.getAscent() - capFm.getDescent()) / 2;
-            g2.setColor(TEXT_MUTED);
-            g2.drawString(creditText, rowX, capBaseline);
-            if (bearLogo != null) {
+
+            if (creditTyped > 0) {
+                g2.setColor(TEXT_MUTED);
+                g2.drawString(CREDIT.substring(0, creditTyped), rowX, capBaseline);
+            }
+            int creditEndX = rowX + capFm.stringWidth(CREDIT.substring(0, creditTyped));
+
+            if (bearLogo != null && elapsed >= LOGO_FADE_START_MS) {
+                float a = Math.min(1f, (elapsed - LOGO_FADE_START_MS) / (float) LOGO_FADE_MS);
+                g2.setComposite(AlphaComposite.getInstance(AlphaComposite.SRC_OVER, a));
                 g2.drawImage(bearLogo, rowX + textW + gap, rowTop, logoW, logoH, null);
+                g2.setComposite(oldComposite);
             }
 
-            g2.setComposite(oldComposite);
+            // ---------- blinking block cursor at the end of whatever is being typed ----------
+            boolean titleDone = titleTyped >= TITLE.length();
+            boolean creditActive = creditTyped > 0;
+            boolean blinkOn = (elapsed / CURSOR_BLINK_MS) % 2 == 0;
+            boolean typingNow = (!titleDone) || (creditActive && creditTyped < CREDIT.length());
+            if (typingNow || blinkOn) {
+                g2.setColor(GREEN);
+                if (creditActive) {
+                    int ch = capFm.getAscent();
+                    g2.fillRect(creditEndX + 3, capBaseline - ch + 2, 2, ch);
+                } else {
+                    int ch = tfm.getAscent();
+                    g2.fillRect(titleEndX + 3, titleY - ch + 4, 3, ch);
+                }
+            }
 
-            // ---------- progress: a single glowing green line ----------
-            int barX = 44;
-            int barY = h - 62;
-            int barW = w - 88;
-            drawGlowLine(g2, barX, barY, barW, displayedProgress / 100f);
-
-            g2.setColor(TEXT_MUTED);
-            g2.setFont(new Font(FONT_FAMILY, Font.PLAIN, 12));
-            g2.drawString(statusText, barX, barY - 12);
-
-            // ---------- engine credit ----------
-            g2.setComposite(AlphaComposite.getInstance(AlphaComposite.SRC_OVER, entrance * 0.65f));
-            g2.setColor(TEXT_MUTED);
-            g2.setFont(new Font(FONT_FAMILY, Font.ITALIC, 11));
-            String poweredBy = "Powered by Chromium";
-            FontMetrics pfm = g2.getFontMetrics();
-            g2.drawString(poweredBy, w - pfm.stringWidth(poweredBy) - 24, h - 18);
-            g2.setComposite(oldComposite);
+            // ---------- progress: one borderless green bar, both ends faded ----------
+            int barMargin = 80;
+            int barX = barMargin;
+            int barW = w - barMargin * 2;
+            int barY = h - 64;
+            drawFadedBar(g2, barX, barY, barW, displayedProgress / 100f);
 
             g2.dispose();
         }
 
         /**
-         * Draws the title with a tight, subtle green halo underneath (1px offsets
-         * only, so it reads as a soft glow rather than smearing the glyph edges),
-         * then a fully crisp copy on top.
+         * A single flat fluorescent-green line, no border and no track. The filled
+         * part fades to transparent at both its left and right ends.
          */
-        private void drawGlowText(Graphics2D g2, String text, int x, int y) {
-            g2.setColor(new Color(GREEN.getRed(), GREEN.getGreen(), GREEN.getBlue(), 90));
-            int[][] offsets = {{-1, 0}, {1, 0}, {0, -1}, {0, 1}};
-            for (int[] o : offsets) {
-                g2.drawString(text, x + o[0], y + o[1]);
-            }
-            g2.setColor(TEXT_PRIMARY);
-            g2.drawString(text, x, y);
-        }
-
-        /**
-         * A single flat green line representing progress, with a soft outer glow
-         * built from a few wider, more transparent strokes layered underneath —
-         * no gradient fill, no gloss, no animated sweep.
-         */
-        private void drawGlowLine(Graphics2D g2, int x, int y, int w, float ratio) {
-            // faint track for the full width, so the line still reads as a progress bar
-            g2.setStroke(new BasicStroke(2f, BasicStroke.CAP_ROUND, BasicStroke.JOIN_ROUND));
-            g2.setColor(BORDER);
-            g2.draw(new Line2D.Double(x, y, x + w, y));
-
+        private void drawFadedBar(Graphics2D g2, int x, int y, int w, float ratio) {
             float fillW = w * ratio;
-            if (fillW <= 0.5f) return;
+            if (fillW < 4f) return;
 
-            Line2D line = new Line2D.Double(x, y, x + fillW, y);
-
-            // layered glow: wide + faint, then narrower + brighter, then the crisp core
-            g2.setStroke(new BasicStroke(10f, BasicStroke.CAP_ROUND, BasicStroke.JOIN_ROUND));
-            g2.setColor(new Color(GREEN.getRed(), GREEN.getGreen(), GREEN.getBlue(), 25));
-            g2.draw(line);
-
-            g2.setStroke(new BasicStroke(6f, BasicStroke.CAP_ROUND, BasicStroke.JOIN_ROUND));
-            g2.setColor(new Color(GREEN.getRed(), GREEN.getGreen(), GREEN.getBlue(), 60));
-            g2.draw(line);
-
-            g2.setStroke(new BasicStroke(2.5f, BasicStroke.CAP_ROUND, BasicStroke.JOIN_ROUND));
-            g2.setColor(GREEN);
-            g2.draw(line);
+            float fadePx = Math.min(BAR_FADE_PX, fillW * 0.25f);
+            float f = fadePx / fillW;
+            LinearGradientPaint paint = new LinearGradientPaint(
+                    new Point2D.Float(x, 0),
+                    new Point2D.Float(x + fillW, 0),
+                    new float[]{0f, f, 1f - f, 1f},
+                    new Color[]{GREEN_CLEAR, GREEN, GREEN, GREEN_CLEAR});
+            g2.setPaint(paint);
+            g2.fill(new Rectangle2D.Float(x, y, fillW, BAR_HEIGHT));
         }
 
         private int scaledWidth(BufferedImage img, int targetH) {
