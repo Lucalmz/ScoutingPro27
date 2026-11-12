@@ -1,7 +1,7 @@
 import { defineStore } from 'pinia'
 import { ref } from 'vue'
 
-export type EventTab = 'scout' | 'rankings' | 'history' | 'schedule' | 'scouts' | 'ai' | 'pit'
+export type EventTab = 'scout' | 'rankings' | 'history' | 'schedule' | 'whiteboard' | 'scouts' | 'ai' | 'pit'
 
 export interface EventNavigationState {
   eventId: string

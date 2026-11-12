@@ -21,6 +21,7 @@ const props = defineProps<{
 
 const emit = defineEmits<{
   (e: 'startScouting', task: { matchNumber: number; teamNumber: number; allianceColor: 'red' | 'blue'; tournamentLevel?: string }): void
+  (e: 'openWhiteboard', match: { matchNumber: number; tournamentLevel?: string }): void
 }>()
 
 const { t } = useI18n()
@@ -595,7 +596,18 @@ function enter(el: Element, done: () => void) {
             >
             <!-- 场次标识 -->
             <td class="td-match">
-              <div class="match-badge">{{ (sched.tournamentLevel || '').toUpperCase() === 'PLAYOFF' ? 'P' : 'Q' }}{{ sched.matchNumber }}</div>
+              <div class="match-cell-stack">
+                <div class="match-badge">{{ (sched.tournamentLevel || '').toUpperCase() === 'PLAYOFF' ? 'P' : 'Q' }}{{ sched.matchNumber }}</div>
+                <button
+                  type="button"
+                  class="btn-match-whiteboard"
+                  :title="t('whiteboard.open_from_schedule')"
+                  @mousedown.stop
+                  @click.stop="emit('openWhiteboard', { matchNumber: sched.matchNumber, tournamentLevel: sched.tournamentLevel || 'QUALIFICATION' })"
+                >
+                  <span class="material-icons">draw</span>
+                </button>
+              </div>
             </td>
 
             <!-- 红方联盟 -->

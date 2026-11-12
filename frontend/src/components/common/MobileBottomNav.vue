@@ -35,6 +35,9 @@ interface NavItem {
 
 // Dynamic 5th tab
 const fifthItem = computed<NavItem>(() => {
+  if (props.activeTab === 'whiteboard') {
+    return { key: 'whiteboard', label: t('bottom_nav.whiteboard'), icon: 'draw' }
+  }
   if (props.activeTab === 'history') {
     return { key: 'history', label: t('bottom_nav.history'), icon: 'history' }
   }
@@ -60,6 +63,7 @@ const navItems = computed<NavItem[]>(() => {
 // Secondary Tabs (in More sheet)
 const moreItems = computed<NavItem[]>(() => {
   const items: NavItem[] = [
+    { key: 'whiteboard', label: t('bottom_nav.whiteboard'), icon: 'draw' },
     { key: 'history', label: t('bottom_nav.history'), icon: 'history' },
     { key: 'ai', label: t('bottom_nav.ai'), icon: 'smart_toy' }
   ]
@@ -70,7 +74,7 @@ const moreItems = computed<NavItem[]>(() => {
 })
 
 const isFifthActive = computed(() => {
-  return ['history', 'ai', 'scouts'].includes(props.activeTab)
+  return ['whiteboard', 'history', 'ai', 'scouts'].includes(props.activeTab)
 })
 
 function handleSelect(key: EventTab | 'more') {

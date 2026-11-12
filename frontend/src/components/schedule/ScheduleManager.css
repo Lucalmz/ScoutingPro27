@@ -460,6 +460,38 @@
   background: #0f1f12;
 }
 
+.match-cell-stack {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 5px;
+}
+
+.btn-match-whiteboard {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 26px;
+  height: 22px;
+  padding: 0;
+  border-radius: 5px;
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  background: rgba(255, 255, 255, 0.03);
+  color: var(--muted-foreground, #888);
+  cursor: pointer;
+  transition: all 0.15s ease;
+}
+
+.btn-match-whiteboard .material-icons {
+  font-size: 14px;
+}
+
+.btn-match-whiteboard:hover {
+  border-color: var(--primary, #39ff14);
+  color: var(--primary, #39ff14);
+  background: rgba(57, 255, 20, 0.1);
+}
+
 .th-score,
 .td-score {
   width: 110px;

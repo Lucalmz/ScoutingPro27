@@ -75,12 +75,12 @@ describe('Mobile and Fold Screen Responsive Architecture', () => {
     const sheet = document.body.querySelector('.more-sheet')
     expect(sheet).not.toBeNull()
 
-    // Action sheet contains history, ai, and scouts
+    // Action sheet contains whiteboard, history, ai, and scouts
     const sheetBtns = sheet!.querySelectorAll('.sheet-item-btn')
-    expect(sheetBtns.length).toBe(3)
+    expect(sheetBtns.length).toBe(4)
 
     // Clicking AI Chat in more sheet emits update:activeTab
-    await (sheetBtns[1] as HTMLButtonElement).click()
+    await (sheetBtns[2] as HTMLButtonElement).click()
     expect(wrapper.emitted('update:activeTab')?.[0]).toEqual(['ai'])
 
     // Sheet closes after selection

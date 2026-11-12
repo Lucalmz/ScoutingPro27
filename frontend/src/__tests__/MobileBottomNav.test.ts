@@ -98,12 +98,12 @@ describe('MobileBottomNav.vue', () => {
     expect(sheet).not.toBeNull()
 
     const sheetBtns = sheet!.querySelectorAll('.sheet-item-btn')
-    // Host has history, ai, scouts
-    expect(sheetBtns.length).toBe(3)
-    expect(sheetBtns[2].textContent).toContain('Scouts')
+    // Host has whiteboard, history, ai, scouts
+    expect(sheetBtns.length).toBe(4)
+    expect(sheetBtns[3].textContent).toContain('Scouts')
 
     // Click scouts button in sheet
-    await (sheetBtns[2] as HTMLButtonElement).click()
+    await (sheetBtns[3] as HTMLButtonElement).click()
     expect(wrapper.emitted('update:activeTab')).toBeTruthy()
     expect(wrapper.emitted('update:activeTab')![0]).toEqual(['scouts'])
   })

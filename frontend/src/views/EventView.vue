@@ -20,6 +20,7 @@ import HistoryList from '@/components/history/HistoryList.vue'
 import AiChatView from '@/components/ai/AiChatView.vue'
 import EventScoutsPanel from '@/components/scouting/EventScoutsPanel.vue'
 import ScheduleManager from '@/components/schedule/ScheduleManager.vue'
+import TacticalWhiteboardView from '@/components/whiteboard/TacticalWhiteboardView.vue'
 import SasVerificationModal from '@/components/common/SasVerificationModal.vue'
 import SessionConflictModal from '@/components/common/SessionConflictModal.vue'
 import TakeoverPromptModal from '@/components/common/TakeoverPromptModal.vue'
@@ -46,10 +47,16 @@ const recordStore = useRecordStore()
 const toastStore = useToastStore()
 
 const activeScoutTask = ref<{ matchNumber: number; teamNumber: number; allianceColor: 'red' | 'blue'; tournamentLevel?: string } | null>(null)
+const activeWhiteboardMatch = ref<{ matchNumber: number; tournamentLevel?: string } | null>(null)
 
 function handleStartScouting(task: { matchNumber: number; teamNumber: number; allianceColor: 'red' | 'blue'; tournamentLevel?: string }) {
   activeScoutTask.value = task
   switchTab('scout')
+}
+
+function handleOpenWhiteboard(match: { matchNumber: number; tournamentLevel?: string }) {
+  activeWhiteboardMatch.value = match
+  switchTab('whiteboard')
 }
 const connStore = useConnectionStore()
 const navStore = useNavigationStore()
@@ -186,7 +193,7 @@ onMounted(async () => {
     restorePosition(savedPos)
   } else if (route.query.tab) {
     const tabQuery = route.query.tab as string
-    if (['scout', 'pit', 'schedule', 'rankings', 'history', 'scouts', 'ai'].includes(tabQuery)) {
+    if (['scout', 'pit', 'schedule', 'whiteboard', 'rankings', 'history', 'scouts', 'ai'].includes(tabQuery)) {
       activeTab.value = tabQuery as EventTab
     }
   }
@@ -214,7 +221,7 @@ onUnmounted(() => {
 watch(
   () => route.query,
   (newQuery) => {
-    if (newQuery.tab && ['scout', 'pit', 'schedule', 'rankings', 'history', 'scouts', 'ai'].includes(newQuery.tab as string)) {
+    if (newQuery.tab && ['scout', 'pit', 'schedule', 'whiteboard', 'rankings', 'history', 'scouts', 'ai'].includes(newQuery.tab as string)) {
       activeTab.value = newQuery.tab as EventTab
     }
   }
@@ -481,6 +488,12 @@ async function handleTakeoverHost() {
           :event="event"
           :is-host="isHost"
           @startScouting="handleStartScouting"
+          @openWhiteboard="handleOpenWhiteboard"
+        />
+        <TacticalWhiteboardView
+          v-else-if="activeTab === 'whiteboard'"
+          :event-id="eventId"
+          :initial-match="activeWhiteboardMatch"
         />
         <RankingsTable
           v-else-if="activeTab === 'rankings'"

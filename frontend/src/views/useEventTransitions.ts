@@ -28,7 +28,7 @@ export function useEventTransitions({
       return saved.fromTab
     }
     const tabQuery = route.query.tab as string
-    if (tabQuery && ['scout', 'pit', 'schedule', 'rankings', 'history', 'scouts', 'ai'].includes(tabQuery)) {
+    if (tabQuery && ['scout', 'pit', 'schedule', 'whiteboard', 'rankings', 'history', 'scouts', 'ai'].includes(tabQuery)) {
       return tabQuery as EventTab
     }
     return 'scout'
@@ -41,6 +41,7 @@ export function useEventTransitions({
       { key: 'scout' as const, label: t('event.tab_scout') },
       { key: 'pit' as const, label: t('event.tab_pit') },
       { key: 'schedule' as const, label: t('event.tab_schedule') },
+      { key: 'whiteboard' as const, label: t('event.tab_whiteboard') },
       { key: 'rankings' as const, label: t('event.tab_rankings') },
       { key: 'history' as const, label: t('event.tab_history') },
       { key: 'ai' as const, label: t('event.tab_ai') }
