@@ -279,6 +279,122 @@ export function hitTestRobotToken(
   return null
 }
 
+/**
+ * 将规范化场地坐标转换为 FTC 6x6 地垫网格编号 (A1 - F6)
+ */
+export function formatFieldTileCoord(fx: number, fy: number): string {
+  const cols = ['A', 'B', 'C', 'D', 'E', 'F']
+  const colIdx = Math.min(5, Math.max(0, Math.floor(clamp01(fx) * 6)))
+  const rowIdx = Math.min(5, Math.max(0, Math.floor(clamp01(fy) * 6)))
+  return `${cols[colIdx]}${rowIdx + 1}`
+}
+
+/**
+ * 磁吸对齐到 FTC 6x6 地垫中心或格线 (默认 12 等分，即每半块地垫一个磁吸锚点)
+ */
+export function snapToFieldGrid(
+  fx: number,
+  fy: number,
+  subdivisions = 12
+): NormalizedPoint {
+  const divs = Math.max(2, subdivisions)
+  const sx = Math.round(clamp01(fx) * divs) / divs
+  const sy = Math.round(clamp01(fy) * divs) / divs
+  return { x: clamp01(sx), y: clamp01(sy) }
+}
+
+/**
+ * 沿多段折线按进度 progress (0..1) 线性插值，返回当前位置、切线角度与已走过的折线顶点
+ * 用于战术路径动画演示与机器人轨迹自动巡航回放
+ */
+export function interpolatePointAlongPolyline(
+  points: NormalizedPoint[],
+  progress: number
+): {
+  x: number
+  y: number
+  angleDeg: number
+  partialPoints: NormalizedPoint[]
+} {
+  if (!points || points.length === 0) {
+    return { x: 0.5, y: 0.5, angleDeg: 0, partialPoints: [] }
+  }
+  const p0 = points[0]!
+  if (points.length === 1 || progress <= 0) {
+    const p1 = points[1] || p0
+    const deg = (Math.atan2(p1.y - p0.y, p1.x - p0.x) * 180) / Math.PI
+    return { x: p0.x, y: p0.y, angleDeg: Number.isFinite(deg) ? deg : 0, partialPoints: [{ ...p0 }] }
+  }
+
+  const clampedProg = clamp01(progress)
+  const segLengths: number[] = []
+  let totalLen = 0
+  for (let i = 0; i < points.length - 1; i++) {
+    const a = points[i]!
+    const b = points[i + 1]!
+    const len = Math.hypot(b.x - a.x, b.y - a.y)
+    segLengths.push(len)
+    totalLen += len
+  }
+
+  if (totalLen <= 1e-6 || clampedProg >= 1) {
+    const last = points[points.length - 1]!
+    const prev = points[points.length - 2] || p0
+    const deg = (Math.atan2(last.y - prev.y, last.x - prev.x) * 180) / Math.PI
+    return {
+      x: last.x,
+      y: last.y,
+      angleDeg: Number.isFinite(deg) ? deg : 0,
+      partialPoints: points.map((p) => ({ ...p }))
+    }
+  }
+
+  const targetDist = totalLen * clampedProg
+  let accum = 0
+  const partial: NormalizedPoint[] = [{ ...p0 }]
+
+  for (let i = 0; i < segLengths.length; i++) {
+    const segLen = segLengths[i]!
+    const a = points[i]!
+    const b = points[i + 1]!
+    if (accum + segLen >= targetDist && segLen > 0) {
+      const localT = (targetDist - accum) / segLen
+      const curX = a.x + (b.x - a.x) * localT
+      const curY = a.y + (b.y - a.y) * localT
+      const deg = (Math.atan2(b.y - a.y, b.x - a.x) * 180) / Math.PI
+      partial.push({ x: curX, y: curY })
+      return {
+        x: curX,
+        y: curY,
+        angleDeg: Number.isFinite(deg) ? deg : 0,
+        partialPoints: partial
+      }
+    }
+    partial.push({ ...b })
+    accum += segLen
+  }
+
+  const last = points[points.length - 1]!
+  return { x: last.x, y: last.y, angleDeg: 0, partialPoints: partial }
+}
+
+/**
+ * 逆序命中检测最顶层笔画 ID（供选择工具平移或橡皮擦悬停高亮使用）
+ */
+export function hitTestTopStroke(
+  strokes: WhiteboardStroke[],
+  pt: NormalizedPoint,
+  hitRadiusNorm = 0.032
+): string | null {
+  for (let i = strokes.length - 1; i >= 0; i--) {
+    const s = strokes[i]!
+    if (isStrokeHitByEraser(s, pt, hitRadiusNorm)) {
+      return s.id
+    }
+  }
+  return null
+}
+
 export function createEmptyPhaseBoard(
   phase: WhiteboardPhase,
   teams: { red1: number; red2: number; blue1: number; blue2: number }
@@ -330,6 +446,7 @@ export function useTacticalWhiteboard(options: UseTacticalWhiteboardOptions) {
   const fieldRotation = ref<FieldRotation>(0)
   const fieldFlipH = ref<boolean>(false)
   const showGridCoords = ref<boolean>(true)
+  const snapToGrid = ref<boolean>(false)
   const isFullscreen = ref<boolean>(false)
   const showSidebar = ref<boolean>(true)
   const sidebarMode = ref<'overview' | 'detail'>('overview')
@@ -650,6 +767,26 @@ export function useTacticalWhiteboard(options: UseTacticalWhiteboardOptions) {
     savePlansToStorage()
   }
 
+  function beginStrokeTranslate(strokeId: string): boolean {
+    const board = currentPhaseBoard.value
+    const exists = board.strokes.some((s) => s.id === strokeId)
+    if (!exists) return false
+    pushUndoSnapshot(board)
+    return true
+  }
+
+  function translateStrokeById(strokeId: string, dx: number, dy: number) {
+    const board = currentPhaseBoard.value
+    const stroke = board.strokes.find((s) => s.id === strokeId)
+    if (!stroke) return
+    stroke.points = stroke.points.map((p) => ({
+      x: clamp01(p.x + dx),
+      y: clamp01(p.y + dy)
+    }))
+    currentPlan.value.updatedAt = Date.now()
+    savePlansToStorage()
+  }
+
   function moveRobotToken(station: StationType, fx: number, fy: number) {
     const robot = currentPhaseBoard.value.robots[station]
     if (!robot) return
@@ -791,6 +928,7 @@ export function useTacticalWhiteboard(options: UseTacticalWhiteboardOptions) {
     fieldRotation,
     fieldFlipH,
     showGridCoords,
+    snapToGrid,
     isFullscreen,
     showSidebar,
     sidebarMode,
@@ -811,6 +949,8 @@ export function useTacticalWhiteboard(options: UseTacticalWhiteboardOptions) {
     setCustomMatchTeams,
     addStroke,
     eraseStrokesAt,
+    beginStrokeTranslate,
+    translateStrokeById,
     undo,
     redo,
     clearCurrentPhaseStrokes,

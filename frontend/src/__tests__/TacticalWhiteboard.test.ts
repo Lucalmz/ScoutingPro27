@@ -10,7 +10,11 @@ import {
   viewToFieldCoords,
   distanceToSegment,
   isStrokeHitByEraser,
+  hitTestTopStroke,
   hitTestRobotToken,
+  formatFieldTileCoord,
+  snapToFieldGrid,
+  interpolatePointAlongPolyline,
   createDefaultPhaseRobots,
   useTacticalWhiteboard,
   type FieldRotation,
@@ -138,6 +142,59 @@ describe('Tactical Whiteboard Core Geometry & Hit-Testing', () => {
     expect(hitTestRobotToken(robots, 0.14, 0.30)).toBe('red1')
     expect(hitTestRobotToken(robots, 0.86, 0.70)).toBe('blue2')
     expect(hitTestRobotToken(robots, 0.50, 0.50)).toBeNull()
+  })
+
+  it('formats field tile coordinates (A1-F6), snaps to magnetic grid, hit-tests top stroke, and interpolates along polylines', () => {
+    expect(formatFieldTileCoord(0.05, 0.05)).toBe('A1')
+    expect(formatFieldTileCoord(0.95, 0.95)).toBe('F6')
+    expect(formatFieldTileCoord(0.42, 0.42)).toBe('C3')
+
+    const snapped = snapToFieldGrid(0.241, 0.512, 12)
+    expect(snapped.x).toBeCloseTo(3 / 12, 5)
+    expect(snapped.y).toBeCloseTo(6 / 12, 5)
+
+    const strokes: WhiteboardStroke[] = [
+      {
+        id: 'bottom-stroke',
+        type: 'line',
+        color: '#ef4444',
+        width: 4,
+        points: [
+          { x: 0.2, y: 0.2 },
+          { x: 0.8, y: 0.2 }
+        ],
+        createdAt: 1
+      },
+      {
+        id: 'top-stroke',
+        type: 'arrow',
+        color: '#3b82f6',
+        width: 4,
+        points: [
+          { x: 0.5, y: 0.1 },
+          { x: 0.5, y: 0.5 }
+        ],
+        createdAt: 2
+      }
+    ]
+    // Intersection at (0.5, 0.2) should hit the top-most stroke first
+    expect(hitTestTopStroke(strokes, { x: 0.5, y: 0.2 }, 0.03)).toBe('top-stroke')
+
+    // Polyline interpolation for Tactical Simulation Playback
+    const poly = [
+      { x: 0.1, y: 0.2 },
+      { x: 0.5, y: 0.2 },
+      { x: 0.5, y: 0.6 }
+    ]
+    const mid = interpolatePointAlongPolyline(poly, 0.5)
+    expect(mid.x).toBeCloseTo(0.5, 5)
+    expect(mid.y).toBeCloseTo(0.2, 5)
+    expect(mid.partialPoints.length).toBeGreaterThanOrEqual(2)
+
+    const threeQuarter = interpolatePointAlongPolyline(poly, 0.75)
+    expect(threeQuarter.x).toBeCloseTo(0.5, 5)
+    expect(threeQuarter.y).toBeCloseTo(0.4, 5)
+    expect(threeQuarter.angleDeg).toBeCloseTo(90, 2)
   })
 })
 
@@ -270,6 +327,36 @@ describe('useTacticalWhiteboard Composable State & Persistence', () => {
     })
     expect(wb.selectedMatchKey.value).toBe('CUSTOM')
     expect(wb.currentPhaseBoard.value.strokes).toEqual([])
+  })
+
+  it('supports stroke translation in Select mode with Undo/Redo snapshot recovery', () => {
+    const wb = useTacticalWhiteboard({
+      eventId: ref('evt-translate'),
+      schedules: ref([]),
+      officialMatches: ref([])
+    })
+
+    wb.addStroke({
+      id: 'st-drag',
+      type: 'arrow',
+      color: '#ef4444',
+      width: 5,
+      points: [
+        { x: 0.2, y: 0.3 },
+        { x: 0.4, y: 0.5 }
+      ],
+      createdAt: 100
+    })
+
+    expect(wb.beginStrokeTranslate('st-drag')).toBe(true)
+    wb.translateStrokeById('st-drag', 0.1, 0.05)
+    expect(wb.currentPhaseBoard.value.strokes[0]!.points[0]!.x).toBeCloseTo(0.3, 5)
+    expect(wb.currentPhaseBoard.value.strokes[0]!.points[0]!.y).toBeCloseTo(0.35, 5)
+
+    // Undo restores the original position before drag
+    wb.undo()
+    expect(wb.currentPhaseBoard.value.strokes[0]!.points[0]!.x).toBeCloseTo(0.2, 5)
+    expect(wb.currentPhaseBoard.value.strokes[0]!.points[0]!.y).toBeCloseTo(0.3, 5)
   })
 })
 
@@ -426,5 +513,19 @@ describe('TacticalWhiteboardView Component Integration (Match -> 4 Teams -> Side
     expect(q2Text).toContain('#28882')
     expect(q2Text).toContain('#29991')
     expect(q2Text).toContain('#29992')
+
+    // Toggle Magnetic Grid Snap button and Shortcuts modal
+    const snapBtn = wrapper.find('[data-testid="wb-btn-snap-grid"]')
+    expect(snapBtn.exists()).toBe(true)
+    expect(snapBtn.classes()).not.toContain('active')
+    await snapBtn.trigger('click')
+    await nextTick()
+    expect(snapBtn.classes()).toContain('active')
+
+    const shortcutsBtn = wrapper.find('[data-testid="wb-btn-shortcuts"]')
+    expect(shortcutsBtn.exists()).toBe(true)
+    await shortcutsBtn.trigger('click')
+    await nextTick()
+    expect(wrapper.find('.wb-shortcuts-panel').exists()).toBe(true)
   })
 })

@@ -6,7 +6,7 @@ import { useRecordStore } from '@/stores/records'
 import { usePitScoutStore } from '@/stores/pitScout'
 import { useNavigationStore } from '@/stores/navigation'
 import { calculateBragIndex } from '@/utils/bragIndex'
-import { sortRecordsChronologically, getMatchLevelPrefix } from '@/utils/tournament'
+import { sortRecordsChronologically, getMatchLevelPrefix, getRecordTournamentLevel } from '@/utils/tournament'
 import TagPicker from '@/components/common/TagPicker.vue'
 import type { StationType, ScoutingRecord, PitScoutingRecord, RankingRow, BragInfo } from '@/types'
 import {
@@ -30,6 +30,7 @@ const emit = defineEmits<{
   (e: 'rotateStation', station: StationType): void
   (e: 'updateRole', payload: { station: StationType; role: TacticalRole }): void
   (e: 'updateNotes', notes: string): void
+  (e: 'loadMatch', payload: { matchNumber: number; tournamentLevel: string }): void
 }>()
 
 const { t } = useI18n()
@@ -562,7 +563,15 @@ function openFullTeamPage(teamNumber: number) {
             :class="{ broken: rec.isBroken }"
           >
             <div class="wb-hist-top">
-              <span class="wb-hist-match">{{ getMatchLevelPrefix(rec) }}{{ rec.matchNumber }}</span>
+              <button
+                type="button"
+                class="wb-hist-match-btn"
+                :title="t('whiteboard.load_match_to_board')"
+                @click="emit('loadMatch', { matchNumber: rec.matchNumber, tournamentLevel: getRecordTournamentLevel(rec) })"
+              >
+                <span class="wb-hist-match">{{ getMatchLevelPrefix(rec) }}{{ rec.matchNumber }}</span>
+                <span class="material-icons" aria-hidden="true" style="font-size: 12px;">draw</span>
+              </button>
               <span class="wb-hist-scores">
                 A:{{ rec.autoScore }} · T:{{ rec.teleopScore }} · E:{{ rec.endgameScore }}
               </span>
@@ -699,12 +708,35 @@ function openFullTeamPage(teamNumber: number) {
 
 .wb-pred-fill.red {
   background: linear-gradient(90deg, #dc2626, #f97316);
-  transition: width 0.25s ease;
+  transition: width 0.35s ease-out;
 }
 
 .wb-pred-fill.blue {
   background: linear-gradient(90deg, #06b6d4, #2563eb);
-  transition: width 0.25s ease;
+  transition: width 0.35s ease-out;
+}
+
+@media (prefers-reduced-motion: no-preference) {
+  .wb-pred-fill.red,
+  .wb-pred-fill.blue {
+    transition: width 0.55s linear(0, 0.45 15%, 1.08 35%, 0.97 55%, 1.01 75%, 1);
+  }
+}
+
+.wb-hist-match-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  padding: 2px 6px;
+  border-radius: 5px;
+  border: 1px solid rgba(57, 255, 20, 0.25);
+  background: rgba(57, 255, 20, 0.06);
+  color: var(--primary, #39ff14);
+  cursor: pointer;
+}
+
+.wb-hist-match-btn:hover {
+  background: rgba(57, 255, 20, 0.16);
 }
 
 .wb-sidebar-scroll {

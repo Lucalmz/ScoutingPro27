@@ -41,12 +41,18 @@ const wb = useTacticalWhiteboard({
 
 const canvasCompRef = ref<InstanceType<typeof WhiteboardFieldCanvas> | null>(null)
 const showCustomTeamsEditor = ref(false)
+const showShortcutsHelp = ref(false)
+const isSimPlaying = ref(false)
 const customTeamInputs = ref({
   red1: '',
   red2: '',
   blue1: '',
   blue2: ''
 })
+
+function handleToggleSimulation() {
+  canvasCompRef.value?.toggleSimulation()
+}
 
 function openCustomTeamsEditor() {
   const cur = wb.currentTeams.value
@@ -142,9 +148,15 @@ function onKeyDown(e: KeyboardEvent) {
   if (target && (target.tagName === 'INPUT' || target.tagName === 'TEXTAREA' || target.tagName === 'SELECT')) {
     return
   }
-  if (e.key === 'Escape' && wb.isFullscreen.value) {
-    wb.isFullscreen.value = false
-    return
+  if (e.key === 'Escape') {
+    if (showShortcutsHelp.value) {
+      showShortcutsHelp.value = false
+      return
+    }
+    if (wb.isFullscreen.value) {
+      wb.isFullscreen.value = false
+      return
+    }
   }
   if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'z') {
     if (e.shiftKey) {
@@ -154,9 +166,48 @@ function onKeyDown(e: KeyboardEvent) {
       e.preventDefault()
       wb.undo()
     }
-  } else if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'y') {
+    return
+  }
+  if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'y') {
     e.preventDefault()
     wb.redo()
+    return
+  }
+  if (e.ctrlKey || e.metaKey || e.altKey) return
+
+  if (e.code === 'Space') {
+    e.preventDefault()
+    handleToggleSimulation()
+    return
+  }
+  if (e.key === '?') {
+    showShortcutsHelp.value = !showShortcutsHelp.value
+    return
+  }
+
+  const keyMap: Record<string, WhiteboardTool> = {
+    '1': 'select',
+    v: 'select',
+    '2': 'pen',
+    p: 'pen',
+    '3': 'arrow',
+    a: 'arrow',
+    '4': 'dashed-arrow',
+    d: 'dashed-arrow',
+    '5': 'line',
+    l: 'line',
+    '6': 'rect',
+    r: 'rect',
+    '7': 'circle',
+    c: 'circle',
+    '8': 'text',
+    t: 'text',
+    '9': 'eraser',
+    e: 'eraser'
+  }
+  const mapped = keyMap[e.key.toLowerCase()]
+  if (mapped) {
+    wb.activeTool.value = mapped
   }
 }
 
@@ -521,6 +572,28 @@ onUnmounted(() => {
         <button
           type="button"
           class="wb-icon-btn"
+          data-testid="wb-btn-play-sim"
+          :class="{ active: isSimPlaying }"
+          :title="isSimPlaying ? t('whiteboard.btn_stop_sim') : t('whiteboard.btn_play_sim')"
+          :aria-label="isSimPlaying ? t('whiteboard.btn_stop_sim') : t('whiteboard.btn_play_sim')"
+          @click="handleToggleSimulation"
+        >
+          <span class="material-icons" aria-hidden="true">{{ isSimPlaying ? 'stop_circle' : 'play_circle' }}</span>
+        </button>
+        <button
+          type="button"
+          class="wb-icon-btn"
+          data-testid="wb-btn-snap-grid"
+          :class="{ active: wb.snapToGrid.value }"
+          :title="t('whiteboard.btn_snap_grid')"
+          :aria-label="t('whiteboard.btn_snap_grid')"
+          @click="wb.snapToGrid.value = !wb.snapToGrid.value"
+        >
+          <span class="material-icons" aria-hidden="true">grid_goldenratio</span>
+        </button>
+        <button
+          type="button"
+          class="wb-icon-btn"
           data-testid="wb-btn-toggle-grid"
           :class="{ active: wb.showGridCoords.value }"
           :title="t('whiteboard.btn_toggle_grid')"
@@ -539,6 +612,36 @@ onUnmounted(() => {
         >
           <span class="material-icons" aria-hidden="true">download</span>
         </button>
+        <button
+          type="button"
+          class="wb-icon-btn"
+          data-testid="wb-btn-shortcuts"
+          :class="{ active: showShortcutsHelp }"
+          :title="t('whiteboard.btn_shortcuts')"
+          :aria-label="t('whiteboard.btn_shortcuts')"
+          @click="showShortcutsHelp = !showShortcutsHelp"
+        >
+          <span class="material-icons" aria-hidden="true">keyboard</span>
+        </button>
+      </div>
+    </div>
+
+    <!-- 可展开：快捷键与手势高阶指南浮层 -->
+    <div v-if="showShortcutsHelp" class="wb-shortcuts-panel" data-testid="wb-shortcuts-panel">
+      <div class="wb-shortcuts-hdr">
+        <span class="material-icons" aria-hidden="true" style="font-size: 16px; color: #39ff14;">bolt</span>
+        <strong>{{ t('whiteboard.shortcuts_title') }}</strong>
+        <button type="button" class="wb-clear-filter-btn" style="position: static; margin-left: auto;" @click="showShortcutsHelp = false">
+          <span class="material-icons" aria-hidden="true" style="font-size: 16px;">close</span>
+        </button>
+      </div>
+      <div class="wb-shortcuts-grid">
+        <div class="wb-sc-item">{{ t('whiteboard.shortcut_tools') }}</div>
+        <div class="wb-sc-item">{{ t('whiteboard.shortcut_sim') }}</div>
+        <div class="wb-sc-item">{{ t('whiteboard.shortcut_undo') }}</div>
+        <div class="wb-sc-item">{{ t('whiteboard.shortcut_snap') }}</div>
+        <div class="wb-sc-item">{{ t('whiteboard.shortcut_stroke_drag') }}</div>
+        <div class="wb-sc-item">{{ t('whiteboard.shortcut_rotate') }}</div>
       </div>
     </div>
 
@@ -553,6 +656,7 @@ onUnmounted(() => {
         :rotation="wb.fieldRotation.value"
         :flip-h="wb.fieldFlipH.value"
         :show-grid-coords="wb.showGridCoords.value"
+        :snap-to-grid="wb.snapToGrid.value"
         :strokes="wb.currentPhaseBoard.value.strokes"
         :robots="wb.currentPhaseBoard.value.robots"
         :selected-station="wb.selectedStation.value"
@@ -560,9 +664,12 @@ onUnmounted(() => {
         :match-label="currentMatchLabel"
         @add-stroke="wb.addStroke"
         @erase-at="wb.eraseStrokesAt"
+        @begin-stroke-drag="wb.beginStrokeTranslate"
+        @move-stroke="(p) => wb.translateStrokeById(p.strokeId, p.dx, p.dy)"
         @move-robot="(p) => wb.moveRobotToken(p.station, p.x, p.y)"
         @rotate-robot="wb.rotateRobotToken"
         @select-station="(st) => wb.selectStationForDetail(st, true)"
+        @simulation-change="(v) => (isSimPlaying = v)"
       />
 
       <WhiteboardSidebar
@@ -578,6 +685,7 @@ onUnmounted(() => {
         @rotate-station="wb.rotateRobotToken"
         @update-role="(p) => wb.setRobotRole(p.station, p.role)"
         @update-notes="wb.updateTacticalNotes"
+        @load-match="(m) => wb.selectMatchByNumber(m.matchNumber, m.tournamentLevel)"
       />
     </div>
   </div>
@@ -975,6 +1083,83 @@ onUnmounted(() => {
   font-size: 12px;
   font-weight: 800;
   cursor: pointer;
+}
+
+:where(.wb-root button) {
+  transition:
+    box-shadow 150ms ease-out,
+    scale 150ms ease-out,
+    border-color 150ms ease-out,
+    background-color 150ms ease-out;
+}
+
+:where(.wb-root button:not(:disabled)):hover {
+  box-shadow: 0 2px 10px rgba(0, 0, 0, 0.35);
+}
+
+:where(.wb-root button:not(:disabled)):active {
+  scale: 0.96;
+}
+
+:where(.wb-root button, .wb-root input, .wb-root select):focus-visible {
+  outline: 2px solid var(--primary, #39ff14);
+  outline-offset: 2px;
+}
+
+.wb-shortcuts-panel {
+  background: #141513;
+  border: 1px solid rgba(57, 255, 20, 0.45);
+  border-radius: 10px;
+  padding: 10px 14px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  transform-origin: top right;
+  animation: wb-panel-fade 150ms ease-out both;
+}
+
+@media (prefers-reduced-motion: no-preference) {
+  .wb-shortcuts-panel,
+  .wb-custom-teams-bar {
+    animation:
+      wb-panel-grow 320ms linear(0, 0.45 15%, 1.08 35%, 0.97 55%, 1.01 75%, 1) both,
+      wb-panel-fade 150ms ease-out both;
+  }
+}
+
+@keyframes wb-panel-grow {
+  from {
+    scale: 0.95;
+  }
+}
+
+@keyframes wb-panel-fade {
+  from {
+    opacity: 0;
+  }
+}
+
+.wb-shortcuts-hdr {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 12px;
+  color: var(--foreground, #f0efe9);
+}
+
+.wb-shortcuts-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+  gap: 6px 14px;
+}
+
+.wb-sc-item {
+  font-size: 11.5px;
+  color: #b5b4ae;
+  padding: 4px 8px;
+  background: #1b1c1a;
+  border: 1px solid #272825;
+  border-radius: 6px;
 }
 
 .wb-workspace {

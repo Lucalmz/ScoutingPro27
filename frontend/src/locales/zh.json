@@ -1305,6 +1305,19 @@
     "field_red_wall": "红方联盟站台 (RED ALLIANCE)",
     "field_blue_wall": "蓝方联盟站台 (BLUE ALLIANCE)",
     "field_center_goal": "核心花坛 / 发射目标区",
-    "field_park_zone": "停泊 / 观察区"
+    "field_park_zone": "停泊 / 观察区",
+    "btn_play_sim": "推演回放 (Space)",
+    "btn_stop_sim": "停止推演 (Space)",
+    "btn_snap_grid": "磁吸格心 (Shift)",
+    "btn_shortcuts": "快捷键与手势指南 (?)",
+    "shortcuts_title": "战术白板快捷键与高阶操作",
+    "shortcut_tools": "1-9 / V,P,A,D,L,R,C,T,E 切换画笔工具",
+    "shortcut_sim": "Space 播放/停止路径动画与机位轨迹推演",
+    "shortcut_undo": "Ctrl+Z / Ctrl+Y 撤销与重做笔画",
+    "shortcut_snap": "拖拽机位时按住 Shift (或开启磁吸) 自动对齐地垫格心",
+    "shortcut_stroke_drag": "选择工具 (V) 下可直接拖拽平移已有路径或文字标注",
+    "shortcut_rotate": "双击场地机位棋子顺时针旋转车头 90°",
+    "load_match_to_board": "载入此场至白板",
+    "sim_playing_badge": "战术轨迹推演中..."
   }
 }

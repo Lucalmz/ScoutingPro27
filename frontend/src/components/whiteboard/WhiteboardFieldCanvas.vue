@@ -6,6 +6,11 @@ import {
   fieldToViewCoords,
   viewToFieldCoords,
   hitTestRobotToken,
+  hitTestTopStroke,
+  isStrokeHitByEraser,
+  formatFieldTileCoord,
+  snapToFieldGrid,
+  interpolatePointAlongPolyline,
   STATION_LIST,
   type WhiteboardPhase,
   type WhiteboardTool,
@@ -23,6 +28,7 @@ const props = defineProps<{
   rotation: FieldRotation
   flipH: boolean
   showGridCoords: boolean
+  snapToGrid?: boolean
   strokes: WhiteboardStroke[]
   robots: Record<StationType, RobotTokenState>
   selectedStation: StationType
@@ -33,9 +39,12 @@ const props = defineProps<{
 const emit = defineEmits<{
   (e: 'addStroke', stroke: WhiteboardStroke): void
   (e: 'eraseAt', pt: NormalizedPoint): void
+  (e: 'beginStrokeDrag', strokeId: string): void
+  (e: 'moveStroke', payload: { strokeId: string; dx: number; dy: number }): void
   (e: 'moveRobot', payload: { station: StationType; x: number; y: number }): void
   (e: 'rotateRobot', station: StationType): void
   (e: 'selectStation', station: StationType): void
+  (e: 'simulationChange', isPlaying: boolean): void
 }>()
 
 const { t } = useI18n()
@@ -44,13 +53,170 @@ const containerRef = ref<HTMLElement | null>(null)
 const canvasRef = ref<HTMLCanvasElement | null>(null)
 const canvasSize = ref<number>(600)
 
-// 正在绘制中的临时笔画
+// 正在绘制中的临时笔画与高级交互状态
 const draftPoints = ref<NormalizedPoint[]>([])
 const isPointerDown = ref(false)
 const draggingStation = ref<StationType | null>(null)
+const draggingStrokeId = ref<string | null>(null)
+const hoveredStrokeId = ref<string | null>(null)
 const dragStartViewPt = ref<NormalizedPoint | null>(null)
+const lastDragFieldPt = ref<NormalizedPoint | null>(null)
 const robotDragMoved = ref(false)
 const hoverViewPt = ref<NormalizedPoint | null>(null)
+const hoverFieldPt = ref<NormalizedPoint | null>(null)
+const activeSnapPt = ref<NormalizedPoint | null>(null)
+
+// 战术轨迹推演回放状态 (0..1)
+const isSimulating = ref(false)
+const simProgress = ref(1)
+let simRafId: number | null = null
+let simStartTime = 0
+const SIM_DURATION_MS = 2800
+
+// 声呐脉冲水波纹动效队列
+interface CanvasRipple {
+  fx: number
+  fy: number
+  color: string
+  bornAt: number
+}
+const ripples = ref<CanvasRipple[]>([])
+let rippleRafId: number | null = null
+
+// 机器人平滑弹簧插值坐标（用于切换阶段/重置机位时的丝滑过渡）
+const displayRobotCoords = ref<Record<StationType, { x: number; y: number }>>({
+  red1: { x: 0.14, y: 0.30 },
+  red2: { x: 0.14, y: 0.70 },
+  blue1: { x: 0.86, y: 0.30 },
+  blue2: { x: 0.86, y: 0.70 }
+})
+let robotSpringRafId: number | null = null
+
+function syncDisplayRobotsImmediate() {
+  for (const st of STATION_LIST) {
+    const r = props.robots[st]
+    if (r) {
+      displayRobotCoords.value[st] = { x: r.x, y: r.y }
+    }
+  }
+}
+syncDisplayRobotsImmediate()
+
+function animateRobotTransition() {
+  if (typeof window === 'undefined' || typeof requestAnimationFrame === 'undefined') {
+    syncDisplayRobotsImmediate()
+    renderCanvas()
+    return
+  }
+  const prefersReduced =
+    typeof window.matchMedia === 'function' &&
+    window.matchMedia('(prefers-reduced-motion: reduce)').matches
+  if (prefersReduced || draggingStation.value) {
+    syncDisplayRobotsImmediate()
+    renderCanvas()
+    return
+  }
+
+  if (robotSpringRafId !== null) cancelAnimationFrame(robotSpringRafId)
+  const step = () => {
+    let needsMore = false
+    for (const st of STATION_LIST) {
+      const target = props.robots[st]
+      const cur = displayRobotCoords.value[st]
+      if (!target || !cur) continue
+      const dx = target.x - cur.x
+      const dy = target.y - cur.y
+      if (Math.hypot(dx, dy) > 0.0015) {
+        cur.x += dx * 0.26
+        cur.y += dy * 0.26
+        needsMore = true
+      } else {
+        cur.x = target.x
+        cur.y = target.y
+      }
+    }
+    renderCanvas()
+    if (needsMore) {
+      robotSpringRafId = requestAnimationFrame(step)
+    } else {
+      robotSpringRafId = null
+    }
+  }
+  robotSpringRafId = requestAnimationFrame(step)
+}
+
+function spawnRipple(fx: number, fy: number, color = '#39ff14') {
+  ripples.value.push({ fx, fy, color, bornAt: performance.now() })
+  if (rippleRafId === null && typeof requestAnimationFrame !== 'undefined') {
+    const tickRipples = () => {
+      const now = performance.now()
+      ripples.value = ripples.value.filter((r) => now - r.bornAt < 650)
+      renderCanvas()
+      if (ripples.value.length > 0) {
+        rippleRafId = requestAnimationFrame(tickRipples)
+      } else {
+        rippleRafId = null
+      }
+    }
+    rippleRafId = requestAnimationFrame(tickRipples)
+  }
+}
+
+function startSimulation() {
+  if (simRafId !== null && typeof cancelAnimationFrame !== 'undefined') {
+    cancelAnimationFrame(simRafId)
+  }
+  isSimulating.value = true
+  simProgress.value = 0
+  simStartTime = typeof performance !== 'undefined' ? performance.now() : Date.now()
+  emit('simulationChange', true)
+
+  if (typeof requestAnimationFrame === 'undefined') {
+    simProgress.value = 1
+    isSimulating.value = false
+    emit('simulationChange', false)
+    renderCanvas()
+    return
+  }
+
+  const stepSim = (now: number) => {
+    const elapsed = Math.max(0, now - simStartTime)
+    const prog = Math.min(1, elapsed / SIM_DURATION_MS)
+    simProgress.value = prog
+    renderCanvas()
+    if (prog < 1 && isSimulating.value) {
+      simRafId = requestAnimationFrame(stepSim)
+    } else {
+      simProgress.value = 1
+      isSimulating.value = false
+      simRafId = null
+      emit('simulationChange', false)
+      renderCanvas()
+    }
+  }
+  simRafId = requestAnimationFrame(stepSim)
+}
+
+function stopSimulation() {
+  if (simRafId !== null && typeof cancelAnimationFrame !== 'undefined') {
+    cancelAnimationFrame(simRafId)
+    simRafId = null
+  }
+  isSimulating.value = false
+  simProgress.value = 1
+  emit('simulationChange', false)
+  renderCanvas()
+}
+
+function toggleSimulation(): boolean {
+  if (isSimulating.value) {
+    stopSimulation()
+    return false
+  } else {
+    startSimulation()
+    return true
+  }
+}
 
 // 文本标注浮层状态
 const textPromptState = ref<{
@@ -296,26 +462,50 @@ function drawFtcFieldBase(ctx: CanvasRenderingContext2D, size: number) {
 function drawSingleStroke(
   ctx: CanvasRenderingContext2D,
   stroke: {
+    id?: string
     type: Exclude<WhiteboardTool, 'select' | 'eraser'>
     color: string
     width: number
     points: NormalizedPoint[]
     text?: string
   },
-  size: number
+  size: number,
+  options?: {
+    isHovered?: boolean
+    isEraserTarget?: boolean
+    simProgress?: number
+  }
 ) {
-  const pts = stroke.points
+  let pts = stroke.points
   if (!pts || pts.length === 0) return
 
   const scaleFactor = size / 600
   const lineWidth = Math.max(2, stroke.width * scaleFactor)
+  const prog = options?.simProgress !== undefined ? options.simProgress : 1
+
+  if (
+    prog < 1 &&
+    (stroke.type === 'pen' || stroke.type === 'arrow' || stroke.type === 'dashed-arrow' || stroke.type === 'line')
+  ) {
+    const interp = interpolatePointAlongPolyline(pts, prog)
+    pts = interp.partialPoints
+    if (pts.length === 0) return
+  }
 
   ctx.save()
-  ctx.strokeStyle = stroke.color
-  ctx.fillStyle = stroke.color
-  ctx.lineWidth = lineWidth
+  ctx.strokeStyle = options?.isEraserTarget ? '#ef4444' : stroke.color
+  ctx.fillStyle = options?.isEraserTarget ? '#ef4444' : stroke.color
+  ctx.lineWidth = options?.isHovered || options?.isEraserTarget ? lineWidth + 2 : lineWidth
   ctx.lineCap = 'round'
   ctx.lineJoin = 'round'
+
+  if (options?.isHovered) {
+    ctx.shadowColor = stroke.color
+    ctx.shadowBlur = 10
+  } else if (options?.isEraserTarget) {
+    ctx.shadowColor = '#ef4444'
+    ctx.shadowBlur = 14
+  }
 
   if (stroke.type === 'text') {
     const p0 = toViewPx(pts[0]!.x, pts[0]!.y, size)
@@ -333,14 +523,18 @@ function drawSingleStroke(
     const boxH = fontSize + padY * 2
 
     ctx.fillStyle = 'rgba(12, 13, 12, 0.88)'
-    ctx.strokeStyle = stroke.color
-    ctx.lineWidth = 1.5
+    ctx.strokeStyle = options?.isEraserTarget ? '#ef4444' : stroke.color
+    ctx.lineWidth = options?.isHovered || options?.isEraserTarget ? 2.5 : 1.5
     ctx.beginPath()
-    ctx.roundRect(p0.x - boxW / 2, p0.y - boxH / 2, boxW, boxH, 6)
+    if (typeof ctx.roundRect === 'function') {
+      ctx.roundRect(p0.x - boxW / 2, p0.y - boxH / 2, boxW, boxH, 6)
+    } else {
+      ctx.rect(p0.x - boxW / 2, p0.y - boxH / 2, boxW, boxH)
+    }
     ctx.fill()
     ctx.stroke()
 
-    ctx.fillStyle = stroke.color
+    ctx.fillStyle = options?.isEraserTarget ? '#ef4444' : stroke.color
     ctx.textAlign = 'center'
     ctx.textBaseline = 'middle'
     ctx.fillText(content, p0.x, p0.y)
@@ -361,7 +555,7 @@ function drawSingleStroke(
     const h = Math.abs(b.y - a.y)
 
     ctx.save()
-    ctx.globalAlpha = 0.14
+    ctx.globalAlpha = 0.14 * prog
     ctx.fillRect(x, y, w, h)
     ctx.restore()
 
@@ -378,7 +572,7 @@ function drawSingleStroke(
     }
     const a = toViewPx(pts[0]!.x, pts[0]!.y, size)
     const b = toViewPx(pts[pts.length - 1]!.x, pts[pts.length - 1]!.y, size)
-    const r = Math.hypot(b.x - a.x, b.y - a.y)
+    const r = Math.hypot(b.x - a.x, b.y - a.y) * prog
     ctx.beginPath()
     ctx.arc(a.x, a.y, r, 0, Math.PI * 2)
     ctx.save()
@@ -429,8 +623,96 @@ function drawSingleStroke(
     const last = viewPts[viewPts.length - 1]!
     ctx.lineTo(last.x, last.y)
     ctx.stroke()
+
+    // 若处于轨迹推演回放中，在自由画笔前端绘制高亮激光引导点
+    if (prog < 1) {
+      ctx.beginPath()
+      ctx.arc(last.x, last.y, lineWidth * 1.35, 0, Math.PI * 2)
+      ctx.fillStyle = '#39ff14'
+      ctx.fill()
+    }
   }
   ctx.restore()
+}
+
+function resolveSimulatedRobotPose(st: StationType, baseRobot: RobotTokenState): {
+  x: number
+  y: number
+  heading: number
+} {
+  if (!isSimulating.value || simProgress.value >= 1) {
+    const smooth = displayRobotCoords.value[st]
+    return {
+      x: draggingStation.value === st || !smooth ? baseRobot.x : smooth.x,
+      y: draggingStation.value === st || !smooth ? baseRobot.y : smooth.y,
+      heading: baseRobot.heading || 0
+    }
+  }
+
+  const stationColor =
+    st === 'red1' ? '#ef4444' : st === 'red2' ? '#f97316' : st === 'blue1' ? '#3b82f6' : '#06b6d4'
+
+  // 寻找属于该机器人的路径笔画（起点靠近该机器人或颜色匹配该工位）
+  const candidate = props.strokes.find((s) => {
+    if (s.type !== 'arrow' && s.type !== 'dashed-arrow' && s.type !== 'pen' && s.type !== 'line') {
+      return false
+    }
+    if (!s.points || s.points.length < 2) return false
+    const p0 = s.points[0]!
+    const nearStart = Math.hypot(p0.x - baseRobot.x, p0.y - baseRobot.y) <= 0.14
+    const sameColor = s.color.toLowerCase() === stationColor.toLowerCase()
+    return nearStart || sameColor
+  })
+
+  if (!candidate) {
+    return { x: baseRobot.x, y: baseRobot.y, heading: baseRobot.heading || 0 }
+  }
+
+  const interp = interpolatePointAlongPolyline(candidate.points, simProgress.value)
+  // 将切线角度 (0° = +X) 映射为白板机头角度 (0° = -Y / 上方, 90° = +X / 右方)
+  const headingFromTangent = ((Math.round(interp.angleDeg + 90) % 360) + 360) % 360
+  return {
+    x: interp.x,
+    y: interp.y,
+    heading: headingFromTangent
+  }
+}
+
+function drawRipplesAndSnapTarget(ctx: CanvasRenderingContext2D, size: number) {
+  const now = typeof performance !== 'undefined' ? performance.now() : Date.now()
+  for (const rp of ripples.value) {
+    const age = Math.max(0, Math.min(1, (now - rp.bornAt) / 650))
+    const p = toViewPx(rp.fx, rp.fy, size)
+    const radius = size * (0.04 + age * 0.095)
+    ctx.save()
+    ctx.beginPath()
+    ctx.arc(p.x, p.y, radius, 0, Math.PI * 2)
+    ctx.strokeStyle = rp.color
+    ctx.globalAlpha = Math.max(0, (1 - age) * 0.78)
+    ctx.lineWidth = 2.5 * (1 - age * 0.5)
+    ctx.stroke()
+    ctx.restore()
+  }
+
+  // 磁吸格心目标准星预览
+  if (draggingStation.value && activeSnapPt.value) {
+    const sp = toViewPx(activeSnapPt.value.x, activeSnapPt.value.y, size)
+    ctx.save()
+    ctx.strokeStyle = 'rgba(57, 255, 20, 0.85)'
+    ctx.lineWidth = 1.5
+    ctx.setLineDash([3, 3])
+    ctx.beginPath()
+    ctx.arc(sp.x, sp.y, size * 0.056, 0, Math.PI * 2)
+    ctx.stroke()
+    ctx.setLineDash([])
+    ctx.beginPath()
+    ctx.moveTo(sp.x - 8, sp.y)
+    ctx.lineTo(sp.x + 8, sp.y)
+    ctx.moveTo(sp.x, sp.y - 8)
+    ctx.lineTo(sp.x, sp.y + 8)
+    ctx.stroke()
+    ctx.restore()
+  }
 }
 
 function drawRobotTokens(ctx: CanvasRenderingContext2D, size: number) {
@@ -441,25 +723,32 @@ function drawRobotTokens(ctx: CanvasRenderingContext2D, size: number) {
     const r = props.robots[st]
     if (!r) continue
 
-    const pos = toViewPx(r.x, r.y, size)
+    const simPose = resolveSimulatedRobotPose(st, r)
+    const pos = toViewPx(simPose.x, simPose.y, size)
     const isRed = st.startsWith('red')
     const isSelected = props.selectedStation === st
     const isHighlighted = props.highlightedStation === st
+    const isDraggingThis = draggingStation.value === st
 
     const primaryColor =
       st === 'red1' ? '#ef4444' : st === 'red2' ? '#f97316' : st === 'blue1' ? '#3b82f6' : '#06b6d4'
 
     ctx.save()
     ctx.translate(pos.x, pos.y)
+    if (isDraggingThis) {
+      ctx.scale(1.12, 1.12)
+      ctx.shadowColor = primaryColor
+      ctx.shadowBlur = 18
+    }
 
     // 高亮脉冲光晕或选中光环
-    if (isHighlighted || isSelected) {
+    if (isHighlighted || isSelected || isDraggingThis) {
       ctx.save()
       ctx.beginPath()
       ctx.arc(0, 0, half * 1.38, 0, Math.PI * 2)
       ctx.strokeStyle = isHighlighted ? '#39ff14' : primaryColor
       ctx.lineWidth = isHighlighted ? 3.5 : 2
-      if (!isHighlighted) ctx.setLineDash([4, 3])
+      if (!isHighlighted && !isDraggingThis) ctx.setLineDash([4, 3])
       ctx.stroke()
       ctx.restore()
     }
@@ -467,14 +756,18 @@ function drawRobotTokens(ctx: CanvasRenderingContext2D, size: number) {
     // 机器人底盘方块
     ctx.fillStyle = isRed ? 'rgba(32, 12, 12, 0.94)' : 'rgba(11, 22, 38, 0.94)'
     ctx.strokeStyle = primaryColor
-    ctx.lineWidth = isSelected ? 3 : 2.2
+    ctx.lineWidth = isSelected || isDraggingThis ? 3 : 2.2
     ctx.beginPath()
-    ctx.roundRect(-half, -half, tokenSize, tokenSize, 9)
+    if (typeof ctx.roundRect === 'function') {
+      ctx.roundRect(-half, -half, tokenSize, tokenSize, 9)
+    } else {
+      ctx.rect(-half, -half, tokenSize, tokenSize)
+    }
     ctx.fill()
     ctx.stroke()
 
     // 机头朝向小三角指示器 (计算视图旋转与镜像后的角度)
-    let viewHeading = ((r.heading || 0) + props.rotation) % 360
+    let viewHeading = ((simPose.heading || 0) + props.rotation) % 360
     if (props.flipH) {
       viewHeading = (360 - viewHeading) % 360
     }
@@ -483,7 +776,7 @@ function drawRobotTokens(ctx: CanvasRenderingContext2D, size: number) {
     const ix = Math.cos(rad) * indicatorDist
     const iy = Math.sin(rad) * indicatorDist
     ctx.beginPath()
-    ctx.arc(ix, iy, 3.5, 0, Math.PI * 2)
+    ctx.arc(ix, iy, 3.8, 0, Math.PI * 2)
     ctx.fillStyle = '#39ff14'
     ctx.fill()
 
@@ -501,6 +794,31 @@ function drawRobotTokens(ctx: CanvasRenderingContext2D, size: number) {
     ctx.font = `700 ${Math.max(10, Math.floor(tokenSize * 0.25))}px "Manrope", sans-serif`
     ctx.textBaseline = 'top'
     ctx.fillText(teamText, 0, 1)
+
+    // 拖拽时顶部悬浮实时网格坐标与车头角度胶囊 (如: C3 · 90°)
+    if (isDraggingThis) {
+      const tileLabel = formatFieldTileCoord(r.x, r.y)
+      const hudText = `${activeSnapPt.value ? '🧲 ' : ''}${tileLabel} · ${r.heading}°`
+      ctx.font = `700 11px "Manrope", sans-serif`
+      const tw = ctx.measureText(hudText).width + 14
+      const th = 20
+      const ty = -half - 24
+      ctx.fillStyle = 'rgba(9, 10, 9, 0.94)'
+      ctx.strokeStyle = '#39ff14'
+      ctx.lineWidth = 1.2
+      ctx.beginPath()
+      if (typeof ctx.roundRect === 'function') {
+        ctx.roundRect(-tw / 2, ty, tw, th, 6)
+      } else {
+        ctx.rect(-tw / 2, ty, tw, th)
+      }
+      ctx.fill()
+      ctx.stroke()
+      ctx.fillStyle = '#39ff14'
+      ctx.textAlign = 'center'
+      ctx.textBaseline = 'middle'
+      ctx.fillText(hudText, 0, ty + th / 2)
+    }
 
     ctx.restore()
   }
@@ -531,12 +849,27 @@ function renderCanvas() {
   // 1. 绘制 FTC 场地底图
   drawFtcFieldBase(ctx, size)
 
-  // 2. 绘制已保存笔画
+  // 2. 绘制声呐水波纹与磁吸准星
+  drawRipplesAndSnapTarget(ctx, size)
+
+  // 3. 绘制已保存笔画（支持悬停发光、橡皮擦预警与轨迹推演动画）
   for (const stroke of props.strokes) {
-    drawSingleStroke(ctx, stroke, size)
+    const isEraserHit =
+      props.tool === 'eraser' &&
+      hoverFieldPt.value !== null &&
+      isStrokeHitByEraser(stroke, hoverFieldPt.value, 0.032)
+    const isHovered =
+      props.tool === 'select' &&
+      (hoveredStrokeId.value === stroke.id || draggingStrokeId.value === stroke.id)
+
+    drawSingleStroke(ctx, stroke, size, {
+      isHovered,
+      isEraserTarget: isEraserHit,
+      simProgress: isSimulating.value ? simProgress.value : 1
+    })
   }
 
-  // 3. 绘制正在拖拽中的预览笔画
+  // 4. 绘制正在拖拽中的预览笔画
   if (
     isPointerDown.value &&
     draftPoints.value.length > 0 &&
@@ -556,16 +889,16 @@ function renderCanvas() {
     )
   }
 
-  // 4. 绘制四台机器人机位 Token
+  // 5. 绘制四台机器人机位 Token
   drawRobotTokens(ctx, size)
 
-  // 5. 橡皮擦光标圈预览
+  // 6. 橡皮擦光标圈预览
   if (props.tool === 'eraser' && hoverViewPt.value) {
     ctx.save()
     ctx.beginPath()
     ctx.arc(hoverViewPt.value.x * size, hoverViewPt.value.y * size, size * 0.032, 0, Math.PI * 2)
-    ctx.strokeStyle = 'rgba(248, 250, 252, 0.85)'
-    ctx.fillStyle = 'rgba(239, 68, 68, 0.18)'
+    ctx.strokeStyle = 'rgba(248, 250, 252, 0.9)'
+    ctx.fillStyle = 'rgba(239, 68, 68, 0.22)'
     ctx.lineWidth = 1.5
     ctx.fill()
     ctx.stroke()
@@ -592,6 +925,9 @@ function getNormalizedFromPointerEvent(e: PointerEvent | MouseEvent): {
 
 function onPointerDown(e: PointerEvent) {
   if (e.button !== 0 && e.pointerType === 'mouse') return
+  if (isSimulating.value) {
+    stopSimulation()
+  }
   const canvas = canvasRef.value
   if (canvas && typeof canvas.setPointerCapture === 'function') {
     try {
@@ -601,19 +937,32 @@ function onPointerDown(e: PointerEvent) {
 
   const { viewPt, fieldPt } = getNormalizedFromPointerEvent(e)
   hoverViewPt.value = viewPt
+  hoverFieldPt.value = fieldPt
 
-  // 优先检测是否点中机器人机位 Token（在 select 工具下或任意工具下点中机位中心均可选中/在 select 下拖拽）
+  // 优先检测是否点中机器人机位 Token（除橡皮擦外，任意工具下直接按住机位棋子均可丝滑拖拽！）
   const hitStation = hitTestRobotToken(props.robots, fieldPt.x, fieldPt.y, 0.058)
-  if (hitStation && props.tool === 'select') {
+  if (hitStation && props.tool !== 'eraser') {
     isPointerDown.value = true
     draggingStation.value = hitStation
     dragStartViewPt.value = viewPt
     robotDragMoved.value = false
+    const stColor =
+      hitStation === 'red1' ? '#ef4444' : hitStation === 'red2' ? '#f97316' : hitStation === 'blue1' ? '#3b82f6' : '#06b6d4'
+    spawnRipple(props.robots[hitStation].x, props.robots[hitStation].y, stColor)
     emit('selectStation', hitStation)
     return
   }
 
+  // 在 select 工具下，检测是否点中已有笔画并允许整体拖拽平移
   if (props.tool === 'select') {
+    const hitStroke = hitTestTopStroke(props.strokes, fieldPt, 0.032)
+    if (hitStroke) {
+      isPointerDown.value = true
+      draggingStrokeId.value = hitStroke
+      lastDragFieldPt.value = fieldPt
+      emit('beginStrokeDrag', hitStroke)
+      renderCanvas()
+    }
     return
   }
 
@@ -645,9 +994,18 @@ function onPointerDown(e: PointerEvent) {
 function onPointerMove(e: PointerEvent) {
   const { viewPt, fieldPt } = getNormalizedFromPointerEvent(e)
   hoverViewPt.value = viewPt
+  hoverFieldPt.value = fieldPt
 
   if (!isPointerDown.value) {
-    if (props.tool === 'eraser') renderCanvas()
+    if (props.tool === 'select') {
+      const nextHover = hitTestTopStroke(props.strokes, fieldPt, 0.032)
+      if (nextHover !== hoveredStrokeId.value) {
+        hoveredStrokeId.value = nextHover
+        renderCanvas()
+      }
+    } else if (props.tool === 'eraser') {
+      renderCanvas()
+    }
     return
   }
 
@@ -658,11 +1016,24 @@ function onPointerMove(e: PointerEvent) {
     ) {
       robotDragMoved.value = true
     }
+    const shouldSnap = Boolean(props.snapToGrid || e.shiftKey)
+    const targetPt = shouldSnap ? snapToFieldGrid(fieldPt.x, fieldPt.y, 12) : fieldPt
+    activeSnapPt.value = shouldSnap ? targetPt : null
+    displayRobotCoords.value[draggingStation.value] = { x: targetPt.x, y: targetPt.y }
     emit('moveRobot', {
       station: draggingStation.value,
-      x: fieldPt.x,
-      y: fieldPt.y
+      x: targetPt.x,
+      y: targetPt.y
     })
+    renderCanvas()
+    return
+  }
+
+  if (draggingStrokeId.value && lastDragFieldPt.value) {
+    const dx = fieldPt.x - lastDragFieldPt.value.x
+    const dy = fieldPt.y - lastDragFieldPt.value.y
+    lastDragFieldPt.value = fieldPt
+    emit('moveStroke', { strokeId: draggingStrokeId.value, dx, dy })
     renderCanvas()
     return
   }
@@ -701,9 +1072,22 @@ function onPointerUp(e: PointerEvent) {
   isPointerDown.value = false
 
   if (draggingStation.value) {
+    const st = draggingStation.value
+    const r = props.robots[st]
+    if (r && robotDragMoved.value) {
+      spawnRipple(r.x, r.y, '#39ff14')
+    }
     draggingStation.value = null
     dragStartViewPt.value = null
+    activeSnapPt.value = null
     robotDragMoved.value = false
+    renderCanvas()
+    return
+  }
+
+  if (draggingStrokeId.value) {
+    draggingStrokeId.value = null
+    lastDragFieldPt.value = null
     renderCanvas()
     return
   }
@@ -748,6 +1132,7 @@ function onDoubleClick(e: MouseEvent) {
   const { fieldPt } = getNormalizedFromPointerEvent(e)
   const hitStation = hitTestRobotToken(props.robots, fieldPt.x, fieldPt.y, 0.058)
   if (hitStation) {
+    spawnRipple(props.robots[hitStation].x, props.robots[hitStation].y, '#39ff14')
     emit('rotateRobot', hitStation)
   }
 }
@@ -795,8 +1180,28 @@ function exportAsPng(): string | null {
 
 defineExpose({
   exportAsPng,
-  renderCanvas
+  renderCanvas,
+  startSimulation,
+  stopSimulation,
+  toggleSimulation
 })
+
+watch(
+  () => props.robots,
+  () => {
+    animateRobotTransition()
+  },
+  { deep: true }
+)
+
+watch(
+  () => props.highlightedStation,
+  (st) => {
+    if (st && props.robots[st]) {
+      spawnRipple(props.robots[st].x, props.robots[st].y, '#39ff14')
+    }
+  }
+)
 
 watch(
   () => [
@@ -808,7 +1213,6 @@ watch(
     props.flipH,
     props.showGridCoords,
     props.strokes,
-    props.robots,
     props.selectedStation,
     props.highlightedStation
   ],
@@ -830,6 +1234,15 @@ onMounted(() => {
 })
 
 onUnmounted(() => {
+  if (simRafId !== null && typeof cancelAnimationFrame !== 'undefined') {
+    cancelAnimationFrame(simRafId)
+  }
+  if (rippleRafId !== null && typeof cancelAnimationFrame !== 'undefined') {
+    cancelAnimationFrame(rippleRafId)
+  }
+  if (robotSpringRafId !== null && typeof cancelAnimationFrame !== 'undefined') {
+    cancelAnimationFrame(robotSpringRafId)
+  }
   resizeObserver?.disconnect()
   window.removeEventListener('resize', updateCanvasDimensions)
 })
@@ -850,6 +1263,20 @@ onUnmounted(() => {
         @mouseleave="hoverViewPt = null; renderCanvas()"
         @dblclick="onDoubleClick"
       ></canvas>
+
+      <!-- 战术轨迹推演回放 HUD 状态条（含可键盘触达的停止按钮，符合 WCAG 2.2.2） -->
+      <div v-if="isSimulating" class="wb-sim-hud" data-testid="wb-sim-hud">
+        <span class="wb-sim-dot" aria-hidden="true"></span>
+        <span class="wb-sim-text">{{ t('whiteboard.sim_playing_badge') }} ({{ Math.round(simProgress * 100) }}%)</span>
+        <button
+          type="button"
+          class="wb-sim-stop-btn"
+          :title="t('whiteboard.btn_stop_sim')"
+          @click="stopSimulation"
+        >
+          <span class="material-icons" aria-hidden="true" style="font-size: 14px;">stop</span>
+        </button>
+      </div>
 
       <!-- 浮动文字标注输入框 -->
       <div
@@ -926,9 +1353,53 @@ onUnmounted(() => {
   cursor: text;
 }
 
+.wb-sim-hud {
+  position: absolute;
+  top: 10px;
+  right: 10px;
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  padding: 5px 10px;
+  border-radius: 999px;
+  background: rgba(10, 12, 10, 0.92);
+  border: 1px solid rgba(57, 255, 20, 0.65);
+  color: #39ff14;
+  font-size: 11px;
+  font-weight: 700;
+  box-shadow: 0 6px 20px rgba(0, 0, 0, 0.65);
+  z-index: 15;
+}
+
+.wb-sim-dot {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: #39ff14;
+  box-shadow: 0 0 8px #39ff14;
+}
+
+.wb-sim-stop-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 22px;
+  height: 22px;
+  border-radius: 50%;
+  border: 1px solid rgba(239, 68, 68, 0.5);
+  background: rgba(239, 68, 68, 0.16);
+  color: #f87171;
+  cursor: pointer;
+}
+
+.wb-sim-stop-btn:hover {
+  background: rgba(239, 68, 68, 0.3);
+}
+
 .wb-text-popover {
   position: absolute;
   transform: translate(-50%, -50%);
+  transform-origin: center center;
   display: flex;
   align-items: center;
   gap: 6px;
@@ -938,6 +1409,27 @@ onUnmounted(() => {
   border-radius: 10px;
   box-shadow: 0 12px 28px rgba(0, 0, 0, 0.75);
   z-index: 20;
+  animation: wb-pop-fade 150ms ease-out both;
+}
+
+@media (prefers-reduced-motion: no-preference) {
+  .wb-text-popover {
+    animation:
+      wb-pop-spring 320ms linear(0, 0.45 15%, 1.08 35%, 0.97 55%, 1.01 75%, 1) both,
+      wb-pop-fade 150ms ease-out both;
+  }
+}
+
+@keyframes wb-pop-spring {
+  from {
+    scale: 0.88;
+  }
+}
+
+@keyframes wb-pop-fade {
+  from {
+    opacity: 0;
+  }
 }
 
 .wb-text-input {

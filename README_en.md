@@ -105,6 +105,7 @@ The table below benchmarks **ScoutingPro27** against classic open-source scoutin
 | **High Hang Rest Amnesty** | **Built-in strategic rest detection** | None | None | None | None |
 | **High-Availability Hot-Spare** | **Dual-Host Standby + Instant Handoff** | None (Single point of failure) | None | Dependent on cloud uptime | None |
 | **Official API & Penalty Deduction** | **Event Code bind + Auto Penalty strip** | Partial support | None | Basic schedule fetch | Manual calculation |
+| **Interactive Tactical Whiteboard** | **Viper-Style 4-Team Board + Live Sim** | Static maps / Separate app | None | Standalone drawing tool | Physical dry-erase board |
 | **Tactical AI Advisor** | **Built-in streaming AI with context feed** | None | None | Rare | None |
 | **UI & Experience** | **Native Bilingual + Cyber Glassmorphism** | English only / Raw Android | English only / Basic forms | English mostly / Generic web | Handwritten paper |
 | **Development Team** | **FTC Team 27570 Students** | Mentors + Senior Students | Mentors / Alumni | Commercial / Third-party | Ad-hoc team members |
@@ -264,7 +265,25 @@ Lead laptops face dead batteries, hardware crashes, or accidental cable disconne
 
 ---
 
-### 2.10 Step 9: Tactical AI Advisor
+### 2.10 Step 9: Viper-Style Interactive Tactical Whiteboard & Trajectory Simulation
+Before stepping onto the drive station, drivers, coaches, and alliance partners need to align on autonomous paths and teleop roles in seconds. ScoutingPro27 features a dedicated **[Tactical Whiteboard]** workspace inspired by **FTC Viper** and wired directly into your live scouting database:
+1. **Select Match -> Auto-Populate All 4 Teams (`R1 / R2 / B1 / B2`)**:
+   - Pick any match from the header selector (`Q12 · RED: 27570 19234 vs BLUE: 20401 20402`), step through matches with Prev/Next buttons, or jump directly from any row in the **[Schedule Workbench]** via the 1-click **[Whiteboard]** action button;
+   - All 4 draggable robot tokens (with heading arrows, role badges, and live field coordinates) automatically spawn in their alliance starting zones.
+2. **3-Phase Independent Layers & 1-Click Presets (`Auto / TeleOp / Endgame`)**:
+   - Autonomous, TeleOp, and Endgame each maintain isolated stroke layers, Undo/Redo stacks, and robot positions, with **[Sync from Previous Phase]** and 3 built-in tactical route presets.
+3. **Vector Drawing Tools, Magnetic Tile Snap & Select-Drag**:
+   - **9 Tools (Hotkeys `1`–`9` / `V,P,A,D,L,R,C,T,E`)**: Select & Stroke Translate, Quadratic-Smoothed Pen, Solid Tactical Arrow, Dashed Advance Arrow, Line, Defense Zone Rect, Circle, On-Field Text Callout, and Geometry Hit-Test Eraser (with crimson hover target preview);
+   - **FTC `A1–F6` 6×6 Tile Magnetic Snap (`G` or hold `Shift`)**: Dragging a robot token surfaces a floating coordinate & heading HUD badge (`🧲 C3 · 90°`) and snaps cleanly to tile centers and borders; double-clicking rotates heading by 90° and emits a sonar shockwave ripple.
+4. **🎬 1-Click Tactical Trajectory Simulation (`Space` or `[▶ Simulate]`)**:
+   - Click **[▶ Simulate]** to launch a 60fps laser playback loop: drawn paths progressively extend with a glowing laser head while robot tokens anchored near path origins automatically glide and rotate along their drawn trajectories to reveal potential path collisions.
+5. **Dual-Mode Intelligence Sidebar (4-Team Overview + 1-Team Deep Dive)**:
+   - **4-Team Overview**: Displays a live Red vs. Blue predicted score tug-of-war bar alongside all 4 teams' Average Total, Auto/TeleOp/Endgame breakdown, Max Score, Brag Index badge, and tactical role selector (Scorer / Cycler / Defense / Support);
+   - **Single-Team Deep Dive**: Click any team card or top-bar quick pill to inspect **Pit hardware specs, HD robot photo thumbnails, pros/cons tags, and recent match-by-match score breakdowns** (with a 1-click 🎯 button to load any historical match directly onto the board).
+
+---
+
+### 2.11 Step 10: Tactical AI Advisor
 1. Open the **[Tactical AI]** tab to inject full event rankings, pit specs, brag indices, and defensive ratings directly into LLMs (Google Gemini & OpenAI).
 2. Ask tactical questions conversationally:
    - *"Our robot scores high in auto but lacks a reliable high hang. Which two teams should we pick for alliance selection?"*
@@ -273,7 +292,7 @@ Lead laptops face dead batteries, hardware crashes, or accidental cable disconne
 
 ---
 
-### 2.11 Step 10: Data Export & Flash Drive Offline Sync Package
+### 2.12 Step 11: Data Export & Flash Drive Offline Sync Package
 - **Standard Reports**: Export all match records and pit metrics into structured **Excel / CSV sheets** for presentations and alliance review.
 - **Extreme Venue Blackout: USB Flash Sync**:  
   Under total wireless communication bans:
@@ -282,7 +301,7 @@ Lead laptops face dead batteries, hardware crashes, or accidental cable disconne
 
 ---
 
-### 2.12 Step 11: Safe Single-Entry Event Deletion & Deep Offline Cache Flush
+### 2.13 Step 12: Safe Single-Entry Event Deletion & Deep Offline Cache Flush
 1. **Single-Entry Focus: Dashboard Card Safe Deletion**:
    - To eliminate accidental deletions during high-stakes scoring, **all delete buttons have been removed from the active event header and mobile HUD**;
    - Deletion is consolidated exclusively on the Dashboard event cards with a trash icon. Clicking prompts a cyber glassmorphic Danger confirmation modal with the event title before executing cascading deletion.
@@ -294,8 +313,12 @@ Lead laptops face dead batteries, hardware crashes, or accidental cable disconne
 
 # 3. Technical Deep Dive
 
-### 3.1 Public P2P Mesh & Blind Signaling Architecture
+### 3.1 Public P2P Mesh, Blind Signaling & Dual-Track Hot-Upgrade Architecture
 ScoutingPro27 operates on an **offline-first decentralized architecture**. The host machine hosts local microservices, an embedded H2 database, and photo storage. Clients connect via WebRTC DataChannels. Public MQTT brokers simply relay blind connection handshakes (public keys, SDP, ICE candidates) without holding plaintext data.
+
+Under the hood, the transport layer is powered by a **`VirtualDataChannel` Dual-Phase Bounded Drain & Zero-Loss Hot-Upgrade Engine**:
+- **1.8s Instant Fallback + Background P2P Promotion**: When venue firewalls throttle UDP, the client establishes an encrypted Relay virtual channel within 1.8 seconds for immediate match scouting while negotiating direct STUN/TURN P2P in the background;
+- **Zero-Loss Two-Phase Drain**: Once the native `RTCDataChannel` opens, `VirtualDataChannel` seamlessly promotes outbound traffic to the high-bandwidth P2P pipe while executing a **two-phase bounded drain on the retiring channel (Phase 1: waits for `bufferedAmount === 0` to flush the outbound buffer; Phase 2: keeps `onmessage` alive for a 3000ms grace window to finish reassembling in-flight `__SP27_CHUNK__|...` multi-part frames)**, eliminating mid-upgrade packet truncation.
 
 <p align="center">
   <img src="docs/images/architecture.svg" alt="Architecture Diagram" width="100%" />
@@ -562,6 +585,19 @@ flowchart TD
 
 ---
 
+### 3.6 Viper-Style Tactical Whiteboard Geometry & Physics-Based Motion Engine
+The Tactical Whiteboard (`frontend/src/components/whiteboard/`) combines lossless normalized vector geometry with a physics-based spring animation engine across desktop and mobile viewports:
+- **Normalized Reversible Affine Coordinate Space (`[0, 1]` Field Space)**:
+  - All drawn strokes, geometric regions, and 4 robot tokens are stored in normalized `[0, 1] × [0, 1]` field space;
+  - `fieldToViewCoords` and `viewToFieldCoords` preserve $10^{-6}$-accurate round-trip transformations across all `0°/90°/180°/270°` rotations and Red/Blue alliance mirror flips.
+- **Arc-Length Parameterized Polyline Interpolation & 60fps Laser Simulation (`interpolatePointAlongPolyline`)**:
+  - Triggering **[▶ Simulate]** parameterizes drawn polylines, arrows, and lines by cumulative arc length to compute exact coordinates and first-order tangent headings $\theta = \text{atan2}(\Delta y, \Delta x)$ at any progress $p \in [0, 1]$;
+  - Robot tokens anchored near a trajectory origin automatically glide and rotate along their assigned paths during playback, accompanied by an on-canvas WCAG 2.2.2-compliant **[■ Stop Sim]** control pill.
+- **Physics-Based `linear()` Spring Easing & Reduced-Motion Accessibility**:
+  - Phase transitions and robot resets use under-damped spring interpolation, while popovers, shortcut modals, and the Red/Blue alliance prediction bar apply inline CSS `linear(...)` spring physics (with standard `ease-out` fallbacks) and respect `@media (prefers-reduced-motion: reduce)`.
+
+---
+
 # 4. Developer & Testing Guide
 
 ### 4.1 Local Development Prerequisites
@@ -594,7 +630,7 @@ ScoutingPro27 enforces an **Evidence Triad verification policy** with comprehens
 cd frontend
 npm run type-check
 
-# 2. Frontend Vitest unit & component test suite (73 test suites / 562 tests 100% passing)
+# 2. Frontend Vitest unit & component test suite (88 test suites / 679 tests 100% passing)
 npm test -- --run
 
 # 3. Backend Maven Surefire test suite (136 tests 100% passing)

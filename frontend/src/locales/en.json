@@ -1305,6 +1305,19 @@
     "field_red_wall": "RED ALLIANCE STATION",
     "field_blue_wall": "BLUE ALLIANCE STATION",
     "field_center_goal": "CENTRAL GOAL / FLOWER HUB",
-    "field_park_zone": "PARK / OBSERVATION ZONE"
+    "field_park_zone": "PARK / OBSERVATION ZONE",
+    "btn_play_sim": "Play Simulation (Space)",
+    "btn_stop_sim": "Stop Simulation (Space)",
+    "btn_snap_grid": "Snap to Tile (Shift)",
+    "btn_shortcuts": "Shortcuts & Gestures (?)",
+    "shortcuts_title": "Whiteboard Shortcuts & Pro Interactions",
+    "shortcut_tools": "1-9 / V,P,A,D,L,R,C,T,E — Switch drawing tools",
+    "shortcut_sim": "Space — Play/Stop path & robot trajectory simulation",
+    "shortcut_undo": "Ctrl+Z / Ctrl+Y — Undo & Redo strokes",
+    "shortcut_snap": "Hold Shift while dragging (or enable Snap) to align to tile centers",
+    "shortcut_stroke_drag": "In Select tool (V), drag any drawn stroke or callout to reposition",
+    "shortcut_rotate": "Double-click any robot token to rotate heading +90°",
+    "load_match_to_board": "Load Match to Whiteboard",
+    "sim_playing_badge": "Simulating Trajectory..."
   }
 }
