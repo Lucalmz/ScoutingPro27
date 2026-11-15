@@ -34,7 +34,7 @@ jobs:
 
       - uses: actions/setup-node@v4
         with:
-          node-version: 20
+          node-version: 24
 
       # ---------- 前端构建 (vite 会直接输出到 Backend/src/main/resources/public) ----------
       - name: Build frontend
