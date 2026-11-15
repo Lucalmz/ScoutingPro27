@@ -28,10 +28,12 @@ let t = (k: string, _values?: any) => {
   if (k === 'pit_scout.status_unrecorded') return '未录入'
   return k
 }
+let te = (_k: string) => false
 try {
   const i18n = useI18n()
   if (i18n && i18n.t) {
     t = i18n.t
+    if (i18n.te) te = i18n.te
   }
 } catch {}
 
@@ -45,8 +47,26 @@ const titleText = computed(() => {
   if (!hasRecord.value) return t('pit_scout.status_tooltip_unrecorded')
   let str = t('pit_scout.status_tooltip_recorded')
   if (bragInfo.value && team.value?.matchCount) {
-    const tierText = t(`pit_scout.brag_tiers.${bragInfo.value.tier}`) || bragInfo.value.label
-    str += ` · ${bragInfo.value.overallRatio}x ${tierText}`
+    if (bragInfo.value.tier === 'pending') {
+      const pendingText =
+        bragInfo.value.labelKey && te(bragInfo.value.labelKey)
+          ? t(bragInfo.value.labelKey)
+          : te('pit_scout.brag_tiers.pending')
+            ? t('pit_scout.brag_tiers.pending')
+            : bragInfo.value.label
+      str += ` · ${pendingText}`
+    } else {
+      const tierKey = `pit_scout.brag_tiers.${bragInfo.value.tier}`
+      const tierText = te(tierKey) ? t(tierKey) : bragInfo.value.tier
+      const summary = te('pit_scout.brag_label_format')
+        ? t('pit_scout.brag_label_format', { ratio: bragInfo.value.overallRatio, tier: tierText })
+        : `${bragInfo.value.overallRatio}x ${tierText}`
+      str += ` · ${summary}`
+    }
+    if (bragInfo.value.statusKeys && bragInfo.value.statusKeys.length > 0) {
+      const statusTexts = bragInfo.value.statusKeys.map((k) => (te(k) ? t(k) : k))
+      str += ` (${statusTexts.join(', ')})`
+    }
   }
   return str
 })
@@ -79,7 +99,11 @@ function handleClick(e: MouseEvent) {
       class="brag-badge"
       :class="`tier-${bragInfo.tier}`"
     >
-      {{ bragInfo.overallRatio }}x
+      {{
+        bragInfo.tier === 'pending'
+          ? (bragInfo.labelKey && te(bragInfo.labelKey) ? t(bragInfo.labelKey) : bragInfo.label)
+          : `${bragInfo.overallRatio}x`
+      }}
     </span>
   </div>
 </template>

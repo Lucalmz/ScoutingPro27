@@ -16,6 +16,8 @@ import {
 import type { ScoutingRecord, ScoutingFormData } from '@/types'
 import { isAssignmentCompleted, getRecordTournamentLevel } from '@/utils/tournament'
 import { formatUserFriendlyError } from '@/utils/errorHelper'
+import { calcBiobuzzEndgameScore, parseBiobuzzEndgame } from '@/utils/analytics/rankings'
+import { calcMatchPredictCycleTime } from '@/utils/analytics/predictCycleTime'
 
 export interface MobileTeamScoutData {
   teamNumber: string
@@ -29,8 +31,15 @@ export interface MobileTeamScoutData {
   // TeleOp
   teleopCycles: number[]
   teleopMissedCycles: number[]
+  teleopCycleTimestamps: number[]
 
-  // Endgame
+  // Endgame (2026-2027 BIOBUZZ)
+  flowerNectars: number
+  flowerBottomBonusCount: number
+  flowerPollens: number
+  gardenBalls: number
+  flowerDescore: boolean
+  g410EarlyFlowerFoul: boolean
   flowerPlaced: boolean
   flowerBottomBonus: boolean
   teleopPark: boolean
@@ -50,6 +59,13 @@ export function createEmptyMobileTeam(): MobileTeamScoutData {
     autoPark: false,
     teleopCycles: [],
     teleopMissedCycles: [],
+    teleopCycleTimestamps: [],
+    flowerNectars: 0,
+    flowerBottomBonusCount: 0,
+    flowerPollens: 0,
+    gardenBalls: 0,
+    flowerDescore: false,
+    g410EarlyFlowerFoul: false,
     flowerPlaced: false,
     flowerBottomBonus: false,
     teleopPark: false,
@@ -70,6 +86,12 @@ export function hasAnyMobileScoutData(t: MobileTeamScoutData): boolean {
     t.autoPark ||
     t.teleopCycles.length > 0 ||
     t.teleopMissedCycles.length > 0 ||
+    t.flowerNectars > 0 ||
+    t.flowerBottomBonusCount > 0 ||
+    t.flowerPollens > 0 ||
+    t.gardenBalls > 0 ||
+    t.flowerDescore ||
+    t.g410EarlyFlowerFoul ||
     t.flowerPlaced ||
     t.flowerBottomBonus ||
     t.teleopPark ||
@@ -212,7 +234,15 @@ export function useMobileWizardForm(
         matchNumber.value = draft.matchNumber || matchNumber.value
         allianceColor.value = draft.allianceColor || allianceColor.value
         currentTournamentLevel.value = draft.currentTournamentLevel || currentTournamentLevel.value
-        team.value = { ...createEmptyMobileTeam(), ...draft.team }
+        const mergedTeam = { ...createEmptyMobileTeam(), ...draft.team }
+        const normalizedEndgame = parseBiobuzzEndgame(mergedTeam)
+        team.value = {
+          ...mergedTeam,
+          teleopCycleTimestamps: Array.isArray(draft.team.teleopCycleTimestamps)
+            ? [...draft.team.teleopCycleTimestamps]
+            : [],
+          ...normalizedEndgame
+        }
         syncAutoBalls()
         currentStep.value = typeof draft.currentStep === 'number' ? draft.currentStep : 0
         isDraftRestored.value = true
@@ -296,9 +326,12 @@ export function useMobileWizardForm(
     const r = u.pitRecord
     return {
       drivetrain: r.drivetrainType || '-',
+      chassisSize: r.chassisSize || '',
+      flowerMechanism: r.flowerMechanism || '',
       ballCompatibility: r.ballCompatibility || 'universal',
       autoScore: r.claimedAutoScore ?? 0,
-      teleopCycles: r.claimedTeleopCycles ?? 0
+      teleopCycles: r.claimedTeleopCycles ?? 0,
+      claimedEndgameScore: r.claimedEndgameScore ?? 0
     }
   })
 
@@ -336,9 +369,7 @@ export function useMobileWizardForm(
   })
 
   const endgameScore = computed(() => {
-    return (team.value.flowerPlaced ? 10 : 0) +
-           (team.value.flowerBottomBonus ? 5 : 0) +
-           (team.value.teleopPark ? 5 : 0)
+    return calcBiobuzzEndgameScore(parseBiobuzzEndgame(team.value))
   })
 
   const totalScore = computed(() => {
@@ -521,11 +552,22 @@ export function useMobileWizardForm(
     }
   }
 
+  function stampTeleopCycleTimestamp(idx: number) {
+    if (!Array.isArray(team.value.teleopCycleTimestamps)) {
+      team.value.teleopCycleTimestamps = []
+    }
+    while (team.value.teleopCycleTimestamps.length <= idx) {
+      team.value.teleopCycleTimestamps.push(0)
+    }
+    team.value.teleopCycleTimestamps[idx] = Date.now()
+  }
+
   // TeleOp Phase Actions
   function addTeleopCycleShot() {
     if (team.value.teleopCycles.length === 0) {
       team.value.teleopCycles.push(1)
       team.value.teleopMissedCycles.push(0)
+      stampTeleopCycleTimestamp(0)
       teleopCycleHistory.value.push('hit')
       hapticMedium()
       return
@@ -537,6 +579,7 @@ export function useMobileWizardForm(
 
     if (curHits + curMisses < 4) {
       team.value.teleopCycles[idx] = curHits + 1
+      stampTeleopCycleTimestamp(idx)
       teleopCycleHistory.value.push('hit')
       hapticMedium()
       if (curHits + 1 + curMisses >= 4) {
@@ -552,6 +595,7 @@ export function useMobileWizardForm(
     if (team.value.teleopCycles.length === 0) {
       team.value.teleopCycles.push(0)
       team.value.teleopMissedCycles.push(1)
+      stampTeleopCycleTimestamp(0)
       teleopCycleHistory.value.push('miss')
       hapticWarning()
       return
@@ -563,6 +607,7 @@ export function useMobileWizardForm(
 
     if (curHits + curMisses < 4) {
       team.value.teleopMissedCycles[idx] = curMisses + 1
+      stampTeleopCycleTimestamp(idx)
       teleopCycleHistory.value.push('miss')
       hapticWarning()
       if (curHits + curMisses + 1 >= 4) {
@@ -578,6 +623,7 @@ export function useMobileWizardForm(
     if (team.value.teleopCycles.length === 0) {
       team.value.teleopCycles.push(val)
       team.value.teleopMissedCycles.push(0)
+      stampTeleopCycleTimestamp(0)
       teleopCycleHistory.value = []
       if (val >= 4) triggerPulsingGlow('teleop')
       hapticSelection()
@@ -589,6 +635,7 @@ export function useMobileWizardForm(
     const newMisses = Math.min(curMisses, 4 - val)
     team.value.teleopCycles[idx] = newHits
     team.value.teleopMissedCycles[idx] = newMisses
+    stampTeleopCycleTimestamp(idx)
     teleopCycleHistory.value = []
     if (newHits + newMisses >= 4) {
       triggerPulsingGlow('teleop')
@@ -647,6 +694,12 @@ export function useMobileWizardForm(
     if (team.value.teleopCycles.length > 0) {
       team.value.teleopCycles.pop()
       team.value.teleopMissedCycles.pop()
+      if (Array.isArray(team.value.teleopCycleTimestamps)) {
+        team.value.teleopCycleTimestamps.length = Math.min(
+          team.value.teleopCycleTimestamps.length,
+          team.value.teleopCycles.length
+        )
+      }
       teleopCycleHistory.value = []
       clearPulsingGlow('teleop')
       hapticLight()
@@ -661,6 +714,13 @@ export function useMobileWizardForm(
       targetCycles.splice(index, 1)
       if (index < targetMissed.length) {
         targetMissed.splice(index, 1)
+      }
+      if (
+        phase === 'teleop' &&
+        Array.isArray(team.value.teleopCycleTimestamps) &&
+        index < team.value.teleopCycleTimestamps.length
+      ) {
+        team.value.teleopCycleTimestamps.splice(index, 1)
       }
       if (phase === 'auto') syncAutoBalls()
     }
@@ -678,6 +738,13 @@ export function useMobileWizardForm(
         targetCycles.splice(index, 1)
         if (index < targetMissed.length) {
           targetMissed.splice(index, 1)
+        }
+        if (
+          phase === 'teleop' &&
+          Array.isArray(team.value.teleopCycleTimestamps) &&
+          index < team.value.teleopCycleTimestamps.length
+        ) {
+          team.value.teleopCycleTimestamps.splice(index, 1)
         }
       }
       if (phase === 'auto') syncAutoBalls()
@@ -741,6 +808,7 @@ export function useMobileWizardForm(
         ? [...raw.autoCycles]
         : (rawAutoBalls > 0 ? [rawAutoBalls] : [])
 
+      const parsedEndgame = parseBiobuzzEndgame(raw)
       team.value = {
         teamNumber: String(rec.teamNumber),
         autoLeave: raw.autoLeave ?? false,
@@ -750,9 +818,8 @@ export function useMobileWizardForm(
         autoPark: raw.autoPark ?? false,
         teleopCycles: Array.isArray(raw.teleopCycles) ? [...raw.teleopCycles] : [],
         teleopMissedCycles: Array.isArray(raw.teleopMissedCycles) ? [...raw.teleopMissedCycles] : [],
-        flowerPlaced: raw.flowerPlaced ?? false,
-        flowerBottomBonus: raw.flowerBottomBonus ?? false,
-        teleopPark: raw.teleopPark ?? false,
+        teleopCycleTimestamps: Array.isArray(raw.teleopCycleTimestamps) ? [...raw.teleopCycleTimestamps] : [],
+        ...parsedEndgame,
         isBroken: raw.isBroken ?? false,
         notes: rec.notes || '',
         customFields: raw.customFields ? { ...raw.customFields } : {}
@@ -842,6 +909,12 @@ export function useMobileWizardForm(
     submitStatus.value = 'none'
 
     try {
+      const parsedEndgame = parseBiobuzzEndgame(team.value)
+      const teleopTimestamps = Array.isArray(team.value.teleopCycleTimestamps)
+        ? [...team.value.teleopCycleTimestamps]
+        : []
+      const predictCycleTimeSec = calcMatchPredictCycleTime(team.value.teleopCycles, teleopTimestamps)
+
       const formData: ScoutingFormData = {
         matchNumber: matchNum,
         tournamentLevel: currentTournamentLevel.value,
@@ -856,9 +929,17 @@ export function useMobileWizardForm(
         autoPark: team.value.autoPark,
         teleopCycles: [...team.value.teleopCycles],
         teleopMissedCycles: [...team.value.teleopMissedCycles],
-        flowerPlaced: team.value.flowerPlaced,
-        flowerBottomBonus: team.value.flowerBottomBonus,
-        teleopPark: team.value.teleopPark,
+        teleopCycleTimestamps: teleopTimestamps,
+        predictCycleTimeSec,
+        flowerNectars: parsedEndgame.flowerNectars,
+        flowerBottomBonusCount: parsedEndgame.flowerBottomBonusCount,
+        flowerPollens: parsedEndgame.flowerPollens,
+        gardenBalls: parsedEndgame.gardenBalls,
+        flowerDescore: parsedEndgame.flowerDescore,
+        g410EarlyFlowerFoul: parsedEndgame.g410EarlyFlowerFoul,
+        flowerPlaced: parsedEndgame.flowerPlaced,
+        flowerBottomBonus: parsedEndgame.flowerBottomBonus,
+        teleopPark: parsedEndgame.teleopPark,
         customFields: { ...team.value.customFields }
       }
 

@@ -5,7 +5,7 @@ import type { UnifiedTeamItem } from '@/types'
 import { getPhotoUrl } from '@/services/photoStorage'
 import ImagePreviewModal from '@/components/common/ImagePreviewModal.vue'
 import PitStatusIndicator from './PitStatusIndicator.vue'
-import { LAUNCHER_PRESETS } from '@/constants/pitScoutPresets'
+import { LAUNCHER_PRESETS, FLOWER_PRESETS, CHASSIS_SIZE_PRESETS } from '@/constants/pitScoutPresets'
 
 const props = defineProps<{
   team: UnifiedTeamItem
@@ -16,7 +16,7 @@ const emit = defineEmits<{
   (e: 'select', teamNumber: number): void
 }>()
 
-const { t } = useI18n()
+const { t, te } = useI18n()
 const photoUrl = ref<string | null>(null)
 const allPhotoUrls = ref<string[]>([])
 const isPreviewOpen = ref(false)
@@ -41,36 +41,70 @@ async function loadPhoto() {
 onMounted(loadPhoto)
 watch(() => props.team.pitRecord?.photoKeys, loadPhoto, { deep: true })
 
+function formatPresetLabel(
+  raw: string | undefined,
+  presets: readonly { key: string; zh: string; en: string }[],
+  prefix: string
+): string {
+  if (!raw) return ''
+  const trimmed = raw.trim()
+  const lower = trimmed.toLowerCase()
+  const preset = presets.find(
+    (p) =>
+      p.zh === trimmed ||
+      p.en === trimmed ||
+      p.key === trimmed ||
+      p.en.toLowerCase() === lower ||
+      p.key.toLowerCase() === lower
+  )
+  if (preset) {
+    const key = `${prefix}.${preset.key}`
+    return te(key) ? t(key) : trimmed
+  }
+  return trimmed
+}
+
 const drivetrainText = computed(() => {
   const dt = props.team.pitRecord?.drivetrainType
   if (!dt) return ''
-  return t(`pit_scout.drivetrain.${dt}`) || dt
+  const key = `pit_scout.drivetrain.${dt}`
+  return te(key) ? t(key) : dt
 })
+
+const chassisSizeText = computed(() =>
+  formatPresetLabel(props.team.pitRecord?.chassisSize, CHASSIS_SIZE_PRESETS, 'pit_scout.chassis_size_presets')
+)
 
 const ballCompatibilityText = computed(() => {
   const bc = props.team.pitRecord?.ballCompatibility
   if (!bc) return ''
-  return t(`pit_scout.ball_compatibility.${bc}`) || bc
+  const key = `pit_scout.ball_compatibility.${bc}`
+  return te(key) ? t(key) : bc
 })
 
-const launcherText = computed(() => {
-  const raw = props.team.pitRecord?.launcherType
-  if (!raw) return ''
-  const preset = LAUNCHER_PRESETS.find(
-    (p) => p.zh === raw || p.en === raw || p.key === raw || p.en.toLowerCase() === raw.toLowerCase()
-  )
-  if (preset) {
-    return t(`pit_scout.launcher_presets.${preset.key}`)
-  }
-  return raw
+const launcherText = computed(() =>
+  formatPresetLabel(props.team.pitRecord?.launcherType, LAUNCHER_PRESETS, 'pit_scout.launcher_presets')
+)
+
+const flowerText = computed(() => {
+  const raw = props.team.pitRecord?.flowerMechanism?.trim()
+  if (!raw || raw.toLowerCase() === 'none' || raw === '无') return ''
+  return formatPresetLabel(raw, FLOWER_PRESETS, 'pit_scout.flower_presets')
 })
 
 const bragLabel = computed(() => {
   const b = props.team.bragInfo
   if (!b) return ''
-  const tierText = t(`pit_scout.brag_tiers.${b.tier}`) || b.label
-  let str = `${b.overallRatio}x ${tierText}`
-  return str
+  if (b.tier === 'pending') {
+    if (b.labelKey && te(b.labelKey)) return t(b.labelKey)
+    return te('pit_scout.brag_tiers.pending') ? t('pit_scout.brag_tiers.pending') : b.label
+  }
+  const tierKey = `pit_scout.brag_tiers.${b.tier}`
+  const tierText = te(tierKey) ? t(tierKey) : b.tier
+  if (te('pit_scout.brag_label_format')) {
+    return t('pit_scout.brag_label_format', { ratio: b.overallRatio, tier: tierText })
+  }
+  return `${b.overallRatio}x ${tierText}`
 })
 </script>
 
@@ -113,6 +147,10 @@ const bragLabel = computed(() => {
       <span class="pill pill-drivetrain">
         {{ drivetrainText }}
       </span>
+      <span v-if="chassisSizeText" class="pill pill-chassis">
+        <span class="material-icons pill-icon">straighten</span>
+        {{ chassisSizeText }}
+      </span>
       <span v-if="team.pitRecord.weightLbs > 0" class="pill pill-weight">
         <span class="material-icons pill-icon">scale</span>
         {{ team.pitRecord.weightLbs }} lbs
@@ -125,6 +163,18 @@ const bragLabel = computed(() => {
         <span class="material-icons pill-icon">rocket_launch</span>
         {{ launcherText }}
       </span>
+      <span v-if="flowerText" class="pill pill-flower">
+        <span class="material-icons pill-icon">local_florist</span>
+        {{ flowerText }}
+      </span>
+      <span v-if="team.pitRecord.hasDescoreMech" class="pill pill-feature">
+        <span class="material-icons pill-icon">layers_clear</span>
+        {{ t('pit_scout.descore_capable') }}
+      </span>
+      <span v-if="team.pitRecord.hasApriltagVision" class="pill pill-feature">
+        <span class="material-icons pill-icon">qr_code_scanner</span>
+        {{ t('pit_scout.apriltag_vision') }}
+      </span>
     </div>
 
     <!-- 核心量化自述对比条 -->
@@ -136,13 +186,19 @@ const bragLabel = computed(() => {
       <div class="quant-item">
         <span class="quant-label">{{ t('pit_scout.claimed_auto') }}</span>
         <span class="quant-value">
-          {{ team.pitRecord.claimedAutoScore }} {{ t('pit_scout.drawer.unit_pts') }}
+          {{ t('pit_scout.claimed_pts_unit', { pts: team.pitRecord.claimedAutoScore || 0 }) }}
         </span>
       </div>
       <div class="quant-item">
         <span class="quant-label">{{ t('pit_scout.claimed_teleop_cycles') }}</span>
         <span class="quant-value">
           {{ t('pit_scout.claimed_cycles_unit', { cycles: team.pitRecord.claimedTeleopCycles || 0 }) }}
+        </span>
+      </div>
+      <div class="quant-item">
+        <span class="quant-label">{{ t('pit_scout.claimed_endgame') }}</span>
+        <span class="quant-value">
+          {{ t('pit_scout.claimed_pts_unit', { pts: team.pitRecord.claimedEndgameScore || 0 }) }}
         </span>
       </div>
     </div>
@@ -154,12 +210,26 @@ const bragLabel = computed(() => {
         <span>{{ t('pit_scout.max_score', { score: team.maxTotalScore }) }}</span>
         <span>{{ t('pit_scout.avg_score', { score: team.avgTotalScore }) }}</span>
       </div>
-      <div v-if="team.bragInfo" class="brag-tier-pill" :class="`tier-${team.bragInfo.tier}`">
-        <span class="material-icons brag-icon" v-if="team.bragInfo.tier === 'realistic'">verified</span>
-        <span class="material-icons brag-icon" v-else-if="team.bragInfo.tier === 'optimistic'">trending_up</span>
-        <span class="material-icons brag-icon" v-else-if="team.bragInfo.tier === 'overclaimed'">warning</span>
-        <span class="material-icons brag-icon" v-else-if="team.bragInfo.tier === 'mythical'">local_fire_department</span>
-        <span>{{ bragLabel }}</span>
+      <div v-if="team.bragInfo" class="reconcile-badges">
+        <span v-if="team.bragInfo.flowerVerified" class="verify-pill is-verified">
+          {{ t('pit_scout.flower_verified') }}
+        </span>
+        <span v-else-if="team.bragInfo.flowerPending" class="verify-pill is-pending">
+          {{ t('pit_scout.flower_pending_verify') }}
+        </span>
+        <span v-if="team.bragInfo.parkVerified" class="verify-pill is-verified">
+          {{ t('pit_scout.park_verified') }}
+        </span>
+        <span v-else-if="team.bragInfo.parkPending" class="verify-pill is-pending">
+          {{ t('pit_scout.park_pending') }}
+        </span>
+        <div class="brag-tier-pill" :class="`tier-${team.bragInfo.tier}`">
+          <span class="material-icons brag-icon" v-if="team.bragInfo.tier === 'realistic'">verified</span>
+          <span class="material-icons brag-icon" v-else-if="team.bragInfo.tier === 'optimistic'">trending_up</span>
+          <span class="material-icons brag-icon" v-else-if="team.bragInfo.tier === 'overclaimed'">warning</span>
+          <span class="material-icons brag-icon" v-else-if="team.bragInfo.tier === 'mythical'">local_fire_department</span>
+          <span>{{ bragLabel }}</span>
+        </div>
       </div>
     </div>
 
@@ -314,6 +384,9 @@ const bragLabel = computed(() => {
 }
 
 .pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
   font-size: 11px;
   padding: 3px 10px;
   border-radius: 9999px;
@@ -323,16 +396,27 @@ const bragLabel = computed(() => {
   font-weight: 500;
 }
 
+.pill-icon {
+  font-size: 13px;
+  opacity: 0.85;
+}
+
 .pill-drivetrain {
   background: rgba(57, 255, 20, 0.1);
   border-color: rgba(57, 255, 20, 0.3);
   color: var(--primary, #39ff14);
 }
 
+.pill-feature {
+  background: rgba(59, 130, 246, 0.1);
+  border-color: rgba(59, 130, 246, 0.28);
+  color: #93c5fd;
+}
+
 .quant-grid {
   display: grid;
-  grid-template-columns: repeat(3, 1fr);
-  gap: 8px;
+  grid-template-columns: repeat(2, 1fr);
+  gap: 8px 12px;
   background: var(--surface-recessed, #080807);
   border: 1px solid var(--border, #262624);
   border-radius: 8px;
@@ -367,8 +451,10 @@ const bragLabel = computed(() => {
 
 .match-reconcile-bar {
   display: flex;
+  flex-wrap: wrap;
   align-items: center;
   justify-content: space-between;
+  gap: 6px;
   padding: 7px 10px;
   border-radius: 8px;
   background: var(--surface-recessed, #080807);
@@ -383,13 +469,46 @@ const bragLabel = computed(() => {
   color: var(--muted-foreground, #8e8d87);
 }
 
+.reconcile-badges {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 5px;
+}
+
+.verify-pill {
+  display: inline-flex;
+  align-items: center;
+  padding: 2px 7px;
+  border-radius: 9999px;
+  font-size: 10px;
+  font-weight: 600;
+}
+
+.verify-pill.is-verified {
+  background: rgba(57, 255, 20, 0.12);
+  color: #39ff14;
+  border: 1px solid rgba(57, 255, 20, 0.35);
+}
+
+.verify-pill.is-pending {
+  background: rgba(250, 204, 21, 0.12);
+  color: #facc15;
+  border: 1px solid rgba(250, 204, 21, 0.3);
+}
+
 .brag-tier-pill {
   display: inline-flex;
   align-items: center;
+  gap: 3px;
   font-weight: 700;
   padding: 2px 8px;
   border-radius: 9999px;
   font-size: 10px;
+}
+
+.brag-icon {
+  font-size: 12px;
 }
 
 .tier-realistic { background: #0d1f0e; color: #39ff14; border: 1px solid rgba(57, 255, 20, 0.45); }

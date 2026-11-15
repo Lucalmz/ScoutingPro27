@@ -11,17 +11,25 @@ public class PitScoutingRecord {
     // 核心硬件构型 (Hardware Essentials - 2026-2027 BIOBUZZ)
     private String drivetrainType = "mecanum";
     private double weightLbs = 0.0;
+    private String chassisSize = "";
     private String odometryType = "none";
     private String ballCompatibility = "universal";
     private String launcherType = "";
     private String flowerMechanism = "";
     private boolean hasColorSensor = false;
+    private boolean hasDescoreMech = false;
+    private boolean hasApriltagVision = false;
 
     // 核心量化自述指标 (Claimed Quantitative Performance - 2026-2027 BIOBUZZ)
     private String claimedAutoStrategy = "";
     private int claimedAutoScore = 0;
     private int claimedTeleopCycles = 0;
     private int claimedTeleopScore = 0;
+    private boolean claimedTeleopPark = false;
+    private int claimedFlowerNectars = 0;
+    private int claimedFlowerBottomBonus = 0;
+    private int claimedFlowerPollens = 0;
+    private int claimedGardenBalls = 0;
     private int claimedEndgameScore = 0;
     private int claimedTotalScore = 0;
 
@@ -61,6 +69,9 @@ public class PitScoutingRecord {
     public double getWeightLbs() { return weightLbs; }
     public void setWeightLbs(double weightLbs) { this.weightLbs = weightLbs; }
 
+    public String getChassisSize() { return chassisSize; }
+    public void setChassisSize(String chassisSize) { this.chassisSize = chassisSize; }
+
     public String getOdometryType() { return odometryType; }
     public void setOdometryType(String odometryType) { this.odometryType = odometryType; }
 
@@ -77,6 +88,14 @@ public class PitScoutingRecord {
     public boolean getHasColorSensor() { return hasColorSensor; }
     public void setHasColorSensor(boolean hasColorSensor) { this.hasColorSensor = hasColorSensor; }
 
+    public boolean isHasDescoreMech() { return hasDescoreMech; }
+    public boolean getHasDescoreMech() { return hasDescoreMech; }
+    public void setHasDescoreMech(boolean hasDescoreMech) { this.hasDescoreMech = hasDescoreMech; }
+
+    public boolean isHasApriltagVision() { return hasApriltagVision; }
+    public boolean getHasApriltagVision() { return hasApriltagVision; }
+    public void setHasApriltagVision(boolean hasApriltagVision) { this.hasApriltagVision = hasApriltagVision; }
+
     public String getClaimedAutoStrategy() { return claimedAutoStrategy; }
     public void setClaimedAutoStrategy(String claimedAutoStrategy) { this.claimedAutoStrategy = claimedAutoStrategy; }
 
@@ -88,6 +107,22 @@ public class PitScoutingRecord {
 
     public int getClaimedTeleopScore() { return claimedTeleopScore; }
     public void setClaimedTeleopScore(int claimedTeleopScore) { this.claimedTeleopScore = claimedTeleopScore; }
+
+    public boolean isClaimedTeleopPark() { return claimedTeleopPark; }
+    public boolean getClaimedTeleopPark() { return claimedTeleopPark; }
+    public void setClaimedTeleopPark(boolean claimedTeleopPark) { this.claimedTeleopPark = claimedTeleopPark; }
+
+    public int getClaimedFlowerNectars() { return claimedFlowerNectars; }
+    public void setClaimedFlowerNectars(int claimedFlowerNectars) { this.claimedFlowerNectars = claimedFlowerNectars; }
+
+    public int getClaimedFlowerBottomBonus() { return claimedFlowerBottomBonus; }
+    public void setClaimedFlowerBottomBonus(int claimedFlowerBottomBonus) { this.claimedFlowerBottomBonus = claimedFlowerBottomBonus; }
+
+    public int getClaimedFlowerPollens() { return claimedFlowerPollens; }
+    public void setClaimedFlowerPollens(int claimedFlowerPollens) { this.claimedFlowerPollens = claimedFlowerPollens; }
+
+    public int getClaimedGardenBalls() { return claimedGardenBalls; }
+    public void setClaimedGardenBalls(int claimedGardenBalls) { this.claimedGardenBalls = claimedGardenBalls; }
 
     public int getClaimedEndgameScore() { return claimedEndgameScore; }
     public void setClaimedEndgameScore(int claimedEndgameScore) { this.claimedEndgameScore = claimedEndgameScore; }

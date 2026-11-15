@@ -11,6 +11,8 @@ import { updateEventFtcConfig, fetchEventMembers, removeEventMember, type EventM
 import { getKnownScouts, removeKnownScout } from '@/services/scoutStorage'
 import { downloadCSV } from '@/utils/csvExport'
 import { sortRecordsChronologically, getRecordTournamentLevel } from '@/utils/tournament'
+import { parseScoutRawData } from '@/utils/analytics/rankings'
+import { calcMatchPredictCycleTime } from '@/utils/analytics/predictCycleTime'
 import OfflineSyncModal from '@/components/common/OfflineSyncModal.vue'
 import CustomFieldsManagerModal from '@/components/customFields/CustomFieldsManagerModal.vue'
 import SendMessageModal from './SendMessageModal.vue'
@@ -22,7 +24,7 @@ const props = defineProps<{
 }>()
 
 const { t, locale } = useI18n()
-const isZh = computed(() => (locale.value || '').startsWith('zh'))
+const isZh = computed(() => (locale?.value || '').startsWith('zh'))
 const eventStore = useEventStore()
 const recordStore = useRecordStore()
 const connStore = useConnectionStore()
@@ -124,8 +126,18 @@ function exportRankingsCSV() {
       : (isZh.value ? `自定义: 场均${f.name}` : `Custom: Avg ${f.name}`)
   )
   const headers = isZh.value
-    ? ['队伍', '场数', '抛锚场次', '场均Auto', '场均Teleop', '场均Endgame', '最高分', '平均评分', '趋势', ...customHeaders]
-    : ['Team', 'Matches', 'Breakdown Count', 'Avg Auto', 'Avg Teleop', 'Avg Endgame', 'Max Score', 'Avg Rating', 'Trend', ...customHeaders]
+    ? [
+        '晋级分', '队伍', '场数', '抛锚场次', '场均Auto', '场均Teleop', '场均Endgame', '最高分', '平均评分', '趋势',
+        'TeleOp停泊率(%)', '机动RP均分', '场均Nectars', '场均底层Bonus', '场均Pollens', '场均Garden',
+        '拆台率(%)', 'G410犯规率(%)', 'Predict Cycle Time (s)', '合格采样本场数', '估算最大Cycle',
+        ...customHeaders
+      ]
+    : [
+        'Adv. Pts', 'Team', 'Matches', 'Breakdown Count', 'Avg Auto', 'Avg Teleop', 'Avg Endgame', 'Max Score', 'Avg Rating', 'Trend',
+        'TeleOp Park (%)', 'Avg Mobility RP Pts', 'Avg Nectars', 'Avg Bottom Bonus', 'Avg Pollens', 'Avg Garden',
+        'Descore (%)', 'G410 Foul (%)', 'Predict Cycle Time (s)', 'Predict Cycle Matches', 'Est. Max Cycles',
+        ...customHeaders
+      ]
   const rows = recordStore.rankings.map(r => {
     const teamRecs = recordStore.activeRecords.filter(
       rec => (!props.event?.id || rec.eventId === props.event.id) && rec.teamNumber === r.teamNumber && !rec.isBroken
@@ -166,6 +178,7 @@ function exportRankingsCSV() {
       }
     })
     return [
+      r.advancementPoints ?? 0,
       r.teamNumber,
       r.matchCount,
       r.brokenCount,
@@ -175,6 +188,17 @@ function exportRankingsCSV() {
       r.maxScore,
       r.avgRating,
       r.trend,
+      Math.round((r.teleopParkRate ?? 0) * 1000) / 10,
+      r.avgMobilityRpPts ?? 0,
+      r.avgFlowerNectars ?? 0,
+      r.avgFlowerBottomBonus ?? 0,
+      r.avgFlowerPollens ?? 0,
+      r.avgGardenBalls ?? 0,
+      Math.round((r.descoreRate ?? 0) * 1000) / 10,
+      Math.round((r.g410FoulRate ?? 0) * 1000) / 10,
+      r.predictCycleTime ?? '',
+      r.predictCycleMatches ?? 0,
+      r.estimatedMaxCycles ?? '',
       ...customCells
     ]
   })
@@ -193,8 +217,16 @@ function exportRecordsCSV() {
       : (isZh.value ? `自定义: ${f.name}` : `Custom: ${f.name}`)
   )
   const headers = isZh.value
-    ? ['记录ID', '级别', '场次', '队伍', '侦察员', 'Auto', 'Teleop', 'Endgame', '总分', '是否抛锚', '记录时间', ...customHeaders]
-    : ['Record ID', 'Level', 'Match', 'Team', 'Scout', 'Auto', 'Teleop', 'Endgame', 'Total Score', 'Is Broken', 'Created At', ...customHeaders]
+    ? [
+        '记录ID', '级别', '场次', '队伍', '侦察员', 'Auto', 'Teleop', 'Endgame', '总分', '是否抛锚',
+        'TeleOp停泊', 'Flower Nectars', 'Bottom Bonus', 'Flower Pollens', 'Garden', '底口拆台', 'G410早放花', 'Predict Cycle (s)',
+        '记录时间', ...customHeaders
+      ]
+    : [
+        'Record ID', 'Level', 'Match', 'Team', 'Scout', 'Auto', 'Teleop', 'Endgame', 'Total Score', 'Is Broken',
+        'TeleOp Park', 'Flower Nectars', 'Bottom Bonus', 'Flower Pollens', 'Garden Balls', 'Flower Descore', 'G410 Foul', 'Predict Cycle (s)',
+        'Created At', ...customHeaders
+      ]
   const sorted = sortRecordsChronologically(recordStore.activeRecords)
   const rows = sorted.map(r => {
     let customObj: Record<string, any> = {}
@@ -204,6 +236,10 @@ function exportRecordsCSV() {
         customObj = parsed.customFields || {}
       } catch {}
     }
+    const parsedRaw = parseScoutRawData(r.rawData)
+    const predictSec =
+      parsedRaw.predictCycleTimeSec ??
+      calcMatchPredictCycleTime(parsedRaw.teleopCycles, parsedRaw.teleopCycleTimestamps)
     const customCells = activeCustomFields.map(f => {
       const val = customObj[f.fieldKey]
       if (val === undefined || val === null) return ''
@@ -221,6 +257,14 @@ function exportRecordsCSV() {
       r.endgameScore,
       r.totalScore,
       r.isBroken ? 'Yes' : 'No',
+      parsedRaw.endgame.teleopPark ? 'Yes' : 'No',
+      parsedRaw.endgame.flowerNectars,
+      parsedRaw.endgame.flowerBottomBonusCount,
+      parsedRaw.endgame.flowerPollens,
+      parsedRaw.endgame.gardenBalls,
+      parsedRaw.endgame.flowerDescore ? 'Yes' : 'No',
+      parsedRaw.endgame.g410EarlyFlowerFoul ? 'Yes' : 'No',
+      predictSec ?? '',
       new Date(r.createdAt).toLocaleString(),
       ...customCells
     ]

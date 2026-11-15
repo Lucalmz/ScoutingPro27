@@ -15,6 +15,8 @@ import { useCustomFieldsStore } from '@/stores/customFields'
 import PitScoutFormDrawer from '@/components/pit/PitScoutFormDrawer.vue'
 import type { ScoutingRecord } from '@/types'
 import { sortRecordsChronologically, getMatchLevelPrefix } from '@/utils/tournament'
+import { parseScoutRawData } from '@/utils/analytics/rankings'
+import { calcMatchPredictCycleTime, aggregateTeamPredictCycleStats } from '@/utils/analytics/predictCycleTime'
 import TeamPitProfileCard from './components/TeamPitProfileCard.vue'
 import TeamCustomMetricsCard from './components/TeamCustomMetricsCard.vue'
 import {
@@ -90,6 +92,31 @@ const teamPitCustomSpecs = computed(() => {
 
 function getMatchCustomBadges(match: ScoutingRecord) {
   return buildMatchCustomBadges(activeMatchFields.value, match, t)
+}
+
+const teamPredictStats = computed(() => {
+  return aggregateTeamPredictCycleStats(
+    teamMatches.value.map(match => {
+      const parsed = parseScoutRawData(match.rawData)
+      return {
+        teleopCycles: parsed.teleopCycles,
+        teleopCycleTimestamps: parsed.teleopCycleTimestamps,
+        isBroken: match.isBroken
+      }
+    })
+  )
+})
+
+function getMatchBiobuzzMeta(match: ScoutingRecord) {
+  const parsed = parseScoutRawData(match.rawData)
+  const predictCycleSec =
+    parsed.predictCycleTimeSec ??
+    calcMatchPredictCycleTime(parsed.teleopCycles, parsed.teleopCycleTimestamps)
+  return {
+    teleopCyclesCount: parsed.teleopCycles.length,
+    endgame: parsed.endgame,
+    predictCycleSec
+  }
 }
 
 function loadEventData(eventId: string) {
@@ -219,6 +246,20 @@ async function saveComment(match: ScoutingRecord) {
         </div>
 
         <div v-else class="matches-list">
+          <div class="team-predict-banner">
+            <span class="predict-banner-label">
+              <span class="material-icons" style="font-size: 16px; color: #38bdf8;">speed</span>
+              {{ t('rankings.predict_cycle_time') }}:
+            </span>
+            <strong v-if="teamPredictStats.predictCycleTime !== null" class="predict-banner-val">
+              {{ t('rankings.predict_cycle_time_unit', { sec: teamPredictStats.predictCycleTime }) }}
+              <span class="predict-banner-sub">
+                ({{ t('rankings.predict_cycle_spread', { sec: teamPredictStats.predictCycleSpread ?? 0 }) }} · {{ t('rankings.estimated_max_cycles_unit', { cycles: teamPredictStats.estimatedMaxCycles ?? 0 }) }} · {{ t('rankings.predict_cycle_matches_count', { count: teamPredictStats.predictCycleMatches }) }})
+              </span>
+            </strong>
+            <span v-else class="predict-banner-sub">{{ t('rankings.predict_cycle_insufficient') }}</span>
+          </div>
+
           <div v-for="match in teamMatches" :key="match.id" class="match-card" :class="{ 'is-broken': match.isBroken }">
             <div class="match-header">
               <h3>{{ t('team_detail.match') }} #{{ getMatchLevelPrefix(match) }}{{ match.matchNumber }}</h3>
@@ -245,6 +286,55 @@ async function saveComment(match: ScoutingRecord) {
                 <span class="label">{{ t('scouting.total_score') }}</span>
                 <span class="value">{{ match.totalScore }}</span>
               </div>
+            </div>
+
+            <!-- BIOBUZZ Endgame & Cycle Breakdown Badges -->
+            <div
+              v-if="
+                getMatchBiobuzzMeta(match).endgame.flowerNectars > 0 ||
+                getMatchBiobuzzMeta(match).endgame.flowerPollens > 0 ||
+                getMatchBiobuzzMeta(match).endgame.gardenBalls > 0 ||
+                getMatchBiobuzzMeta(match).endgame.teleopPark ||
+                getMatchBiobuzzMeta(match).endgame.flowerDescore ||
+                getMatchBiobuzzMeta(match).endgame.g410EarlyFlowerFoul ||
+                getMatchBiobuzzMeta(match).predictCycleSec !== null ||
+                getMatchBiobuzzMeta(match).teleopCyclesCount > 0
+              "
+              class="match-custom-badges-row"
+            >
+              <span v-if="getMatchBiobuzzMeta(match).endgame.flowerNectars > 0" class="match-cf-badge cf-color-purple">
+                <span class="cf-name">Nectar:</span>
+                <span class="cf-val">{{ getMatchBiobuzzMeta(match).endgame.flowerNectars }}</span>
+              </span>
+              <span v-if="getMatchBiobuzzMeta(match).endgame.flowerBottomBonusCount > 0" class="match-cf-badge cf-color-green">
+                <span class="cf-name">Bottom Bonus:</span>
+                <span class="cf-val">{{ getMatchBiobuzzMeta(match).endgame.flowerBottomBonusCount }}</span>
+              </span>
+              <span v-if="getMatchBiobuzzMeta(match).endgame.flowerPollens > 0" class="match-cf-badge cf-color-orange">
+                <span class="cf-name">Pollen:</span>
+                <span class="cf-val">{{ getMatchBiobuzzMeta(match).endgame.flowerPollens }}</span>
+              </span>
+              <span v-if="getMatchBiobuzzMeta(match).endgame.gardenBalls > 0" class="match-cf-badge cf-color-green">
+                <span class="cf-name">Garden:</span>
+                <span class="cf-val">{{ getMatchBiobuzzMeta(match).endgame.gardenBalls }}</span>
+              </span>
+              <span v-if="getMatchBiobuzzMeta(match).endgame.teleopPark" class="match-cf-badge cf-color-blue">
+                <span class="cf-val">Park +5</span>
+              </span>
+              <span v-if="getMatchBiobuzzMeta(match).endgame.flowerDescore" class="match-cf-badge cf-color-purple">
+                <span class="cf-val">Descore</span>
+              </span>
+              <span v-if="getMatchBiobuzzMeta(match).endgame.g410EarlyFlowerFoul" class="match-cf-badge cf-color-orange">
+                <span class="cf-val">G410 Foul</span>
+              </span>
+              <span v-if="getMatchBiobuzzMeta(match).predictCycleSec !== null" class="match-cf-badge cf-color-blue">
+                <span class="cf-name">{{ t('scouting.predict_cycle_time') }}:</span>
+                <span class="cf-val">{{ getMatchBiobuzzMeta(match).predictCycleSec }}s</span>
+              </span>
+              <span v-else-if="getMatchBiobuzzMeta(match).teleopCyclesCount > 0" class="match-cf-badge">
+                <span class="cf-name">{{ t('scouting.predict_cycle_time') }}:</span>
+                <span class="cf-val">{{ t('rankings.predict_cycle_insufficient_short') }}</span>
+              </span>
             </div>
 
             <!-- 单场自定义字段徽章 -->
@@ -696,4 +786,37 @@ async function saveComment(match: ScoutingRecord) {
 
 .match-cf-badge.cf-color-red { border-color: rgba(248, 113, 113, 0.3); background: rgba(248, 113, 113, 0.08); }
 .match-cf-badge.cf-color-red .cf-val { color: #f87171; }
+
+.team-predict-banner {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 10px 14px;
+  margin-bottom: 12px;
+  border-radius: 10px;
+  background: rgba(56, 189, 248, 0.08);
+  border: 1px solid rgba(56, 189, 248, 0.25);
+  font-size: 13px;
+}
+
+.predict-banner-label {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  color: var(--foreground);
+  font-weight: 600;
+}
+
+.predict-banner-val {
+  color: #38bdf8;
+}
+
+.predict-banner-sub {
+  font-weight: 500;
+  font-size: 12px;
+  color: var(--muted-foreground);
+  margin-left: 4px;
+}
 </style>

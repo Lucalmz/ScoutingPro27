@@ -8,7 +8,12 @@ import { useRecordStore } from '../stores/records'
 import { useEventStore } from '../stores/events'
 import { useConfirm } from '../composables/useConfirm'
 import * as api from '../services/api'
+import { downloadCSV } from '../utils/csvExport'
 import type { ScoutingRecord } from '../types'
+
+vi.mock('../utils/csvExport', () => ({
+  downloadCSV: vi.fn()
+}))
 
 vi.mock('../services/api', async () => {
   const actual = await vi.importActual('../services/api')
@@ -25,6 +30,7 @@ vi.mock('vue-i18n', async (importOriginal) => {
   return {
     ...actual,
     useI18n: () => ({
+      locale: { value: 'en' },
       t: (key: string, values?: any) => {
         const dict: Record<string, string> = {
           'event.tab_scouts': 'Scouts & Settings',
@@ -246,5 +252,84 @@ describe('EventScoutsPanel.vue', () => {
 
     // Verify member removal API was called
     expect(api.removeEventMember).toHaveBeenCalledWith('event-test-1', 'u_bob')
+  })
+
+  it('exports BIOBUZZ Endgame and Predict Cycle Time columns in Rankings and Records CSV', async () => {
+    vi.mocked(api.fetchEventMembers).mockResolvedValue([])
+    const recordStore = useRecordStore()
+    const baseMs = 1_700_000_000_000
+    const ts = [0, 5, 7, 9, 11, 13].reduce<number[]>((acc, g, idx) => {
+      acc.push(idx === 0 ? baseMs : acc[idx - 1]! + g * 1000)
+      return acc
+    }, [])
+
+    recordStore.records = [
+      {
+        id: 'rec_csv_1',
+        eventId: 'event-test-1',
+        scoutId: 'u_alice',
+        scoutName: 'Alice',
+        matchNumber: 1,
+        teamNumber: 27570,
+        autoScore: 20,
+        teleopScore: 24,
+        endgameScore: 27,
+        totalScore: 71,
+        rawData: JSON.stringify({
+          autoLeave: true,
+          teleopPark: true,
+          flowerNectars: 4,
+          flowerBottomBonusCount: 2,
+          flowerPollens: 2,
+          gardenBalls: 0,
+          flowerDescore: true,
+          g410EarlyFlowerFoul: false,
+          teleopCycles: [2, 2, 2, 2, 2, 2],
+          teleopCycleTimestamps: ts
+        }),
+        syncStatus: 'SYNCED',
+        createdAt: new Date().toISOString(),
+        updatedAt: new Date().toISOString(),
+        version: 1
+      }
+    ]
+    recordStore.currentEventId = 'event-test-1'
+
+    const wrapper = mount(EventScoutsPanel, {
+      props: {
+        event: {
+          id: 'event-test-1',
+          name: 'Test Regional',
+          inviteCode: 'TEST01',
+          creatorId: 'u_alice',
+          createdAt: '',
+          updatedAt: ''
+        }
+      }
+    })
+
+    await flushPromises()
+
+    const btns = wrapper.findAll('button')
+    const exportRankingsBtn = btns.find(b => b.text().includes('event.export_rankings'))!
+    const exportRecordsBtn = btns.find(b => b.text().includes('event.export_records'))!
+
+    await exportRankingsBtn.trigger('click')
+    await exportRecordsBtn.trigger('click')
+
+    expect(vi.mocked(downloadCSV)).toHaveBeenCalledTimes(2)
+    const [rankFile, rankHeaders, rankRows] = vi.mocked(downloadCSV).mock.calls[0]!
+    expect(rankFile).toContain('rankings')
+    expect(rankHeaders).toContain('Predict Cycle Time (s)')
+    expect(rankHeaders).toContain('Avg Nectars')
+    expect(rankHeaders).toContain('TeleOp Park (%)')
+    expect(rankRows[0]).toContain(10) // Predict Cycle Time 10.0s
+
+    const [recFile, recHeaders, recRows] = vi.mocked(downloadCSV).mock.calls[1]!
+    expect(recFile).toContain('records')
+    expect(recHeaders).toContain('Flower Nectars')
+    expect(recHeaders).toContain('Predict Cycle (s)')
+    expect(recRows[0]).toContain(10)
+    expect(recRows[0]).toContain('Yes')
   })
 })

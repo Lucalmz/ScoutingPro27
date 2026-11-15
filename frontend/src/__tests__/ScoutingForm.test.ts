@@ -1,12 +1,16 @@
 import { mount } from '@vue/test-utils'
 import { describe, it, expect, vi, beforeEach } from 'vitest'
 import { setActivePinia, createPinia } from 'pinia'
+import { readFileSync } from 'node:fs'
+import { resolve } from 'node:path'
 import ScoutingForm from '../components/scouting/ScoutingForm.vue'
+import { useRecordStore } from '../stores/records'
 import type { ScoutingRecord } from '../../types'
 
 vi.mock('vue-i18n', () => ({
   useI18n: () => ({
-    t: (key: string) => key
+    t: (key: string) => key,
+    te: () => false
   }),
   createI18n: () => ({})
 }))
@@ -367,6 +371,180 @@ describe('ScoutingForm', () => {
       expect(parsed.teamsData[0].notes).toBe('Unmounting without waiting 400ms')
 
       vi.useRealTimers()
+    })
+  })
+
+  describe('Restored UI interactions & stylesheet integrity', () => {
+    it('retains scoped ScoutingForm.css import in ScoutingForm.vue SFC', () => {
+      const sfcPath = resolve(__dirname, '../components/scouting/ScoutingForm.vue')
+      const source = readFileSync(sfcPath, 'utf-8')
+      expect(source).toMatch(/<style\s+scoped\s+src="\.\/ScoutingForm\.css"\s*><\/style>/)
+    })
+
+    it('wires DOM clicks for mode switch, alliance SPDT switch, and toggle cards', async () => {
+      localStorage.removeItem('sp27_active_draft_event-1')
+      const wrapper = mount(ScoutingForm, { props: defaultProps })
+      await wrapper.vm.$nextTick()
+
+      // Mode switch buttons
+      const modeBtns = wrapper.findAll('.settings-section .segmented-control button')
+      expect(modeBtns).toHaveLength(2)
+      await modeBtns[1].trigger('click')
+      expect(wrapper.vm.scoutMode).toBe('alliance')
+      expect(wrapper.findAll('.team-column')).toHaveLength(2)
+      await modeBtns[0].trigger('click')
+      expect(wrapper.vm.scoutMode).toBe('single')
+      expect(wrapper.findAll('.team-column')).toHaveLength(1)
+
+      // Alliance SPDT switch labels
+      const spdtLabels = wrapper.findAll('.spdt-labels span')
+      expect(spdtLabels).toHaveLength(2)
+      await spdtLabels[1].trigger('click')
+      expect(wrapper.vm.allianceColor).toBe('blue')
+      expect(wrapper.find('.scouting-wrapper').classes()).toContain('color-blue')
+      await spdtLabels[0].trigger('click')
+      expect(wrapper.vm.allianceColor).toBe('red')
+      expect(wrapper.find('.scouting-wrapper').classes()).toContain('color-red')
+
+      // Toggle cards (Auto Leave, Auto Park, TeleOp Park, Flower Descore, G410 Foul, Broken)
+      const toggles = wrapper.findAll('.toggle-card')
+      expect(toggles).toHaveLength(6)
+      await toggles[0].find('input[type="checkbox"]').setValue(true) // autoLeave
+      await toggles[2].find('input[type="checkbox"]').setValue(true) // teleopPark
+      expect(wrapper.vm.teamsData[0].autoLeave).toBe(true)
+      expect(wrapper.vm.teamsData[0].teleopPark).toBe(true)
+      expect(toggles[0].classes()).toContain('is-active')
+      expect(toggles[2].classes()).toContain('is-active')
+    })
+
+    it('prevents TagPicker add/remove buttons inside ScoutingForm from triggering form submit', async () => {
+      localStorage.removeItem('sp27_active_draft_event-1')
+      const recordStore = useRecordStore()
+      recordStore.teamTags = [
+        {
+          id: 'tag-1',
+          eventId: 'event-1',
+          teamNumber: 27570,
+          tag: 'fast-auto',
+          color: 'blue',
+          isPreset: false,
+          createdAt: new Date().toISOString()
+        }
+      ] as any
+
+      const wrapper = mount(ScoutingForm, { props: defaultProps })
+      await wrapper.find('input[placeholder="e.g. 12345"]').setValue('27570')
+      await wrapper.vm.$nextTick()
+
+      const addBtn = wrapper.find('.btn-add-tag')
+      const removeBtn = wrapper.find('.btn-tag-remove')
+      expect(addBtn.exists()).toBe(true)
+      expect(removeBtn.exists()).toBe(true)
+      expect(addBtn.attributes('type')).toBe('button')
+      expect(removeBtn.attributes('type')).toBe('button')
+
+      await addBtn.trigger('click')
+      await wrapper.vm.$nextTick()
+      expect(wrapper.find('.tag-edit-panel').exists()).toBe(true)
+      expect(wrapper.emitted('submit')).toBeUndefined()
+      expect(wrapper.find('.submit-status-msg').exists()).toBe(false)
+    })
+
+    it('calculates BIOBUZZ Endgame scoring, clamps bottom bonus <= nectars, warns on unowned pollens and alliance nectar > 8', async () => {
+      localStorage.removeItem('sp27_active_draft_event-1')
+      const wrapper = mount(ScoutingForm, { props: defaultProps })
+
+      wrapper.vm.matchNumber = '3'
+      wrapper.vm.allianceColor = 'red'
+      wrapper.vm.teamsData[0].teamNumber = '27570'
+
+      // Pollens > 0 while flowerNectars === 0 shows non-blocking hint banner
+      wrapper.vm.setEndgameField(wrapper.vm.teamsData[0], 'flowerPollens', 2)
+      await wrapper.vm.$nextTick()
+      expect(wrapper.find('.endgame-hint-banner').exists()).toBe(true)
+
+      // Quick-chip buttons highlight active selection with `.is-selected`
+      const stepperCards = wrapper.findAll('.endgame-stepper-card')
+      expect(stepperCards).toHaveLength(4)
+      const nectarChips = stepperCards[0].findAll('.quick-ball-btn')
+      const pollenChips = stepperCards[2].findAll('.quick-ball-btn')
+      const gardenChips = stepperCards[3].findAll('.quick-ball-btn')
+      expect(pollenChips[1].classes()).toContain('is-selected') // 2 pollens
+
+      await nectarChips[2].trigger('click') // flowerNectars = 2
+      expect(nectarChips[2].classes()).toContain('is-selected')
+      expect(nectarChips[0].classes()).not.toContain('is-selected')
+
+      await gardenChips[2].trigger('click') // gardenBalls = 4
+      expect(gardenChips[2].classes()).toContain('is-selected')
+
+      // Nectars = 2, try setting BottomBonus = 4 -> clamped to 2
+      wrapper.vm.setEndgameField(wrapper.vm.teamsData[0], 'flowerNectars', 2)
+      wrapper.vm.setEndgameField(wrapper.vm.teamsData[0], 'flowerBottomBonusCount', 4)
+      expect(wrapper.vm.teamsData[0].flowerBottomBonusCount).toBe(2)
+
+      // Dropping Nectars down to 1 auto-clamps BottomBonus down to 1
+      wrapper.vm.setEndgameField(wrapper.vm.teamsData[0], 'flowerNectars', 1)
+      await wrapper.vm.$nextTick()
+      expect(wrapper.vm.teamsData[0].flowerBottomBonusCount).toBe(1)
+      const bonusChips = stepperCards[1].findAll('.quick-ball-btn')
+      expect(bonusChips[1].classes()).toContain('is-selected') // 1 bottom bonus
+
+      // Endgame = park(5) + 1*2 + 1*5 + 2*2 + garden 3*1 = 19
+      wrapper.vm.teamsData[0].teleopPark = true
+      wrapper.vm.setEndgameField(wrapper.vm.teamsData[0], 'gardenBalls', 3)
+      await wrapper.vm.$nextTick()
+      expect(wrapper.vm.calcTeamTotal(wrapper.vm.teamsData[0])).toBe(19)
+
+      // Dual-team mode alliance nectar cap warning (> 8 across both teams)
+      wrapper.vm.scoutMode = 'alliance'
+      await wrapper.vm.$nextTick()
+      wrapper.vm.teamsData[0].flowerNectars = 5
+      wrapper.vm.teamsData[1].flowerNectars = 4
+      await wrapper.vm.$nextTick()
+      expect(wrapper.find('.endgame-warn-banner').exists()).toBe(true)
+    })
+
+    it('passively collects teleopCycleTimestamps, pops on undo, ignores history +/- edits, and saves predictCycleTimeSec', async () => {
+      localStorage.removeItem('sp27_active_draft_event-1')
+      vi.useFakeTimers()
+      let now = 1_700_000_000_000
+      vi.setSystemTime(now)
+
+      try {
+        const wrapper = mount(ScoutingForm, { props: defaultProps })
+        wrapper.vm.matchNumber = '10'
+        wrapper.vm.allianceColor = 'blue'
+        wrapper.vm.teamsData[0].teamNumber = '27570'
+
+        const team = wrapper.vm.teamsData[0]
+        // Simulate 6 cycles at +6s, +8s, +10s, +12s, +14s intervals (5 valid intervals -> drops 6s, avg(8,10,12,14)=11.0s)
+        const gaps = [0, 6000, 8000, 10000, 12000, 14000]
+        for (const g of gaps) {
+          now += g
+          vi.setSystemTime(now)
+          wrapper.vm.addCycle(team)
+          wrapper.vm.setLastCycleBalls(team, 2)
+        }
+        expect(team.teleopCycleTimestamps).toHaveLength(6)
+        const snapshotBeforeEdit = [...team.teleopCycleTimestamps]
+
+        // Historical adjustment (+/-) must NOT alter recorded timestamps
+        team.teleopCycles[0] = 3
+        expect(team.teleopCycleTimestamps).toEqual(snapshotBeforeEdit)
+
+        // Adding 7th cycle then undoing it should pop its timestamp cleanly
+        now += 5000
+        vi.setSystemTime(now)
+        wrapper.vm.addCycle(team)
+        expect(team.teleopCycleTimestamps).toHaveLength(7)
+        wrapper.vm.undoLastCycle(team)
+        expect(team.teleopCycleTimestamps).toEqual(snapshotBeforeEdit)
+
+        expect(wrapper.vm.getTeamPredictCycleTime(team)).toBe(11.0)
+      } finally {
+        vi.useRealTimers()
+      }
     })
   })
 })

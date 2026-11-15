@@ -133,11 +133,15 @@ describe('MobilePhaseWizardForm.vue', () => {
     expect(wrapper.find('.score-val').text()).toBe('4') // 2 balls * 2 pts = 4
     await wrapper.find('.btn-wizard-primary').trigger('click')
 
-    // STEP 3: Endgame (30s)
+    // STEP 3: Endgame (BIOBUZZ steppers + toggles)
     expect(wrapper.find('.step-endgame').exists()).toBe(true)
+    const stepperCards = wrapper.findAll('.mobile-stepper-card')
+    expect(stepperCards).toHaveLength(4)
+    await stepperCards[0].findAll('.chip-btn')[2].trigger('click') // flowerNectars = 2 (+4 pts)
+    await stepperCards[1].findAll('.chip-btn')[1].trigger('click') // flowerBottomBonusCount = 1 (+5 pts)
+    await stepperCards[3].findAll('.btn-step')[1].trigger('click') // gardenBalls = 1 (+1 pt)
     const endgameCards = wrapper.findAll('.toggle-card')
-    await endgameCards[0].trigger('click') // Flower Placed (+10 pts)
-    await endgameCards[2].trigger('click') // TeleOp Park (+5 pts)
+    await endgameCards[0].trigger('click') // TeleOp Park (+5 pts)
     expect(wrapper.find('.score-val').text()).toBe('15')
 
     // Quick notes chip
@@ -436,5 +440,65 @@ describe('MobilePhaseWizardForm.vue', () => {
     await teleopUndoBtn.trigger('click')
     expect(wrapper.findAll('.step-teleop .cycle-chip').length).toBe(1)
     expect(wrapper.find('.step-teleop .cycle-chip').text()).toContain('1')
+  })
+
+  it('clamps mobile bottom bonus <= nectars, shows pollen hint, and emits teleopCycleTimestamps & predictCycleTimeSec', async () => {
+    vi.useFakeTimers()
+    let now = 1_700_000_000_000
+    vi.setSystemTime(now)
+
+    try {
+      const wrapper = mount(MobilePhaseWizardForm, {
+        props: {
+          eventId: 'evt_1',
+          scoutId: 'scout_1',
+          scoutName: 'Alice'
+        }
+      })
+
+      await wrapper.find('.red-btn').trigger('click')
+      await wrapper.findAll('.giant-num-input')[1].setValue('27570')
+
+      const steps = wrapper.findAll('.stepper-step')
+      await steps[2].trigger('click') // Step 2: TeleOp
+
+      const teleopHitBtn = wrapper.find('.teleop-hero-hit')
+      const newCycleBtn = wrapper.find('.step-teleop .btn-new-cycle')
+      // Record 6 cycles spaced at [4s, 6s, 8s, 10s, 12s] -> dropped 4s, avg(6,8,10,12)=9.0s
+      const gaps = [0, 4000, 6000, 8000, 10000, 12000]
+      for (let i = 0; i < gaps.length; i++) {
+        now += gaps[i]!
+        vi.setSystemTime(now)
+        if (i > 0) await newCycleBtn.trigger('click')
+        await teleopHitBtn.trigger('click')
+      }
+
+      // Go to Step 3: Endgame
+      await steps[3].trigger('click')
+      const stepperCards = wrapper.findAll('.mobile-stepper-card')
+      // Pollens > 0 while nectars === 0 shows warning hint
+      await stepperCards[2].findAll('.btn-step')[1].trigger('click') // pollens = 1 (+2)
+      expect(wrapper.find('.mobile-unowned-hint').exists()).toBe(true)
+
+      // Set Nectars = 2 (+4), BottomBonus = 2 (+10)
+      await stepperCards[0].findAll('.chip-btn')[2].trigger('click') // nectars = 2
+      await stepperCards[1].findAll('.chip-btn')[2].trigger('click') // bottomBonus = 2
+      expect(wrapper.find('.mobile-unowned-hint').exists()).toBe(false)
+
+      // Dropping Nectars to 1 auto-clamps BottomBonus down to 1!
+      await stepperCards[0].findAll('.chip-btn')[1].trigger('click') // nectars = 1
+      await steps[4].trigger('click') // Summary
+
+      await wrapper.find('.btn-wizard-submit').trigger('click')
+      const emitted = wrapper.emitted('submit')![0][0] as ScoutingRecord
+      const raw = JSON.parse(emitted.rawData || '{}')
+      expect(raw.flowerNectars).toBe(1)
+      expect(raw.flowerBottomBonusCount).toBe(1)
+      expect(raw.flowerPollens).toBe(1)
+      expect(raw.teleopCycleTimestamps).toHaveLength(6)
+      expect(raw.predictCycleTimeSec).toBe(9.0)
+    } finally {
+      vi.useRealTimers()
+    }
   })
 })

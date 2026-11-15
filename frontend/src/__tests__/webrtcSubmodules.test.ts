@@ -12,6 +12,7 @@ import {
 import { OfflineMessageManager } from '@/services/webrtc/offlineQueue'
 import { toSessionDescription, toIceCandidate } from '@/services/webrtc/sdpUtil'
 import { evaluateAndApplyClientTrust } from '@/services/webrtc/clientTrustHelper'
+import { PeerConnectionManager } from '@/services/webrtc/peerManager'
 import type { WebRtcDirectMessage } from '@/types'
 
 describe('WebRTC Decoupled Submodules Unit Suite', () => {
@@ -41,6 +42,8 @@ describe('WebRTC Decoupled Submodules Unit Suite', () => {
       expect(isPrivateIpv4Address('111.8.3.78')).toBe(false)
 
       expect(isTunVirtualAddress('198.18.0.1')).toBe(true)
+      expect(isTunVirtualAddress('28.0.0.1')).toBe(true)
+      expect(isTunVirtualAddress('28.255.1.10')).toBe(true)
       expect(isTunVirtualAddress('100.64.0.5')).toBe(true)
       expect(isTunVirtualAddress('172.19.0.1')).toBe(true)
       expect(isTunVirtualAddress('fdfe:dcba:9876::1')).toBe(true)
@@ -143,6 +146,65 @@ describe('WebRTC Decoupled Submodules Unit Suite', () => {
       expect(sentMessages).toHaveLength(1)
       expect(handledMessages).toHaveLength(1)
       expect(verifiedPeers).toEqual(['host'])
+    })
+  })
+
+  describe('PeerConnectionManager timer cleanup', () => {
+    it('cancels delayed 1200ms and 3000ms updateTransportInfo timers on peer.close()', async () => {
+      vi.useFakeTimers()
+      const origRtcpc = global.RTCPeerConnection
+      const getStatsMock = vi.fn().mockResolvedValue(new Map())
+      const closeMock = vi.fn()
+      let createdPeer: any = null
+
+      global.RTCPeerConnection = vi.fn().mockImplementation(() => {
+        createdPeer = {
+          connectionState: 'new',
+          iceConnectionState: 'new',
+          iceGatheringState: 'new',
+          getStats: getStatsMock,
+          close: closeMock,
+          onicecandidate: null,
+          oniceconnectionstatechange: null,
+          onconnectionstatechange: null,
+          ondatachannel: null
+        }
+        return createdPeer
+      }) as any
+
+      try {
+        const mgr = new PeerConnectionManager({
+          getSignaling: () => null,
+          isHostMode: () => false,
+          callbacks: {
+            onStatusChange: vi.fn(),
+            onRecordsReceived: vi.fn(),
+            onAckReceived: vi.fn(),
+            onRequestSync: vi.fn()
+          },
+          setStatus: vi.fn(),
+          getClientSharedAesKey: () => null,
+          getClientSharedKey: () => null,
+          getClientFingerprint: () => undefined,
+          getClientSecurityFingerprint: () => ''
+        })
+
+        const peer = mgr.createPeerConnection(false)
+        ;(peer as any).iceConnectionState = 'connected'
+        peer.oniceconnectionstatechange?.({} as any)
+
+        // Initial immediate getStats probe runs synchronously once; close immediately before 1200ms/3000ms
+        expect(getStatsMock).toHaveBeenCalledTimes(1)
+        peer.close()
+        expect(closeMock).toHaveBeenCalledTimes(1)
+
+        await vi.advanceTimersByTimeAsync(5000)
+        // Must NOT fire delayed 1200ms / 3000ms updateTransportInfo probes after peer.close()
+        expect(getStatsMock).toHaveBeenCalledTimes(1)
+      } finally {
+        global.RTCPeerConnection = origRtcpc
+        vi.useRealTimers()
+      }
     })
   })
 })

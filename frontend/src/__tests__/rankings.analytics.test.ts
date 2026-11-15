@@ -1,5 +1,12 @@
 import { describe, it, expect } from 'vitest'
-import { calculateScoutReliability, calculateRankings, getScoutedBalls } from '@/utils/analytics/rankings'
+import {
+  calculateScoutReliability,
+  calculateRankings,
+  getScoutedBalls,
+  parseBiobuzzEndgame,
+  calcBiobuzzEndgameScore,
+  parseScoutRawData
+} from '@/utils/analytics/rankings'
 import type { ScoutingRecord, OfficialMatch } from '@/types'
 
 describe('rankings analytics', () => {
@@ -404,6 +411,100 @@ describe('rankings analytics', () => {
     expect(teamRow.teamNumber).toBe(27570)
     expect(teamRow.matchCount).toBe(1) // NOT 2! Deduplication must hold!
     expect(teamRow.avgRating).toBe(60) // Uses latest record score 60, NOT (40+60)/2 = 50
+  })
+
+  it('aggregates BIOBUZZ Endgame metrics, Mobility RP pts, legacy fallback, and Predict Cycle Time in calculateRankings', () => {
+    const baseMs = 1_700_000_000_000
+    const tsQual = [0, 5, 7, 9, 11, 13].reduce<number[]>((acc, g, idx) => {
+      acc.push(idx === 0 ? baseMs : acc[idx - 1]! + g * 1000)
+      return acc
+    }, [])
+
+    // Legacy normalization check
+    const legacy = parseBiobuzzEndgame({ flowerPlaced: true, flowerBottomBonus: true, teleopPark: true })
+    expect(legacy.flowerNectars).toBe(1)
+    expect(legacy.flowerBottomBonusCount).toBe(1)
+    expect(calcBiobuzzEndgameScore(legacy)).toBe(12) // 5 (park) + 2 (nectar) + 5 (bonus)
+
+    const parsedLegacy = parseScoutRawData(JSON.stringify({ flowerPlaced: true, flowerPollens: 2 }))
+    expect(parsedLegacy.endgame.flowerNectars).toBe(1)
+    expect(parsedLegacy.endgame.flowerPollens).toBe(2)
+
+    const records: ScoutingRecord[] = [
+      {
+        id: 'bb_1',
+        eventId: 'e1',
+        matchNumber: 1,
+        teamNumber: 27570,
+        scoutId: 's1',
+        scoutName: 'Alice',
+        autoScore: 20,
+        teleopScore: 24,
+        endgameScore: 27, // 5 (park) + 4*2 + 2*5 + 2*2
+        totalScore: 71,
+        rawData: JSON.stringify({
+          autoLeave: true,
+          autoPark: true,
+          teleopPark: true,
+          flowerNectars: 4,
+          flowerBottomBonusCount: 2,
+          flowerPollens: 2,
+          gardenBalls: 0,
+          flowerDescore: false,
+          g410EarlyFlowerFoul: false,
+          teleopCycles: [2, 2, 2, 2, 2, 2],
+          teleopCycleTimestamps: tsQual
+        }),
+        syncStatus: 'SYNCED',
+        createdAt: '2026-01-01T10:00:00Z',
+        updatedAt: '2026-01-01T10:00:00Z'
+      },
+      {
+        id: 'bb_2',
+        eventId: 'e1',
+        matchNumber: 2,
+        teamNumber: 27570,
+        scoutId: 's1',
+        scoutName: 'Alice',
+        autoScore: 15,
+        teleopScore: 16,
+        endgameScore: 9, // 0 (park) + 2*2 + 0 + 0 + 5*1
+        totalScore: 40,
+        rawData: JSON.stringify({
+          autoLeave: true,
+          autoPark: false,
+          teleopPark: false,
+          flowerNectars: 2,
+          flowerBottomBonusCount: 0,
+          flowerPollens: 0,
+          gardenBalls: 5,
+          flowerDescore: true,
+          g410EarlyFlowerFoul: true,
+          teleopCycles: [2, 2],
+          teleopCycleTimestamps: [baseMs, baseMs + 5000] // <5 intervals -> ignored for Predict Cycle
+        }),
+        syncStatus: 'SYNCED',
+        createdAt: '2026-01-01T11:00:00Z',
+        updatedAt: '2026-01-01T11:00:00Z'
+      }
+    ]
+
+    const rankings = calculateRankings(records, [], {})
+    expect(rankings).toHaveLength(1)
+    const row = rankings[0]!
+    expect(row.teleopParkRate).toBe(0.5)
+    // Match 1 Mobility = 3+5+5 = 13; Match 2 Mobility = 3+0+0 = 3 -> avg 8.0
+    expect(row.avgMobilityRpPts).toBe(8.0)
+    expect(row.avgFlowerNectars).toBe(3.0)
+    expect(row.avgFlowerBottomBonus).toBe(1.0)
+    expect(row.avgFlowerPollens).toBe(1.0)
+    expect(row.avgGardenBalls).toBe(2.5)
+    expect(row.descoreRate).toBe(0.5)
+    expect(row.g410FoulRate).toBe(0.5)
+    // Only Match 1 qualified (>=5 intervals: [5,7,9,11,13] -> drop 5 -> avg(7,9,11,13)=10.0s)
+    expect(row.predictCycleTime).toBe(10.0)
+    expect(row.predictCycleMatches).toBe(1)
+    expect(row.estimatedMaxCycles).toBe(9.0)
   })
 })
 

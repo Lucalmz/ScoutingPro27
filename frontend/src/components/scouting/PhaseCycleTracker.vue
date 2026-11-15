@@ -15,6 +15,7 @@ const props = withDefaults(
     rateText: string
     modelValue: number[]
     missedValue?: number[]
+    timestampsValue?: number[]
   }>(),
   {
     modelValue: () => [],
@@ -25,6 +26,7 @@ const props = withDefaults(
 const emit = defineEmits<{
   (e: 'update:modelValue', val: number[]): void
   (e: 'update:missedValue', val: number[]): void
+  (e: 'update:timestampsValue', val: number[]): void
   (e: 'change', scored: number[], missed: number[]): void
 }>()
 
@@ -74,7 +76,13 @@ const {
   getMissedValue: () => props.missedValue,
   emitModelValue: (val) => emit('update:modelValue', val),
   emitMissedValue: (val) => emit('update:missedValue', val),
-  emitChange: (scored, missed) => emit('change', scored, missed)
+  emitChange: (scored, missed) => emit('change', scored, missed),
+  getTimestampsValue: () => (props.phase === 'teleop' ? props.timestampsValue : undefined),
+  emitTimestampsValue: (val) => {
+    if (props.phase === 'teleop' && props.timestampsValue !== undefined) {
+      emit('update:timestampsValue', val)
+    }
+  }
 })
 
 defineExpose({

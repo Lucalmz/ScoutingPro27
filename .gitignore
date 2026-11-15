@@ -22,3 +22,18 @@ scratch/
 .vite/
 *.zip
 Microsoft/
+
+# Maven shade generated artifacts
+dependency-reduced-pom.xml
+**/dependency-reduced-pom.xml
+
+# Build outputs
+target/
+**/target/
+dist/
+**/dist/
+
+# Scratch & test failure dumps
+*-failed-*.png
+**/*-failed-*.png
+**/__screenshots__/

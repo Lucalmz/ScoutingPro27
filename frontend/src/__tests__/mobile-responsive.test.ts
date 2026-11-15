@@ -110,11 +110,17 @@ describe('Mobile and Fold Screen Responsive Architecture', () => {
     const tableWrapper = wrapper.find('.table-wrapper')
     expect(tableWrapper.exists()).toBe(true)
 
-    const teamHeader = wrapper.find('thead th:first-child')
+    const advHeader = wrapper.find('thead th:first-child')
+    expect(advHeader.exists()).toBe(true)
+    expect(advHeader.classes()).toContain('advancement-col-th')
+
+    const teamHeader = wrapper.find('thead th.team-col-th')
     expect(teamHeader.exists()).toBe(true)
 
     const row = wrapper.find('[data-team-row="27570"]')
     expect(row.exists()).toBe(true)
+    const advCell = row.find('.advancement-cell')
+    expect(advCell.exists()).toBe(true)
     const teamCell = row.find('.team-cell')
     expect(teamCell.exists()).toBe(true)
     expect(teamCell.text()).toContain('27570')

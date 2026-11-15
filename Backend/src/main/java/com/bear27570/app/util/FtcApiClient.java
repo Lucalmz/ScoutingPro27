@@ -129,6 +129,16 @@ public class FtcApiClient {
             JsonObject normMatch = new JsonObject();
             normMatch.addProperty("matchNum", matchNum);
             normMatch.addProperty("tournamentLevel", level);
+            if (m.has("series") && !m.get("series").isJsonNull()) {
+                normMatch.addProperty("series", m.get("series").getAsInt());
+            } else if (m.has("Series") && !m.get("Series").isJsonNull()) {
+                normMatch.addProperty("series", m.get("Series").getAsInt());
+            }
+            if (m.has("description") && !m.get("description").isJsonNull()) {
+                normMatch.addProperty("description", m.get("description").getAsString());
+            } else if (m.has("Description") && !m.get("Description").isJsonNull()) {
+                normMatch.addProperty("description", m.get("Description").getAsString());
+            }
 
             boolean hasScores = m.has("scoreRedFinal") && !m.get("scoreRedFinal").isJsonNull();
             if (hasScores) {
@@ -253,6 +263,256 @@ public class FtcApiClient {
         } while (page <= pageTotal && page <= 20);
 
         return allTeams;
+    }
+
+    /**
+     * 获取指定赛季与赛事代码的队伍排名列表，并归一化为纯净 Ranking 列表
+     *
+     * @param season    FTC 赛季年份 (如 2024, 2025)
+     * @param eventCode 赛事代码 (如 CNCMPLB, AUCMP)
+     * @return 归一化后的官方排名 JsonArray
+     */
+    public JsonArray fetchNormalizedRankings(int season, String eventCode) throws Exception {
+        if ("BIOBUZZ_SYNTHETIC".equalsIgnoreCase(eventCode) || "SYNTHETIC".equalsIgnoreCase(eventCode)) {
+            return generateSyntheticBiobuzzRankings();
+        }
+
+        String path = "/v2.0/" + season + "/rankings/" + eventCode;
+        JsonObject rawObj = fetchJsonWithCache(path);
+        JsonArray rawRankings = null;
+        if (rawObj != null) {
+            if (rawObj.has("rankings") && !rawObj.get("rankings").isJsonNull() && rawObj.get("rankings").isJsonArray()) {
+                rawRankings = rawObj.getAsJsonArray("rankings");
+            } else if (rawObj.has("Rankings") && !rawObj.get("Rankings").isJsonNull() && rawObj.get("Rankings").isJsonArray()) {
+                rawRankings = rawObj.getAsJsonArray("Rankings");
+            }
+        }
+        if (rawRankings == null) {
+            return new JsonArray();
+        }
+
+        JsonArray normalizedRankings = new JsonArray();
+
+        for (JsonElement rElem : rawRankings) {
+            if (!rElem.isJsonObject()) continue;
+            JsonObject r = rElem.getAsJsonObject();
+
+            int rank = r.has("rank") && !r.get("rank").isJsonNull() ? r.get("rank").getAsInt() : (r.has("Rank") && !r.get("Rank").isJsonNull() ? r.get("Rank").getAsInt() : 0);
+            int teamNum = r.has("teamNumber") && !r.get("teamNumber").isJsonNull() ? r.get("teamNumber").getAsInt() : (r.has("TeamNumber") && !r.get("TeamNumber").isJsonNull() ? r.get("TeamNumber").getAsInt() : 0);
+            if (teamNum <= 0) continue;
+
+            JsonObject normRank = new JsonObject();
+            normRank.addProperty("rank", rank);
+            normRank.addProperty("teamNumber", teamNum);
+
+            copyDoubleProperty(r, normRank, "sortOrder1", "SortOrder1");
+            copyDoubleProperty(r, normRank, "sortOrder2", "SortOrder2");
+            copyDoubleProperty(r, normRank, "sortOrder3", "SortOrder3");
+            copyDoubleProperty(r, normRank, "sortOrder4", "SortOrder4");
+            copyDoubleProperty(r, normRank, "sortOrder5", "SortOrder5");
+            copyDoubleProperty(r, normRank, "sortOrder6", "SortOrder6");
+            copyIntProperty(r, normRank, "wins", "Wins");
+            copyIntProperty(r, normRank, "losses", "Losses");
+            copyIntProperty(r, normRank, "ties", "Ties");
+            copyIntProperty(r, normRank, "qualMatchesPlayed", "QualMatchesPlayed");
+            copyIntProperty(r, normRank, "dq", "Dq");
+
+            normalizedRankings.add(normRank);
+        }
+
+        return normalizedRankings;
+    }
+
+    /**
+     * 获取指定赛季与赛事代码的评审与赛事奖项列表
+     */
+    public JsonArray fetchAwards(int season, String eventCode) throws Exception {
+        if ("BIOBUZZ_SYNTHETIC".equalsIgnoreCase(eventCode) || "SYNTHETIC".equalsIgnoreCase(eventCode)) {
+            return generateSyntheticBiobuzzAwards();
+        }
+
+        String path = "/v2.0/" + season + "/awards/" + eventCode;
+        JsonObject rawObj = fetchJsonWithCache(path);
+        JsonArray rawAwards = null;
+        if (rawObj != null) {
+            if (rawObj.has("awards") && !rawObj.get("awards").isJsonNull() && rawObj.get("awards").isJsonArray()) {
+                rawAwards = rawObj.getAsJsonArray("awards");
+            } else if (rawObj.has("Awards") && !rawObj.get("Awards").isJsonNull() && rawObj.get("Awards").isJsonArray()) {
+                rawAwards = rawObj.getAsJsonArray("Awards");
+            }
+        }
+        if (rawAwards == null) {
+            return new JsonArray();
+        }
+
+        JsonArray normalizedAwards = new JsonArray();
+
+        for (JsonElement aElem : rawAwards) {
+            if (!aElem.isJsonObject()) continue;
+            JsonObject a = aElem.getAsJsonObject();
+
+            int teamNum = a.has("teamNumber") && !a.get("teamNumber").isJsonNull() ? a.get("teamNumber").getAsInt() : (a.has("TeamNumber") && !a.get("TeamNumber").isJsonNull() ? a.get("TeamNumber").getAsInt() : 0);
+            String name = a.has("name") && !a.get("name").isJsonNull() ? a.get("name").getAsString() : (a.has("Name") && !a.get("Name").isJsonNull() ? a.get("Name").getAsString() : "");
+            int series = a.has("series") && !a.get("series").isJsonNull() ? a.get("series").getAsInt() : (a.has("Series") && !a.get("Series").isJsonNull() ? a.get("Series").getAsInt() : 1);
+
+            JsonObject normAward = new JsonObject();
+            normAward.addProperty("teamNumber", teamNum);
+            normAward.addProperty("name", name);
+            normAward.addProperty("series", series);
+            if (a.has("awardId")) normAward.addProperty("awardId", a.get("awardId").getAsInt());
+
+            normalizedAwards.add(normAward);
+        }
+
+        return normalizedAwards;
+    }
+
+    /**
+     * 获取指定赛季与赛事代码的选队联盟信息
+     */
+    public JsonArray fetchAlliances(int season, String eventCode) throws Exception {
+        if ("BIOBUZZ_SYNTHETIC".equalsIgnoreCase(eventCode) || "SYNTHETIC".equalsIgnoreCase(eventCode)) {
+            return generateSyntheticBiobuzzAlliances();
+        }
+
+        String path = "/v2.0/" + season + "/alliances/" + eventCode;
+        JsonObject rawObj = fetchJsonWithCache(path);
+        JsonArray rawAlliances = null;
+        if (rawObj != null) {
+            if (rawObj.has("alliances") && !rawObj.get("alliances").isJsonNull() && rawObj.get("alliances").isJsonArray()) {
+                rawAlliances = rawObj.getAsJsonArray("alliances");
+            } else if (rawObj.has("Alliances") && !rawObj.get("Alliances").isJsonNull() && rawObj.get("Alliances").isJsonArray()) {
+                rawAlliances = rawObj.getAsJsonArray("Alliances");
+            }
+        }
+        if (rawAlliances == null) {
+            return new JsonArray();
+        }
+
+        JsonArray normalizedAlliances = new JsonArray();
+
+        for (JsonElement el : rawAlliances) {
+            if (!el.isJsonObject()) continue;
+            JsonObject a = el.getAsJsonObject();
+
+            int number = AdvancementCalculator.extractTeamNumber(a, "number", "Number");
+            int captain = AdvancementCalculator.extractTeamNumber(a, "captain", "Captain");
+            int round1 = AdvancementCalculator.extractTeamNumber(a, "round1", "Round1");
+            int round2 = AdvancementCalculator.extractTeamNumber(a, "round2", "Round2");
+            int round3 = AdvancementCalculator.extractTeamNumber(a, "round3", "Round3");
+            int backup = AdvancementCalculator.extractTeamNumber(a, "backup", "Backup");
+
+            JsonObject normAlliance = new JsonObject();
+            normAlliance.addProperty("number", number);
+            normAlliance.addProperty("captain", captain);
+            normAlliance.addProperty("round1", round1);
+            if (round2 > 0) normAlliance.addProperty("round2", round2);
+            if (round3 > 0) normAlliance.addProperty("round3", round3);
+            if (backup > 0) normAlliance.addProperty("backup", backup);
+            if (a.has("name") && !a.get("name").isJsonNull()) {
+                normAlliance.addProperty("name", a.get("name").getAsString());
+            } else if (a.has("Name") && !a.get("Name").isJsonNull()) {
+                normAlliance.addProperty("name", a.get("Name").getAsString());
+            }
+
+            normalizedAlliances.add(normAlliance);
+        }
+
+        return normalizedAlliances;
+    }
+
+    public JsonObject fetchOfficialAdvancementRaw(int season, String eventCode) {
+        if (eventCode == null || eventCode.isBlank()
+                || "BIOBUZZ_SYNTHETIC".equalsIgnoreCase(eventCode)
+                || "SYNTHETIC".equalsIgnoreCase(eventCode)) {
+            return null;
+        }
+        try {
+            return fetchJsonWithCache("/v2.0/" + season + "/advancement/" + eventCode);
+        } catch (Exception ignored) {
+            return null;
+        }
+    }
+
+    /**
+     * 查询 FTC 官方 /v2.0/{season}/advancement/{eventCode} 提供的赛事晋级名额 (slots)，若赛事未发布或返回 404 则回退默认 4
+     */
+    public int fetchOfficialAdvancementSlots(int season, String eventCode) {
+        JsonObject rawAdv = fetchOfficialAdvancementRaw(season, eventCode);
+        if (rawAdv != null) {
+            int slots = AdvancementCalculator.extractTeamNumber(rawAdv, "slots", "Slots");
+            if (slots > 0) {
+                return slots;
+            }
+        }
+        return AdvancementCalculator.DEFAULT_ADVANCEMENT_SLOTS;
+    }
+
+    /**
+     * 实时汇算指定赛事全部战队的 FTC 官方标准晋级分（优先读取官方赛事 slots，回退默认 4）
+     */
+    public JsonArray fetchAdvancement(int season, String eventCode) throws Exception {
+        return fetchAdvancement(season, eventCode, (Integer) null);
+    }
+
+    /**
+     * 实时汇算指定赛事全部战队的 FTC 官方标准晋级分 (支持自定义晋级名额)
+     */
+    public JsonArray fetchAdvancement(int season, String eventCode, int advancementSlots) throws Exception {
+        return fetchAdvancement(season, eventCode, Integer.valueOf(advancementSlots));
+    }
+
+    /**
+     * 实时汇算指定赛事全部战队的 FTC 官方标准晋级分与顺延状态（当 explicitSlots 为 null 或 <= 0 时自动读取官方 slots 与晋级状态）
+     */
+    public JsonArray fetchAdvancement(int season, String eventCode, Integer explicitSlots) throws Exception {
+        JsonArray rankings = fetchNormalizedRankings(season, eventCode);
+        JsonArray alliances = fetchAlliances(season, eventCode);
+        JsonArray awards = fetchAwards(season, eventCode);
+        JsonArray matches = fetchNormalizedMatches(season, eventCode, null);
+
+        JsonObject rawOfficialAdv = fetchOfficialAdvancementRaw(season, eventCode);
+        boolean hasExplicitSlots = explicitSlots != null && explicitSlots > 0;
+        int resolvedSlots;
+        if (hasExplicitSlots) {
+            resolvedSlots = explicitSlots;
+        } else {
+            int officialSlots = rawOfficialAdv != null
+                    ? AdvancementCalculator.extractTeamNumber(rawOfficialAdv, "slots", "Slots")
+                    : -1;
+            resolvedSlots = officialSlots > 0 ? officialSlots : AdvancementCalculator.DEFAULT_ADVANCEMENT_SLOTS;
+        }
+
+        // 如果官方 rankings 尚未产生，但已有队伍名单，则按队伍名单构建默认 rank
+        if (rankings.size() == 0) {
+            JsonArray teams = fetchNormalizedTeams(season, eventCode);
+            for (int i = 0; i < teams.size(); i++) {
+                JsonObject t = teams.get(i).getAsJsonObject();
+                JsonObject r = new JsonObject();
+                r.addProperty("rank", i + 1);
+                r.addProperty("teamNumber", t.get("teamNumber").getAsInt());
+                rankings.add(r);
+            }
+        }
+
+        return AdvancementCalculator.calculateAdvancement(
+                rankings, alliances, awards, matches, resolvedSlots, rawOfficialAdv, hasExplicitSlots);
+    }
+
+    private static void copyDoubleProperty(JsonObject src, JsonObject dst, String primaryKey, String fallbackKey) {
+        if (src.has(primaryKey) && !src.get(primaryKey).isJsonNull()) {
+            dst.addProperty(primaryKey, src.get(primaryKey).getAsDouble());
+        } else if (src.has(fallbackKey) && !src.get(fallbackKey).isJsonNull()) {
+            dst.addProperty(primaryKey, src.get(fallbackKey).getAsDouble());
+        }
+    }
+
+    private static void copyIntProperty(JsonObject src, JsonObject dst, String primaryKey, String fallbackKey) {
+        if (src.has(primaryKey) && !src.get(primaryKey).isJsonNull()) {
+            dst.addProperty(primaryKey, src.get(primaryKey).getAsInt());
+        } else if (src.has(fallbackKey) && !src.get(fallbackKey).isJsonNull()) {
+            dst.addProperty(primaryKey, src.get(fallbackKey).getAsInt());
+        }
     }
 
     /**
@@ -442,5 +702,77 @@ public class FtcApiClient {
             teams.add(t);
         }
         return teams;
+    }
+
+    public static JsonArray generateSyntheticBiobuzzRankings() {
+        JsonArray rankings = new JsonArray();
+        int[] numbers = {
+            27570, 11115, 8417, 18457, 11260, 8644, 18219, 19600,
+            16461, 14295, 12808, 10011, 16379, 12599, 19743, 22312
+        };
+        for (int i = 0; i < numbers.length; i++) {
+            JsonObject r = new JsonObject();
+            r.addProperty("rank", i + 1);
+            r.addProperty("teamNumber", numbers[i]);
+            r.addProperty("sortOrder1", 2.0 - (i * 0.1));
+            r.addProperty("sortOrder2", 130.0 - (i * 4));
+            r.addProperty("wins", Math.max(0, 5 - (i / 3)));
+            r.addProperty("losses", Math.min(5, i / 3));
+            r.addProperty("ties", 0);
+            r.addProperty("qualMatchesPlayed", 5);
+            rankings.add(r);
+        }
+        return rankings;
+    }
+
+    public static JsonArray generateSyntheticBiobuzzAlliances() {
+        JsonArray alliances = new JsonArray();
+        int[][] seeds = {
+            {1, 27570, 11115},
+            {2, 8417, 18457},
+            {3, 11260, 8644},
+            {4, 18219, 19600}
+        };
+        for (int[] s : seeds) {
+            JsonObject a = new JsonObject();
+            a.addProperty("number", s[0]);
+            a.addProperty("captain", s[1]);
+            a.addProperty("round1", s[2]);
+            a.addProperty("name", "Alliance " + s[0]);
+            alliances.add(a);
+        }
+        return alliances;
+    }
+
+    public static JsonArray generateSyntheticBiobuzzAwards() {
+        JsonArray awards = new JsonArray();
+        // Inspire Award 1st, 2nd, 3rd
+        addSyntheticAward(awards, "Inspire Award", 1, 27570);
+        addSyntheticAward(awards, "Inspire Award", 2, 8417);
+        addSyntheticAward(awards, "Inspire Award", 3, 11260);
+
+        // Winning / Finalist Alliances
+        addSyntheticAward(awards, "Winning Alliance Captain", 1, 27570);
+        addSyntheticAward(awards, "Winning Alliance 1st Pick", 1, 11115);
+        addSyntheticAward(awards, "Finalist Alliance Captain", 2, 8417);
+        addSyntheticAward(awards, "Finalist Alliance 1st Pick", 2, 18457);
+
+        // Other judged team awards
+        addSyntheticAward(awards, "Think Award", 1, 18457);
+        addSyntheticAward(awards, "Connect Award", 1, 8644);
+        addSyntheticAward(awards, "Innovate Award", 1, 18219);
+        addSyntheticAward(awards, "Design Award", 1, 19600);
+        addSyntheticAward(awards, "Motivate Award", 1, 16461);
+        addSyntheticAward(awards, "Control Award", 1, 14295);
+
+        return awards;
+    }
+
+    private static void addSyntheticAward(JsonArray awards, String name, int series, int teamNum) {
+        JsonObject a = new JsonObject();
+        a.addProperty("name", name);
+        a.addProperty("series", series);
+        a.addProperty("teamNumber", teamNum);
+        awards.add(a);
     }
 }

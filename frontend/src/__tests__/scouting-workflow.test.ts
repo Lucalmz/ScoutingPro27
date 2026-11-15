@@ -91,7 +91,7 @@ describe('End-to-End Scouting Workflow Integration', () => {
     // Initially, before any match is played, brag index is 'pending'
     const initialBrag = calculateBragIndex(storedPit, [])
     expect(initialBrag?.tier).toBe('pending')
-    expect(initialBrag?.label).toContain('待实测')
+    expect(initialBrag?.label).toContain('Pending')
 
     // 4. Host sets up schedule and assigns Alice to Match 1 Red1 (Team 27570)
     await scheduleStore.importSchedules(
@@ -168,9 +168,9 @@ describe('End-to-End Scouting Workflow Integration', () => {
     expect(bragInfo?.overallRatio).toBeGreaterThan(1.5)
     expect(bragInfo?.overallRatio).toBeLessThan(2.0)
     expect(bragInfo?.tier).toBe('overclaimed')
-    expect(bragInfo?.label).toContain('夸大其词')
+    expect(bragInfo?.label).toContain('Overclaimed')
 
-    // 7. Second match: Team 27570 achieves 125 points with Level 3 hang (28 pts)
+    // 7. Second match: Team 27570 achieves 125 points with Flower + TeleOp Park (28 pts)
     const match2Record: ScoutingRecord = {
       id: 'rec_match2_27570',
       eventId,
@@ -180,10 +180,15 @@ describe('End-to-End Scouting Workflow Integration', () => {
       teamNumber: 27570,
       autoScore: 45,
       teleopScore: 52,
-      endgameScore: 28, // Level 3 verified!
+      endgameScore: 28,
       totalScore: 125,
-      notes: 'Flawless match, high hang verified.',
-      rawData: JSON.stringify({ allianceColor: 'blue' }),
+      notes: 'Flawless match, flower verified.',
+      rawData: JSON.stringify({
+        allianceColor: 'blue',
+        flowerNectars: 4,
+        flowerBottomBonusCount: 3,
+        teleopPark: true
+      }),
       syncStatus: 'PENDING',
       version: 1,
       createdAt: new Date().toISOString(),
@@ -203,8 +208,9 @@ describe('End-to-End Scouting Workflow Integration', () => {
     const updatedBrag = calculateBragIndex(claimedRecord, updatedMatches)
 
     expect(updatedBrag).toBeDefined()
-    // Max endgame score is now 28, confirming the claimed flower endgame score!
-    expect(updatedBrag?.label).toContain('花朵已证实')
+    // Actual flower scoring confirms the claimed flower endgame capability
+    expect(updatedBrag?.flowerVerified).toBe(true)
+    expect(updatedBrag?.label).toContain('Flower Verified')
   })
 
   it('verifies that teammate covering an assignment clears pending task for the assigned scout', async () => {

@@ -6,7 +6,7 @@ import TagPicker from '@/components/common/TagPicker.vue'
 import type { CustomFieldDefinition } from '@/types'
 import type { MobileTeamScoutData } from './useMobileWizardForm'
 
-defineProps<{
+const props = defineProps<{
   eventId: string
   team: MobileTeamScoutData
   endgameScore: number
@@ -19,6 +19,37 @@ const emit = defineEmits<{
 }>()
 
 const { t } = useI18n()
+
+type EndgameCounterField =
+  | 'flowerNectars'
+  | 'flowerBottomBonusCount'
+  | 'flowerPollens'
+  | 'gardenBalls'
+
+function setCounter(field: EndgameCounterField, rawValue: number) {
+  const num = Number.isFinite(rawValue) ? Math.round(rawValue) : 0
+  if (field === 'flowerNectars') {
+    const clamped = Math.max(0, Math.min(8, num))
+    props.team.flowerNectars = clamped
+    props.team.flowerBottomBonusCount = Math.min(props.team.flowerBottomBonusCount, clamped)
+    props.team.flowerPlaced = clamped > 0
+    props.team.flowerBottomBonus = props.team.flowerBottomBonusCount > 0
+  } else if (field === 'flowerBottomBonusCount') {
+    const cap = Math.min(4, props.team.flowerNectars)
+    const clamped = Math.max(0, Math.min(cap, num))
+    props.team.flowerBottomBonusCount = clamped
+    props.team.flowerBottomBonus = clamped > 0
+  } else if (field === 'flowerPollens') {
+    props.team.flowerPollens = Math.max(0, Math.min(12, num))
+  } else if (field === 'gardenBalls') {
+    props.team.gardenBalls = Math.max(0, Math.min(12, num))
+  }
+  hapticSelection()
+}
+
+function adjustCounter(field: EndgameCounterField, delta: number) {
+  setCounter(field, (props.team[field] || 0) + delta)
+}
 </script>
 
 <template>
@@ -26,8 +57,8 @@ const { t } = useI18n()
     <div class="pane-header">
       <div class="pane-header-row">
         <div>
-          <h2 class="pane-title">{{ t('scouting.endgame') }} (30s)</h2>
-          <span class="pane-subtitle">{{ t('wizard.endgame_sub') }}</span>
+          <h2 class="pane-title">{{ t('scouting.endgame') }}</h2>
+          <span class="pane-subtitle">{{ t('wizard.endgame_header_tag') }}</span>
         </div>
         <div class="phase-score-badge">
           <span class="score-val">{{ endgameScore }}</span>
@@ -36,44 +67,128 @@ const { t } = useI18n()
       </div>
     </div>
 
+    <!-- BIOBUZZ Flower & Garden Steppers -->
+    <div class="mobile-endgame-steppers">
+      <!-- Flower Nectars (0..8) -->
+      <div class="mobile-stepper-card">
+        <div class="stepper-header">
+          <div class="stepper-title-wrap">
+            <span class="material-icons toggle-icon" style="color: #ec4899;">local_florist</span>
+            <div>
+              <div class="toggle-title">{{ t('scouting.flower_nectars') }}</div>
+              <div class="toggle-pts">{{ t('wizard.nectar_pts') }}</div>
+            </div>
+          </div>
+          <div class="stepper-ctrl">
+            <button type="button" class="btn-step" :disabled="team.flowerNectars <= 0" @click="adjustCounter('flowerNectars', -1)">-</button>
+            <span class="step-val">{{ team.flowerNectars }}</span>
+            <button type="button" class="btn-step" :disabled="team.flowerNectars >= 8" @click="adjustCounter('flowerNectars', 1)">+</button>
+          </div>
+        </div>
+        <div class="chip-row">
+          <button
+            v-for="chip in [0, 1, 2, 4, 8]"
+            :key="chip"
+            type="button"
+            class="chip-btn"
+            :class="{ 'is-active': team.flowerNectars === chip }"
+            @click="setCounter('flowerNectars', chip)"
+          >{{ chip }}</button>
+        </div>
+      </div>
+
+      <!-- Bottom Nectar Bonus (0..4 <= Nectars) -->
+      <div class="mobile-stepper-card">
+        <div class="stepper-header">
+          <div class="stepper-title-wrap">
+            <span class="material-icons toggle-icon" style="color: #10b981;">spa</span>
+            <div>
+              <div class="toggle-title">{{ t('scouting.flower_bottom_bonus_count') }}</div>
+              <div class="toggle-pts">{{ t('wizard.bottom_bonus_pts') }}</div>
+            </div>
+          </div>
+          <div class="stepper-ctrl">
+            <button type="button" class="btn-step" :disabled="team.flowerBottomBonusCount <= 0" @click="adjustCounter('flowerBottomBonusCount', -1)">-</button>
+            <span class="step-val">{{ team.flowerBottomBonusCount }}</span>
+            <button type="button" class="btn-step" :disabled="team.flowerBottomBonusCount >= Math.min(4, team.flowerNectars)" @click="adjustCounter('flowerBottomBonusCount', 1)">+</button>
+          </div>
+        </div>
+        <div class="chip-row">
+          <button
+            v-for="chip in [0, 1, 2, 4]"
+            :key="chip"
+            type="button"
+            class="chip-btn"
+            :class="{ 'is-active': team.flowerBottomBonusCount === chip }"
+            :disabled="chip > team.flowerNectars"
+            @click="setCounter('flowerBottomBonusCount', chip)"
+          >{{ chip }}</button>
+        </div>
+      </div>
+
+      <!-- Flower Pollens (0..12) -->
+      <div class="mobile-stepper-card">
+        <div class="stepper-header">
+          <div class="stepper-title-wrap">
+            <span class="material-icons toggle-icon" style="color: #f59e0b;">grain</span>
+            <div>
+              <div class="toggle-title">{{ t('scouting.flower_pollens') }}</div>
+              <div class="toggle-pts">{{ t('wizard.pollen_pts') }}</div>
+            </div>
+          </div>
+          <div class="stepper-ctrl">
+            <button type="button" class="btn-step" :disabled="team.flowerPollens <= 0" @click="adjustCounter('flowerPollens', -1)">-</button>
+            <span class="step-val">{{ team.flowerPollens }}</span>
+            <button type="button" class="btn-step" :disabled="team.flowerPollens >= 12" @click="adjustCounter('flowerPollens', 1)">+</button>
+          </div>
+        </div>
+        <div class="chip-row">
+          <button
+            v-for="chip in [0, 2, 4, 6, 8]"
+            :key="chip"
+            type="button"
+            class="chip-btn"
+            :class="{ 'is-active': team.flowerPollens === chip }"
+            @click="setCounter('flowerPollens', chip)"
+          >{{ chip }}</button>
+        </div>
+        <div v-if="team.flowerPollens > 0 && team.flowerNectars === 0" class="mobile-unowned-hint">
+          <span class="material-icons" style="font-size: 14px;">info</span>
+          <span>{{ t('scouting.flower_pollen_unowned_hint') }}</span>
+        </div>
+      </div>
+
+      <!-- Garden Balls (0..12) -->
+      <div class="mobile-stepper-card">
+        <div class="stepper-header">
+          <div class="stepper-title-wrap">
+            <span class="material-icons toggle-icon" style="color: #22c55e;">yard</span>
+            <div>
+              <div class="toggle-title">{{ t('scouting.garden_balls') }}</div>
+              <div class="toggle-pts">{{ t('wizard.garden_pts') }}</div>
+            </div>
+          </div>
+          <div class="stepper-ctrl">
+            <button type="button" class="btn-step" :disabled="team.gardenBalls <= 0" @click="adjustCounter('gardenBalls', -1)">-</button>
+            <span class="step-val">{{ team.gardenBalls }}</span>
+            <button type="button" class="btn-step" :disabled="team.gardenBalls >= 12" @click="adjustCounter('gardenBalls', 1)">+</button>
+          </div>
+        </div>
+        <div class="chip-row">
+          <button
+            v-for="chip in [0, 2, 4, 6]"
+            :key="chip"
+            type="button"
+            class="chip-btn"
+            :class="{ 'is-active': team.gardenBalls === chip }"
+            @click="setCounter('gardenBalls', chip)"
+          >{{ chip }}</button>
+        </div>
+      </div>
+    </div>
+
     <!-- Toggle Group -->
     <div class="toggle-cards-group">
-      <button
-        type="button"
-        class="toggle-card"
-        :class="{ 'is-checked': team.flowerPlaced }"
-        @click="team.flowerPlaced = !team.flowerPlaced; hapticSelection()"
-      >
-        <div class="toggle-card-left">
-          <span class="material-icons toggle-icon" style="color: #ec4899;">local_florist</span>
-          <div class="toggle-text-wrap">
-            <span class="toggle-title">{{ t('scouting.flower_placed') }}</span>
-            <span class="toggle-pts">{{ t('wizard.flower_pts') }}</span>
-          </div>
-        </div>
-        <div class="toggle-check-box">
-          <span v-if="team.flowerPlaced" class="material-icons">check</span>
-        </div>
-      </button>
-
-      <button
-        type="button"
-        class="toggle-card"
-        :class="{ 'is-checked': team.flowerBottomBonus }"
-        @click="team.flowerBottomBonus = !team.flowerBottomBonus; hapticSelection()"
-      >
-        <div class="toggle-card-left">
-          <span class="material-icons toggle-icon" style="color: #10b981;">spa</span>
-          <div class="toggle-text-wrap">
-            <span class="toggle-title">{{ t('scouting.flower_bottom_bonus') }}</span>
-            <span class="toggle-pts">{{ t('wizard.park_pts') }}</span>
-          </div>
-        </div>
-        <div class="toggle-check-box">
-          <span v-if="team.flowerBottomBonus" class="material-icons">check</span>
-        </div>
-      </button>
-
       <button
         type="button"
         class="toggle-card"
@@ -89,6 +204,42 @@ const { t } = useI18n()
         </div>
         <div class="toggle-check-box">
           <span v-if="team.teleopPark" class="material-icons">check</span>
+        </div>
+      </button>
+
+      <button
+        type="button"
+        class="toggle-card"
+        :class="{ 'is-checked': team.flowerDescore }"
+        @click="team.flowerDescore = !team.flowerDescore; hapticSelection()"
+      >
+        <div class="toggle-card-left">
+          <span class="material-icons toggle-icon" style="color: #a855f7;">cleaning_services</span>
+          <div class="toggle-text-wrap">
+            <span class="toggle-title">{{ t('scouting.flower_descore') }}</span>
+            <span class="toggle-pts">{{ t('scouting.flower_descore_desc') }}</span>
+          </div>
+        </div>
+        <div class="toggle-check-box">
+          <span v-if="team.flowerDescore" class="material-icons">check</span>
+        </div>
+      </button>
+
+      <button
+        type="button"
+        class="toggle-card g410-toggle-card"
+        :class="{ 'is-g410-checked': team.g410EarlyFlowerFoul }"
+        @click="team.g410EarlyFlowerFoul = !team.g410EarlyFlowerFoul; hapticWarning()"
+      >
+        <div class="toggle-card-left">
+          <span class="material-icons toggle-icon" style="color: #f59e0b;">gavel</span>
+          <div class="toggle-text-wrap">
+            <span class="toggle-title">{{ t('scouting.g410_early_flower_foul') }}</span>
+            <span class="toggle-pts" style="color: #fbbf24;">{{ t('scouting.g410_early_flower_foul_desc') }}</span>
+          </div>
+        </div>
+        <div class="toggle-check-box g410-check">
+          <span v-if="team.g410EarlyFlowerFoul" class="material-icons">warning</span>
         </div>
       </button>
 
@@ -364,5 +515,125 @@ const { t } = useI18n()
   background: #141413;
   border: 1px solid #262624;
   border-radius: 12px;
+}
+
+.mobile-endgame-steppers {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.mobile-stepper-card {
+  background: #141413;
+  border: 1px solid #262624;
+  border-radius: 12px;
+  padding: 10px 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.stepper-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+}
+
+.stepper-title-wrap {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+}
+
+.stepper-ctrl {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  flex-shrink: 0;
+}
+
+.btn-step {
+  width: 34px;
+  height: 34px;
+  border-radius: 8px;
+  border: 1px solid #353532;
+  background: #1d1d1a;
+  color: var(--foreground, #f0efe9);
+  font-size: 18px;
+  font-weight: 700;
+  cursor: pointer;
+}
+
+.btn-step:disabled {
+  opacity: 0.35;
+  cursor: not-allowed;
+}
+
+.step-val {
+  min-width: 22px;
+  text-align: center;
+  font-size: 16px;
+  font-weight: 800;
+  color: var(--foreground, #f0efe9);
+}
+
+.chip-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.chip-btn {
+  flex: 1;
+  min-width: 38px;
+  padding: 5px 8px;
+  border-radius: 8px;
+  border: 1px solid #262624;
+  background: #0d0d0c;
+  color: var(--muted-foreground, #8e8d87);
+  font-size: 12px;
+  font-weight: 700;
+  cursor: pointer;
+}
+
+.chip-btn.is-active {
+  background: #121a10;
+  border-color: #39ff14;
+  color: #39ff14;
+}
+
+.chip-btn:disabled {
+  opacity: 0.3;
+  cursor: not-allowed;
+}
+
+.mobile-unowned-hint {
+  display: flex;
+  align-items: flex-start;
+  gap: 6px;
+  padding: 6px 8px;
+  border-radius: 8px;
+  background: rgba(245, 158, 11, 0.12);
+  border: 1px solid rgba(245, 158, 11, 0.35);
+  color: #fbbf24;
+  font-size: 11px;
+  line-height: 1.35;
+}
+
+.g410-toggle-card.is-g410-checked {
+  background: rgba(245, 158, 11, 0.12);
+  border-color: #f59e0b;
+}
+
+.g410-check {
+  border-color: rgba(245, 158, 11, 0.4);
+  color: #f59e0b;
+}
+
+.g410-toggle-card.is-g410-checked .g410-check {
+  background: #f59e0b;
+  color: #141413;
 }
 </style>

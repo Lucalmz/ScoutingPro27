@@ -432,4 +432,33 @@ describe('HistoryList.vue Component & Animations', () => {
     // Alice cannot edit Bob's synced record
     expect(cards[1].find('.btn-edit').exists()).toBe(false)
   })
+
+  it('renders BIOBUZZ endgame summary pills and predict cycle badge when present in rawData', () => {
+    const rec = createRecord({
+      id: 'r-biobuzz',
+      rawData: JSON.stringify({
+        teleopPark: true,
+        flowerNectars: 4,
+        flowerBottomBonusCount: 2,
+        flowerPollens: 3,
+        gardenBalls: 1,
+        flowerDescore: true,
+        g410EarlyFlowerFoul: true,
+        predictCycleTimeSec: 10.5
+      })
+    })
+    const wrapper = mount(HistoryList, {
+      props: {
+        records: [rec],
+        loading: false
+      }
+    })
+
+    const strip = wrapper.find('.card-biobuzz-pills')
+    expect(strip.exists()).toBe(true)
+    expect(strip.find('.biobuzz-pill.is-park').exists()).toBe(true)
+    expect(strip.find('.biobuzz-pill.is-descore').exists()).toBe(true)
+    expect(strip.find('.biobuzz-pill.is-foul').exists()).toBe(true)
+    expect(strip.find('.biobuzz-pill.is-cycle').text()).toContain('10.5s')
+  })
 })

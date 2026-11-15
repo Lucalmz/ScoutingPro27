@@ -3,6 +3,7 @@ import { mount } from '@vue/test-utils'
 import { createPinia, setActivePinia } from 'pinia'
 import { createI18n } from 'vue-i18n'
 import TeamPitProfileCard from '@/views/components/TeamPitProfileCard.vue'
+import TeamRosterCard from '@/components/pit/TeamRosterCard.vue'
 import TeamCustomMetricsCard from '@/views/components/TeamCustomMetricsCard.vue'
 import RankingsTableToolbar from '@/components/rankings/RankingsTableToolbar.vue'
 import {
@@ -210,10 +211,13 @@ describe('TeamDetail & Rankings Decoupled Sub-components and Composables', () =>
         scoutName: 'Scout 1',
         drivetrainType: 'swerve',
         weightLbs: 38,
-        ballCompatibility: 'universal',
-        launcherType: '双飞轮',
-        flowerMechanism: '独立机械臂',
+        chassisSize: '紧凑小车 (≤15")',
+        ballCompatibility: 'specialized' as any,
+        launcherType: '差速双飞轮',
+        flowerMechanism: '垂直级联高抬升',
         hasColorSensor: true,
+        hasDescoreMech: true,
+        hasApriltagVision: true,
         odometryType: 'three_wheel',
         claimedAutoScore: 15,
         claimedTeleopScore: 30,
@@ -228,11 +232,16 @@ describe('TeamDetail & Rankings Decoupled Sub-components and Composables', () =>
       },
       bragInfo: {
         tier: 'realistic',
-        label: '1.08x 实事求是',
+        label: '1.08x Realistic',
         overallRatio: 1.08,
         autoRatio: 1.1,
         teleopRatio: 1.1,
-        endgameUnfulfilled: false
+        endgameRatio: 1.0,
+        endgameUnfulfilled: false,
+        flowerVerified: true,
+        flowerPending: false,
+        parkVerified: true,
+        parkPending: false
       }
     }
 
@@ -240,21 +249,55 @@ describe('TeamDetail & Rankings Decoupled Sub-components and Composables', () =>
     expect(pitSpecs).toHaveLength(1)
     expect(pitSpecs[0]!.displayValue).toBe('4 个')
 
+    const enI18n = createI18n({
+      legacy: false,
+      locale: 'en',
+      messages: { zh, en }
+    })
+
     const wrapper = mount(TeamPitProfileCard, {
       props: {
         unifiedTeam,
         teamPitCustomSpecs: pitSpecs
       },
-      global: { plugins: [createTestI18n()] }
+      global: { plugins: [enI18n] }
     })
 
     expect(wrapper.find('.pit-profile-card').exists()).toBe(true)
     expect(wrapper.find('.custom-spec-badge').text()).toContain('底盘电机数: 4 个')
     expect(wrapper.text()).toContain('55')
     expect(wrapper.text()).toContain('51')
+    expect(wrapper.text()).toContain('Compact Small (≤15")')
+    expect(wrapper.text()).toContain('Specialized Intake / Sorting')
+    expect(wrapper.text()).toContain('Dual Flywheel')
+    expect(wrapper.text()).toContain('Vertical Cascading Lift')
+    expect(wrapper.text()).toContain('Descore: Equipped')
+    expect(wrapper.text()).toContain('AprilTag: Equipped')
+    expect(wrapper.text()).toContain('End 10')
+    expect(wrapper.text()).toContain('Flower Verified')
+    expect(wrapper.text()).toContain('Park Verified')
 
     await wrapper.find('.btn-edit-pit').trigger('click')
     expect(wrapper.emitted('openPitDrawer')).toHaveLength(1)
+
+    // Verify TeamRosterCard V6 fields, te() fallback, and claimed_cycles_unit number interpolation
+    const rosterCard = mount(TeamRosterCard, {
+      props: {
+        team: unifiedTeam,
+        cardIndex: 0
+      },
+      global: { plugins: [enI18n] }
+    })
+    expect(rosterCard.text()).toContain('Compact Small (≤15")')
+    expect(rosterCard.text()).toContain('38 lbs')
+    expect(rosterCard.text()).toContain('Specialized Intake / Sorting')
+    expect(rosterCard.text()).toContain('Vertical Cascading Lift')
+    expect(rosterCard.text()).toContain('Bottom Descore')
+    expect(rosterCard.text()).toContain('AprilTag Vision')
+    expect(rosterCard.text()).toContain('8 cycles')
+    expect(rosterCard.text()).toContain('10 pts')
+    expect(rosterCard.text()).toContain('Flower Verified')
+    expect(rosterCard.text()).toContain('Park Verified')
   })
 
   it('manages custom column visibility and persistence via useRankingsCustomColumns & RankingsTableToolbar', async () => {

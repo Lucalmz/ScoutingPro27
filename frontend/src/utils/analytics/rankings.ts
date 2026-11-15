@@ -1,5 +1,142 @@
-import type { ScoutingRecord, OfficialMatch, RankingRow } from '@/types'
+import type { ScoutingRecord, OfficialMatch, RankingRow, AdvancementDetail } from '@/types'
 import { getRecordTournamentLevel, getTournamentLevelOrder } from '@/utils/tournament'
+import { aggregateTeamPredictCycleStats } from './predictCycleTime'
+
+export interface BiobuzzEndgameFields {
+  flowerNectars: number
+  flowerBottomBonusCount: number
+  flowerPollens: number
+  gardenBalls: number
+  flowerDescore: boolean
+  g410EarlyFlowerFoul: boolean
+  teleopPark: boolean
+  flowerPlaced: boolean
+  flowerBottomBonus: boolean
+}
+
+export interface ParsedScoutRawData {
+  autoLeave: boolean
+  autoBalls: number
+  autoPark: boolean
+  teleopCycles: number[]
+  teleopMissedCycles: number[]
+  teleopCycleTimestamps: number[]
+  predictCycleTimeSec: number | null
+  endgame: BiobuzzEndgameFields
+}
+
+function clampInt(value: unknown, min: number, max: number): number {
+  const num = Number(value)
+  if (!Number.isFinite(num)) return min
+  return Math.max(min, Math.min(max, Math.round(num)))
+}
+
+/**
+ * Normalizes BIOBUZZ Endgame fields from raw scouting JSON, falling back cleanly
+ * for legacy records that only stored boolean `flowerPlaced` / `flowerBottomBonus`.
+ */
+export function parseBiobuzzEndgame(raw: Record<string, any> | null | undefined): BiobuzzEndgameFields {
+  const data = raw ?? {}
+  const flowerNectars = typeof data.flowerNectars === 'number'
+    ? clampInt(data.flowerNectars, 0, 8)
+    : (data.flowerPlaced ? 1 : 0)
+
+  const rawBottomBonusCount = typeof data.flowerBottomBonusCount === 'number'
+    ? clampInt(data.flowerBottomBonusCount, 0, 4)
+    : (data.flowerBottomBonus ? 1 : 0)
+  // A flower can only earn the +5 bottom bonus if that alliance owns >= 1 Nectar on it.
+  const flowerBottomBonusCount = Math.min(rawBottomBonusCount, flowerNectars)
+
+  const flowerPollens = typeof data.flowerPollens === 'number'
+    ? clampInt(data.flowerPollens, 0, 12)
+    : 0
+  const gardenBalls = typeof data.gardenBalls === 'number'
+    ? clampInt(data.gardenBalls, 0, 12)
+    : 0
+  const flowerDescore = Boolean(data.flowerDescore)
+  const g410EarlyFlowerFoul = Boolean(data.g410EarlyFlowerFoul)
+  const teleopPark = Boolean(data.teleopPark)
+
+  return {
+    flowerNectars,
+    flowerBottomBonusCount,
+    flowerPollens,
+    gardenBalls,
+    flowerDescore,
+    g410EarlyFlowerFoul,
+    teleopPark,
+    flowerPlaced: flowerNectars > 0,
+    flowerBottomBonus: flowerBottomBonusCount > 0
+  }
+}
+
+/**
+ * Calculates BIOBUZZ 2026-2027 Endgame score:
+ * TeleOp Park (+5) + Flower Nectars (+2/ball) + Flower Bottom Bonus (+5/flower)
+ * + Flower Pollens (+2/ball) + Garden Balls (+1/ball).
+ */
+export function calcBiobuzzEndgameScore(endgame: Pick<
+  BiobuzzEndgameFields,
+  'teleopPark' | 'flowerNectars' | 'flowerBottomBonusCount' | 'flowerPollens' | 'gardenBalls'
+>): number {
+  const nectars = clampInt(endgame.flowerNectars, 0, 8)
+  const bottomBonusCount = Math.min(clampInt(endgame.flowerBottomBonusCount, 0, 4), nectars)
+  const pollens = clampInt(endgame.flowerPollens, 0, 12)
+  const garden = clampInt(endgame.gardenBalls, 0, 12)
+  return (
+    (endgame.teleopPark ? 5 : 0) +
+    nectars * 2 +
+    bottomBonusCount * 5 +
+    pollens * 2 +
+    garden
+  )
+}
+
+/**
+ * Parses `ScoutingRecord.rawData` (JSON string or plain object) into normalized BIOBUZZ fields.
+ */
+export function parseScoutRawData(rawData: unknown): ParsedScoutRawData {
+  let parsed: Record<string, any> = {}
+  try {
+    if (typeof rawData === 'string' && rawData.trim()) {
+      parsed = JSON.parse(rawData)
+    } else if (rawData && typeof rawData === 'object') {
+      parsed = rawData as Record<string, any>
+    }
+  } catch {
+    parsed = {}
+  }
+
+  const autoLeave = Boolean(parsed.autoLeave)
+  const autoBalls = typeof parsed.autoBalls === 'number'
+    ? Math.max(0, Math.round(parsed.autoBalls))
+    : ((parsed.autoPreload ? 1 : 0) + (parsed.autoSecondary ? 1 : 0))
+  const autoPark = Boolean(parsed.autoPark)
+
+  const teleopCycles = Array.isArray(parsed.teleopCycles)
+    ? parsed.teleopCycles.map((c: unknown) => Math.max(0, Number(c) || 0))
+    : []
+  const teleopMissedCycles = Array.isArray(parsed.teleopMissedCycles)
+    ? parsed.teleopMissedCycles.map((c: unknown) => Math.max(0, Number(c) || 0))
+    : []
+  const teleopCycleTimestamps = Array.isArray(parsed.teleopCycleTimestamps)
+    ? parsed.teleopCycleTimestamps.map((ts: unknown) => Number(ts)).filter((ts: number) => Number.isFinite(ts) && ts > 0)
+    : []
+  const predictCycleTimeSec = typeof parsed.predictCycleTimeSec === 'number' && Number.isFinite(parsed.predictCycleTimeSec)
+    ? parsed.predictCycleTimeSec
+    : null
+
+  return {
+    autoLeave,
+    autoBalls,
+    autoPark,
+    teleopCycles,
+    teleopMissedCycles,
+    teleopCycleTimestamps,
+    predictCycleTimeSec,
+    endgame: parseBiobuzzEndgame(parsed)
+  }
+}
 
 /**
  * Calculates reliability rating ('low' | 'high') for each scout based on
@@ -78,20 +215,9 @@ export function calculateScoutReliability(
  * Helper to extract total scored balls from a scouting record's rawData (2026 BIOBUZZ autoBalls + teleopCycles or legacy fields).
  */
 export function getScoutedBalls(r: ScoutingRecord): number {
-  try {
-    if (!r.rawData) return 0
-    const parsed = typeof r.rawData === 'string' ? JSON.parse(r.rawData) : r.rawData
-    const autoBalls = typeof parsed.autoBalls === 'number'
-      ? parsed.autoBalls
-      : ((parsed.autoPreload ? 1 : 0) + (parsed.autoSecondary ? 1 : 0))
-    if (Array.isArray(parsed.teleopCycles)) {
-      const teleopBalls = parsed.teleopCycles.reduce((sum: number, c: number) => sum + (Number(c) || 0), 0)
-      return autoBalls + teleopBalls
-    }
-    return autoBalls
-  } catch {
-    return 0
-  }
+  const parsed = parseScoutRawData(r.rawData)
+  const teleopBalls = parsed.teleopCycles.reduce((sum, c) => sum + c, 0)
+  return parsed.autoBalls + teleopBalls
 }
 
 /**
@@ -103,7 +229,8 @@ export function getScoutedBalls(r: ScoutingRecord): number {
 export function calculateRankings(
   records: ScoutingRecord[],
   officialMatches: OfficialMatch[],
-  scoutReliability: Record<string, 'low' | 'high'>
+  scoutReliability: Record<string, 'low' | 'high'>,
+  advancementMap?: Map<number, AdvancementDetail>
 ): RankingRow[] {
   const uniqueRecords = new Map<string, ScoutingRecord>()
   for (const record of records) {
@@ -142,9 +269,18 @@ export function calculateRankings(
     let totalWeightedTeleop = 0
     let totalWeightedEndgame = 0
     let totalWeightedScore = 0
+    let totalWeightedTeleopPark = 0
+    let totalWeightedMobilityRpPts = 0
+    let totalWeightedFlowerNectars = 0
+    let totalWeightedFlowerBottomBonus = 0
+    let totalWeightedFlowerPollens = 0
+    let totalWeightedGardenBalls = 0
+    let totalWeightedDescore = 0
+    let totalWeightedG410Foul = 0
     let totalAllocatedTips = 0
     let realMaxScore = 0
     const totalRealScoreForTrend: number[] = []
+    const predictCycleInputs: Array<{ teleopCycles: number[]; teleopCycleTimestamps: number[]; isBroken?: boolean }> = []
     let brokenCount = 0
 
     for (const r of sortedRecs) {
@@ -155,6 +291,26 @@ export function calculateRankings(
 
       const weight = scoutReliability[r.scoutId] === 'low' ? 0.5 : 1.0
       weightSum += weight
+
+      const parsedRaw = parseScoutRawData(r.rawData)
+      const mobilityPts =
+        (parsedRaw.autoLeave ? 3 : 0) +
+        (parsedRaw.autoPark ? 5 : 0) +
+        (parsedRaw.endgame.teleopPark ? 5 : 0)
+
+      totalWeightedTeleopPark += (parsedRaw.endgame.teleopPark ? 1 : 0) * weight
+      totalWeightedMobilityRpPts += mobilityPts * weight
+      totalWeightedFlowerNectars += parsedRaw.endgame.flowerNectars * weight
+      totalWeightedFlowerBottomBonus += parsedRaw.endgame.flowerBottomBonusCount * weight
+      totalWeightedFlowerPollens += parsedRaw.endgame.flowerPollens * weight
+      totalWeightedGardenBalls += parsedRaw.endgame.gardenBalls * weight
+      totalWeightedDescore += (parsedRaw.endgame.flowerDescore ? 1 : 0) * weight
+      totalWeightedG410Foul += (parsedRaw.endgame.g410EarlyFlowerFoul ? 1 : 0) * weight
+      predictCycleInputs.push({
+        teleopCycles: parsedRaw.teleopCycles,
+        teleopCycleTimestamps: parsedRaw.teleopCycleTimestamps,
+        isBroken: r.isBroken
+      })
 
       // 官方判罚分目前忽略，纯粹聚焦战队自身得分能力
       const realTotalScore = r.totalScore
@@ -240,9 +396,22 @@ export function calculateRankings(
       trend = 'new'
     }
 
+    const predictStats = aggregateTeamPredictCycleStats(predictCycleInputs)
+    const adv = advancementMap ? advancementMap.get(teamNumber) : undefined
+
     rows.push({
       teamNumber,
       matchCount,
+      advancementPoints: adv ? adv.totalAdvancementPoints : 0,
+      advancementRank: adv ? adv.advancementRank : undefined,
+      advancementStatus: adv ? adv.advancementStatus : 'NONE',
+      advancementOfficialStatus: adv?.officialStatus,
+      advancementDeclined: adv?.declined,
+      advancementRolledDown: adv?.rolledDown,
+      advancementSlot: adv?.advancementSlot,
+      advancementCriteria: adv?.advancementCriteria,
+      advancementAdvancesTo: adv?.advancesTo,
+      advancementBreakdown: adv ? adv.breakdown : undefined,
       avgAutoScore: Math.round(avgAutoScore * 10) / 10,
       avgTeleopScore: Math.round(avgTeleopScore * 10) / 10,
       avgEndgameScore: Math.round(avgEndgameScore * 10) / 10,
@@ -250,10 +419,65 @@ export function calculateRankings(
       maxScore: realMaxScore,
       avgRating: Math.round(avgRating * 10) / 10,
       brokenCount,
-      trend
+      trend,
+      teleopParkRate: Math.round((totalWeightedTeleopPark / effectiveWeight) * 1000) / 1000,
+      avgMobilityRpPts: Math.round((totalWeightedMobilityRpPts / effectiveWeight) * 10) / 10,
+      avgFlowerNectars: Math.round((totalWeightedFlowerNectars / effectiveWeight) * 10) / 10,
+      avgFlowerBottomBonus: Math.round((totalWeightedFlowerBottomBonus / effectiveWeight) * 10) / 10,
+      avgFlowerPollens: Math.round((totalWeightedFlowerPollens / effectiveWeight) * 10) / 10,
+      avgGardenBalls: Math.round((totalWeightedGardenBalls / effectiveWeight) * 10) / 10,
+      descoreRate: Math.round((totalWeightedDescore / effectiveWeight) * 1000) / 1000,
+      g410FoulRate: Math.round((totalWeightedG410Foul / effectiveWeight) * 1000) / 1000,
+      predictCycleTime: predictStats.predictCycleTime,
+      predictCycleMatches: predictStats.predictCycleMatches,
+      predictCycleSpread: predictStats.predictCycleSpread,
+      estimatedMaxCycles: predictStats.estimatedMaxCycles
     })
   }
 
-  rows.sort((a, b) => b.avgRating - a.avgRating)
+  // 若传入了官方晋级数据，将尚未有记录的战队作为初始行加入列表
+  if (advancementMap) {
+    for (const [teamNum, adv] of advancementMap) {
+      if (!map.has(teamNum)) {
+        rows.push({
+          teamNumber: teamNum,
+          matchCount: 0,
+          advancementPoints: adv.totalAdvancementPoints,
+          advancementRank: adv.advancementRank,
+          advancementStatus: adv.advancementStatus,
+          advancementOfficialStatus: adv.officialStatus,
+          advancementDeclined: adv.declined,
+          advancementRolledDown: adv.rolledDown,
+          advancementSlot: adv.advancementSlot,
+          advancementCriteria: adv.advancementCriteria,
+          advancementAdvancesTo: adv.advancesTo,
+          advancementBreakdown: adv.breakdown,
+          avgAutoScore: 0,
+          avgTeleopScore: 0,
+          avgEndgameScore: 0,
+          maxScore: 0,
+          avgRating: 0,
+          brokenCount: 0,
+          trend: 'new'
+        })
+      }
+    }
+  }
+
+  const hasAdvancementData = rows.some(r => (r.advancementPoints ?? 0) > 0)
+  if (hasAdvancementData) {
+    rows.sort((a, b) => {
+      const aPts = a.advancementPoints ?? 0
+      const bPts = b.advancementPoints ?? 0
+      if (aPts !== bPts) return bPts - aPts
+      const aRank = a.advancementRank ?? 9999
+      const bRank = b.advancementRank ?? 9999
+      if (aRank !== bRank) return aRank - bRank
+      if ((a.avgRating ?? 0) !== (b.avgRating ?? 0)) return (b.avgRating ?? 0) - (a.avgRating ?? 0)
+      return a.teamNumber - b.teamNumber
+    })
+  } else {
+    rows.sort((a, b) => b.avgRating - a.avgRating)
+  }
   return rows
 }

@@ -137,4 +137,32 @@ describe('SignalingChannel Multi-Broker & LAN WebSocket', () => {
     expect(resolveBrokerUrl('wss://custom.io/mqtt')).toBe('wss://custom.io/mqtt')
     expect(resolveBrokerUrl('invalid-broker-string')).toBe('wss://broker.emqx.io:8084/mqtt')
   })
+
+  it('cancels the 180ms MQTT SUBACK fallback timer when close() is called before timeout', async () => {
+    vi.useFakeTimers()
+    ;(globalThis as any).__TEST_ENABLE_MQTT_SUBACK_TIMER__ = true
+    try {
+      const channel = new SignalingChannel('test-room-close-timer')
+      await channel.initTopic()
+      const onConnect = vi.fn()
+
+      channel.connect({
+        onMessage: vi.fn(),
+        onConnect
+      })
+
+      const onConnectHandler = mockMqttClient.on.mock.calls.find((c: any) => c[0] === 'connect')?.[1]
+      expect(onConnectHandler).toBeDefined()
+      onConnectHandler()
+
+      expect(onConnect).not.toHaveBeenCalled()
+      channel.close()
+
+      await vi.advanceTimersByTimeAsync(250)
+      expect(onConnect).not.toHaveBeenCalled()
+    } finally {
+      ;(globalThis as any).__TEST_ENABLE_MQTT_SUBACK_TIMER__ = false
+      vi.useRealTimers()
+    }
+  })
 })

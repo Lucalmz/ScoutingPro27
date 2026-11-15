@@ -106,11 +106,21 @@ export interface ScoutingFormData {
   // Teleop (Cycle Tracker)
   teleopCycles: number[]
   teleopMissedCycles?: number[]
+  teleopCycleTimestamps?: number[]  // 每次手动循环完成时刻 epoch ms，数组长度与 teleopCycles 同步对齐，撤销轮次时同步弹出
+  predictCycleTimeSec?: number | null // 可选单场缓存：剔除最快 1 次后取接下来 4 次较短循环间隔的均值（单位秒，有效间隔 < 5 个为 null）
 
-  // Endgame
-  flowerPlaced: boolean
-  flowerBottomBonus: boolean
+  // Endgame (2026-2027 BIOBUZZ)
   teleopPark: boolean
+  flowerNectars?: number            // 花朵大球 Nectar (0–8, +2 pts/ball)
+  flowerBottomBonusCount?: number   // 花朵占底 Nectar 朵数 (0–4 且 <= flowerNectars, +5 pts/flower)
+  flowerPollens?: number            // 花朵小球 Pollen (0–12, +2 pts/ball)
+  gardenBalls?: number              // Garden 推进球数 (0–12, +1 pt/ball)
+  flowerDescore?: boolean           // 战术标签：敌方花朵底口掏球拆台 (G418)
+  g410EarlyFlowerFoul?: boolean     // 风险标签：<60s 误投 Nectar 触发 Major Foul (G410)
+  /** @deprecated Legacy compatibility alias for historical rawData */
+  flowerPlaced?: boolean
+  /** @deprecated Legacy compatibility alias for historical rawData */
+  flowerBottomBonus?: boolean
 
   // Custom Fields
   customFields?: Record<string, any>
@@ -120,9 +130,11 @@ export interface ScoutingFormData {
 export interface OfficialMatch {
   matchNum: number
   tournamentLevel?: string
+  series?: number
+  description?: string
   scores: {
-    red: { penaltyPointsCommitted: number; totalPointsNp: number; totalTips?: number }
-    blue: { penaltyPointsCommitted: number; totalPointsNp: number; totalTips?: number }
+    red: { penaltyPointsCommitted: number; totalPointsNp: number; finalScore?: number; totalTips?: number }
+    blue: { penaltyPointsCommitted: number; totalPointsNp: number; finalScore?: number; totalTips?: number }
   } | null
   teams: { teamNumber: number; alliance: string }[]
 }
@@ -583,6 +595,91 @@ export interface ConnectionTransportInfo {
 
 
 
+// --- FTC Official Rankings & Advancement ---
+export interface OfficialRanking {
+  rank: number
+  teamNumber: number
+  sortOrder1?: number
+  sortOrder2?: number
+  sortOrder3?: number
+  wins?: number
+  losses?: number
+  ties?: number
+  qualMatchesPlayed?: number
+  dq?: number
+}
+
+export interface OfficialAward {
+  awardId?: number
+  name: string
+  series: number
+  teamNumber: number
+  person?: string
+}
+
+export type AllianceTeamRef = number | { teamNumber?: number; TeamNumber?: number; team?: number } | null | undefined
+
+export interface OfficialAlliance {
+  number: number
+  captain: AllianceTeamRef
+  round1: AllianceTeamRef
+  round2?: AllianceTeamRef
+  round3?: AllianceTeamRef
+  backup?: AllianceTeamRef
+  name?: string
+}
+
+export type AdvancementStatus =
+  | 'ADVANCING'
+  | 'BUBBLE'
+  | 'COMPETING'
+  | 'ALREADY_ADVANCING'
+  | 'DECLINED'
+  | 'INELIGIBLE'
+  | 'NONE'
+
+export interface OfficialAdvancementSlot {
+  team?: number | null
+  displayTeam?: string
+  slot?: number
+  criteria?: string
+  declined?: boolean
+  status?: string
+}
+
+export interface OfficialAdvancementResponse {
+  advancesTo?: string
+  slots?: number
+  fcmpReserved?: number
+  advancement?: OfficialAdvancementSlot[]
+}
+
+export interface AdvancementBreakdown {
+  qualPoints: number
+  alliancePoints: number
+  playoffPoints: number
+  awardPoints: number
+}
+
+export interface AdvancementDetail {
+  teamNumber: number
+  advancementRank: number
+  totalAdvancementPoints: number
+  qualRank: number
+  qualPoints: number
+  alliancePoints: number
+  playoffPoints: number
+  awardPoints: number
+  advancementStatus: AdvancementStatus
+  officialStatus?: string
+  declined?: boolean
+  rolledDown?: boolean
+  advancementSlot?: number
+  advancementCriteria?: string
+  advancesTo?: string
+  breakdown: AdvancementBreakdown
+}
+
 // --- Rankings row (aggregated client-side) ---
 export interface RankingRow {
   teamNumber: number
@@ -590,7 +687,31 @@ export interface RankingRow {
   avgAutoScore: number
   avgTeleopScore: number
   avgEndgameScore: number
-  avgTipsPerMatch?: number     // 场均蜂巢翻转贡献次数 (tips/场)
+  avgTipsPerMatch?: number       // 场均蜂巢翻转贡献次数 (tips/场)
+  // FTC 官方标准晋级积分体系
+  advancementPoints?: number     // 实时计算得到的总晋级积分
+  advancementRank?: number       // 实时晋级排位
+  advancementStatus?: AdvancementStatus // 实时晋级状态 ('ADVANCING' | 'ALREADY_ADVANCING' | 'DECLINED' | 'INELIGIBLE' | 'BUBBLE' | 'COMPETING')
+  advancementOfficialStatus?: string
+  advancementDeclined?: boolean
+  advancementRolledDown?: boolean
+  advancementSlot?: number
+  advancementCriteria?: string
+  advancementAdvancesTo?: string
+  advancementBreakdown?: AdvancementBreakdown // 晋级分明细
+  // BIOBUZZ 2026-2027 教练评估核心指标
+  teleopParkRate?: number        // 终局装载区停泊率 (0–1)
+  avgMobilityRpPts?: number      // 场均机动贡献分 (Leave*3 + AutoPark*5 + TeleOpPark*5, 满分 13, 用于预判 Swarm RP >= 16)
+  avgFlowerNectars?: number      // 场均花朵大球 Nectar 投入数
+  avgFlowerBottomBonus?: number  // 场均花朵占底数 (Bottom Nectar Bonus)
+  avgFlowerPollens?: number      // 场均花朵小球 Pollen 投入数
+  avgGardenBalls?: number        // 场均 Garden 推进球数
+  descoreRate?: number           // 花底掏球拆台率 (0–1, G418)
+  g410FoulRate?: number          // G410 <60s 误投 Nectar 大犯规率 (0–1)
+  predictCycleTime?: number | null    // 预测单轮循环平均耗时（秒）：单场 >=5 有效间隔去最快1次取4次较短均值，跨达标场次均值
+  predictCycleMatches?: number        // 参与 predictCycleTime 计算的有效达标场次数（单场有效间隔 >= 5）
+  predictCycleSpread?: number | null  // 有效循环耗时离散度（秒，样本不足为 null）
+  estimatedMaxCycles?: number | null  // 基于 predictCycleTime 推算的理论手动可打轮次（无达标样本为 null）
   maxScore: number
   avgRating: number
   brokenCount: number
@@ -619,13 +740,16 @@ export interface PitScoutingRecord {
   scoutName: string
   robotName?: string
 
-  // 核心硬件构型 (BIOBUZZ 2026-2027)
+  // 核心硬件与战术特点 (BIOBUZZ 2026-2027, 仅记录客观特点，不包含限重/尺寸合规检查)
   drivetrainType: 'mecanum' | 'tank' | 'swerve' | 'other'
   weightLbs: number
+  chassisSize?: string          // 车体尺寸特征（如紧凑小车 ≤15" / 标准中型 16"-17" / 宽体大车 ~18" 或自定义尺寸备注，不做合规校验）
   ballCompatibility: BallCompatibility
   launcherType: string
   flowerMechanism: string
   hasColorSensor: boolean
+  hasDescoreMech?: boolean      // 是否具备敌方花朵底口掏 Pollen 拆台机构 (G418)
+  hasApriltagVision?: boolean   // 是否具备 AprilTag / 视觉自瞄
   odometryType: string  // 'none' | 'two_wheel' | 'three_wheel' | 'pinpoint' | 'sparkfun_otos'
 
   // 核心量化自述指标
@@ -633,6 +757,11 @@ export interface PitScoutingRecord {
   claimedAutoScore: number
   claimedTeleopCycles: number
   claimedTeleopScore: number
+  claimedTeleopPark?: boolean         // 自述终局回装载区停泊 (+5 pts)
+  claimedFlowerNectars?: number       // 自述花朵放入 Nectar 数 (+2 pts/球)
+  claimedFlowerBottomBonus?: number   // 自述花朵占底数 (+5 pts/朵)
+  claimedFlowerPollens?: number       // 自述花朵放入 Pollen 数 (+2 pts/球)
+  claimedGardenBalls?: number         // 自述 Garden 推进球数 (+1 pt/球)
   claimedEndgameScore: number
   claimedTotalScore: number
 
@@ -661,16 +790,26 @@ export type BragTier = 'realistic' | 'optimistic' | 'overclaimed' | 'mythical' |
 
 export interface BragInfo {
   tier: BragTier
-  overallRatio: number       // claimedTotal / actualMaxTotal
-  autoRatio: number          // claimedAuto / actualMaxAuto
-  teleopRatio: number        // claimedTeleop / actualMaxTeleop
-  endgameUnfulfilled: boolean   // claimed flower/endgame (>=10) but actual < 10
+  overallRatio: number          // claimedTotal / actualMaxTotal
+  autoRatio: number             // claimedAuto / actualMaxAuto
+  teleopRatio: number           // claimedTeleop / actualMaxTeleop
+  endgameRatio?: number         // claimedEndgame / actualMaxEndgame
+  endgameUnfulfilled: boolean   // claimed flower/endgame unfulfilled across matches
   endgamePardoned?: boolean     // 残局花朵未履约特赦标志
-  endgameVerified?: boolean     // 残局花朵实测已证实
-  hangUnfulfilled?: boolean     // 兼容别名
+  endgameVerified?: boolean     // 残局花朵实测已证实（兼容既有字段）
+  flowerVerified?: boolean      // 规范化：实测已证实花朵能力
+  flowerPending?: boolean       // 规范化：自述花朵能力待实测证实
+  parkVerified?: boolean        // 规范化：实测已证实终局停泊能力
+  parkPending?: boolean         // 规范化：自述停泊能力待实测或未稳定履约
+  statusKeys?: string[]         // 规范化 i18n 状态修饰 key 列表（消除硬编码中文拼接）
+  labelKey?: string             // 规范化 i18n 主标签 key（消除硬编码中文）
+  /** @deprecated Legacy alias kept for backwards compatibility */
+  hangUnfulfilled?: boolean
+  /** @deprecated Legacy alias kept for backwards compatibility */
   hangPardoned?: boolean
+  /** @deprecated Legacy alias kept for backwards compatibility */
   hangVerified?: boolean
-  label: string              // e.g. "1.05x 真实守信"
+  label: string                 // Fallback display label (prefer i18n via tier/labelKey/statusKeys)
 }
 
 export interface UnifiedTeamItem {

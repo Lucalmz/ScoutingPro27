@@ -528,4 +528,143 @@ describe('TacticalWhiteboardView Component Integration (Match -> 4 Teams -> Side
     await nextTick()
     expect(wrapper.find('.wb-shortcuts-panel').exists()).toBe(true)
   })
+
+  it('splits autoParkRate vs teleopParkRate, displays Swarm RP >=16 & 8 Nectar budget, and computes Predict Cycle Time', async () => {
+    setActivePinia(createPinia())
+    localStorage.clear()
+
+    const scheduleStore = useScheduleStore()
+    const recordStore = useRecordStore()
+    const pitStore = usePitScoutStore()
+
+    scheduleStore.schedules = [
+      {
+        id: 'sch-bb-1',
+        eventId: 'evt-wb-bb',
+        matchNumber: 1,
+        tournamentLevel: 'QUALIFICATION',
+        red1: 27570,
+        red2: 19235,
+        blue1: 20401,
+        blue2: 20402
+      }
+    ]
+
+    const baseMs = 1_700_000_000_000
+    const tsQual = [0, 5, 8, 8, 10, 10].reduce<number[]>((acc, g, idx) => {
+      acc.push(idx === 0 ? baseMs : acc[idx - 1]! + g * 1000)
+      return acc
+    }, [])
+
+    recordStore.records = [
+      {
+        id: 'rec-bb-27570',
+        eventId: 'evt-wb-bb',
+        scoutId: 's1',
+        scoutName: 'Alice',
+        matchNumber: 1,
+        teamNumber: 27570,
+        notes: 'Park split verification',
+        rawData: JSON.stringify({
+          tournamentLevel: 'QUALIFICATION',
+          autoLeave: true,
+          autoPark: true, // Auto Park only! Must NOT inflate teleopParkRate!
+          teleopPark: false,
+          flowerNectars: 5,
+          flowerBottomBonusCount: 2,
+          teleopCycles: [2, 2, 2, 2, 2, 2],
+          teleopCycleTimestamps: tsQual
+        }),
+        autoScore: 20,
+        teleopScore: 30,
+        endgameScore: 20,
+        totalScore: 70,
+        createdAt: new Date().toISOString(),
+        updatedAt: new Date().toISOString(),
+        syncStatus: 'SYNCED',
+        version: 1
+      },
+      {
+        id: 'rec-bb-19235',
+        eventId: 'evt-wb-bb',
+        scoutId: 's2',
+        scoutName: 'Bob',
+        matchNumber: 1,
+        teamNumber: 19235,
+        notes: 'Alliance partner',
+        rawData: JSON.stringify({
+          tournamentLevel: 'QUALIFICATION',
+          autoLeave: true,
+          autoPark: false,
+          teleopPark: true, // Endgame Park only! (3+5=8 Mobility RP -> Red total 8+8=16 >= 16!)
+          flowerNectars: 4 // Red sum = 5+4 = 9 > 8 Nectar budget warning!
+        }),
+        autoScore: 15,
+        teleopScore: 25,
+        endgameScore: 13,
+        totalScore: 53,
+        createdAt: new Date().toISOString(),
+        updatedAt: new Date().toISOString(),
+        syncStatus: 'SYNCED',
+        version: 1
+      }
+    ]
+
+    pitStore.records = [
+      {
+        id: 'pit-bb-27570',
+        eventId: 'evt-wb-bb',
+        teamNumber: 27570,
+        scoutId: 's1',
+        scoutName: 'Alice',
+        drivetrainType: 'swerve',
+        chassisSize: 'compact_small',
+        odometryType: 'pinpoint',
+        ballCompatibility: 'universal',
+        claimedAutoScore: 20,
+        claimedTeleopCycles: 6,
+        claimedTeleopScore: 30,
+        claimedEndgameScore: 20,
+        claimedTotalScore: 70,
+        createdAt: new Date().toISOString(),
+        updatedAt: new Date().toISOString(),
+        syncStatus: 'SYNCED'
+      }
+    ]
+
+    const wrapper = mount(TacticalWhiteboardView, {
+      props: {
+        eventId: 'evt-wb-bb',
+        initialMatch: { matchNumber: 1, tournamentLevel: 'QUALIFICATION' }
+      },
+      global: {
+        plugins: [createTestI18n()]
+      }
+    })
+    await nextTick()
+
+    // Swarm RP forecast strip & 8 Nectar budget rendered
+    const rpStrip = wrapper.find('[data-testid="wb-swarm-rp-strip"]')
+    expect(rpStrip.exists()).toBe(true)
+    expect(rpStrip.text()).toContain('16/16')
+    expect(rpStrip.text()).toContain('9/8')
+
+    // Red1 overview card: teleopParkRate must be 0% (NOT 100% from autoPark!), predictCycleTime = 9s
+    const red1Card = wrapper.find('[data-testid="wb-team-card-red1"]')
+    expect(red1Card.text()).toContain('0%')
+    expect(red1Card.find('[data-testid="wb-card-predict-cycle"]').text()).toContain('9s')
+
+    // Red2 has <5 cycle intervals -> shows insufficient placeholder
+    const red2Card = wrapper.find('[data-testid="wb-team-card-red2"]')
+    expect(red2Card.find('[data-testid="wb-card-predict-cycle"]').text()).toContain('样本不足')
+
+    // Open Deep-Dive for Red1 and verify split Auto Park 100% vs Endgame Park 0% + chassisSize
+    await wrapper.findAll('.wb-strip-pill')[0]!.trigger('click')
+    await nextTick()
+    const detailText = wrapper.text()
+    expect(detailText).toContain('自动停泊率')
+    expect(detailText).toContain('终局停泊率0%')
+    expect(detailText).toContain('100%')
+    expect(detailText).toContain('紧凑小车')
+  })
 })

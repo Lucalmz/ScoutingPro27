@@ -141,7 +141,10 @@ export const usePitScoutStore = defineStore('pitScout', () => {
       filtered = filtered.filter((t) =>
         String(t.teamNumber).includes(q) ||
         t.name.toLowerCase().includes(q) ||
-        (t.robotName && t.robotName.toLowerCase().includes(q))
+        (t.robotName && t.robotName.toLowerCase().includes(q)) ||
+        (t.pitRecord?.chassisSize && t.pitRecord.chassisSize.toLowerCase().includes(q)) ||
+        (t.pitRecord?.launcherType && t.pitRecord.launcherType.toLowerCase().includes(q)) ||
+        (t.pitRecord?.flowerMechanism && t.pitRecord.flowerMechanism.toLowerCase().includes(q))
       )
     }
 
@@ -161,14 +164,14 @@ export const usePitScoutStore = defineStore('pitScout', () => {
         return a.teamNumber - b.teamNumber
       }
       if (sortBy.value === 'bragAsc') {
-        const ratioA = a.bragInfo?.overallRatio ?? 999
-        const ratioB = b.bragInfo?.overallRatio ?? 999
-        return ratioA - ratioB
+        const ratioA = a.bragInfo && a.bragInfo.tier !== 'pending' ? a.bragInfo.overallRatio : 999
+        const ratioB = b.bragInfo && b.bragInfo.tier !== 'pending' ? b.bragInfo.overallRatio : 999
+        return ratioA - ratioB || a.teamNumber - b.teamNumber
       }
       if (sortBy.value === 'bragDesc') {
-        const ratioA = a.bragInfo?.overallRatio ?? 0
-        const ratioB = b.bragInfo?.overallRatio ?? 0
-        return ratioB - ratioA
+        const ratioA = a.bragInfo && a.bragInfo.tier !== 'pending' ? a.bragInfo.overallRatio : -1
+        const ratioB = b.bragInfo && b.bragInfo.tier !== 'pending' ? b.bragInfo.overallRatio : -1
+        return ratioB - ratioA || a.teamNumber - b.teamNumber
       }
       if (sortBy.value === 'scoreDesc') {
         const scoreA = a.pitRecord?.claimedTotalScore ?? 0

@@ -7,6 +7,8 @@ import { useNavigationStore } from '@/stores/navigation'
 import TagPicker from '@/components/common/TagPicker.vue'
 import type { RankingRow, ScoutingRecord } from '@/types'
 import { sortRecordsChronologically, getMatchLevelPrefix } from '@/utils/tournament'
+import { parseScoutRawData } from '@/utils/analytics/rankings'
+import { calcMatchPredictCycleTime } from '@/utils/analytics/predictCycleTime'
 
 const props = defineProps<{
   /** 当前展示的队伍编号，null 表示关闭状态 */
@@ -86,6 +88,17 @@ const teamRankDisplay = computed(() => {
 function trendIconName(trend: RankingRow['trend']): string {
   const map: Record<string, string> = { up: 'trending_up', down: 'trending_down', stable: 'trending_flat', new: 'fiber_new' }
   return map[trend] ?? 'trending_flat'
+}
+
+function getMatchBiobuzzMeta(match: ScoutingRecord) {
+  const parsed = parseScoutRawData(match.rawData)
+  const predictCycleSec =
+    parsed.predictCycleTimeSec ??
+    calcMatchPredictCycleTime(parsed.teleopCycles, parsed.teleopCycleTimestamps)
+  return {
+    endgame: parsed.endgame,
+    predictCycleSec
+  }
 }
 
 function goFullDetail() {
@@ -193,6 +206,16 @@ onUnmounted(() => {
                 <span class="stat-value">{{ rankInfo.maxScore }}</span>
               </div>
               <div class="stat-item">
+                <span class="stat-label">{{ t('team_drawer.predict_cycle_time') }}</span>
+                <span class="stat-value">
+                  {{
+                    rankInfo.predictCycleTime !== null && rankInfo.predictCycleTime !== undefined
+                      ? t('rankings.predict_cycle_time_unit', { sec: rankInfo.predictCycleTime })
+                      : '-'
+                  }}
+                </span>
+              </div>
+              <div class="stat-item">
                 <span class="stat-label">{{ t('team_drawer.trend') }}</span>
                 <span class="stat-value trend">
                   <span class="material-icons trend-icon" :class="rankInfo.trend">{{ trendIconName(rankInfo.trend) }}</span>
@@ -203,6 +226,15 @@ onUnmounted(() => {
               <span class="stat-sub">{{ t('team_drawer.auto') }}: {{ rankInfo.avgAutoScore }}</span>
               <span class="stat-sub">{{ t('team_drawer.teleop') }}: {{ rankInfo.avgTeleopScore }}</span>
               <span class="stat-sub">{{ t('team_drawer.endgame') }}: {{ rankInfo.avgEndgameScore }}</span>
+              <span v-if="rankInfo.avgMobilityRpPts !== undefined" class="stat-sub">
+                {{ t('rankings.avg_mobility_rp_pts') }}: {{ rankInfo.avgMobilityRpPts }}
+              </span>
+              <span v-if="rankInfo.teleopParkRate !== undefined" class="stat-sub">
+                {{ t('rankings.teleop_park_rate') }}: {{ Math.round(rankInfo.teleopParkRate * 100) }}%
+              </span>
+              <span v-if="rankInfo.estimatedMaxCycles" class="stat-sub">
+                {{ t('rankings.estimated_max_cycles_unit', { cycles: rankInfo.estimatedMaxCycles }) }}
+              </span>
               <span v-if="rankInfo.brokenCount > 0" class="stat-sub broken">
                 <span class="material-icons" style="font-size:12px">build</span>
                 {{ t('team_drawer.broken_count', { n: rankInfo.brokenCount }) }}
@@ -244,6 +276,33 @@ onUnmounted(() => {
                 <span>{{ t('team_drawer.auto') }}: {{ match.autoScore }}</span>
                 <span>{{ t('team_drawer.teleop') }}: {{ match.teleopScore }}</span>
                 <span>{{ t('team_drawer.endgame') }}: {{ match.endgameScore }}</span>
+                <span v-if="getMatchBiobuzzMeta(match).predictCycleSec !== null">
+                  {{ t('team_drawer.predict_cycle_time') }}: {{ getMatchBiobuzzMeta(match).predictCycleSec }}s
+                </span>
+              </div>
+              <div
+                v-if="
+                  getMatchBiobuzzMeta(match).endgame.flowerNectars > 0 ||
+                  getMatchBiobuzzMeta(match).endgame.flowerPollens > 0 ||
+                  getMatchBiobuzzMeta(match).endgame.gardenBalls > 0 ||
+                  getMatchBiobuzzMeta(match).endgame.teleopPark ||
+                  getMatchBiobuzzMeta(match).endgame.flowerDescore ||
+                  getMatchBiobuzzMeta(match).endgame.g410EarlyFlowerFoul
+                "
+                class="match-scores"
+                style="font-size: 11px; opacity: 0.9;"
+              >
+                <span v-if="getMatchBiobuzzMeta(match).endgame.flowerNectars > 0">
+                  N:{{ getMatchBiobuzzMeta(match).endgame.flowerNectars }}
+                  <template v-if="getMatchBiobuzzMeta(match).endgame.flowerBottomBonusCount > 0">
+                    (B{{ getMatchBiobuzzMeta(match).endgame.flowerBottomBonusCount }})
+                  </template>
+                </span>
+                <span v-if="getMatchBiobuzzMeta(match).endgame.flowerPollens > 0">P:{{ getMatchBiobuzzMeta(match).endgame.flowerPollens }}</span>
+                <span v-if="getMatchBiobuzzMeta(match).endgame.gardenBalls > 0">G:{{ getMatchBiobuzzMeta(match).endgame.gardenBalls }}</span>
+                <span v-if="getMatchBiobuzzMeta(match).endgame.teleopPark">Park +5</span>
+                <span v-if="getMatchBiobuzzMeta(match).endgame.flowerDescore">Descore</span>
+                <span v-if="getMatchBiobuzzMeta(match).endgame.g410EarlyFlowerFoul" style="color: #fbbf24;">G410</span>
               </div>
               <p v-if="match.notes" class="match-notes">{{ match.notes }}</p>
             </div>

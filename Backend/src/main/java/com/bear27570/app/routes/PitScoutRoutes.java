@@ -87,6 +87,7 @@ public class PitScoutRoutes {
                 record.setScoutName(record.getScoutId() != null ? record.getScoutId() : userId);
             }
             record.setEventId(eventId);
+            normalizePitRecord(record);
 
             try {
                 synchronized (DbUtil.RECORD_WRITE_LOCK) {
@@ -135,6 +136,7 @@ public class PitScoutRoutes {
                                     r.setScoutName(r.getScoutId() != null ? r.getScoutId() : userId);
                                 }
                                 r.setEventId(eventId);
+                                normalizePitRecord(r);
                                 dao.upsertPitRecord(r);
                             }
                         });
@@ -353,5 +355,87 @@ public class PitScoutRoutes {
             }
             ctx.status(200).result(gson.toJson(Map.of("success", true, "key", key))).contentType("application/json");
         });
+    }
+
+    /**
+     * 规范化 Pit 展位记录字段与 BIOBUZZ 终局自述得分：
+     * - 当传入结构化自述终局字段时按 BIOBUZZ 公式同步 claimedEndgameScore（并保持 claimedFlowerBottomBonus <= claimedFlowerNectars）；
+     * - 未传入结构化终局字段的旧端数据保留原 claimedEndgameScore。
+     */
+    static void normalizePitRecord(PitScoutingRecord record) {
+        if (record == null) return;
+        if (record.getDrivetrainType() == null || record.getDrivetrainType().isBlank()) {
+            record.setDrivetrainType("mecanum");
+        }
+        if (record.getOdometryType() == null || record.getOdometryType().isBlank()) {
+            record.setOdometryType("none");
+        }
+        if (record.getBallCompatibility() == null || record.getBallCompatibility().isBlank()) {
+            record.setBallCompatibility("universal");
+        }
+        if (record.getLauncherType() == null) {
+            record.setLauncherType("");
+        }
+        if (record.getFlowerMechanism() == null) {
+            record.setFlowerMechanism("");
+        }
+        if (record.getClaimedAutoStrategy() == null) {
+            record.setClaimedAutoStrategy("");
+        }
+        if (record.getWeightLbs() < 0) {
+            record.setWeightLbs(0.0);
+        }
+        if (record.getChassisSize() == null) {
+            record.setChassisSize("");
+        } else {
+            String trimmedChassisSize = record.getChassisSize().trim();
+            record.setChassisSize(trimmedChassisSize.length() > 64 ? trimmedChassisSize.substring(0, 64) : trimmedChassisSize);
+        }
+
+        int nectars = Math.max(0, Math.min(8, record.getClaimedFlowerNectars()));
+        int bottomBonus = Math.max(0, Math.min(4, Math.min(nectars, record.getClaimedFlowerBottomBonus())));
+        int pollens = Math.max(0, record.getClaimedFlowerPollens());
+        int garden = Math.max(0, record.getClaimedGardenBalls());
+
+        record.setClaimedFlowerNectars(nectars);
+        record.setClaimedFlowerBottomBonus(bottomBonus);
+        record.setClaimedFlowerPollens(pollens);
+        record.setClaimedGardenBalls(garden);
+
+        int auto = Math.max(0, record.getClaimedAutoScore());
+        int teleop = Math.max(0, record.getClaimedTeleopScore());
+        record.setClaimedAutoScore(auto);
+        record.setClaimedTeleopScore(teleop);
+        record.setClaimedTeleopCycles(Math.max(0, record.getClaimedTeleopCycles()));
+
+        int originalEndgame = record.getClaimedEndgameScore();
+        int structuredEndgame = (record.isClaimedTeleopPark() ? 5 : 0)
+                + (nectars * 2)
+                + (bottomBonus * 5)
+                + (pollens * 2)
+                + garden;
+
+        boolean hasStructuredEndgame = record.isClaimedTeleopPark()
+                || nectars > 0
+                || bottomBonus > 0
+                || pollens > 0
+                || garden > 0;
+
+        if (hasStructuredEndgame) {
+            record.setClaimedEndgameScore(structuredEndgame);
+        } else if (originalEndgame < 0) {
+            record.setClaimedEndgameScore(0);
+        }
+
+        int effectiveEndgame = record.getClaimedEndgameScore();
+        int originalTotal = record.getClaimedTotalScore();
+        if (originalTotal <= 0 && (auto + teleop + effectiveEndgame) > 0) {
+            record.setClaimedTotalScore(auto + teleop + effectiveEndgame);
+        } else if (hasStructuredEndgame && originalEndgame != effectiveEndgame
+                && (originalTotal == auto + teleop + originalEndgame)) {
+            record.setClaimedTotalScore(auto + teleop + effectiveEndgame);
+        } else if (originalTotal < 0) {
+            record.setClaimedTotalScore(0);
+        }
     }
 }

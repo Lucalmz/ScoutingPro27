@@ -1,10 +1,13 @@
 import { setActivePinia, createPinia } from 'pinia'
 import { describe, it, expect, beforeEach } from 'vitest'
 import { mount } from '@vue/test-utils'
+import { createI18n } from 'vue-i18n'
 import PitStatusIndicator from '../components/pit/PitStatusIndicator.vue'
 import { usePitScoutStore } from '../stores/pitScout'
 import { useRecordStore } from '../stores/records'
-import type { PitScoutingRecord, ScoutingRecord } from '../types'
+import en from '@/locales/en.json'
+import zh from '@/locales/zh.json'
+import type { ScoutingRecord } from '../types'
 
 describe('PitStatusIndicator.vue', () => {
   beforeEach(() => {
@@ -94,5 +97,62 @@ describe('PitStatusIndicator.vue', () => {
     await wrapper.trigger('click')
     expect(wrapper.emitted('click')).toHaveLength(1)
     expect(wrapper.emitted('click')![0]).toEqual([27570])
+  })
+
+  it('renders localized pending label instead of 0x when matchCount > 0 and claimedTotalScore is 0', () => {
+    const pitStore = usePitScoutStore()
+    const recordStore = useRecordStore()
+
+    pitStore.records = [
+      {
+        id: 'p-empty',
+        eventId: 'e1',
+        teamNumber: 27570,
+        scoutId: 's1',
+        scoutName: 'Alice',
+        drivetrainType: 'mecanum',
+        weightLbs: 38,
+        ballCompatibility: 'universal',
+        launcherType: 'dual_flywheel',
+        flowerMechanism: 'none',
+        hasColorSensor: true,
+        odometryType: 'two_wheel',
+        claimedAutoScore: 0,
+        claimedTeleopCycles: 0,
+        claimedTeleopScore: 0,
+        claimedEndgameScore: 0,
+        claimedTotalScore: 0,
+        version: 1
+      }
+    ]
+    recordStore.records = [
+      {
+        id: 'm1',
+        eventId: 'e1',
+        scoutId: 's1',
+        matchNumber: 1,
+        teamNumber: 27570,
+        autoScore: 20,
+        teleopScore: 30,
+        endgameScore: 5,
+        totalScore: 55,
+        syncStatus: 'SYNCED',
+        createdAt: '',
+        updatedAt: ''
+      } as ScoutingRecord
+    ]
+
+    const i18n = createI18n({ legacy: false, locale: 'en', messages: { en, zh } })
+    const wrapper = mount(PitStatusIndicator, {
+      props: { teamNumber: 27570, showLabel: true, showBrag: true },
+      global: { plugins: [i18n] }
+    })
+
+    const badge = wrapper.find('.brag-badge')
+    expect(badge.exists()).toBe(true)
+    expect(badge.classes()).toContain('tier-pending')
+    expect(badge.text()).not.toBe('0x')
+    expect(badge.text()).toContain('Claims Incomplete')
+    expect(wrapper.attributes('title')).toContain('Claims Incomplete')
   })
 })

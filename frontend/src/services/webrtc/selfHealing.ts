@@ -16,6 +16,8 @@ export interface SelfHealingOptions {
 export function setupSelfHealing(options: SelfHealingOptions): { dispose: () => void } {
   let isReconnecting = false
   let isResumeProbing = false
+  let disposed = false
+  let reconnectCooldownTimer: ReturnType<typeof setTimeout> | null = null
   let lastTriggerTime = 0
   let lastResumeTime = 0
   let connectingEnteredAt = 0
@@ -52,13 +54,23 @@ export function setupSelfHealing(options: SelfHealingOptions): { dispose: () => 
       log.info(`Executing self-healing reconnect: ${reason}`)
       await options.reconnectNow(true)
     } finally {
-      setTimeout(() => {
+      if (reconnectCooldownTimer) {
+        clearTimeout(reconnectCooldownTimer)
+      }
+      if (!disposed) {
+        reconnectCooldownTimer = setTimeout(() => {
+          reconnectCooldownTimer = null
+          isReconnecting = false
+        }, 500)
+      } else {
+        reconnectCooldownTimer = null
         isReconnecting = false
-      }, 500)
+      }
     }
   }
 
   const handleOnline = async () => {
+    if (disposed) return
     if (options.isConflictActive?.()) {
       log.info('Device network came online, but session conflict is active; suppressing reconnect.')
       return
@@ -90,6 +102,7 @@ export function setupSelfHealing(options: SelfHealingOptions): { dispose: () => 
   }
 
   const handleResume = async () => {
+    if (disposed) return
     if (typeof document !== 'undefined' && document.visibilityState !== 'visible') {
       return
     }
@@ -194,6 +207,11 @@ export function setupSelfHealing(options: SelfHealingOptions): { dispose: () => 
 
   return {
     dispose: () => {
+      disposed = true
+      if (reconnectCooldownTimer) {
+        clearTimeout(reconnectCooldownTimer)
+        reconnectCooldownTimer = null
+      }
       if (typeof window !== 'undefined') {
         window.removeEventListener('online', handleOnline)
         window.removeEventListener('pageshow', handleResume)

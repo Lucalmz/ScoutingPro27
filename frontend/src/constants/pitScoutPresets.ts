@@ -13,7 +13,13 @@ export const LAUNCHER_PRESETS: PresetOption[] = [
 
 export const FLOWER_PRESETS: PresetOption[] = [
   { key: 'vertical_lift', zh: '垂直级联高抬升', en: 'Vertical Cascading Lift' },
-  { key: 'bottom_chute', zh: '底部滑槽', en: 'Bottom Chute' },
   { key: 'angled_launcher', zh: '仰角抛射', en: 'Angled Ejection' },
+  { key: 'pivot_arm', zh: '摆臂直投', en: 'Pivot Arm' },
   { key: 'none', zh: '无', en: 'None' }
+]
+
+export const CHASSIS_SIZE_PRESETS: PresetOption[] = [
+  { key: 'compact_small', zh: '紧凑小车 (≤15")', en: 'Compact Small (≤15")' },
+  { key: 'standard_mid', zh: '标准中型 (16"-17")', en: 'Standard Mid (16"-17")' },
+  { key: 'wide_large', zh: '宽体大车 (~18")', en: 'Wide Large (~18")' }
 ]

@@ -228,6 +228,7 @@ async function handleAddPresetTag(preset: typeof PRESET_TAGS[number]) {
         <span class="tag-text">{{ formatTagLabel(tag) }}</span>
         <button
           v-if="!readonly"
+          type="button"
           class="btn-tag-remove"
           :disabled="isSubmitting"
           @click.stop="handleRemoveTag(tag.tag)"
@@ -242,6 +243,7 @@ async function handleAddPresetTag(preset: typeof PRESET_TAGS[number]) {
       <button
         key="btn-add"
         v-if="!readonly && !isAdding"
+        type="button"
         class="btn-add-tag"
         :disabled="isSubmitting || currentTags.length >= 15"
         @click="isAdding = true"

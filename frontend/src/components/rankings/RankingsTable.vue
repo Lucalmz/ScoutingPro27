@@ -1,9 +1,10 @@
 <script setup lang="ts">
 import { ref, computed, defineComponent, toRef, h, nextTick, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
-import type { RankingRow } from '@/types'
+import type { RankingRow, BragInfo } from '@/types'
 import { useEventStore } from '@/stores/events'
 import { useRecordStore } from '@/stores/records'
+import { usePitScoutStore } from '@/stores/pitScout'
 import { useToastStore } from '@/stores/toast'
 import { useRouter } from 'vue-router'
 import { transitionState } from '@/utils/transitionState'
@@ -11,22 +12,24 @@ import { useTween } from '@/composables/useTween'
 import { useNavigationStore } from '@/stores/navigation'
 import { hapticLight } from '@/utils/haptics'
 import { useConfirm } from '@/composables/useConfirm'
+import { calculateBragIndex } from '@/utils/bragIndex'
 import RankingsTableToolbar from './RankingsTableToolbar.vue'
 import { useRankingsCustomColumns } from './useRankingsCustomColumns'
 
 // Inline component for animated numbers
 const AnimatedNumber = defineComponent({
-  props: { value: { type: Number, required: true } },
+  props: { value: { type: Number, default: 0 } },
   setup(props) {
-    const valRef = toRef(props, 'value')
+    const valRef = computed(() => Number.isFinite(props.value) ? props.value : 0)
     const tweened = useTween(valRef, 800)
     return () => h('span', tweened.value.toFixed(1))
   }
 })
 
-const { t } = useI18n()
+const { t, te } = useI18n()
 const eventStore = useEventStore()
 const recordStore = useRecordStore()
+const pitStore = usePitScoutStore()
 const toastStore = useToastStore()
 const router = useRouter()
 const navStore = useNavigationStore()
@@ -37,7 +40,7 @@ const props = defineProps<{
 }>()
 
 type SortKey = keyof RankingRow | string
-const sortKey = ref<SortKey>('avgRating')
+const sortKey = ref<SortKey>('advancementPoints')
 const sortDir = ref<'asc' | 'desc'>('desc')
 
 // 标签筛选
@@ -70,7 +73,7 @@ function setSort(key: SortKey) {
     sortDir.value = sortDir.value === 'asc' ? 'desc' : 'asc'
   } else {
     sortKey.value = key
-    sortDir.value = 'desc'
+    sortDir.value = key === 'predictCycleTime' ? 'asc' : 'desc'
   }
 }
 
@@ -101,15 +104,120 @@ const sorted = computed<RankingRow[]>(() => {
       if (!bHas) return -1
       return sortDir.value === 'asc' ? aStat.value - bStat.value : bStat.value - aStat.value
     }
+    if (sortKey.value === 'advancementPoints') {
+      const aPts = a.advancementPoints ?? 0
+      const bPts = b.advancementPoints ?? 0
+      if (aPts !== bPts) {
+        return sortDir.value === 'asc' ? aPts - bPts : bPts - aPts
+      }
+      // Official Table 4-2 tiebreakers: advancementRank, then avgRating, then teamNumber
+      const aRank = a.advancementRank ?? 9999
+      const bRank = b.advancementRank ?? 9999
+      if (aRank !== bRank) {
+        return sortDir.value === 'asc' ? bRank - aRank : aRank - bRank
+      }
+      if ((a.avgRating ?? 0) !== (b.avgRating ?? 0)) {
+        return sortDir.value === 'asc' ? (a.avgRating ?? 0) - (b.avgRating ?? 0) : (b.avgRating ?? 0) - (a.avgRating ?? 0)
+      }
+      return sortDir.value === 'asc' ? b.teamNumber - a.teamNumber : a.teamNumber - b.teamNumber
+    }
     const av = a[sortKey.value as keyof RankingRow]
     const bv = b[sortKey.value as keyof RankingRow]
-    if (typeof av === 'number' && typeof bv === 'number') {
-      return sortDir.value === 'asc' ? av - bv : bv - av
-    }
-    return 0
+    const aValid = typeof av === 'number' && Number.isFinite(av)
+    const bValid = typeof bv === 'number' && Number.isFinite(bv)
+    if (!aValid && !bValid) return 0
+    if (!aValid) return 1
+    if (!bValid) return -1
+    return sortDir.value === 'asc' ? av - bv : bv - av
   })
   return arr
 })
+
+const bragInfoMap = computed(() => {
+  const map = new Map<number, BragInfo | null>()
+  const eventId = eventStore.currentEvent?.id
+  for (const row of props.rankings) {
+    const pitRec = pitStore.getUnifiedTeam(row.teamNumber)?.pitRecord
+    const teamMatches = recordStore.activeRecords.filter(
+      r => r.teamNumber === row.teamNumber && (!eventId || r.eventId === eventId)
+    )
+    map.set(row.teamNumber, calculateBragIndex(pitRec, teamMatches) ?? null)
+  }
+  return map
+})
+
+function formatBragText(brag: BragInfo | null | undefined): string {
+  if (!brag) return '-'
+  if (brag.label) return brag.label
+  if (brag.labelKey && te(brag.labelKey)) return t(brag.labelKey)
+  return brag.tier
+}
+
+function getBragTooltip(brag: BragInfo | null | undefined): string {
+  if (!brag) return ''
+  const parts: string[] = []
+  if (Array.isArray(brag.statusKeys) && brag.statusKeys.length > 0) {
+    for (const key of brag.statusKeys) {
+      parts.push(te(key) ? t(key) : key)
+    }
+  } else {
+    if (brag.flowerVerified) parts.push(t('pit_scout.flower_verified'))
+    else if (brag.flowerPending) parts.push(t('pit_scout.flower_pending_verify'))
+    if (brag.parkVerified) parts.push(t('pit_scout.park_verified'))
+    else if (brag.parkPending) parts.push(t('pit_scout.park_pending'))
+  }
+  return parts.join(' · ')
+}
+
+function formatAdvancementStatus(status?: string, row?: RankingRow): string {
+  if (!status) return ''
+  switch (status.toUpperCase()) {
+    case 'ADVANCING':
+      return row?.advancementRolledDown
+        ? t('rankings.advancement_status_rolled_down')
+        : t('rankings.advancement_status_advancing')
+    case 'ALREADY_ADVANCING':
+      return t('rankings.advancement_status_already_advancing')
+    case 'DECLINED':
+      return t('rankings.advancement_status_declined')
+    case 'INELIGIBLE':
+      return t('rankings.advancement_status_ineligible')
+    case 'BUBBLE':
+      return t('rankings.advancement_status_bubble')
+    case 'COMPETING':
+      return t('rankings.advancement_status_competing')
+    default:
+      return status
+  }
+}
+
+function getAdvancementTooltip(row: RankingRow): string {
+  const b = row.advancementBreakdown
+  const parts: string[] = []
+  if (b) {
+    parts.push(
+      t('rankings.advancement_breakdown_tooltip', {
+        qual: b.qualPoints,
+        alliance: b.alliancePoints,
+        playoff: b.playoffPoints,
+        award: b.awardPoints
+      })
+    )
+  } else {
+    parts.push(`${t('rankings.advancement_points')}: ${row.advancementPoints ?? 0}`)
+  }
+
+  if (row.advancementRolledDown) {
+    parts.push(t('rankings.advancement_rolled_down_note', { slot: row.advancementSlot ?? row.advancementRank ?? '-' }))
+  } else if (row.advancementStatus === 'ALREADY_ADVANCING') {
+    parts.push(t('rankings.advancement_already_advancing_note'))
+  } else if (row.advancementStatus === 'DECLINED') {
+    parts.push(t('rankings.advancement_declined_note'))
+  } else if (row.advancementStatus === 'INELIGIBLE') {
+    parts.push(t('rankings.advancement_ineligible_note'))
+  }
+  return parts.join(' · ')
+}
 
 const maxMetrics = computed(() => {
   const rows = props.rankings
@@ -278,7 +386,10 @@ function enter(el: Element, done: () => void) {
         <table>
           <thead @mouseenter="onListLeave">
             <tr>
-              <th @click="setSort('teamNumber')" class="sortable">
+              <th @click="setSort('advancementPoints')" class="sortable advancement-col-th" :title="t('rankings.advancement_points_desc')">
+                {{ t('rankings.advancement_points') }}<span class="material-icons sort-icon" :class="{ 'is-active': sortKey === 'advancementPoints', 'is-asc': sortKey === 'advancementPoints' && sortDir === 'asc' }">arrow_drop_down</span>
+              </th>
+              <th @click="setSort('teamNumber')" class="sortable team-col-th">
                 {{ t('rankings.team') }}<span class="material-icons sort-icon" :class="{ 'is-active': sortKey === 'teamNumber', 'is-asc': sortKey === 'teamNumber' && sortDir === 'asc' }">arrow_drop_down</span>
               </th>
               <th @click="setSort('matchCount')" class="sortable">
@@ -296,6 +407,18 @@ function enter(el: Element, done: () => void) {
               <th @click="setSort('avgEndgameScore')" class="sortable">
                 {{ t('rankings.avg_endgame') }}<span class="material-icons sort-icon" :class="{ 'is-active': sortKey === 'avgEndgameScore', 'is-asc': sortKey === 'avgEndgameScore' && sortDir === 'asc' }">arrow_drop_down</span>
               </th>
+              <th @click="setSort('avgMobilityRpPts')" class="sortable" :title="t('rankings.avg_mobility_rp_pts_desc')">
+                {{ t('rankings.avg_mobility_rp_pts') }}<span class="material-icons sort-icon" :class="{ 'is-active': sortKey === 'avgMobilityRpPts', 'is-asc': sortKey === 'avgMobilityRpPts' && sortDir === 'asc' }">arrow_drop_down</span>
+              </th>
+              <th @click="setSort('teleopParkRate')" class="sortable" :title="t('rankings.teleop_park_rate_desc')">
+                {{ t('rankings.teleop_park_rate') }}<span class="material-icons sort-icon" :class="{ 'is-active': sortKey === 'teleopParkRate', 'is-asc': sortKey === 'teleopParkRate' && sortDir === 'asc' }">arrow_drop_down</span>
+              </th>
+              <th @click="setSort('avgFlowerNectars')" class="sortable">
+                {{ t('rankings.avg_flower_nectars') }}<span class="material-icons sort-icon" :class="{ 'is-active': sortKey === 'avgFlowerNectars', 'is-asc': sortKey === 'avgFlowerNectars' && sortDir === 'asc' }">arrow_drop_down</span>
+              </th>
+              <th @click="setSort('predictCycleTime')" class="sortable" :title="t('rankings.predict_cycle_time_desc')">
+                {{ t('rankings.predict_cycle_time') }}<span class="material-icons sort-icon" :class="{ 'is-active': sortKey === 'predictCycleTime', 'is-asc': sortKey === 'predictCycleTime' && sortDir === 'asc' }">arrow_drop_down</span>
+              </th>
               <th @click="setSort('avgTipsPerMatch')" class="sortable" :title="t('rankings.avg_tips_desc')">
                 {{ t('rankings.avg_tips') }}<span class="material-icons sort-icon" :class="{ 'is-active': sortKey === 'avgTipsPerMatch', 'is-asc': sortKey === 'avgTipsPerMatch' && sortDir === 'asc' }">arrow_drop_down</span>
               </th>
@@ -304,6 +427,9 @@ function enter(el: Element, done: () => void) {
               </th>
               <th @click="setSort('avgRating')" class="sortable">
                 {{ t('rankings.rating') }}<span class="material-icons sort-icon" :class="{ 'is-active': sortKey === 'avgRating', 'is-asc': sortKey === 'avgRating' && sortDir === 'asc' }">arrow_drop_down</span>
+              </th>
+              <th :title="t('rankings.brag_index_desc')">
+                {{ t('rankings.brag_index') }}
               </th>
               <th
                 v-for="f in visibleCustomFields"
@@ -336,6 +462,18 @@ function enter(el: Element, done: () => void) {
               class="ranking-row"
               @mouseenter="onRowEnter"
             >
+              <td class="advancement-cell" :title="getAdvancementTooltip(row)">
+                <div class="advancement-cell-content">
+                  <span class="advancement-score-val">{{ row.advancementPoints ?? 0 }}</span>
+                  <span
+                    v-if="row.advancementStatus && row.advancementStatus !== 'NONE'"
+                    class="advancement-status-badge"
+                    :class="[`status-${row.advancementStatus.toLowerCase()}`, { 'is-rolled-down': row.advancementRolledDown }]"
+                  >
+                    {{ formatAdvancementStatus(row.advancementStatus, row) }}
+                  </span>
+                </div>
+              </td>
               <td class="team-cell" @click="viewTeamDetails(row.teamNumber)" style="cursor: pointer;">
                 <div 
                   class="team-cell-content" 
@@ -360,29 +498,68 @@ function enter(el: Element, done: () => void) {
               <td :class="{'high-breakdown': row.brokenCount > 0 && row.brokenCount / row.matchCount >= 0.5}">{{ row.brokenCount }} / {{ row.matchCount }}</td>
               <td>
                 <div class="telemetry-cell">
-                  <AnimatedNumber :value="row.avgAutoScore" />
+                  <AnimatedNumber :value="row.avgAutoScore ?? 0" />
                   <div class="telemetry-bar-track"><div class="telemetry-bar-fill bar-cyan" :style="{ width: barPct(row.avgAutoScore, maxMetrics.auto) }"></div></div>
                 </div>
               </td>
               <td>
                 <div class="telemetry-cell">
-                  <AnimatedNumber :value="row.avgTeleopScore" />
+                  <AnimatedNumber :value="row.avgTeleopScore ?? 0" />
                   <div class="telemetry-bar-track"><div class="telemetry-bar-fill bar-green" :style="{ width: barPct(row.avgTeleopScore, maxMetrics.tele) }"></div></div>
                 </div>
               </td>
               <td>
                 <div class="telemetry-cell">
-                  <AnimatedNumber :value="row.avgEndgameScore" />
+                  <AnimatedNumber :value="row.avgEndgameScore ?? 0" />
                   <div class="telemetry-bar-track"><div class="telemetry-bar-fill bar-amber" :style="{ width: barPct(row.avgEndgameScore, maxMetrics.end) }"></div></div>
                 </div>
               </td>
+              <td>
+                <div class="telemetry-cell">
+                  <AnimatedNumber :value="row.avgMobilityRpPts ?? 0" />
+                  <div class="telemetry-bar-track"><div class="telemetry-bar-fill bar-cyan" :style="{ width: barPct(row.avgMobilityRpPts ?? 0, 13) }"></div></div>
+                </div>
+              </td>
+              <td>{{ Math.round((row.teleopParkRate ?? 0) * 100) }}%</td>
+              <td>
+                <div class="flower-garden-cell">
+                  <span class="fg-main">N:{{ row.avgFlowerNectars ?? 0 }} B:{{ row.avgFlowerBottomBonus ?? 0 }}</span>
+                  <span class="fg-sub">P:{{ row.avgFlowerPollens ?? 0 }} G:{{ row.avgGardenBalls ?? 0 }}</span>
+                  <span v-if="(row.g410FoulRate ?? 0) > 0" class="fg-foul-pill">G410 {{ Math.round((row.g410FoulRate ?? 0) * 100) }}%</span>
+                </div>
+              </td>
+              <td>
+                <div v-if="row.predictCycleTime !== null && row.predictCycleTime !== undefined" class="predict-cycle-cell">
+                  <span class="predict-cycle-main">{{ t('rankings.predict_cycle_time_unit', { sec: row.predictCycleTime }) }}</span>
+                  <span class="predict-cycle-sub">
+                    {{ t('rankings.predict_cycle_spread', { sec: row.predictCycleSpread ?? 0 }) }} · {{ t('rankings.estimated_max_cycles_unit', { cycles: row.estimatedMaxCycles ?? 0 }) }}
+                  </span>
+                  <span class="predict-cycle-sub">
+                    {{ t('rankings.predict_cycle_matches_count', { count: row.predictCycleMatches ?? 0 }) }}
+                  </span>
+                </div>
+                <span v-else class="empty-cell" :title="t('rankings.predict_cycle_insufficient')">
+                  {{ t('rankings.predict_cycle_insufficient_short') }}
+                </span>
+              </td>
               <td><AnimatedNumber :value="row.avgTipsPerMatch ?? 0" /></td>
-              <td><AnimatedNumber :value="row.maxScore" /></td>
+              <td><AnimatedNumber :value="row.maxScore ?? 0" /></td>
               <td class="total-cell">
                 <div class="telemetry-cell">
-                  <AnimatedNumber :value="row.avgRating" />
+                  <AnimatedNumber :value="row.avgRating ?? 0" />
                   <div class="telemetry-bar-track"><div class="telemetry-bar-fill bar-primary" :style="{ width: barPct(row.avgRating, maxMetrics.rating) }"></div></div>
                 </div>
+              </td>
+              <td>
+                <span
+                  v-if="bragInfoMap.get(row.teamNumber)"
+                  class="brag-tier-pill"
+                  :class="`tier-${bragInfoMap.get(row.teamNumber)!.tier}`"
+                  :title="getBragTooltip(bragInfoMap.get(row.teamNumber))"
+                >
+                  {{ formatBragText(bragInfoMap.get(row.teamNumber)) }}
+                </span>
+                <span v-else class="empty-cell">-</span>
               </td>
               <td
                 v-for="f in visibleCustomFields"
@@ -491,12 +668,45 @@ thead th {
   z-index: 6;
 }
 
-thead th:first-child {
+/* Dual sticky frozen columns on horizontal scrolling */
+thead th.advancement-col-th,
+tbody td.advancement-cell {
   position: sticky;
   left: 0;
+  width: 136px;
+  min-width: 136px;
+  max-width: 136px;
+  padding: 12px 8px;
+  background: var(--card);
+  box-sizing: border-box;
+  overflow: hidden;
+}
+
+thead th.advancement-col-th {
   z-index: 12;
+  text-overflow: ellipsis;
+}
+
+tbody td.advancement-cell {
+  z-index: 4;
+}
+
+thead th.team-col-th,
+tbody td.team-cell {
+  position: sticky;
+  left: 136px;
+  min-width: 130px;
   background: var(--card);
   box-shadow: 2px 0 6px -2px rgba(0, 0, 0, 0.4);
+  box-sizing: border-box;
+}
+
+thead th.team-col-th {
+  z-index: 11;
+}
+
+tbody td.team-cell {
+  z-index: 3;
 }
 
 th.sortable {
@@ -533,12 +743,77 @@ tbody td {
   transition: background-color 0.15s ease;
 }
 
-tbody td:first-child {
-  position: sticky;
-  left: 0;
-  z-index: 2;
-  background: var(--card);
-  box-shadow: 2px 0 6px -2px rgba(0, 0, 0, 0.4);
+
+
+.advancement-cell {
+  white-space: nowrap;
+}
+
+.advancement-cell-content {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  max-width: 100%;
+}
+
+.advancement-score-val {
+  font-family: 'Orbitron', monospace;
+  font-size: 15px;
+  font-weight: 700;
+  color: var(--primary, #39ff14);
+  text-shadow: 0 0 8px rgba(57, 255, 20, 0.25);
+  min-width: 28px;
+  text-align: right;
+}
+
+.advancement-status-badge {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 9.5px;
+  font-weight: 700;
+  padding: 1px 5px;
+  border-radius: 4px;
+  text-transform: uppercase;
+  letter-spacing: 0.2px;
+  white-space: nowrap;
+}
+
+.advancement-status-badge.status-advancing {
+  background: rgba(57, 255, 20, 0.15);
+  border: 1px solid rgba(57, 255, 20, 0.4);
+  color: #39ff14;
+}
+
+.advancement-status-badge.status-advancing.is-rolled-down {
+  background: rgba(16, 185, 129, 0.2);
+  border: 1px solid rgba(52, 211, 153, 0.55);
+  color: #6ee7b7;
+}
+
+.advancement-status-badge.status-already_advancing {
+  background: rgba(56, 189, 248, 0.14);
+  border: 1px solid rgba(56, 189, 248, 0.45);
+  color: #38bdf8;
+}
+
+.advancement-status-badge.status-declined,
+.advancement-status-badge.status-ineligible {
+  background: rgba(244, 63, 94, 0.12);
+  border: 1px solid rgba(244, 63, 94, 0.35);
+  color: #fda4af;
+}
+
+.advancement-status-badge.status-bubble {
+  background: rgba(245, 158, 11, 0.15);
+  border: 1px solid rgba(245, 158, 11, 0.4);
+  color: #f59e0b;
+}
+
+.advancement-status-badge.status-competing {
+  background: rgba(148, 163, 184, 0.1);
+  border: 1px solid rgba(148, 163, 184, 0.25);
+  color: var(--muted-foreground);
 }
 
 .rank-index-badge {
@@ -720,5 +995,76 @@ td.custom-col-td {
   thead th, tbody td {
     padding: 10px 12px;
   }
+}
+
+.flower-garden-cell,
+.predict-cycle-cell {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  white-space: nowrap;
+}
+
+.fg-main,
+.predict-cycle-main {
+  font-weight: 700;
+  color: var(--foreground);
+  font-variant-numeric: tabular-nums;
+}
+
+.fg-sub,
+.predict-cycle-sub {
+  font-size: 11px;
+  color: var(--muted-foreground);
+  font-variant-numeric: tabular-nums;
+}
+
+.fg-foul-pill {
+  display: inline-block;
+  width: fit-content;
+  font-size: 10px;
+  font-weight: 700;
+  padding: 1px 5px;
+  border-radius: 4px;
+  background: rgba(245, 158, 11, 0.16);
+  color: #fbbf24;
+  border: 1px solid rgba(245, 158, 11, 0.4);
+}
+
+.brag-tier-pill {
+  display: inline-flex;
+  align-items: center;
+  padding: 2px 8px;
+  border-radius: 999px;
+  font-size: 11px;
+  font-weight: 600;
+  white-space: nowrap;
+  border: 1px solid var(--border);
+  background: rgba(255, 255, 255, 0.04);
+  color: var(--foreground);
+}
+
+.brag-tier-pill.tier-elite {
+  border-color: rgba(57, 255, 20, 0.45);
+  background: rgba(57, 255, 20, 0.1);
+  color: #39ff14;
+}
+
+.brag-tier-pill.tier-honest {
+  border-color: rgba(56, 189, 248, 0.45);
+  background: rgba(56, 189, 248, 0.1);
+  color: #38bdf8;
+}
+
+.brag-tier-pill.tier-optimist {
+  border-color: rgba(245, 158, 11, 0.45);
+  background: rgba(245, 158, 11, 0.12);
+  color: #fbbf24;
+}
+
+.brag-tier-pill.tier-overclaimed {
+  border-color: rgba(239, 68, 68, 0.45);
+  background: rgba(239, 68, 68, 0.12);
+  color: #f87171;
 }
 </style>

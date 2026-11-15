@@ -60,8 +60,11 @@ async function handleSyncOfficial() {
       return
     }
 
-    // 2. 更新 recordsStore 中的官方比分
+    // 2. 更新 recordsStore 中的官方比分与官方晋级分
     recordStore.officialMatches = matches
+    await recordStore.refreshAdvancement(year, code).catch(err => {
+      console.warn('[handleSyncOfficial] Failed to refresh advancement:', err)
+    })
 
     // 3. 将官方比赛映射转入赛程表
     const res = await scheduleStore.importFromFtcOfficial(

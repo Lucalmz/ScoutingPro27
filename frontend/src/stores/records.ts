@@ -13,11 +13,12 @@ import {
   addTeamTag as apiAddTeamTag,
   deleteTeamTag as apiDeleteTeamTag
 } from '@/services/api'
-import { fetchEventMatches } from '@/services/ftcApi'
+import { fetchEventMatches, fetchEventAdvancement } from '@/services/ftcApi'
 import { useInboxStore } from '@/stores/inbox'
 import { useToastStore } from '@/stores/toast'
-import type { ScoutingRecord, RankingRow, OfficialMatch, TeamTagItem } from '@/types'
+import type { ScoutingRecord, RankingRow, OfficialMatch, TeamTagItem, AdvancementDetail } from '@/types'
 import { calculateScoutReliability, calculateRankings } from '@/utils/analytics/rankings'
+import { buildAdvancementMap } from '@/utils/analytics/advancement'
 import { calculateMatchDiscrepancies, type MatchDiscrepancy } from '@/utils/analytics/audit'
 import { i18n } from '@/i18n'
 
@@ -38,9 +39,12 @@ export const useRecordStore = defineStore('records', () => {
   const officialMatches = ref<OfficialMatch[]>(loadFromStorage('scoutingpro_officialMatches', []))
   const bannedTeams = ref<number[]>(loadFromStorage('scoutingpro_bannedTeams', []))
   const teamTags = ref<TeamTagItem[]>(loadFromStorage('scoutingpro_tags', []))
+  const officialAdvancement = ref<AdvancementDetail[]>(loadFromStorage('scoutingpro_advancement', []))
   const currentEventId = ref<string | null>(null)
   const loading = ref(false)
   const error = ref<string | null>(null)
+
+  const advancementMap = computed(() => buildAdvancementMap(officialAdvancement.value))
 
   const currentRecords = computed(() => {
     if (!currentEventId.value) return records.value
@@ -64,13 +68,14 @@ export const useRecordStore = defineStore('records', () => {
   function flushStorage() {
     saveToStorage('scoutingpro_records', records.value)
     saveToStorage('scoutingpro_officialMatches', officialMatches.value)
+    saveToStorage('scoutingpro_advancement', officialAdvancement.value)
     saveToStorage('scoutingpro_bannedTeams', bannedTeams.value)
     saveToStorage('scoutingpro_tags', teamTags.value)
   }
 
   // Debounced watch
   let saveTimeout: any = null
-  watch([records, officialMatches, bannedTeams, teamTags], () => {
+  watch([records, officialMatches, officialAdvancement, bannedTeams, teamTags], () => {
     if (saveTimeout) clearTimeout(saveTimeout)
     saveTimeout = setTimeout(() => {
       flushStorage()
@@ -96,6 +101,8 @@ export const useRecordStore = defineStore('records', () => {
       } catch {}
     } else if (e.key === 'scoutingpro_officialMatches' && e.newValue) {
       try { officialMatches.value = JSON.parse(e.newValue) } catch {}
+    } else if (e.key === 'scoutingpro_advancement' && e.newValue) {
+      try { officialAdvancement.value = JSON.parse(e.newValue) } catch {}
     } else if (e.key === 'scoutingpro_bannedTeams' && e.newValue) {
       try { bannedTeams.value = JSON.parse(e.newValue) } catch {}
     } else if (e.key === 'scoutingpro_tags' && e.newValue) {
@@ -119,7 +126,7 @@ export const useRecordStore = defineStore('records', () => {
 
   // --- computed rankings ---
   const rankings = computed<RankingRow[]>(() =>
-    calculateRankings(currentRecords.value, officialMatches.value, scoutReliability.value)
+    calculateRankings(currentRecords.value, officialMatches.value, scoutReliability.value, advancementMap.value)
   )
 
   // --- active (non-deleted) records ---
@@ -153,6 +160,7 @@ export const useRecordStore = defineStore('records', () => {
     currentEventId.value = eventId
     if (isSwitchingEvent) {
       officialMatches.value = []
+      officialAdvancement.value = []
       bannedTeams.value = []
     }
     try {
@@ -210,9 +218,17 @@ export const useRecordStore = defineStore('records', () => {
         })
       }
       if (ftcYear && ftcEventCode) {
-        officialMatches.value = await fetchEventMatches(ftcYear, ftcEventCode)
+        const [matches, adv] = await Promise.all([
+          fetchEventMatches(ftcYear, ftcEventCode),
+          fetchEventAdvancement(ftcYear, ftcEventCode).catch(() => [])
+        ])
+        officialMatches.value = matches
+        officialAdvancement.value = adv
+        flushStorage()
       } else {
         officialMatches.value = []
+        officialAdvancement.value = []
+        flushStorage()
       }
       bannedTeams.value = await apiFetchBannedTeams(eventId).catch(() => [])
     } catch (e: any) {
@@ -681,11 +697,25 @@ export const useRecordStore = defineStore('records', () => {
     return teamTags.value.filter(t => t.teamNumber === teamNumber && (!eid || t.eventId === eid))
   }
 
+  async function refreshAdvancement(season: number, eventCode: string) {
+    if (!season || !eventCode) return
+    try {
+      const adv = await fetchEventAdvancement(season, eventCode)
+      officialAdvancement.value = adv
+      flushStorage()
+    } catch (e) {
+      console.warn('[refreshAdvancement] Failed to fetch advancement:', e)
+    }
+  }
+
   return {
     records,
     currentRecords,
     activeRecords,
     officialMatches,
+    officialAdvancement,
+    advancementMap,
+    refreshAdvancement,
     bannedTeams,
     teamTags,
     currentEventId,

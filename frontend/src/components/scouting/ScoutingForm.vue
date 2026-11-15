@@ -26,6 +26,8 @@ import {
   type TeamScoutData
 } from './composables/useScoutingDraft'
 import { useScoutingFormCycles } from './composables/useScoutingFormCycles'
+import { calcBiobuzzEndgameScore, parseBiobuzzEndgame } from '@/utils/analytics/rankings'
+import { calcMatchPredictCycleTime } from '@/utils/analytics/predictCycleTime'
 
 const { t, te } = useI18n()
 
@@ -59,6 +61,18 @@ function formatBallCompat(bc?: string) {
   return te(key) ? t(key) : bc
 }
 
+function formatChassisSize(size?: string) {
+  if (!size) return ''
+  const key = 'pit_scout.chassis_size_presets.' + size
+  return te(key) ? t(key) : size
+}
+
+function formatFlowerMech(mech?: string) {
+  if (!mech) return ''
+  const key = 'pit_scout.flower_presets.' + mech
+  return te(key) ? t(key) : mech
+}
+
 function getPitSummary(teamNumStr: string) {
   const num = parseInt(teamNumStr)
   if (!num) return null
@@ -67,10 +81,48 @@ function getPitSummary(teamNumStr: string) {
   const r = u.pitRecord
   return {
     drivetrain: r.drivetrainType,
+    chassisSize: r.chassisSize || '',
+    flowerMechanism: r.flowerMechanism || '',
     ballCompatibility: r.ballCompatibility || 'universal',
     autoScore: r.claimedAutoScore,
-    teleopCycles: r.claimedTeleopCycles || 0
+    teleopCycles: r.claimedTeleopCycles || 0,
+    claimedEndgameScore: r.claimedEndgameScore || 0
   }
+}
+
+type EndgameCounterField =
+  | 'flowerNectars'
+  | 'flowerBottomBonusCount'
+  | 'flowerPollens'
+  | 'gardenBalls'
+
+function setEndgameField(team: TeamScoutData, field: EndgameCounterField, rawValue: number) {
+  const num = Number.isFinite(rawValue) ? Math.round(rawValue) : 0
+  if (field === 'flowerNectars') {
+    const clamped = Math.max(0, Math.min(8, num))
+    team.flowerNectars = clamped
+    team.flowerBottomBonusCount = Math.min(team.flowerBottomBonusCount, clamped)
+    team.flowerPlaced = clamped > 0
+    team.flowerBottomBonus = team.flowerBottomBonusCount > 0
+  } else if (field === 'flowerBottomBonusCount') {
+    const cap = Math.min(4, team.flowerNectars)
+    const clamped = Math.max(0, Math.min(cap, num))
+    team.flowerBottomBonusCount = clamped
+    team.flowerBottomBonus = clamped > 0
+  } else if (field === 'flowerPollens') {
+    team.flowerPollens = Math.max(0, Math.min(12, num))
+  } else if (field === 'gardenBalls') {
+    team.gardenBalls = Math.max(0, Math.min(12, num))
+  }
+  hapticSelection()
+}
+
+function adjustEndgameField(team: TeamScoutData, field: EndgameCounterField, delta: number) {
+  setEndgameField(team, field, (team[field] || 0) + delta)
+}
+
+function getTeamPredictCycleTime(team: TeamScoutData): number | null {
+  return calcMatchPredictCycleTime(team.teleopCycles, team.teleopCycleTimestamps)
 }
 
 // --- Form State ---
@@ -157,6 +209,7 @@ watch(() => props.editRecord, (rec: ScoutingRecord | null | undefined) => {
       : (autoBalls > 0 ? [autoBalls] : [])
     const autoMissedCycles = Array.isArray(raw.autoMissedCycles) ? [...raw.autoMissedCycles] : []
     const teleopMissedCycles = Array.isArray(raw.teleopMissedCycles) ? [...raw.teleopMissedCycles] : []
+    const parsedEndgame = parseBiobuzzEndgame(raw)
     teamsData.value = [{
       teamNumber: String(rec.teamNumber),
       autoLeave: raw.autoLeave ?? false,
@@ -166,9 +219,8 @@ watch(() => props.editRecord, (rec: ScoutingRecord | null | undefined) => {
       autoPark: raw.autoPark ?? false,
       teleopCycles: Array.isArray(raw.teleopCycles) ? [...raw.teleopCycles] : [],
       teleopMissedCycles: teleopMissedCycles,
-      flowerPlaced: raw.flowerPlaced ?? false,
-      flowerBottomBonus: raw.flowerBottomBonus ?? false,
-      teleopPark: raw.teleopPark ?? false,
+      teleopCycleTimestamps: Array.isArray(raw.teleopCycleTimestamps) ? [...raw.teleopCycleTimestamps] : [],
+      ...parsedEndgame,
       isBroken: raw.isBroken ?? false,
       notes: rec.notes || '',
       customFields: raw.customFields ? { ...raw.customFields } : {}
@@ -285,10 +337,13 @@ async function handleSubmit() {
                    (team.autoPark ? 5 : 0)
       const totalBalls = getCycleBallsTotal(team)
       const teleop = totalBalls * 2
-      const endgame = (team.flowerPlaced ? 10 : 0) +
-                      (team.flowerBottomBonus ? 5 : 0) +
-                      (team.teleopPark ? 5 : 0)
+      const parsedEndgame = parseBiobuzzEndgame(team)
+      const endgame = calcBiobuzzEndgameScore(parsedEndgame)
       const total = auto + teleop + endgame
+      const teleopTimestamps = Array.isArray(team.teleopCycleTimestamps)
+        ? [...team.teleopCycleTimestamps]
+        : []
+      const predictCycleTimeSec = calcMatchPredictCycleTime(team.teleopCycles, teleopTimestamps)
 
       const formData: ScoutingFormData = {
         matchNumber: parseInt(matchNumber.value),
@@ -304,9 +359,17 @@ async function handleSubmit() {
         autoPark: team.autoPark,
         teleopCycles: [...team.teleopCycles],
         teleopMissedCycles: [...team.teleopMissedCycles],
-        flowerPlaced: team.flowerPlaced,
-        flowerBottomBonus: team.flowerBottomBonus,
-        teleopPark: team.teleopPark,
+        teleopCycleTimestamps: teleopTimestamps,
+        predictCycleTimeSec,
+        flowerNectars: parsedEndgame.flowerNectars,
+        flowerBottomBonusCount: parsedEndgame.flowerBottomBonusCount,
+        flowerPollens: parsedEndgame.flowerPollens,
+        gardenBalls: parsedEndgame.gardenBalls,
+        flowerDescore: parsedEndgame.flowerDescore,
+        g410EarlyFlowerFoul: parsedEndgame.g410EarlyFlowerFoul,
+        flowerPlaced: parsedEndgame.flowerPlaced,
+        flowerBottomBonus: parsedEndgame.flowerBottomBonus,
+        teleopPark: parsedEndgame.teleopPark,
         customFields: { ...team.customFields }
       }
 
@@ -371,6 +434,14 @@ async function handleSubmit() {
     }, 2000)
   }
 }
+
+const allianceFlowerCapWarning = computed(() => {
+  if (scoutMode.value !== 'alliance' || teamsData.value.length < 2) return false
+  const t1 = teamsData.value[0]!
+  const t2 = teamsData.value[1]!
+  return (t1.flowerNectars + t2.flowerNectars > 8) ||
+         (t1.flowerBottomBonusCount + t2.flowerBottomBonusCount > 4)
+})
 
 const wrapperClass = computed(() => {
   return [
@@ -467,10 +538,20 @@ const wrapperClass = computed(() => {
                   <PitStatusIndicator v-if="parseInt(team.teamNumber) > 0" :team-number="parseInt(team.teamNumber)" :show-label="true" />
                 </div>
                 <input v-model="team.teamNumber" type="text" inputmode="numeric" placeholder="e.g. 12345" :class="{ 'invalid-field': isInvalidFormat(team.teamNumber) }" />
-                <span v-if="getPitSummary(team.teamNumber)" class="pit-quick-hint" style="font-size: 11px; color: var(--color-primary, #38bdf8); margin-top: 2px; display: inline-flex; align-items: center; gap: 4px;">
-                  <span class="material-icons" style="font-size: 13px;">lightbulb</span>
-                  <span>{{ t('pit_scout.quick_summary', { drivetrain: formatDrivetrain(getPitSummary(team.teamNumber)?.drivetrain), ball: formatBallCompat(getPitSummary(team.teamNumber)?.ballCompatibility), auto: getPitSummary(team.teamNumber)?.autoScore ?? 0, teleop: getPitSummary(team.teamNumber)?.teleopCycles ?? 0 }) }}</span>
-                </span>
+                <div v-if="getPitSummary(team.teamNumber)" class="pit-quick-hint" style="font-size: 11px; color: var(--color-primary, #38bdf8); margin-top: 4px; display: flex; flex-direction: column; gap: 3px;">
+                  <div style="display: inline-flex; align-items: center; gap: 4px;">
+                    <span class="material-icons" style="font-size: 13px;">lightbulb</span>
+                    <span>{{ t('pit_scout.quick_summary_v2', { drivetrain: formatDrivetrain(getPitSummary(team.teamNumber)?.drivetrain), ball: formatBallCompat(getPitSummary(team.teamNumber)?.ballCompatibility), auto: getPitSummary(team.teamNumber)?.autoScore ?? 0, teleop: getPitSummary(team.teamNumber)?.teleopCycles ?? 0, endgame: getPitSummary(team.teamNumber)?.claimedEndgameScore ?? 0 }) }}</span>
+                  </div>
+                  <div v-if="getPitSummary(team.teamNumber)?.chassisSize || getPitSummary(team.teamNumber)?.flowerMechanism" class="pit-spec-chips">
+                    <span v-if="getPitSummary(team.teamNumber)?.chassisSize" class="pit-spec-chip">
+                      {{ t('pit_scout.detail_card.spec_chassis_size', { val: formatChassisSize(getPitSummary(team.teamNumber)?.chassisSize) }) }}
+                    </span>
+                    <span v-if="getPitSummary(team.teamNumber)?.flowerMechanism" class="pit-spec-chip">
+                      {{ t('pit_scout.detail_card.spec_flower', { val: formatFlowerMech(getPitSummary(team.teamNumber)?.flowerMechanism) }) }}
+                    </span>
+                  </div>
+                </div>
                 <span v-if="recordStore.bannedTeams.includes(parseInt(team.teamNumber))" class="banned-warning">
                   <span class="material-icons" style="font-size: 14px; vertical-align: middle;">warning</span> 
                   {{ t('scouting.banned_warning') }}
@@ -538,7 +619,25 @@ const wrapperClass = computed(() => {
               :rate-text="'+2 ' + t('scouting.unit_balls')"
               v-model="team.teleopCycles"
               v-model:missed-value="team.teleopMissedCycles"
+              v-model:timestamps-value="team.teleopCycleTimestamps"
             />
+
+            <div v-if="team.teleopCycles.length > 0" class="teleop-predict-bar">
+              <span class="predict-label">
+                <span class="material-icons" style="font-size: 14px;">speed</span>
+                {{ t('scouting.predict_cycle_time') }}:
+              </span>
+              <span
+                class="predict-val"
+                :class="{ 'is-insufficient': getTeamPredictCycleTime(team) === null }"
+              >
+                {{
+                  getTeamPredictCycleTime(team) !== null
+                    ? t('scouting.predict_cycle_value', { sec: getTeamPredictCycleTime(team) })
+                    : t('scouting.predict_cycle_insufficient')
+                }}
+              </span>
+            </div>
 
             <!-- Custom Fields (TeleOp) -->
             <DynamicFieldsRenderer
@@ -550,28 +649,136 @@ const wrapperClass = computed(() => {
           <!-- Endgame -->
           <section class="form-section">
             <h3><span class="material-icons">flag</span> {{ t('scouting.endgame') }}</h3>
-            <div class="biobuzz-toggles-grid">
-              <label class="toggle-card" :class="{ 'is-active': team.flowerPlaced }">
-                <input v-model="team.flowerPlaced" type="checkbox" @change="hapticSelection" />
-                <span class="material-icons check-icon">{{ team.flowerPlaced ? 'check_box' : 'check_box_outline_blank' }}</span>
-                <div class="toggle-info">
-                  <span class="toggle-title">{{ t('scouting.flower_placed') }}</span>
-                </div>
-              </label>
+            <p class="endgame-subtitle">{{ t('scouting.endgame_sub') }}</p>
 
-              <label class="toggle-card" :class="{ 'is-active': team.flowerBottomBonus }">
-                <input v-model="team.flowerBottomBonus" type="checkbox" @change="hapticSelection" />
-                <span class="material-icons check-icon">{{ team.flowerBottomBonus ? 'check_box' : 'check_box_outline_blank' }}</span>
-                <div class="toggle-info">
-                  <span class="toggle-title">{{ t('scouting.flower_bottom_bonus') }}</span>
-                </div>
-              </label>
+            <div v-if="allianceFlowerCapWarning" class="endgame-warn-banner">
+              <span class="material-icons" style="font-size: 16px;">warning_amber</span>
+              <span>{{ t('scouting.flower_alliance_cap_warning') }}</span>
+            </div>
 
+            <div class="biobuzz-endgame-steppers">
+              <!-- Flower Nectars (0..8, +2/ball) -->
+              <div class="endgame-stepper-card">
+                <div class="endgame-stepper-head">
+                  <span class="endgame-stepper-title">{{ t('scouting.flower_nectars') }}</span>
+                  <span class="endgame-stepper-rate">{{ t('scouting.flower_nectars_rate') }}</span>
+                </div>
+                <div class="counter-controls">
+                  <button type="button" class="counter-btn" :disabled="team.flowerNectars <= 0" @click="adjustEndgameField(team, 'flowerNectars', -1)">-</button>
+                  <span class="counter-val">{{ team.flowerNectars }}</span>
+                  <button type="button" class="counter-btn" :disabled="team.flowerNectars >= 8" @click="adjustEndgameField(team, 'flowerNectars', 1)">+</button>
+                </div>
+                <div class="quick-ball-chips">
+                  <button
+                    v-for="chip in [0, 1, 2, 4, 8]"
+                    :key="chip"
+                    type="button"
+                    class="quick-ball-btn"
+                    :class="{ 'is-selected': team.flowerNectars === chip }"
+                    @click="setEndgameField(team, 'flowerNectars', chip)"
+                  >{{ chip }}</button>
+                </div>
+              </div>
+
+              <!-- Bottom Nectar Bonus Count (0..4, <= flowerNectars, +5/flower) -->
+              <div class="endgame-stepper-card">
+                <div class="endgame-stepper-head">
+                  <span class="endgame-stepper-title">{{ t('scouting.flower_bottom_bonus_count') }}</span>
+                  <span class="endgame-stepper-rate">{{ t('scouting.flower_bottom_bonus_rate') }}</span>
+                </div>
+                <div class="counter-controls">
+                  <button type="button" class="counter-btn" :disabled="team.flowerBottomBonusCount <= 0" @click="adjustEndgameField(team, 'flowerBottomBonusCount', -1)">-</button>
+                  <span class="counter-val">{{ team.flowerBottomBonusCount }}</span>
+                  <button type="button" class="counter-btn" :disabled="team.flowerBottomBonusCount >= Math.min(4, team.flowerNectars)" @click="adjustEndgameField(team, 'flowerBottomBonusCount', 1)">+</button>
+                </div>
+                <div class="quick-ball-chips">
+                  <button
+                    v-for="chip in [0, 1, 2, 4]"
+                    :key="chip"
+                    type="button"
+                    class="quick-ball-btn"
+                    :class="{ 'is-selected': team.flowerBottomBonusCount === chip }"
+                    :disabled="chip > team.flowerNectars"
+                    @click="setEndgameField(team, 'flowerBottomBonusCount', chip)"
+                  >{{ chip }}</button>
+                </div>
+              </div>
+
+              <!-- Flower Pollens (0..12, +2/ball) -->
+              <div class="endgame-stepper-card">
+                <div class="endgame-stepper-head">
+                  <span class="endgame-stepper-title">{{ t('scouting.flower_pollens') }}</span>
+                  <span class="endgame-stepper-rate">{{ t('scouting.flower_pollens_rate') }}</span>
+                </div>
+                <div class="counter-controls">
+                  <button type="button" class="counter-btn" :disabled="team.flowerPollens <= 0" @click="adjustEndgameField(team, 'flowerPollens', -1)">-</button>
+                  <span class="counter-val">{{ team.flowerPollens }}</span>
+                  <button type="button" class="counter-btn" :disabled="team.flowerPollens >= 12" @click="adjustEndgameField(team, 'flowerPollens', 1)">+</button>
+                </div>
+                <div class="quick-ball-chips">
+                  <button
+                    v-for="chip in [0, 2, 4, 6, 8]"
+                    :key="chip"
+                    type="button"
+                    class="quick-ball-btn"
+                    :class="{ 'is-selected': team.flowerPollens === chip }"
+                    @click="setEndgameField(team, 'flowerPollens', chip)"
+                  >{{ chip }}</button>
+                </div>
+                <div v-if="team.flowerPollens > 0 && team.flowerNectars === 0" class="endgame-hint-banner">
+                  <span class="material-icons" style="font-size: 14px;">info</span>
+                  <span>{{ t('scouting.flower_pollen_unowned_hint') }}</span>
+                </div>
+              </div>
+
+              <!-- Garden Balls (0..12, +1/ball) -->
+              <div class="endgame-stepper-card">
+                <div class="endgame-stepper-head">
+                  <span class="endgame-stepper-title">{{ t('scouting.garden_balls') }}</span>
+                  <span class="endgame-stepper-rate">{{ t('scouting.garden_balls_rate') }}</span>
+                </div>
+                <div class="counter-controls">
+                  <button type="button" class="counter-btn" :disabled="team.gardenBalls <= 0" @click="adjustEndgameField(team, 'gardenBalls', -1)">-</button>
+                  <span class="counter-val">{{ team.gardenBalls }}</span>
+                  <button type="button" class="counter-btn" :disabled="team.gardenBalls >= 12" @click="adjustEndgameField(team, 'gardenBalls', 1)">+</button>
+                </div>
+                <div class="quick-ball-chips">
+                  <button
+                    v-for="chip in [0, 2, 4, 6]"
+                    :key="chip"
+                    type="button"
+                    class="quick-ball-btn"
+                    :class="{ 'is-selected': team.gardenBalls === chip }"
+                    @click="setEndgameField(team, 'gardenBalls', chip)"
+                  >{{ chip }}</button>
+                </div>
+              </div>
+            </div>
+
+            <div class="biobuzz-toggles-grid" style="margin-top: 12px;">
               <label class="toggle-card" :class="{ 'is-active': team.teleopPark }">
                 <input v-model="team.teleopPark" type="checkbox" @change="hapticSelection" />
                 <span class="material-icons check-icon">{{ team.teleopPark ? 'check_box' : 'check_box_outline_blank' }}</span>
                 <div class="toggle-info">
                   <span class="toggle-title">{{ t('scouting.teleop_park') }}</span>
+                </div>
+              </label>
+
+              <label class="toggle-card" :class="{ 'is-active': team.flowerDescore }">
+                <input v-model="team.flowerDescore" type="checkbox" @change="hapticSelection" />
+                <span class="material-icons check-icon">{{ team.flowerDescore ? 'check_box' : 'check_box_outline_blank' }}</span>
+                <div class="toggle-info">
+                  <span class="toggle-title">{{ t('scouting.flower_descore') }}</span>
+                  <span class="toggle-sub">{{ t('scouting.flower_descore_desc') }}</span>
+                </div>
+              </label>
+
+              <label class="toggle-card is-g410-card" :class="{ 'is-active': team.g410EarlyFlowerFoul }">
+                <input v-model="team.g410EarlyFlowerFoul" type="checkbox" @change="hapticSelection" />
+                <span class="material-icons check-icon" :style="team.g410EarlyFlowerFoul ? 'color: #f59e0b;' : ''">{{ team.g410EarlyFlowerFoul ? 'check_box' : 'check_box_outline_blank' }}</span>
+                <div class="toggle-info">
+                  <span class="toggle-title" style="color: #fbbf24;">{{ t('scouting.g410_early_flower_foul') }}</span>
+                  <span class="toggle-sub">{{ t('scouting.g410_early_flower_foul_desc') }}</span>
                 </div>
               </label>
 
@@ -644,3 +851,159 @@ const wrapperClass = computed(() => {
     </form>
   </div>
 </template>
+
+<style scoped>
+.pit-spec-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.pit-spec-chip {
+  font-size: 11px;
+  padding: 2px 7px;
+  border-radius: 999px;
+  background: rgba(56, 189, 248, 0.14);
+  border: 1px solid rgba(56, 189, 248, 0.28);
+  color: var(--color-primary, #38bdf8);
+}
+
+.teleop-predict-bar {
+  margin-top: 10px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 8px 12px;
+  border-radius: 10px;
+  background: rgba(255, 255, 255, 0.04);
+  border: 1px solid var(--border-subtle, rgba(255, 255, 255, 0.1));
+  font-size: 12px;
+}
+
+.predict-label {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  color: var(--text-secondary, #94a3b8);
+}
+
+.predict-val {
+  font-weight: 700;
+  color: var(--color-primary, #38bdf8);
+}
+
+.predict-val.is-insufficient {
+  font-weight: 500;
+  color: var(--text-muted, #64748b);
+}
+
+.endgame-subtitle {
+  margin: -4px 0 12px;
+  font-size: 12px;
+  color: var(--text-secondary, #94a3b8);
+}
+
+.biobuzz-endgame-steppers {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
+  gap: 12px;
+}
+
+@media (min-width: 680px) {
+  .biobuzz-endgame-steppers {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+
+.endgame-stepper-card {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  min-width: 0;
+  box-sizing: border-box;
+  padding: 10px 12px;
+  border-radius: 12px;
+  background: rgba(255, 255, 255, 0.03);
+  border: 1px solid var(--border-subtle, rgba(255, 255, 255, 0.1));
+}
+
+.endgame-stepper-card .quick-ball-chips {
+  flex-wrap: wrap;
+  justify-content: center;
+  gap: 6px;
+  padding: 4px 6px;
+  max-width: 100%;
+  box-sizing: border-box;
+}
+
+.endgame-stepper-card .quick-ball-btn {
+  min-width: 38px;
+  flex: 1 1 38px;
+  height: 38px;
+  font-size: 14px;
+}
+
+.endgame-stepper-card .quick-ball-btn:disabled {
+  opacity: 0.32;
+  cursor: not-allowed;
+  transform: none;
+}
+
+.endgame-stepper-head {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.endgame-stepper-title {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--text-primary, #f8fafc);
+}
+
+.endgame-stepper-rate {
+  font-size: 11px;
+  color: var(--text-secondary, #94a3b8);
+}
+
+.endgame-warn-banner {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 12px;
+  margin-bottom: 10px;
+  border-radius: 10px;
+  background: rgba(245, 158, 11, 0.14);
+  border: 1px solid rgba(245, 158, 11, 0.4);
+  color: #fbbf24;
+  font-size: 12px;
+  font-weight: 600;
+}
+
+.endgame-hint-banner {
+  display: flex;
+  align-items: flex-start;
+  gap: 6px;
+  padding: 6px 8px;
+  border-radius: 8px;
+  background: rgba(245, 158, 11, 0.1);
+  border: 1px solid rgba(245, 158, 11, 0.3);
+  color: #fbbf24;
+  font-size: 11px;
+  line-height: 1.35;
+}
+
+.toggle-sub {
+  display: block;
+  font-size: 11px;
+  color: var(--text-secondary, #94a3b8);
+  margin-top: 2px;
+}
+
+.is-g410-card.is-active {
+  border-color: rgba(245, 158, 11, 0.55);
+  background: rgba(245, 158, 11, 0.12);
+}
+</style>
+
+<style scoped src="./ScoutingForm.css"></style>

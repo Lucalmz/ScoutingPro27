@@ -19,9 +19,12 @@ const props = defineProps<{
   bannedTeams: number[]
   pitSummary: {
     drivetrain: string
+    chassisSize?: string
+    flowerMechanism?: string
     ballCompatibility: string
     autoScore: number
     teleopCycles: number
+    claimedEndgameScore?: number
   } | null
 }>()
 
@@ -35,7 +38,19 @@ const emit = defineEmits<{
   decrementMatch: []
 }>()
 
-const { t } = useI18n()
+const { t, te } = useI18n()
+
+function formatChassisSize(val?: string) {
+  if (!val) return ''
+  const key = 'pit_scout.chassis_size_presets.' + val
+  return te(key) ? t(key) : val
+}
+
+function formatFlowerMech(val?: string) {
+  if (!val) return ''
+  const key = 'pit_scout.flower_presets.' + val
+  return te(key) ? t(key) : val
+}
 
 function selectAlliance(color: 'red' | 'blue') {
   emit('update:allianceColor', color)
@@ -191,7 +206,15 @@ function selectLevel(level: string) {
     <!-- Pit Scout Preview Pill (if available) -->
     <div v-if="pitSummary" class="pit-scout-pill">
       <span class="material-icons" style="font-size: 16px; color: #39ff14;">inventory_2</span>
-      <span>{{ t('wizard.pit_preview') }}: {{ t('wizard.drivetrain') }} <strong>{{ pitSummary.drivetrain }}</strong> • {{ t('wizard.claimed_auto') }} <strong>{{ pitSummary.autoScore }}</strong> {{ t('wizard.pts_unit') }} • {{ t('wizard.claimed_teleop') }} <strong>{{ pitSummary.teleopCycles }}</strong> {{ t('wizard.cycles_unit') }}</span>
+      <span>
+        {{ t('wizard.pit_preview') }}:
+        {{ t('wizard.drivetrain') }} <strong>{{ pitSummary.drivetrain }}</strong>
+        <template v-if="pitSummary.chassisSize"> • <strong>{{ formatChassisSize(pitSummary.chassisSize) }}</strong></template>
+        <template v-if="pitSummary.flowerMechanism"> • {{ t('wizard.flower_mech') }} <strong>{{ formatFlowerMech(pitSummary.flowerMechanism) }}</strong></template>
+        • {{ t('wizard.claimed_auto') }} <strong>{{ pitSummary.autoScore }}</strong> {{ t('wizard.pts_unit') }}
+        • {{ t('wizard.claimed_teleop') }} <strong>{{ pitSummary.teleopCycles }}</strong> {{ t('wizard.cycles_unit') }}
+        <template v-if="pitSummary.claimedEndgameScore !== undefined"> • {{ t('wizard.claimed_endgame') }} <strong>{{ pitSummary.claimedEndgameScore }}</strong> {{ t('wizard.pts_unit') }}</template>
+      </span>
     </div>
   </section>
 </template>

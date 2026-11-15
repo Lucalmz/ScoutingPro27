@@ -107,5 +107,124 @@ public class FtcProxyRoutes {
                 ctx.status(500).result(gson.toJson(Map.of("error", e.getMessage() != null ? e.getMessage() : "Unknown error"))).contentType("application/json");
             }
         });
+
+        routes.get("/api/ftc/{season}/rankings/{eventCode}", ctx -> {
+            int season;
+            try {
+                season = Integer.parseInt(ctx.pathParam("season"));
+            } catch (NumberFormatException e) {
+                ctx.status(400).result("Invalid season format");
+                return;
+            }
+            if (season < 2000 || season > 2100) {
+                ctx.status(400).result("Invalid season");
+                return;
+            }
+            String eventCode = ctx.pathParam("eventCode");
+            if (eventCode == null || !eventCode.matches("^[A-Za-z0-9_-]{1,32}$")) {
+                ctx.status(400).result("Invalid eventCode format");
+                return;
+            }
+
+            try {
+                var rankings = ftcApiClient.fetchNormalizedRankings(season, eventCode);
+                ctx.result(gson.toJson(rankings)).contentType("application/json");
+            } catch (Exception e) {
+                System.err.println("[FTC API Proxy] Error fetching rankings: " + e.getMessage());
+                ctx.status(500).result(gson.toJson(Map.of("error", e.getMessage() != null ? e.getMessage() : "Unknown error"))).contentType("application/json");
+            }
+        });
+
+        routes.get("/api/ftc/{season}/awards/{eventCode}", ctx -> {
+            int season;
+            try {
+                season = Integer.parseInt(ctx.pathParam("season"));
+            } catch (NumberFormatException e) {
+                ctx.status(400).result("Invalid season format");
+                return;
+            }
+            if (season < 2000 || season > 2100) {
+                ctx.status(400).result("Invalid season");
+                return;
+            }
+            String eventCode = ctx.pathParam("eventCode");
+            if (eventCode == null || !eventCode.matches("^[A-Za-z0-9_-]{1,32}$")) {
+                ctx.status(400).result("Invalid eventCode format");
+                return;
+            }
+
+            try {
+                var awards = ftcApiClient.fetchAwards(season, eventCode);
+                ctx.result(gson.toJson(awards)).contentType("application/json");
+            } catch (Exception e) {
+                System.err.println("[FTC API Proxy] Error fetching awards: " + e.getMessage());
+                ctx.status(500).result(gson.toJson(Map.of("error", e.getMessage() != null ? e.getMessage() : "Unknown error"))).contentType("application/json");
+            }
+        });
+
+        routes.get("/api/ftc/{season}/alliances/{eventCode}", ctx -> {
+            int season;
+            try {
+                season = Integer.parseInt(ctx.pathParam("season"));
+            } catch (NumberFormatException e) {
+                ctx.status(400).result("Invalid season format");
+                return;
+            }
+            if (season < 2000 || season > 2100) {
+                ctx.status(400).result("Invalid season");
+                return;
+            }
+            String eventCode = ctx.pathParam("eventCode");
+            if (eventCode == null || !eventCode.matches("^[A-Za-z0-9_-]{1,32}$")) {
+                ctx.status(400).result("Invalid eventCode format");
+                return;
+            }
+
+            try {
+                var alliances = ftcApiClient.fetchAlliances(season, eventCode);
+                ctx.result(gson.toJson(alliances)).contentType("application/json");
+            } catch (Exception e) {
+                System.err.println("[FTC API Proxy] Error fetching alliances: " + e.getMessage());
+                ctx.status(500).result(gson.toJson(Map.of("error", e.getMessage() != null ? e.getMessage() : "Unknown error"))).contentType("application/json");
+            }
+        });
+
+        routes.get("/api/ftc/{season}/advancement/{eventCode}", ctx -> {
+            int season;
+            try {
+                season = Integer.parseInt(ctx.pathParam("season"));
+            } catch (NumberFormatException e) {
+                ctx.status(400).result("Invalid season format");
+                return;
+            }
+            if (season < 2000 || season > 2100) {
+                ctx.status(400).result("Invalid season");
+                return;
+            }
+            String eventCode = ctx.pathParam("eventCode");
+            if (eventCode == null || !eventCode.matches("^[A-Za-z0-9_-]{1,32}$")) {
+                ctx.status(400).result("Invalid eventCode format");
+                return;
+            }
+
+            Integer slots = null;
+            String slotsParam = ctx.queryParam("slots");
+            if (slotsParam != null && !slotsParam.isBlank()) {
+                try {
+                    int parsed = Integer.parseInt(slotsParam);
+                    if (parsed > 0) {
+                        slots = parsed;
+                    }
+                } catch (NumberFormatException ignored) {}
+            }
+
+            try {
+                var advancement = ftcApiClient.fetchAdvancement(season, eventCode, slots);
+                ctx.result(gson.toJson(advancement)).contentType("application/json");
+            } catch (Exception e) {
+                System.err.println("[FTC API Proxy] Error calculating advancement: " + e.getMessage());
+                ctx.status(500).result(gson.toJson(Map.of("error", e.getMessage() != null ? e.getMessage() : "Unknown error"))).contentType("application/json");
+            }
+        });
     }
 }
