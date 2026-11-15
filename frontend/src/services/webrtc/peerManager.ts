@@ -599,6 +599,7 @@ export class PeerConnectionManager {
     let stallNoticeTimer: ReturnType<typeof setTimeout> | null = null
     let disconnectGraceTimer: ReturnType<typeof setTimeout> | null = null
     let hostPendingGcTimer: ReturnType<typeof setTimeout> | null = null
+    const transportInfoTimers = new Set<ReturnType<typeof setTimeout>>()
 
     const clearTimers = () => {
       if (stallNoticeTimer) {
@@ -613,6 +614,10 @@ export class PeerConnectionManager {
         clearTimeout(hostPendingGcTimer)
         hostPendingGcTimer = null
       }
+      for (const timer of transportInfoTimers) {
+        clearTimeout(timer)
+      }
+      transportInfoTimers.clear()
     }
 
     const origClose = peer.close.bind(peer)
@@ -784,8 +789,14 @@ export class PeerConnectionManager {
           this.options.setStatus('connected')
         }
         this.updateTransportInfo(peer, targetSender)
-        setTimeout(() => this.updateTransportInfo(peer, targetSender), 1200)
-        setTimeout(() => this.updateTransportInfo(peer, targetSender), 3000)
+        for (const delayMs of [1200, 3000]) {
+          const timer = setTimeout(() => {
+            transportInfoTimers.delete(timer)
+            if (failureReported || peer.connectionState === 'closed') return
+            this.updateTransportInfo(peer, targetSender)
+          }, delayMs)
+          transportInfoTimers.add(timer)
+        }
       } else if (iceState === 'disconnected') {
         callbacks.onIceStalled?.(false)
         if (!this.virtualFallbackPeers.has(peer)) {

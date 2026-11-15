@@ -1,5 +1,6 @@
 import { ref, computed, watch, onMounted, onUnmounted, type Ref } from 'vue'
 import type { ScoutingRecord } from '@/types'
+import { parseBiobuzzEndgame } from '@/utils/analytics/rankings'
 
 export interface TeamScoutData {
   teamNumber: string
@@ -13,8 +14,15 @@ export interface TeamScoutData {
   // TeleOp (Cycle Tracker)
   teleopCycles: number[]
   teleopMissedCycles: number[]
+  teleopCycleTimestamps: number[]
 
-  // Endgame
+  // Endgame (2026-2027 BIOBUZZ)
+  flowerNectars: number
+  flowerBottomBonusCount: number
+  flowerPollens: number
+  gardenBalls: number
+  flowerDescore: boolean
+  g410EarlyFlowerFoul: boolean
   flowerPlaced: boolean
   flowerBottomBonus: boolean
   teleopPark: boolean
@@ -34,6 +42,13 @@ export function createEmptyTeam(): TeamScoutData {
     autoPark: false,
     teleopCycles: [],
     teleopMissedCycles: [],
+    teleopCycleTimestamps: [],
+    flowerNectars: 0,
+    flowerBottomBonusCount: 0,
+    flowerPollens: 0,
+    gardenBalls: 0,
+    flowerDescore: false,
+    g410EarlyFlowerFoul: false,
     flowerPlaced: false,
     flowerBottomBonus: false,
     teleopPark: false,
@@ -54,6 +69,12 @@ export function hasAnyScoutData(t: TeamScoutData): boolean {
     t.autoPark ||
     t.teleopCycles.length > 0 ||
     t.teleopMissedCycles.length > 0 ||
+    t.flowerNectars > 0 ||
+    t.flowerBottomBonusCount > 0 ||
+    t.flowerPollens > 0 ||
+    t.gardenBalls > 0 ||
+    t.flowerDescore ||
+    t.g410EarlyFlowerFoul ||
     t.flowerPlaced ||
     t.flowerBottomBonus ||
     t.teleopPark ||
@@ -134,7 +155,17 @@ export function useScoutingDraft(options: UseScoutingDraftOptions) {
         allianceColor.value = parsed.allianceColor || 'none'
         currentTournamentLevel.value = parsed.currentTournamentLevel || 'QUALIFICATION'
         scoutMode.value = parsed.scoutMode || 'single'
-        teamsData.value = parsed.teamsData
+        teamsData.value = parsed.teamsData.map((rawTeam: Partial<TeamScoutData>) => {
+          const merged = { ...createEmptyTeam(), ...rawTeam }
+          const normalizedEndgame = parseBiobuzzEndgame(merged)
+          return {
+            ...merged,
+            teleopCycleTimestamps: Array.isArray(rawTeam.teleopCycleTimestamps)
+              ? [...rawTeam.teleopCycleTimestamps]
+              : [],
+            ...normalizedEndgame
+          }
+        })
         isDraftRestored.value = true
       }
     } catch {}

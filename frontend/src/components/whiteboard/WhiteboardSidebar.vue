@@ -6,6 +6,8 @@ import { useRecordStore } from '@/stores/records'
 import { usePitScoutStore } from '@/stores/pitScout'
 import { useNavigationStore } from '@/stores/navigation'
 import { calculateBragIndex } from '@/utils/bragIndex'
+import { parseScoutRawData } from '@/utils/analytics/rankings'
+import { aggregateTeamPredictCycleStats } from '@/utils/analytics/predictCycleTime'
 import { sortRecordsChronologically, getMatchLevelPrefix, getRecordTournamentLevel } from '@/utils/tournament'
 import TagPicker from '@/components/common/TagPicker.vue'
 import type { StationType, ScoutingRecord, PitScoutingRecord, RankingRow, BragInfo } from '@/types'
@@ -33,11 +35,14 @@ const emit = defineEmits<{
   (e: 'loadMatch', payload: { matchNumber: number; tournamentLevel: string }): void
 }>()
 
-const { t } = useI18n()
+const { t, te } = useI18n()
 const router = useRouter()
 const recordStore = useRecordStore()
 const pitStore = usePitScoutStore()
 const navStore = useNavigationStore()
+
+const safeT = (key: string, fallback: string) =>
+  typeof te === 'function' && te(key) ? t(key) : fallback
 
 export interface StationTeamIntel {
   station: StationType
@@ -58,8 +63,21 @@ export interface StationTeamIntel {
   avgEndgame: number
   maxScore: number
   leaveRate: number
+  autoParkRate: number
+  teleopParkRate: number
   parkRate: number
+  avgMobilityRpPts: number
   flowerRate: number
+  avgFlowerNectars: number
+  avgFlowerBottomBonus: number
+  avgFlowerPollens: number
+  avgGardenBalls: number
+  descoreRate: number
+  g410FoulRate: number
+  predictCycleTime: number | null
+  predictCycleSpread: number | null
+  predictCycleMatches: number
+  estimatedMaxCycles: number | null
   brokenRate: number
 }
 
@@ -89,8 +107,21 @@ function buildStationIntel(station: StationType): StationTeamIntel {
       avgEndgame: 0,
       maxScore: 0,
       leaveRate: 0,
+      autoParkRate: 0,
+      teleopParkRate: 0,
       parkRate: 0,
+      avgMobilityRpPts: 0,
       flowerRate: 0,
+      avgFlowerNectars: 0,
+      avgFlowerBottomBonus: 0,
+      avgFlowerPollens: 0,
+      avgGardenBalls: 0,
+      descoreRate: 0,
+      g410FoulRate: 0,
+      predictCycleTime: null,
+      predictCycleSpread: null,
+      predictCycleMatches: 0,
+      estimatedMaxCycles: null,
       brokenRate: 0
     }
   }
@@ -111,22 +142,45 @@ function buildStationIntel(station: StationType): StationTeamIntel {
   )
 
   const matchCount = matches.length
+  const validMatches = matches.filter((m) => !m.isBroken)
+  const validCount = validMatches.length
   let leaveCount = 0
-  let parkCount = 0
+  let autoParkCount = 0
+  let teleopParkCount = 0
   let flowerCount = 0
   let brokenCount = 0
+  let sumMobilityRp = 0
+  let sumFlowerNectars = 0
+  let sumFlowerBottomBonus = 0
+  let sumFlowerPollens = 0
+  let sumGardenBalls = 0
+  let descoreCount = 0
+  let g410Count = 0
 
   for (const m of matches) {
-    if (m.isBroken) brokenCount++
-    try {
-      const parsed = m.rawData ? JSON.parse(m.rawData) : null
-      if (parsed) {
-        if (parsed.autoLeave) leaveCount++
-        if (parsed.teleopPark || parsed.autoPark) parkCount++
-        if (parsed.flowerPlaced) flowerCount++
-      }
-    } catch {}
+    if (m.isBroken) {
+      brokenCount++
+      continue
+    }
+    const parsed = parseScoutRawData(m.rawData)
+    if (parsed.autoLeave) leaveCount++
+    if (parsed.autoPark) autoParkCount++
+    if (parsed.endgame.teleopPark) teleopParkCount++
+    if (parsed.endgame.flowerNectars > 0 || parsed.endgame.flowerBottomBonusCount > 0) {
+      flowerCount++
+    }
+    sumMobilityRp += (parsed.autoLeave ? 3 : 0) + (parsed.autoPark ? 5 : 0) + (parsed.endgame.teleopPark ? 5 : 0)
+    sumFlowerNectars += parsed.endgame.flowerNectars
+    sumFlowerBottomBonus += parsed.endgame.flowerBottomBonusCount
+    sumFlowerPollens += parsed.endgame.flowerPollens
+    sumGardenBalls += parsed.endgame.gardenBalls
+    if (parsed.endgame.flowerDescore) descoreCount++
+    if (parsed.endgame.g410EarlyFlowerFoul) g410Count++
   }
+
+  const predictStats = aggregateTeamPredictCycleStats(matches)
+  const autoParkRate = validCount > 0 ? Math.round((autoParkCount / validCount) * 100) : 0
+  const teleopParkRate = validCount > 0 ? Math.round((teleopParkCount / validCount) * 100) : 0
 
   const avgTotal = rankRow
     ? Number(rankRow.avgRating.toFixed(1))
@@ -178,9 +232,22 @@ function buildStationIntel(station: StationType): StationTeamIntel {
     avgTeleop,
     avgEndgame,
     maxScore,
-    leaveRate: matchCount > 0 ? Math.round((leaveCount / matchCount) * 100) : 0,
-    parkRate: matchCount > 0 ? Math.round((parkCount / matchCount) * 100) : 0,
-    flowerRate: matchCount > 0 ? Math.round((flowerCount / matchCount) * 100) : 0,
+    leaveRate: validCount > 0 ? Math.round((leaveCount / validCount) * 100) : 0,
+    autoParkRate,
+    teleopParkRate,
+    parkRate: teleopParkRate,
+    avgMobilityRpPts: validCount > 0 ? Number((sumMobilityRp / validCount).toFixed(1)) : 0,
+    flowerRate: validCount > 0 ? Math.round((flowerCount / validCount) * 100) : 0,
+    avgFlowerNectars: validCount > 0 ? Number((sumFlowerNectars / validCount).toFixed(1)) : 0,
+    avgFlowerBottomBonus: validCount > 0 ? Number((sumFlowerBottomBonus / validCount).toFixed(1)) : 0,
+    avgFlowerPollens: validCount > 0 ? Number((sumFlowerPollens / validCount).toFixed(1)) : 0,
+    avgGardenBalls: validCount > 0 ? Number((sumGardenBalls / validCount).toFixed(1)) : 0,
+    descoreRate: validCount > 0 ? Math.round((descoreCount / validCount) * 100) : 0,
+    g410FoulRate: validCount > 0 ? Math.round((g410Count / validCount) * 100) : 0,
+    predictCycleTime: predictStats.predictCycleTime,
+    predictCycleSpread: predictStats.predictCycleSpread,
+    predictCycleMatches: predictStats.predictCycleMatches,
+    estimatedMaxCycles: predictStats.estimatedMaxCycles,
     brokenRate: matchCount > 0 ? Math.round((brokenCount / matchCount) * 100) : 0
   }
 }
@@ -211,6 +278,11 @@ const alliancePrediction = computed(() => {
   const redEndgame = Number((r1.avgEndgame + r2.avgEndgame).toFixed(1))
   const blueEndgame = Number((b1.avgEndgame + b2.avgEndgame).toFixed(1))
 
+  const redMobilityRp = Number((r1.avgMobilityRpPts + r2.avgMobilityRpPts).toFixed(1))
+  const blueMobilityRp = Number((b1.avgMobilityRpPts + b2.avgMobilityRpPts).toFixed(1))
+  const redNectars = Number((r1.avgFlowerNectars + r2.avgFlowerNectars).toFixed(1))
+  const blueNectars = Number((b1.avgFlowerNectars + b2.avgFlowerNectars).toFixed(1))
+
   const sum = redTotal + blueTotal
   const redShare = sum > 0 ? Math.round((redTotal / sum) * 100) : 50
 
@@ -223,10 +295,32 @@ const alliancePrediction = computed(() => {
     blueTeleop,
     redEndgame,
     blueEndgame,
+    redMobilityRp,
+    blueMobilityRp,
+    redMobilityMet: redMobilityRp >= 16,
+    blueMobilityMet: blueMobilityRp >= 16,
+    redMobilityGap: Number(Math.max(0, 16 - redMobilityRp).toFixed(1)),
+    blueMobilityGap: Number(Math.max(0, 16 - blueMobilityRp).toFixed(1)),
+    redNectars,
+    blueNectars,
     redShare,
     blueShare: 100 - redShare
   }
 })
+
+function formatMatchBiobuzzMeta(rec: ScoutingRecord): string {
+  const parsed = parseScoutRawData(rec.rawData)
+  const parts: string[] = []
+  if (parsed.endgame.teleopPark) parts.push('Park')
+  if (parsed.endgame.flowerNectars > 0) parts.push(`N:${parsed.endgame.flowerNectars}`)
+  if (parsed.endgame.flowerBottomBonusCount > 0) parts.push(`B:${parsed.endgame.flowerBottomBonusCount}`)
+  if (parsed.endgame.flowerPollens > 0) parts.push(`P:${parsed.endgame.flowerPollens}`)
+  if (parsed.endgame.gardenBalls > 0) parts.push(`G:${parsed.endgame.gardenBalls}`)
+  if (parsed.endgame.flowerDescore) parts.push('Descore')
+  if (parsed.endgame.g410EarlyFlowerFoul) parts.push('G410!')
+  if (parsed.predictCycleTimeSec !== null) parts.push(`${parsed.predictCycleTimeSec.toFixed(1)}s/cyc`)
+  return parts.join(' · ')
+}
 
 function openFullTeamPage(teamNumber: number) {
   if (!teamNumber || teamNumber <= 0) return
@@ -291,6 +385,35 @@ function openFullTeamPage(teamNumber: number) {
       <div class="wb-pred-bar" :title="`${alliancePrediction.redShare}% : ${alliancePrediction.blueShare}%`">
         <div class="wb-pred-fill red" :style="{ width: `${alliancePrediction.redShare}%` }"></div>
         <div class="wb-pred-fill blue" :style="{ width: `${alliancePrediction.blueShare}%` }"></div>
+      </div>
+      <!-- BIOBUZZ Swarm RP (>=16 机动/停泊阈值) 与联盟 8 Nectar 预算 -->
+      <div class="wb-rp-strip" data-testid="wb-swarm-rp-strip">
+        <div class="wb-rp-row">
+          <span class="wb-rp-pill red" :class="{ met: alliancePrediction.redMobilityMet }">
+            R {{ t('whiteboard.swarm_rp_forecast') }}:
+            {{
+              alliancePrediction.redMobilityMet
+                ? t('whiteboard.swarm_rp_met', { pts: alliancePrediction.redMobilityRp })
+                : t('whiteboard.swarm_rp_short', { pts: alliancePrediction.redMobilityRp, gap: alliancePrediction.redMobilityGap })
+            }}
+          </span>
+          <span class="wb-rp-pill blue" :class="{ met: alliancePrediction.blueMobilityMet }">
+            B {{ t('whiteboard.swarm_rp_forecast') }}:
+            {{
+              alliancePrediction.blueMobilityMet
+                ? t('whiteboard.swarm_rp_met', { pts: alliancePrediction.blueMobilityRp })
+                : t('whiteboard.swarm_rp_short', { pts: alliancePrediction.blueMobilityRp, gap: alliancePrediction.blueMobilityGap })
+            }}
+          </span>
+        </div>
+        <div class="wb-nectar-budget">
+          <span :class="{ over: alliancePrediction.redNectars > 8 }">
+            R · {{ t('whiteboard.nectar_budget_note', { used: alliancePrediction.redNectars }) }}
+          </span>
+          <span :class="{ over: alliancePrediction.blueNectars > 8 }">
+            B · {{ t('whiteboard.nectar_budget_note', { used: alliancePrediction.blueNectars }) }}
+          </span>
+        </div>
       </div>
     </div>
 
@@ -366,13 +489,27 @@ function openFullTeamPage(teamNumber: number) {
           <!-- 展位硬件与稳定性摘要 -->
           <div class="wb-meta-chips">
             <span v-if="stationsIntel[st].pitRecord" class="wb-chip hardware">
-              {{ t(`pit_scout.drivetrain.${stationsIntel[st].pitRecord!.drivetrainType}`) }}
+              {{ safeT(`pit_scout.drivetrain.${stationsIntel[st].pitRecord!.drivetrainType}`, stationsIntel[st].pitRecord!.drivetrainType) }}
+            </span>
+            <span v-if="stationsIntel[st].pitRecord?.chassisSize" class="wb-chip hardware">
+              {{ safeT(`pit_scout.chassis_size_presets.${stationsIntel[st].pitRecord!.chassisSize}`, stationsIntel[st].pitRecord!.chassisSize!) }}
             </span>
             <span class="wb-chip">
               {{ t('whiteboard.stat_max') }}: {{ stationsIntel[st].maxScore }}
             </span>
             <span class="wb-chip">
-              {{ t('whiteboard.stat_park_rate') }}: {{ stationsIntel[st].parkRate }}%
+              {{ t('whiteboard.stat_teleop_park_rate') }}: {{ stationsIntel[st].teleopParkRate }}%
+            </span>
+            <span class="wb-chip">
+              {{ t('whiteboard.stat_mobility_rp') }}: {{ stationsIntel[st].avgMobilityRpPts }}
+            </span>
+            <span class="wb-chip" data-testid="wb-card-predict-cycle">
+              {{ t('whiteboard.stat_predict_cycle') }}:
+              {{
+                stationsIntel[st].predictCycleTime !== null
+                  ? `${stationsIntel[st].predictCycleTime}s`
+                  : t('whiteboard.stat_predict_cycle_insufficient')
+              }}
             </span>
             <span
               v-if="stationsIntel[st].brokenRate > 0"
@@ -493,6 +630,18 @@ function openFullTeamPage(teamNumber: number) {
             <span class="k-val">{{ activeIntel.avgEndgame }}</span>
           </div>
           <div class="wb-kpi-cell">
+            <span class="k-lbl">{{ t('whiteboard.stat_mobility_rp') }}</span>
+            <span class="k-val">{{ activeIntel.avgMobilityRpPts }}</span>
+          </div>
+          <div class="wb-kpi-cell">
+            <span class="k-lbl">{{ t('whiteboard.stat_auto_park_rate') }}</span>
+            <span class="k-val">{{ activeIntel.autoParkRate }}%</span>
+          </div>
+          <div class="wb-kpi-cell">
+            <span class="k-lbl">{{ t('whiteboard.stat_teleop_park_rate') }}</span>
+            <span class="k-val">{{ activeIntel.teleopParkRate }}%</span>
+          </div>
+          <div class="wb-kpi-cell">
             <span class="k-lbl">{{ t('whiteboard.stat_leave_rate') }}</span>
             <span class="k-val">{{ activeIntel.leaveRate }}%</span>
           </div>
@@ -501,9 +650,27 @@ function openFullTeamPage(teamNumber: number) {
             <span class="k-val">{{ activeIntel.flowerRate }}%</span>
           </div>
           <div class="wb-kpi-cell">
-            <span class="k-lbl">{{ t('whiteboard.stat_park_rate') }}</span>
-            <span class="k-val">{{ activeIntel.parkRate }}%</span>
+            <span class="k-lbl">{{ t('whiteboard.stat_predict_cycle') }}</span>
+            <span class="k-val">
+              {{
+                activeIntel.predictCycleTime !== null
+                  ? `${activeIntel.predictCycleTime}s`
+                  : t('whiteboard.stat_predict_cycle_insufficient')
+              }}
+            </span>
           </div>
+          <div class="wb-kpi-cell">
+            <span class="k-lbl">{{ t('whiteboard.stat_g410_rate') }}</span>
+            <span class="k-val" :class="{ warn: activeIntel.g410FoulRate > 0 }">{{ activeIntel.g410FoulRate }}%</span>
+          </div>
+        </div>
+        <div v-if="activeIntel.matchCount > 0" class="wb-biobuzz-chips">
+          <span class="wb-chip">{{ t('whiteboard.stat_nectars') }}: {{ activeIntel.avgFlowerNectars }}</span>
+          <span class="wb-chip">{{ t('whiteboard.stat_pollens') }}: {{ activeIntel.avgFlowerPollens }}</span>
+          <span class="wb-chip">{{ t('whiteboard.stat_garden') }}: {{ activeIntel.avgGardenBalls }}</span>
+          <span v-if="activeIntel.estimatedMaxCycles !== null" class="wb-chip">
+            ~{{ activeIntel.estimatedMaxCycles }} cyc
+          </span>
         </div>
       </div>
 
@@ -519,19 +686,22 @@ function openFullTeamPage(teamNumber: number) {
         <div v-if="activeIntel.pitRecord" class="wb-pit-box">
           <div class="wb-pit-specs">
             <span class="wb-chip hardware">
-              {{ t('pit_scout.detail_card.spec_drivetrain', { val: t(`pit_scout.drivetrain.${activeIntel.pitRecord.drivetrainType}`) }) }}
+              {{ t('pit_scout.detail_card.spec_drivetrain', { val: safeT(`pit_scout.drivetrain.${activeIntel.pitRecord.drivetrainType}`, activeIntel.pitRecord.drivetrainType) }) }}
+            </span>
+            <span v-if="activeIntel.pitRecord.chassisSize" class="wb-chip hardware">
+              {{ t('pit_scout.detail_card.spec_chassis_size', { val: safeT(`pit_scout.chassis_size_presets.${activeIntel.pitRecord.chassisSize}`, activeIntel.pitRecord.chassisSize) }) }}
             </span>
             <span class="wb-chip">
-              {{ t('pit_scout.detail_card.spec_odometry', { val: t(`pit_scout.odometry.${activeIntel.pitRecord.odometryType || 'none'}`) }) }}
+              {{ t('pit_scout.detail_card.spec_odometry', { val: safeT(`pit_scout.odometry.${activeIntel.pitRecord.odometryType || 'none'}`, activeIntel.pitRecord.odometryType || 'none') }) }}
             </span>
             <span class="wb-chip">
-              {{ t('pit_scout.detail_card.spec_ball_compat', { val: t(`pit_scout.ball_compatibility.${activeIntel.pitRecord.ballCompatibility || 'universal'}`) }) }}
+              {{ t('pit_scout.detail_card.spec_ball_compat', { val: safeT(`pit_scout.ball_compatibility.${activeIntel.pitRecord.ballCompatibility || 'universal'}`, activeIntel.pitRecord.ballCompatibility || 'universal') }) }}
             </span>
             <span v-if="activeIntel.pitRecord.launcherType" class="wb-chip">
               {{ t('pit_scout.detail_card.spec_launcher', { val: activeIntel.pitRecord.launcherType }) }}
             </span>
             <span v-if="activeIntel.pitRecord.flowerMechanism" class="wb-chip">
-              {{ t('pit_scout.detail_card.spec_flower', { val: activeIntel.pitRecord.flowerMechanism }) }}
+              {{ t('pit_scout.detail_card.spec_flower', { val: safeT(`pit_scout.flower_presets.${activeIntel.pitRecord.flowerMechanism}`, activeIntel.pitRecord.flowerMechanism) }) }}
             </span>
             <span v-if="activeIntel.bragInfo" class="wb-chip brag" :class="activeIntel.bragInfo.tier">
               {{ activeIntel.bragInfo.label }}
@@ -539,7 +709,16 @@ function openFullTeamPage(teamNumber: number) {
           </div>
           <div class="wb-pit-claimed-row">
             <span>{{ t('pit_scout.detail_card.claimed_calc_total') }}: <strong>{{ activeIntel.pitRecord.claimedTotalScore }}</strong></span>
-            <span>{{ t('pit_scout.detail_card.claimed_auto_teleop', { auto: activeIntel.pitRecord.claimedAutoScore, teleop: activeIntel.pitRecord.claimedTeleopScore }) }}</span>
+            <span>
+              {{
+                t('pit_scout.detail_card.claimed_auto_teleop_endgame', {
+                  auto: activeIntel.pitRecord.claimedAutoScore,
+                  teleop: activeIntel.pitRecord.claimedTeleopScore,
+                  cycles: activeIntel.pitRecord.claimedTeleopCycles ?? 0,
+                  endgame: activeIntel.pitRecord.claimedEndgameScore ?? 0
+                })
+              }}
+            </span>
           </div>
           <p v-if="activeIntel.pitRecord.claimedAutoStrategy" class="wb-pit-auto-note">
             <strong>Auto:</strong> {{ activeIntel.pitRecord.claimedAutoStrategy }}
@@ -576,6 +755,9 @@ function openFullTeamPage(teamNumber: number) {
                 A:{{ rec.autoScore }} · T:{{ rec.teleopScore }} · E:{{ rec.endgameScore }}
               </span>
               <strong class="wb-hist-total">{{ rec.totalScore }} {{ t('wizard.pts_unit') }}</strong>
+            </div>
+            <div v-if="formatMatchBiobuzzMeta(rec)" class="wb-hist-biobuzz">
+              {{ formatMatchBiobuzzMeta(rec) }}
             </div>
             <div v-if="rec.isBroken || rec.notes" class="wb-hist-notes">
               <span v-if="rec.isBroken" class="wb-broken-tag">BROKEN</span>
@@ -1154,5 +1336,69 @@ function openFullTeamPage(teamNumber: number) {
   color: var(--muted-foreground, #8e8d87);
   text-align: center;
   padding: 10px 4px;
+}
+
+.wb-rp-strip {
+  margin-top: 8px;
+  padding-top: 8px;
+  border-top: 1px dashed rgba(255, 255, 255, 0.08);
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.wb-rp-row {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+}
+
+.wb-rp-pill {
+  font-size: 10.5px;
+  font-weight: 700;
+  padding: 2px 7px;
+  border-radius: 6px;
+  background: rgba(255, 255, 255, 0.04);
+  color: #b7b6af;
+}
+
+.wb-rp-pill.red.met {
+  background: rgba(239, 68, 68, 0.16);
+  color: #fca5a5;
+}
+
+.wb-rp-pill.blue.met {
+  background: rgba(59, 130, 246, 0.16);
+  color: #93c5fd;
+}
+
+.wb-nectar-budget {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  font-size: 10px;
+  color: #8e8d87;
+}
+
+.wb-nectar-budget .over {
+  color: #facc15;
+  font-weight: 700;
+}
+
+.wb-biobuzz-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 5px;
+  margin-top: 8px;
+}
+
+.wb-kpi-cell .k-val.warn {
+  color: #facc15;
+}
+
+.wb-hist-biobuzz {
+  font-size: 10.5px;
+  color: #9ae6b4;
+  margin-top: 3px;
 }
 </style>

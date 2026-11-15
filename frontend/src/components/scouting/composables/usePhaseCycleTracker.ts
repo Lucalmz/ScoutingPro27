@@ -8,6 +8,8 @@ export interface UsePhaseCycleTrackerOptions {
   emitModelValue: (val: number[]) => void
   emitMissedValue: (val: number[]) => void
   emitChange: (scored: number[], missed: number[]) => void
+  getTimestampsValue?: () => number[] | undefined
+  emitTimestampsValue?: (val: number[]) => void
 }
 
 export function getAccuracyPillClass(scored: number, attempts: number): string {
@@ -30,8 +32,34 @@ export function usePhaseCycleTracker(options: UsePhaseCycleTrackerOptions) {
     getMissedValue,
     emitModelValue,
     emitMissedValue,
-    emitChange
+    emitChange,
+    getTimestampsValue,
+    emitTimestampsValue
   } = options
+
+  function stampCycleTimestamp(cycleIdx: number) {
+    if (!emitTimestampsValue) return
+    const current = getTimestampsValue?.() ?? []
+    const next = [...current]
+    while (next.length <= cycleIdx) {
+      next.push(0)
+    }
+    next[cycleIdx] = Date.now()
+    emitTimestampsValue(next)
+  }
+
+  function popCycleTimestamp(targetLength: number) {
+    if (!emitTimestampsValue) return
+    const current = getTimestampsValue?.()
+    if (!Array.isArray(current) || current.length === 0) return
+    const next = [...current]
+    if (next.length > targetLength) {
+      next.length = Math.max(0, targetLength)
+    } else {
+      next.pop()
+    }
+    emitTimestampsValue(next)
+  }
 
   const { bump, getBumpClass, clearBump } = useBumpAnimation()
 
@@ -170,6 +198,7 @@ export function usePhaseCycleTracker(options: UsePhaseCycleTrackerOptions) {
       emitModelValue(nextCycles)
       emitMissedValue(nextMissed)
       emitChange(nextCycles, nextMissed)
+      stampCycleTimestamp(0)
       currentCycleHistory.value = ['hit']
       userScrolledUp.value = false
       scrollToBottom(true)
@@ -187,6 +216,7 @@ export function usePhaseCycleTracker(options: UsePhaseCycleTrackerOptions) {
       nextCycles[idx] = curHits + 1
       emitModelValue(nextCycles)
       emitChange(nextCycles, missedCycles.value)
+      stampCycleTimestamp(idx)
       currentCycleHistory.value.push('hit')
       hapticMedium()
       bump(idx, 'cycle', 'up')
@@ -204,6 +234,7 @@ export function usePhaseCycleTracker(options: UsePhaseCycleTrackerOptions) {
       emitModelValue(nextCycles)
       emitMissedValue(nextMissed)
       emitChange(nextCycles, nextMissed)
+      stampCycleTimestamp(0)
       currentCycleHistory.value = ['miss']
       userScrolledUp.value = false
       scrollToBottom(true)
@@ -220,6 +251,7 @@ export function usePhaseCycleTracker(options: UsePhaseCycleTrackerOptions) {
       nextMissed[idx] = curMisses + 1
       emitMissedValue(nextMissed)
       emitChange(cycles.value, nextMissed)
+      stampCycleTimestamp(idx)
       currentCycleHistory.value.push('miss')
       hapticWarning()
       if (!userScrolledUp.value) scrollToBottom(true)
@@ -253,6 +285,7 @@ export function usePhaseCycleTracker(options: UsePhaseCycleTrackerOptions) {
       emitModelValue(nextCycles)
       emitMissedValue(nextMissed)
       emitChange(nextCycles, nextMissed)
+      stampCycleTimestamp(0)
       userScrolledUp.value = false
       scrollToBottom(true)
     } else {
@@ -261,6 +294,7 @@ export function usePhaseCycleTracker(options: UsePhaseCycleTrackerOptions) {
       nextCycles[idx] = val
       emitModelValue(nextCycles)
       emitChange(nextCycles, missedCycles.value)
+      stampCycleTimestamp(idx)
     }
     hapticSelection()
     bump(lastCycleIndex.value, 'cycle', 'up')
@@ -275,6 +309,7 @@ export function usePhaseCycleTracker(options: UsePhaseCycleTrackerOptions) {
       emitModelValue(nextCycles)
       emitMissedValue(nextMissed)
       emitChange(nextCycles, nextMissed)
+      popCycleTimestamp(nextCycles.length)
       currentCycleHistory.value = []
       hapticLight()
     }

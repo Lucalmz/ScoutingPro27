@@ -556,5 +556,120 @@ describe('PitScout Store & Unified Team Roster', () => {
     expect(rec2?.scoutName).toBe('OtherScout')
     expect(rec2?.version).toBe(1)
   })
+
+  it('supports searchQuery on chassisSize / flowerMechanism / launcherType and sorts pending teams after evaluated teams in bragAsc/bragDesc', async () => {
+    const pitStore = usePitScoutStore()
+    const recordStore = useRecordStore()
+    pitStore.currentEventId = 'e1'
+
+    pitStore.records = [
+      createMockPitRecord({
+        id: 'p1',
+        teamNumber: 101,
+        chassisSize: 'Compact Small (≤15")',
+        launcherType: 'Curved Guide Rail',
+        flowerMechanism: 'Vertical Cascading Lift',
+        hasDescoreMech: true,
+        hasApriltagVision: true,
+        claimedAutoScore: 50,
+        claimedTeleopScore: 50,
+        claimedEndgameScore: 10,
+        claimedTotalScore: 110
+      }),
+      createMockPitRecord({
+        id: 'p2',
+        teamNumber: 202,
+        chassisSize: 'Wide Large (~18")',
+        launcherType: 'Single Flywheel',
+        flowerMechanism: 'Pivot Arm',
+        claimedAutoScore: 100,
+        claimedTeleopScore: 100,
+        claimedEndgameScore: 20,
+        claimedTotalScore: 220
+      }),
+      createMockPitRecord({
+        id: 'p3',
+        teamNumber: 303,
+        chassisSize: 'Standard Mid (16"-17")',
+        claimedAutoScore: 60,
+        claimedTeleopScore: 60,
+        claimedEndgameScore: 10,
+        claimedTotalScore: 130
+      })
+    ]
+
+    recordStore.records = [
+      {
+        id: 'm1',
+        eventId: 'e1',
+        scoutId: 's1',
+        matchNumber: 1,
+        teamNumber: 101,
+        autoScore: 50,
+        teleopScore: 50,
+        endgameScore: 10,
+        totalScore: 110,
+        rawData: '{"flowerNectars":2}',
+        syncStatus: 'SYNCED',
+        createdAt: '',
+        updatedAt: ''
+      } as ScoutingRecord,
+      {
+        id: 'm2',
+        eventId: 'e1',
+        scoutId: 's1',
+        matchNumber: 1,
+        teamNumber: 202,
+        autoScore: 50,
+        teleopScore: 50,
+        endgameScore: 10,
+        totalScore: 110,
+        rawData: '{"flowerNectars":2}',
+        syncStatus: 'SYNCED',
+        createdAt: '',
+        updatedAt: ''
+      } as ScoutingRecord
+    ]
+
+    // 1. Search by chassisSize / flowerMechanism / launcherType
+    pitStore.searchQuery = 'compact small'
+    expect(pitStore.unifiedTeamList.map((t) => t.teamNumber)).toEqual([101])
+
+    pitStore.searchQuery = 'pivot arm'
+    expect(pitStore.unifiedTeamList.map((t) => t.teamNumber)).toEqual([202])
+
+    pitStore.searchQuery = ''
+
+    // 2. Pending team (303 with 0 matches) always trails evaluated teams in both bragAsc and bragDesc
+    pitStore.sortBy = 'bragAsc'
+    expect(pitStore.unifiedTeamList.map((t) => t.teamNumber)).toEqual([101, 202, 303])
+
+    pitStore.sortBy = 'bragDesc'
+    expect(pitStore.unifiedTeamList.map((t) => t.teamNumber)).toEqual([202, 101, 303])
+
+    // 3. V6 fields persist via saveRecord to localStorage
+    const savedV6 = createMockPitRecord({
+      id: 'p4',
+      teamNumber: 404,
+      chassisSize: 'Compact Small (≤15")',
+      hasDescoreMech: true,
+      hasApriltagVision: true,
+      claimedTeleopPark: true,
+      claimedFlowerNectars: 4,
+      claimedFlowerBottomBonus: 2,
+      claimedFlowerPollens: 2,
+      claimedGardenBalls: 3,
+      claimedEndgameScore: 30,
+      claimedTotalScore: 170
+    })
+    await pitStore.saveRecord(savedV6)
+    const persisted = JSON.parse(localStorage.getItem('sp27_pit_records_e1') || '[]')
+    const found = persisted.find((r: PitScoutingRecord) => r.teamNumber === 404)
+    expect(found.chassisSize).toBe('Compact Small (≤15")')
+    expect(found.hasDescoreMech).toBe(true)
+    expect(found.hasApriltagVision).toBe(true)
+    expect(found.claimedTeleopPark).toBe(true)
+    expect(found.claimedFlowerNectars).toBe(4)
+  })
 })
 

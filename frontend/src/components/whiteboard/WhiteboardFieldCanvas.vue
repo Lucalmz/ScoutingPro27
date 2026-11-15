@@ -307,7 +307,7 @@ function drawFtcFieldBase(ctx: CanvasRenderingContext2D, size: number) {
   ctx.stroke()
   ctx.restore()
 
-  // 3. 角落停泊 / 观察区 (Corner Park / Observation Zones)
+  // 3. BIOBUZZ 角落花园 (A1 红方 / F6 蓝方) 与装载停泊区 (F1 红方 / A6 蓝方)
   const drawPolyField = (pts: Array<[number, number]>, fill: string, stroke: string, dashed = false) => {
     ctx.save()
     ctx.beginPath()
@@ -326,15 +326,16 @@ function drawFtcFieldBase(ctx: CanvasRenderingContext2D, size: number) {
     ctx.restore()
   }
 
-  // 红方左上停泊区 & 左下花坛补给区
+  // 红方左上 A1 Corner Garden (狭窄对角角区) & 左下 F1 Loading/Park Zone
   drawPolyField(
     [
       [0, 0],
       [1 / 6, 0],
       [0, 1 / 6]
     ],
-    'rgba(239, 68, 68, 0.16)',
-    'rgba(239, 68, 68, 0.65)'
+    'rgba(239, 68, 68, 0.22)',
+    'rgba(239, 68, 68, 0.72)',
+    true
   )
   drawPolyField(
     [
@@ -342,20 +343,19 @@ function drawFtcFieldBase(ctx: CanvasRenderingContext2D, size: number) {
       [1 / 6, 1],
       [0, 1]
     ],
-    'rgba(239, 68, 68, 0.12)',
-    'rgba(239, 68, 68, 0.5)',
-    true
+    'rgba(239, 68, 68, 0.14)',
+    'rgba(239, 68, 68, 0.6)'
   )
 
-  // 蓝方右上停泊区 & 右下花坛补给区
+  // 蓝方右下 F6 Corner Garden & 右上 A6 Loading/Park Zone
   drawPolyField(
     [
       [5 / 6, 0],
       [1, 0],
       [1, 1 / 6]
     ],
-    'rgba(59, 130, 246, 0.16)',
-    'rgba(59, 130, 246, 0.65)'
+    'rgba(59, 130, 246, 0.14)',
+    'rgba(59, 130, 246, 0.6)'
   )
   drawPolyField(
     [
@@ -363,8 +363,8 @@ function drawFtcFieldBase(ctx: CanvasRenderingContext2D, size: number) {
       [5 / 6, 1],
       [1, 1]
     ],
-    'rgba(59, 130, 246, 0.12)',
-    'rgba(59, 130, 246, 0.5)',
+    'rgba(59, 130, 246, 0.22)',
+    'rgba(59, 130, 246, 0.72)',
     true
   )
 
@@ -391,12 +391,39 @@ function drawFtcFieldBase(ctx: CanvasRenderingContext2D, size: number) {
     ctx.restore()
   }
 
-  // 中场对角线与中轴线
+  // 中场对角线与起始线
   drawFieldLine(0.5, 0, 0.5, 1, 'rgba(255, 255, 255, 0.16)', 2, [8, 6])
   drawFieldLine(1 / 6, 0, 1 / 6, 1, 'rgba(239, 68, 68, 0.28)', 1.5, [4, 4])
   drawFieldLine(5 / 6, 0, 5 / 6, 1, 'rgba(59, 130, 246, 0.28)', 1.5, [4, 4])
 
-  // 5. 中央核心目标区（Submersible / Central Flower Hub 2x2 tiles center）
+  // 5. 四侧边界花朵目标 (4 Perimeter Flowers along top/bottom side walls)
+  const flowerSpots: Array<[number, number]> = [
+    [2 / 6, 0.045],
+    [4 / 6, 0.045],
+    [2 / 6, 0.955],
+    [4 / 6, 0.955]
+  ]
+  const flowerOuterR = Math.max(9, size * 0.024)
+  const flowerInnerR = Math.max(4, size * 0.011)
+  for (const [fx, fy] of flowerSpots) {
+    const fp = toViewPx(fx, fy, size)
+    ctx.save()
+    ctx.beginPath()
+    ctx.arc(fp.x, fp.y, flowerOuterR, 0, Math.PI * 2)
+    ctx.fillStyle = 'rgba(250, 204, 21, 0.18)'
+    ctx.fill()
+    ctx.lineWidth = 1.8
+    ctx.strokeStyle = 'rgba(250, 204, 21, 0.85)'
+    ctx.stroke()
+
+    ctx.beginPath()
+    ctx.arc(fp.x, fp.y, flowerInnerR, 0, Math.PI * 2)
+    ctx.fillStyle = 'rgba(57, 255, 20, 0.65)'
+    ctx.fill()
+    ctx.restore()
+  }
+
+  // 6. 中央双侧共享蜂巢目标区 (BIOBUZZ Central Dual Hive 2x2 center)
   drawPolyField(
     [
       [2 / 6, 2 / 6],
@@ -404,27 +431,64 @@ function drawFtcFieldBase(ctx: CanvasRenderingContext2D, size: number) {
       [4 / 6, 4 / 6],
       [2 / 6, 4 / 6]
     ],
-    'rgba(57, 255, 20, 0.05)',
-    'rgba(57, 255, 20, 0.38)'
+    'rgba(57, 255, 20, 0.04)',
+    'rgba(57, 255, 20, 0.34)'
   )
 
-  // 中央花坛/发射圆环
   const centerPt = toViewPx(0.5, 0.5, size)
+  const blueAxisPt = toViewPx(0.6, 0.5, size)
+  const blueAngle = Math.atan2(blueAxisPt.y - centerPt.y, blueAxisPt.x - centerPt.x)
+  const hiveR = size * 0.088
+
   ctx.save()
   ctx.beginPath()
-  ctx.arc(centerPt.x, centerPt.y, size * 0.085, 0, Math.PI * 2)
-  ctx.fillStyle = 'rgba(20, 22, 19, 0.88)'
+  ctx.arc(centerPt.x, centerPt.y, hiveR, 0, Math.PI * 2)
+  ctx.fillStyle = 'rgba(20, 22, 19, 0.9)'
   ctx.fill()
   ctx.lineWidth = 2.5
   ctx.strokeStyle = 'rgba(57, 255, 20, 0.65)'
   ctx.stroke()
 
-  // 红蓝分侧弧形指示
+  // 红侧半弧 vs 蓝侧半弧指示中央蜂巢归属
   ctx.beginPath()
-  ctx.arc(centerPt.x, centerPt.y, size * 0.042, 0, Math.PI * 2)
-  ctx.fillStyle = 'rgba(57, 255, 20, 0.18)'
+  ctx.arc(centerPt.x, centerPt.y, hiveR * 0.76, blueAngle + Math.PI / 2, blueAngle + (3 * Math.PI) / 2)
+  ctx.lineWidth = 3.5
+  ctx.strokeStyle = 'rgba(239, 68, 68, 0.78)'
+  ctx.stroke()
+
+  ctx.beginPath()
+  ctx.arc(centerPt.x, centerPt.y, hiveR * 0.76, blueAngle - Math.PI / 2, blueAngle + Math.PI / 2)
+  ctx.lineWidth = 3.5
+  ctx.strokeStyle = 'rgba(59, 130, 246, 0.78)'
+  ctx.stroke()
+
+  ctx.beginPath()
+  ctx.arc(centerPt.x, centerPt.y, size * 0.036, 0, Math.PI * 2)
+  ctx.fillStyle = 'rgba(57, 255, 20, 0.22)'
   ctx.fill()
   ctx.restore()
+
+  // 分区微标签 (HIVE / GARDEN / PARK / FLOWER)
+  const drawZoneLabel = (fx: number, fy: number, label: string, color: string) => {
+    if (size < 320) return
+    const p = toViewPx(fx, fy, size)
+    ctx.save()
+    ctx.font = `700 ${Math.max(8, Math.floor(size * 0.015))}px "Manrope", sans-serif`
+    ctx.fillStyle = color
+    ctx.textAlign = 'center'
+    ctx.textBaseline = 'middle'
+    ctx.fillText(label, p.x, p.y)
+    ctx.restore()
+  }
+  drawZoneLabel(0.5, 0.5 + 0.115, 'HIVE', 'rgba(134, 239, 172, 0.62)')
+  drawZoneLabel(0.065, 0.065, 'GARDEN', 'rgba(252, 165, 165, 0.65)')
+  drawZoneLabel(0.935, 0.935, 'GARDEN', 'rgba(147, 197, 253, 0.65)')
+  drawZoneLabel(0.065, 0.935, 'PARK', 'rgba(252, 165, 165, 0.55)')
+  drawZoneLabel(0.935, 0.065, 'PARK', 'rgba(147, 197, 253, 0.55)')
+  if (props.showGridCoords) {
+    drawZoneLabel(2 / 6, 0.095, 'FLOWER', 'rgba(253, 224, 71, 0.62)')
+    drawZoneLabel(4 / 6, 0.905, 'FLOWER', 'rgba(253, 224, 71, 0.62)')
+  }
 
   // 6. 6x6 地垫网格细线与 A1-F6 坐标标签
   ctx.save()

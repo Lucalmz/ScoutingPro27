@@ -388,6 +388,22 @@ export function fetchFtcScores(season: number, eventCode: string, tournamentLeve
   return request<any>('GET', `/ftc/${season}/scores/${encodeURIComponent(eventCode)}${query}`)
 }
 
+export function fetchFtcRankings(season: number, eventCode: string): Promise<import('@/types').OfficialRanking[]> {
+  return request<import('@/types').OfficialRanking[]>('GET', `/ftc/${season}/rankings/${encodeURIComponent(eventCode.trim())}`)
+}
+
+export function fetchFtcAwards(season: number, eventCode: string): Promise<import('@/types').OfficialAward[]> {
+  return request<import('@/types').OfficialAward[]>('GET', `/ftc/${season}/awards/${encodeURIComponent(eventCode.trim())}`)
+}
+
+export function fetchFtcAlliances(season: number, eventCode: string): Promise<import('@/types').OfficialAlliance[]> {
+  return request<import('@/types').OfficialAlliance[]>('GET', `/ftc/${season}/alliances/${encodeURIComponent(eventCode.trim())}`)
+}
+
+export function fetchFtcAdvancement(season: number, eventCode: string): Promise<import('@/types').AdvancementDetail[]> {
+  return request<import('@/types').AdvancementDetail[]>('GET', `/ftc/${season}/advancement/${encodeURIComponent(eventCode.trim())}`)
+}
+
 // --- Custom Team Tags ---
 export function fetchEventTags(eventId: string): Promise<import('@/types').TeamTagItem[]> {
   return request<import('@/types').TeamTagItem[]>('GET', `/events/${encodeURIComponent(eventId)}/tags`)

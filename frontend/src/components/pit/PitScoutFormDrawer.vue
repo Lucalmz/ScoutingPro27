@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref, computed, watch, onUnmounted } from 'vue'
+import { ref, computed, watch, onUnmounted, type Ref } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { usePitScoutStore } from '@/stores/pitScout'
 import { useUserStore } from '@/stores/user'
@@ -12,7 +12,12 @@ import { hapticLight, hapticMedium, hapticSuccess } from '@/utils/haptics'
 import { useBumpAnimation } from '@/composables/useBumpAnimation'
 import { useConfirm } from '@/composables/useConfirm'
 import type { PitScoutingRecord } from '@/types'
-import { LAUNCHER_PRESETS, FLOWER_PRESETS, type PresetOption } from '@/constants/pitScoutPresets'
+import {
+  LAUNCHER_PRESETS,
+  FLOWER_PRESETS,
+  CHASSIS_SIZE_PRESETS,
+  type PresetOption
+} from '@/constants/pitScoutPresets'
 import './PitScoutFormDrawer.css'
 
 const props = withDefaults(
@@ -31,7 +36,7 @@ const emit = defineEmits<{
   (e: 'saved', record: PitScoutingRecord): void
 }>()
 
-let t = (key: string, values?: any): string => key
+let t = (key: string, _values?: any): string => key
 let localeRef: any = null
 
 try {
@@ -59,44 +64,68 @@ const isZh = computed(() => {
   return String(loc).startsWith('zh')
 })
 
-const defaultLauncher = computed(() => (isZh.value ? '差速双飞轮' : 'Dual Flywheel'))
-const defaultFlower = computed(() => (isZh.value ? '垂直级联高抬升' : 'Vertical Cascading Lift'))
+function formatPreset(preset: PresetOption): string {
+  return isZh.value ? (preset.zh || preset.en || preset.key) : (preset.en || preset.zh || preset.key)
+}
+
+function matchesPreset(value: string, preset: PresetOption): boolean {
+  const val = (value || '').trim()
+  if (!val) return false
+  return (
+    val === preset.zh ||
+    val === preset.en ||
+    val === preset.key ||
+    val.toLowerCase() === preset.en.toLowerCase()
+  )
+}
+
+const defaultLauncher = computed(() => formatPreset(LAUNCHER_PRESETS[0]!))
+const defaultFlower = computed(() => formatPreset(FLOWER_PRESETS[0]!))
 
 const drivetrainType = ref<'mecanum' | 'tank' | 'swerve' | 'other'>('mecanum')
 const weightLbs = ref<number>(38.0)
+const chassisSize = ref<string>('')
 const ballCompatibility = ref<'universal' | 'sorting' | 'pollen_only'>('universal')
 const launcherType = ref<string>(defaultLauncher.value)
 const flowerMechanism = ref<string>(defaultFlower.value)
-
-watch(isZh, (zh) => {
-  const curLauncher = LAUNCHER_PRESETS.find((p) => isLauncherActive(p))
-  if (curLauncher) {
-    launcherType.value = zh ? curLauncher.zh : curLauncher.en
-  }
-  const curFlower = FLOWER_PRESETS.find((p) => isFlowerActive(p))
-  if (curFlower) {
-    flowerMechanism.value = zh ? curFlower.zh : curFlower.en
-  }
-})
 const hasColorSensor = ref<boolean>(true)
+const hasDescoreMech = ref<boolean>(false)
+const hasApriltagVision = ref<boolean>(false)
 const odometryType = ref<string>('two_wheel')
 
+watch(isZh, () => {
+  const curLauncher = LAUNCHER_PRESETS.find((p) => matchesPreset(launcherType.value, p))
+  if (curLauncher) launcherType.value = formatPreset(curLauncher)
+
+  const curFlower = FLOWER_PRESETS.find((p) => matchesPreset(flowerMechanism.value, p))
+  if (curFlower) flowerMechanism.value = formatPreset(curFlower)
+
+  const curChassis = CHASSIS_SIZE_PRESETS.find((p) => matchesPreset(chassisSize.value, p))
+  if (curChassis) chassisSize.value = formatPreset(curChassis)
+})
+
 function isLauncherActive(preset: PresetOption): boolean {
-  const val = (launcherType.value || '').trim()
-  return val === preset.zh || val === preset.en || val === preset.key || val.toLowerCase() === preset.en.toLowerCase()
+  return matchesPreset(launcherType.value, preset)
 }
 
 function selectLauncherPreset(preset: PresetOption) {
-  launcherType.value = isZh.value ? preset.zh : preset.en
+  launcherType.value = formatPreset(preset)
 }
 
 function isFlowerActive(preset: PresetOption): boolean {
-  const val = (flowerMechanism.value || '').trim()
-  return val === preset.zh || val === preset.en || val === preset.key || val.toLowerCase() === preset.en.toLowerCase()
+  return matchesPreset(flowerMechanism.value, preset)
 }
 
 function selectFlowerPreset(preset: PresetOption) {
-  flowerMechanism.value = isZh.value ? preset.zh : preset.en
+  flowerMechanism.value = formatPreset(preset)
+}
+
+function isChassisSizeActive(preset: PresetOption): boolean {
+  return matchesPreset(chassisSize.value, preset)
+}
+
+function selectChassisSizePreset(preset: PresetOption) {
+  chassisSize.value = formatPreset(preset)
 }
 
 // 核心量化自述能力
@@ -104,7 +133,44 @@ const claimedAutoStrategy = ref<string>('')
 const claimedAutoScore = ref<number>(30)
 const claimedTeleopCycles = ref<number>(5)
 const claimedTeleopScore = ref<number>(60)
-const claimedEndgameScore = ref<number>(15)
+
+// 结构化终局自述能力 (BIOBUZZ 2026-2027)
+const claimedTeleopPark = ref<boolean>(false)
+const claimedFlowerNectars = ref<number>(0)
+const claimedFlowerBottomBonus = ref<number>(0)
+const claimedFlowerPollens = ref<number>(0)
+const claimedGardenBalls = ref<number>(0)
+const legacyClaimedEndgameScore = ref<number | null>(null)
+
+const hasStructuredEndgameInput = computed(() => {
+  return (
+    claimedTeleopPark.value ||
+    claimedFlowerNectars.value > 0 ||
+    claimedFlowerBottomBonus.value > 0 ||
+    claimedFlowerPollens.value > 0 ||
+    claimedGardenBalls.value > 0
+  )
+})
+
+const claimedEndgameScore = computed(() => {
+  if (hasStructuredEndgameInput.value) {
+    return (
+      (claimedTeleopPark.value ? 5 : 0) +
+      claimedFlowerNectars.value * 2 +
+      claimedFlowerBottomBonus.value * 5 +
+      claimedFlowerPollens.value * 2 +
+      claimedGardenBalls.value
+    )
+  }
+  return legacyClaimedEndgameScore.value ?? 0
+})
+
+watch(claimedFlowerNectars, (nectars) => {
+  const clampedMax = Math.min(4, Math.max(0, nectars))
+  if (claimedFlowerBottomBonus.value > clampedMax) {
+    claimedFlowerBottomBonus.value = clampedMax
+  }
+})
 
 // 实物特写图
 const photoKeys = ref<string[]>([])
@@ -116,52 +182,104 @@ const calculatedTotalScore = computed(() => {
   return claimedAutoScore.value + claimedTeleopScore.value + claimedEndgameScore.value
 })
 
+function clampInt(val: unknown, min: number, max: number): number {
+  const n = Number(val)
+  if (!Number.isFinite(n)) return min
+  return Math.max(min, Math.min(max, Math.round(n)))
+}
+
+function setClaimedTeleopPark(val: boolean) {
+  claimedTeleopPark.value = val
+  legacyClaimedEndgameScore.value = null
+}
+
 // 加载已有数据
 async function reloadFormData(num: number | null) {
   if (!num) return
   const existing = pitStore.getUnifiedTeam(num)?.pitRecord
   if (existing) {
+    let parsedRaw: Record<string, any> = {}
+    if (existing.rawData) {
+      try {
+        const parsed = JSON.parse(existing.rawData)
+        if (parsed && typeof parsed === 'object') parsedRaw = parsed
+      } catch {
+        parsedRaw = {}
+      }
+    }
+
     drivetrainType.value = existing.drivetrainType || 'mecanum'
-    weightLbs.value = existing.weightLbs || 0
+    weightLbs.value = existing.weightLbs ?? 0
+    chassisSize.value = existing.chassisSize ?? (typeof parsedRaw.chassisSize === 'string' ? parsedRaw.chassisSize : '')
     ballCompatibility.value = existing.ballCompatibility || 'universal'
     launcherType.value = existing.launcherType || ''
     flowerMechanism.value = existing.flowerMechanism || ''
     hasColorSensor.value = existing.hasColorSensor ?? false
+    hasDescoreMech.value = existing.hasDescoreMech ?? Boolean(parsedRaw.hasDescoreMech)
+    hasApriltagVision.value = existing.hasApriltagVision ?? Boolean(parsedRaw.hasApriltagVision)
     odometryType.value = existing.odometryType || 'two_wheel'
 
     claimedAutoStrategy.value = existing.claimedAutoStrategy || ''
     claimedAutoScore.value = existing.claimedAutoScore || 0
     claimedTeleopCycles.value = existing.claimedTeleopCycles || 0
     claimedTeleopScore.value = existing.claimedTeleopScore || 0
-    claimedEndgameScore.value = existing.claimedEndgameScore || 0
+
+    claimedTeleopPark.value = existing.claimedTeleopPark ?? Boolean(parsedRaw.claimedTeleopPark)
+    claimedFlowerNectars.value = clampInt(
+      existing.claimedFlowerNectars ?? parsedRaw.claimedFlowerNectars ?? 0,
+      0,
+      8
+    )
+    claimedFlowerBottomBonus.value = clampInt(
+      existing.claimedFlowerBottomBonus ?? parsedRaw.claimedFlowerBottomBonus ?? 0,
+      0,
+      Math.min(4, claimedFlowerNectars.value)
+    )
+    claimedFlowerPollens.value = clampInt(
+      existing.claimedFlowerPollens ?? parsedRaw.claimedFlowerPollens ?? 0,
+      0,
+      12
+    )
+    claimedGardenBalls.value = clampInt(
+      existing.claimedGardenBalls ?? parsedRaw.claimedGardenBalls ?? 0,
+      0,
+      12
+    )
+
+    const hasStructured =
+      claimedTeleopPark.value ||
+      claimedFlowerNectars.value > 0 ||
+      claimedFlowerBottomBonus.value > 0 ||
+      claimedFlowerPollens.value > 0 ||
+      claimedGardenBalls.value > 0
+    legacyClaimedEndgameScore.value =
+      !hasStructured && (existing.claimedEndgameScore || 0) > 0 ? existing.claimedEndgameScore : null
 
     photoKeys.value = existing.photoKeys ? [...existing.photoKeys] : []
-
-    if (existing.rawData) {
-      try {
-        const parsed = JSON.parse(existing.rawData)
-        customFields.value = parsed.customFields ? { ...parsed.customFields } : {}
-      } catch {
-        customFields.value = {}
-      }
-    } else {
-      customFields.value = {}
-    }
+    customFields.value = parsedRaw.customFields ? { ...parsedRaw.customFields } : {}
   } else {
     // 默认初始值
     drivetrainType.value = 'mecanum'
     weightLbs.value = 38.0
+    chassisSize.value = ''
     ballCompatibility.value = 'universal'
     launcherType.value = defaultLauncher.value
     flowerMechanism.value = defaultFlower.value
     hasColorSensor.value = true
+    hasDescoreMech.value = false
+    hasApriltagVision.value = false
     odometryType.value = 'two_wheel'
 
     claimedAutoStrategy.value = ''
     claimedAutoScore.value = 30
     claimedTeleopCycles.value = 5
     claimedTeleopScore.value = 60
-    claimedEndgameScore.value = 15
+    claimedTeleopPark.value = false
+    claimedFlowerNectars.value = 0
+    claimedFlowerBottomBonus.value = 0
+    claimedFlowerPollens.value = 0
+    claimedGardenBalls.value = 0
+    legacyClaimedEndgameScore.value = null
     photoKeys.value = []
     customFields.value = {}
   }
@@ -182,16 +300,24 @@ function takeSnapshot(): string {
   return JSON.stringify({
     drivetrainType: drivetrainType.value,
     weightLbs: weightLbs.value,
+    chassisSize: chassisSize.value,
     ballCompatibility: ballCompatibility.value,
     launcherType: launcherType.value,
     flowerMechanism: flowerMechanism.value,
     hasColorSensor: hasColorSensor.value,
+    hasDescoreMech: hasDescoreMech.value,
+    hasApriltagVision: hasApriltagVision.value,
     odometryType: odometryType.value,
     claimedAutoStrategy: claimedAutoStrategy.value,
     claimedAutoScore: claimedAutoScore.value,
     claimedTeleopCycles: claimedTeleopCycles.value,
     claimedTeleopScore: claimedTeleopScore.value,
-    claimedEndgameScore: claimedEndgameScore.value,
+    claimedTeleopPark: claimedTeleopPark.value,
+    claimedFlowerNectars: claimedFlowerNectars.value,
+    claimedFlowerBottomBonus: claimedFlowerBottomBonus.value,
+    claimedFlowerPollens: claimedFlowerPollens.value,
+    claimedGardenBalls: claimedGardenBalls.value,
+    legacyClaimedEndgameScore: legacyClaimedEndgameScore.value,
     photoKeys: photoKeys.value,
     customFields: customFields.value
   })
@@ -242,21 +368,48 @@ watch(
 
 const { bump, getBumpClass, clearBump } = useBumpAnimation()
 
-type StepperField = 'weight' | 'autoScore' | 'teleopCycles' | 'teleopScore' | 'endgameScore'
+type StepperField =
+  | 'weight'
+  | 'autoScore'
+  | 'teleopCycles'
+  | 'teleopScore'
+  | 'flowerNectars'
+  | 'flowerBottomBonus'
+  | 'flowerPollens'
+  | 'gardenBalls'
+
+const ENDGAME_STEPPER_FIELDS = new Set<StepperField>([
+  'flowerNectars',
+  'flowerBottomBonus',
+  'flowerPollens',
+  'gardenBalls'
+])
 
 // 步进器便捷函数 (类型安全，解包防御，集成动效与触觉反馈)
 function adjust(field: StepperField, delta: number, min = 0, max = 999) {
-  const fieldMap: Record<StepperField, typeof weightLbs> = {
+  const fieldMap: Record<StepperField, Ref<number>> = {
     weight: weightLbs,
     autoScore: claimedAutoScore,
     teleopCycles: claimedTeleopCycles,
     teleopScore: claimedTeleopScore,
-    endgameScore: claimedEndgameScore
+    flowerNectars: claimedFlowerNectars,
+    flowerBottomBonus: claimedFlowerBottomBonus,
+    flowerPollens: claimedFlowerPollens,
+    gardenBalls: claimedGardenBalls
   }
   const targetRef = fieldMap[field]
   const next = Number((targetRef.value + delta).toFixed(1))
   if (next >= min && next <= max) {
+    if (ENDGAME_STEPPER_FIELDS.has(field)) {
+      legacyClaimedEndgameScore.value = null
+    }
     targetRef.value = next
+    if (field === 'flowerNectars') {
+      const bonusCap = Math.min(4, Math.max(0, next))
+      if (claimedFlowerBottomBonus.value > bonusCap) {
+        claimedFlowerBottomBonus.value = bonusCap
+      }
+    }
     bump(field, delta > 0 ? 'up' : 'down')
     if (delta > 0) {
       hapticMedium()
@@ -348,6 +501,11 @@ function handleSave() {
   if (!props.teamNumber) return
 
   const existing = pitStore.getUnifiedTeam(props.teamNumber)?.pitRecord
+  const trimmedChassisSize = chassisSize.value.trim().slice(0, 64)
+  const clampedNectars = clampInt(claimedFlowerNectars.value, 0, 8)
+  const clampedBottomBonus = clampInt(claimedFlowerBottomBonus.value, 0, Math.min(4, clampedNectars))
+  const clampedPollens = clampInt(claimedFlowerPollens.value, 0, 12)
+  const clampedGarden = clampInt(claimedGardenBalls.value, 0, 12)
 
   const record: PitScoutingRecord = {
     id: existing?.id || `pit_${props.teamNumber}_${Date.now()}`,
@@ -359,27 +517,45 @@ function handleSave() {
 
     drivetrainType: drivetrainType.value,
     weightLbs: weightLbs.value,
+    chassisSize: trimmedChassisSize,
     ballCompatibility: ballCompatibility.value,
     launcherType: launcherType.value,
     flowerMechanism: flowerMechanism.value,
-    hasColorSensor: ballCompatibility.value !== 'pollen_only' ? hasColorSensor.value : false,
+    hasColorSensor: hasColorSensor.value,
+    hasDescoreMech: hasDescoreMech.value,
+    hasApriltagVision: hasApriltagVision.value,
     odometryType: odometryType.value,
 
     claimedAutoStrategy: claimedAutoStrategy.value,
     claimedAutoScore: claimedAutoScore.value,
     claimedTeleopCycles: claimedTeleopCycles.value,
     claimedTeleopScore: claimedTeleopScore.value,
+    claimedTeleopPark: claimedTeleopPark.value,
+    claimedFlowerNectars: clampedNectars,
+    claimedFlowerBottomBonus: clampedBottomBonus,
+    claimedFlowerPollens: clampedPollens,
+    claimedGardenBalls: clampedGarden,
     claimedEndgameScore: claimedEndgameScore.value,
     claimedTotalScore: calculatedTotalScore.value,
 
     photoKeys: photoKeys.value,
-    rawData: JSON.stringify({ customFields: customFields.value }),
+    rawData: JSON.stringify({
+      customFields: customFields.value,
+      chassisSize: trimmedChassisSize,
+      hasDescoreMech: hasDescoreMech.value,
+      hasApriltagVision: hasApriltagVision.value,
+      claimedTeleopPark: claimedTeleopPark.value,
+      claimedFlowerNectars: clampedNectars,
+      claimedFlowerBottomBonus: clampedBottomBonus,
+      claimedFlowerPollens: clampedPollens,
+      claimedGardenBalls: clampedGarden
+    }),
     version: existing?.version || 1
   }
 
   pitStore.saveRecord(record)
   if (pitStore.currentEventId) {
-    flushOfflinePhotos(pitStore.currentEventId).catch((err) => {
+    Promise.resolve(flushOfflinePhotos(pitStore.currentEventId)).catch((err) => {
       console.warn('[PitScout] Background flush photos deferred:', err)
     })
   }
@@ -435,7 +611,7 @@ onUnmounted(() => {
 
       <!-- 表单主体 -->
       <div class="drawer-body">
-        <!-- 模块 1: 核心硬件构型 -->
+        <!-- 模块 1: 核心硬件与战术特点 -->
         <div class="form-section">
           <h4 class="section-title">{{ t('pit_scout.drawer.sec_hardware') }}</h4>
 
@@ -479,7 +655,7 @@ onUnmounted(() => {
 
           <div class="form-group">
             <label>{{ t('pit_scout.drawer.weight_label') }}</label>
-            <div class="stepper-control">
+            <div class="stepper-control" data-field="weight">
               <button
                 type="button"
                 class="step-btn"
@@ -499,10 +675,31 @@ onUnmounted(() => {
               >+</button>
               <span class="stepper-unit">{{ t('pit_scout.drawer.weight_hint') }}</span>
             </div>
-            <span v-if="weightLbs > 42" class="warning-text">
-              <span class="material-icons" style="font-size: 14px; vertical-align: middle; margin-right: 4px;">warning</span>
-              {{ t('pit_scout.drawer.weight_over_warning') }}
-            </span>
+          </div>
+
+          <div class="form-group">
+            <label>{{ t('pit_scout.drawer.chassis_size_label') }}</label>
+            <input
+              v-model="chassisSize"
+              type="text"
+              maxlength="64"
+              class="input-field"
+              data-field="chassisSize"
+              :placeholder="t('pit_scout.drawer.chassis_size_placeholder')"
+            />
+            <div class="quick-chips-wrap">
+              <button
+                v-for="chip in CHASSIS_SIZE_PRESETS"
+                :key="chip.key"
+                type="button"
+                class="quick-chip-btn"
+                :class="{ 'is-active': isChassisSizeActive(chip) }"
+                @click="selectChassisSizePreset(chip)"
+              >
+                {{ t('pit_scout.chassis_size_presets.' + chip.key) }}
+              </button>
+            </div>
+            <span class="field-hint">{{ t('pit_scout.drawer.chassis_size_hint') }}</span>
           </div>
 
           <div class="form-group">
@@ -535,10 +732,10 @@ onUnmounted(() => {
             </div>
           </div>
 
-          <!-- 防违规颜色传感器（仅大小兼容/分类时展示） -->
-          <div v-if="ballCompatibility !== 'pollen_only'" class="form-group">
+          <!-- 颜色传感器（不受球型兼容性限制，可自由勾选） -->
+          <div class="form-group">
             <label>{{ t('pit_scout.drawer.has_color_sensor_label') }}</label>
-            <div class="radio-group">
+            <div class="radio-group" data-field="hasColorSensor">
               <button
                 type="button"
                 class="radio-btn"
@@ -556,6 +753,56 @@ onUnmounted(() => {
               >
                 <span class="material-icons" style="font-size: 16px; margin-right: 4px; vertical-align: text-bottom;">cancel</span>
                 {{ t('pit_scout.drawer.color_sensor_none') }}
+              </button>
+            </div>
+          </div>
+
+          <!-- 花朵底口掏球拆台机构 (G418) -->
+          <div class="form-group">
+            <label>{{ t('pit_scout.drawer.has_descore_mech_label') }}</label>
+            <div class="radio-group" data-field="hasDescoreMech">
+              <button
+                type="button"
+                class="radio-btn"
+                :class="{ 'is-active': hasDescoreMech }"
+                @click="hasDescoreMech = true"
+              >
+                <span class="material-icons" style="font-size: 16px; margin-right: 4px; vertical-align: text-bottom;">check_circle</span>
+                {{ t('pit_scout.drawer.trait_equipped') }}
+              </button>
+              <button
+                type="button"
+                class="radio-btn"
+                :class="{ 'is-active': !hasDescoreMech }"
+                @click="hasDescoreMech = false"
+              >
+                <span class="material-icons" style="font-size: 16px; margin-right: 4px; vertical-align: text-bottom;">cancel</span>
+                {{ t('pit_scout.drawer.trait_none') }}
+              </button>
+            </div>
+          </div>
+
+          <!-- AprilTag / 视觉自动瞄准 -->
+          <div class="form-group">
+            <label>{{ t('pit_scout.drawer.has_apriltag_vision_label') }}</label>
+            <div class="radio-group" data-field="hasApriltagVision">
+              <button
+                type="button"
+                class="radio-btn"
+                :class="{ 'is-active': hasApriltagVision }"
+                @click="hasApriltagVision = true"
+              >
+                <span class="material-icons" style="font-size: 16px; margin-right: 4px; vertical-align: text-bottom;">check_circle</span>
+                {{ t('pit_scout.drawer.trait_equipped') }}
+              </button>
+              <button
+                type="button"
+                class="radio-btn"
+                :class="{ 'is-active': !hasApriltagVision }"
+                @click="hasApriltagVision = false"
+              >
+                <span class="material-icons" style="font-size: 16px; margin-right: 4px; vertical-align: text-bottom;">cancel</span>
+                {{ t('pit_scout.drawer.trait_none') }}
               </button>
             </div>
           </div>
@@ -674,7 +921,7 @@ onUnmounted(() => {
 
           <div class="form-group">
             <label>{{ t('pit_scout.drawer.auto_score_label') }}</label>
-            <div class="stepper-control">
+            <div class="stepper-control" data-field="autoScore">
               <button
                 type="button"
                 class="step-btn"
@@ -698,7 +945,7 @@ onUnmounted(() => {
 
           <div class="form-group">
             <label>{{ t('pit_scout.drawer.teleop_cycles_label') }}</label>
-            <div class="stepper-control">
+            <div class="stepper-control" data-field="teleopCycles">
               <button
                 type="button"
                 class="step-btn"
@@ -722,7 +969,7 @@ onUnmounted(() => {
 
           <div class="form-group">
             <label>{{ t('pit_scout.drawer.teleop_score_label') }}</label>
-            <div class="stepper-control">
+            <div class="stepper-control" data-field="teleopScore">
               <button
                 type="button"
                 class="step-btn"
@@ -744,33 +991,134 @@ onUnmounted(() => {
             </div>
           </div>
 
+          <!-- 结构化 BIOBUZZ 终局能力自述 -->
           <div class="form-group">
-            <label>{{ t('pit_scout.drawer.endgame_score_label') }}</label>
-            <div class="stepper-control">
+            <label>{{ t('pit_scout.drawer.claimed_teleop_park_label') }}</label>
+            <div class="radio-group" data-field="claimedTeleopPark">
               <button
                 type="button"
-                class="step-btn"
-                :disabled="claimedEndgameScore <= 0"
-                @click="adjust('endgameScore', -5, 0, 50)"
-              >-</button>
-              <span
-                class="stepper-val"
-                :class="getBumpClass('endgameScore')"
-                @animationend="clearBump('endgameScore')"
-              >{{ claimedEndgameScore }}</span>
+                class="radio-btn"
+                :class="{ 'is-active': claimedTeleopPark }"
+                @click="setClaimedTeleopPark(true)"
+              >
+                <span class="material-icons" style="font-size: 16px; margin-right: 4px; vertical-align: text-bottom;">check_circle</span>
+                {{ t('pit_scout.drawer.trait_equipped') }}
+              </button>
               <button
                 type="button"
-                class="step-btn"
-                :disabled="claimedEndgameScore >= 50"
-                @click="adjust('endgameScore', 5, 0, 50)"
-              >+</button>
-              <span class="stepper-unit">{{ t('pit_scout.drawer.unit_pts') }}</span>
+                class="radio-btn"
+                :class="{ 'is-active': !claimedTeleopPark }"
+                @click="setClaimedTeleopPark(false)"
+              >
+                <span class="material-icons" style="font-size: 16px; margin-right: 4px; vertical-align: text-bottom;">cancel</span>
+                {{ t('pit_scout.drawer.trait_none') }}
+              </button>
+            </div>
+          </div>
+
+          <div class="endgame-subgrid">
+            <div class="form-group">
+              <label>{{ t('pit_scout.drawer.claimed_flower_nectars_label') }}</label>
+              <div class="stepper-control" data-field="flowerNectars">
+                <button
+                  type="button"
+                  class="step-btn"
+                  :disabled="claimedFlowerNectars <= 0"
+                  @click="adjust('flowerNectars', -1, 0, 8)"
+                >-</button>
+                <span
+                  class="stepper-val"
+                  :class="getBumpClass('flowerNectars')"
+                  @animationend="clearBump('flowerNectars')"
+                >{{ claimedFlowerNectars }}</span>
+                <button
+                  type="button"
+                  class="step-btn"
+                  :disabled="claimedFlowerNectars >= 8"
+                  @click="adjust('flowerNectars', 1, 0, 8)"
+                >+</button>
+              </div>
+            </div>
+
+            <div class="form-group">
+              <label>{{ t('pit_scout.drawer.claimed_flower_bottom_bonus_label') }}</label>
+              <div class="stepper-control" data-field="flowerBottomBonus">
+                <button
+                  type="button"
+                  class="step-btn"
+                  :disabled="claimedFlowerBottomBonus <= 0"
+                  @click="adjust('flowerBottomBonus', -1, 0, Math.min(4, claimedFlowerNectars))"
+                >-</button>
+                <span
+                  class="stepper-val"
+                  :class="getBumpClass('flowerBottomBonus')"
+                  @animationend="clearBump('flowerBottomBonus')"
+                >{{ claimedFlowerBottomBonus }}</span>
+                <button
+                  type="button"
+                  class="step-btn"
+                  :disabled="claimedFlowerBottomBonus >= Math.min(4, claimedFlowerNectars)"
+                  @click="adjust('flowerBottomBonus', 1, 0, Math.min(4, claimedFlowerNectars))"
+                >+</button>
+              </div>
+            </div>
+
+            <div class="form-group">
+              <label>{{ t('pit_scout.drawer.claimed_flower_pollens_label') }}</label>
+              <div class="stepper-control" data-field="flowerPollens">
+                <button
+                  type="button"
+                  class="step-btn"
+                  :disabled="claimedFlowerPollens <= 0"
+                  @click="adjust('flowerPollens', -1, 0, 12)"
+                >-</button>
+                <span
+                  class="stepper-val"
+                  :class="getBumpClass('flowerPollens')"
+                  @animationend="clearBump('flowerPollens')"
+                >{{ claimedFlowerPollens }}</span>
+                <button
+                  type="button"
+                  class="step-btn"
+                  :disabled="claimedFlowerPollens >= 12"
+                  @click="adjust('flowerPollens', 1, 0, 12)"
+                >+</button>
+              </div>
+            </div>
+
+            <div class="form-group">
+              <label>{{ t('pit_scout.drawer.claimed_garden_balls_label') }}</label>
+              <div class="stepper-control" data-field="gardenBalls">
+                <button
+                  type="button"
+                  class="step-btn"
+                  :disabled="claimedGardenBalls <= 0"
+                  @click="adjust('gardenBalls', -1, 0, 12)"
+                >-</button>
+                <span
+                  class="stepper-val"
+                  :class="getBumpClass('gardenBalls')"
+                  @animationend="clearBump('gardenBalls')"
+                >{{ claimedGardenBalls }}</span>
+                <button
+                  type="button"
+                  class="step-btn"
+                  :disabled="claimedGardenBalls >= 12"
+                  @click="adjust('gardenBalls', 1, 0, 12)"
+                >+</button>
+              </div>
             </div>
           </div>
 
           <div class="form-group">
+            <label>{{ t('pit_scout.drawer.endgame_score_label') }}</label>
+            <input type="number" class="input-field" data-field="claimedEndgameScore" :value="claimedEndgameScore" readonly />
+            <span class="field-hint">{{ t('pit_scout.drawer.endgame_score_computed_hint') }}</span>
+          </div>
+
+          <div class="form-group">
             <label>{{ t('pit_scout.drawer.calculated_total_label') }}</label>
-            <input type="number" class="input-field" :value="calculatedTotalScore" readonly />
+            <input type="number" class="input-field" data-field="calculatedTotalScore" :value="calculatedTotalScore" readonly />
           </div>
 
           <!-- Pit Strategy Custom Fields -->

@@ -116,6 +116,8 @@ export class SignalingChannel {
   private client: mqtt.MqttClient | null = null
   private wsClient: WebSocket | null = null
   private companionLanWs: WebSocket | null = null
+  private mqttReadyFallbackTimer: ReturnType<typeof setTimeout> | null = null
+  private isClosed: boolean = false
   private topic: string = ''
   readonly clientId: string
   private messageCallback: ((data: unknown) => void | Promise<void>) | null = null
@@ -155,6 +157,7 @@ export class SignalingChannel {
     onConnect?: () => void
     onError?: (err?: Error) => void
   }): void {
+    this.isClosed = false
     this.messageCallback = callbacks.onMessage
     const customConfig = typeof localStorage !== 'undefined' ? localStorage.getItem('sp27-custom-broker') : null
     const rawTarget = this.preferredEndpoint || customConfig || BUILTIN_BROKERS[this.currentBrokerIndex]?.url || BUILTIN_BROKERS[0]?.url || 'wss://broker.emqx.io:8084/mqtt'
@@ -202,6 +205,7 @@ export class SignalingChannel {
         this.companionLanWs.binaryType = 'arraybuffer'
       } catch {}
       this.companionLanWs.onopen = () => {
+        if (this.isClosed) return
         log.info(`Companion LAN WebSocket bridge active at ${lanWsUrl}`)
         // 若浏览器处于离线态，则立即以伴随局域网 WS 作为主用信令触发 onConnect；否则等待 MQTT 订阅完成或超时兜底
         if (isBrowserSimulatedOffline() && !this.didNotifyConnect) {
@@ -236,6 +240,7 @@ export class SignalingChannel {
         this.wsClient.binaryType = 'arraybuffer'
       } catch {}
       this.wsClient.onopen = () => {
+        if (this.isClosed) return
         log.info(`Native LAN WebSocket connected to ${fullWsUrl}`)
         callbacks.onConnect?.()
       }
@@ -269,9 +274,12 @@ export class SignalingChannel {
     let hasConnected = false
 
     this.client.on('connect', () => {
+      if (this.isClosed) return
       hasConnected = true
       log.info(`MQTT connected successfully to ${brokerUrl}. Subscribing to ${this.topic}...`)
       const notifyReady = () => {
+        this.clearMqttReadyFallbackTimer()
+        if (this.isClosed) return
         if (!this.didNotifyConnect) {
           this.didNotifyConnect = true
           callbacks.onConnect?.()
@@ -281,6 +289,7 @@ export class SignalingChannel {
         (typeof process !== 'undefined' && (process.env?.NODE_ENV === 'test' || process.env?.VITEST === 'true')) ||
         Boolean((globalThis as any).__vitest_worker__) ||
         (globalThis as any).__TEST_ALLOW_UNSIGNED_SIGNALING__ !== undefined
+      const enableSubackTimerInTest = Boolean((globalThis as any).__TEST_ENABLE_MQTT_SUBACK_TIMER__)
 
       this.client!.subscribe(this.topic, (err) => {
         if (err) {
@@ -291,12 +300,16 @@ export class SignalingChannel {
         notifyReady()
       })
 
-      if (isTestEnv) {
+      if (isTestEnv && !enableSubackTimerInTest) {
         // 单测环境下 mockMqttClient.subscribe 常为无回调的 vi.fn()，直接放行
         notifyReady()
       } else {
         // 真机环境下最多等待 180ms SUBACK，防止极端 Broker 不回包卡死
-        setTimeout(notifyReady, 180)
+        this.clearMqttReadyFallbackTimer()
+        this.mqttReadyFallbackTimer = setTimeout(() => {
+          this.mqttReadyFallbackTimer = null
+          notifyReady()
+        }, 180)
       }
     })
 
@@ -509,7 +522,15 @@ export class SignalingChannel {
     return Boolean(this.client && (this.client as any).connected)
   }
 
+  private clearMqttReadyFallbackTimer(): void {
+    if (this.mqttReadyFallbackTimer) {
+      clearTimeout(this.mqttReadyFallbackTimer)
+      this.mqttReadyFallbackTimer = null
+    }
+  }
+
   private closeMqttOnly(): void {
+    this.clearMqttReadyFallbackTimer()
     if (this.client) {
       try {
         if (typeof this.client.removeAllListeners === 'function') {
@@ -527,6 +548,8 @@ export class SignalingChannel {
   }
 
   close(): void {
+    this.isClosed = true
+    this.clearMqttReadyFallbackTimer()
     if (this.wsClient) {
       try {
         this.wsClient.onopen = null

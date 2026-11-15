@@ -1,6 +1,7 @@
 import type { ScoutingRecord, OfficialMatch } from '@/types'
 import { getRecordTournamentLevel } from '@/utils/tournament'
 import { i18n } from '@/i18n'
+import { parseScoutRawData } from './rankings'
 
 export interface AllianceDiscrepancyDetail {
   alliance: 'red' | 'blue'
@@ -10,6 +11,8 @@ export interface AllianceDiscrepancyDetail {
   signedDiff: number
   ratio: number
   isComplete: boolean
+  endgameSharedContestRisk?: boolean
+  g410RiskCount?: number
   scouts: Array<{
     scoutId: string
     scoutName: string
@@ -29,6 +32,7 @@ export interface MatchDiscrepancy {
   red?: AllianceDiscrepancyDetail
   blue?: AllianceDiscrepancyDetail
   summaryMessage: string
+  endgameContestHint?: string
 }
 
 /**
@@ -89,6 +93,17 @@ export function calculateMatchDiscrepancies(
         const signedDiff = scoutScore - officialScore
         const ratio = officialScore > 0 ? diff / officialScore : (scoutScore > 0 ? 1 : 0)
 
+        const parsedEndgames = allianceRecords.map((r) => parseScoutRawData(r.rawData).endgame)
+        const hasSharedEndgameElements = parsedEndgames.some(
+          (e) =>
+            e.flowerNectars > 0 ||
+            e.flowerBottomBonusCount > 0 ||
+            e.flowerPollens > 0 ||
+            e.gardenBalls > 0 ||
+            e.flowerDescore
+        )
+        const g410RiskCount = parsedEndgames.filter((e) => e.g410EarlyFlowerFoul).length
+
         const detail: AllianceDiscrepancyDetail = {
           alliance: color,
           officialScore,
@@ -97,6 +112,8 @@ export function calculateMatchDiscrepancies(
           signedDiff,
           ratio,
           isComplete: allianceRecords.length >= Math.min(2, allianceTeams.length),
+          endgameSharedContestRisk: diff > 0 && (hasSharedEndgameElements || g410RiskCount > 0),
+          g410RiskCount,
           scouts: allianceRecords.map((r) => ({
             scoutId: r.scoutId || '',
             scoutName: r.scoutName || 'Scout',
@@ -128,11 +145,19 @@ export function calculateMatchDiscrepancies(
         ? (isZh ? '红方' : 'Red Alliance')
         : (isZh ? '蓝方' : 'Blue Alliance')
       const signStr = (dominant?.signedDiff || 0) >= 0 ? `+${dominant?.signedDiff}` : `${dominant?.signedDiff}`
-      const summaryMessage = dominant
+      const hasContestRisk = Boolean(redDetail?.endgameSharedContestRisk || blueDetail?.endgameSharedContestRisk)
+      const totalG410Risks = (redDetail?.g410RiskCount || 0) + (blueDetail?.g410RiskCount || 0)
+      const endgameContestHint = hasContestRisk
+        ? (isZh
+            ? `Endgame 含共有 Flower 归属/Garden 残球${totalG410Risks > 0 ? '或 G410 判罚' : ''}差异可能`
+            : `Possible Endgame shared Flower/Garden${totalG410Risks > 0 ? ' or G410 foul' : ''} variance`)
+        : undefined
+      const baseSummary = dominant
         ? (isZh
             ? `${dominantName}侦察总分 ${dominant.scoutScore}分 vs 官方 ${dominant.officialScore}分 (偏差 ${signStr}分, ${(dominant.ratio * 100).toFixed(0)}%)`
             : `${dominantName} Scouted ${dominant.scoutScore} vs Official ${dominant.officialScore} (Diff ${signStr} pts, ${(dominant.ratio * 100).toFixed(0)}%)`)
         : (isZh ? `差额 ±${maxDiff}分` : `Diff ±${maxDiff} pts`)
+      const summaryMessage = endgameContestHint ? `${baseSummary} · ${endgameContestHint}` : baseSummary
 
       results.push({
         matchNumber: matchNum,
@@ -143,7 +168,8 @@ export function calculateMatchDiscrepancies(
         maxRatio,
         red: redDetail,
         blue: blueDetail,
-        summaryMessage
+        summaryMessage,
+        ...(endgameContestHint ? { endgameContestHint } : {})
       })
     }
   }

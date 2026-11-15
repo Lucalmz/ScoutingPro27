@@ -6,10 +6,15 @@ import java.net.Inet6Address;
 import java.net.InetAddress;
 import java.net.NetworkInterface;
 import java.net.SocketException;
+import java.nio.charset.Charset;
+import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.Enumeration;
+import java.util.LinkedHashSet;
 import java.util.List;
+import java.util.Locale;
+import java.util.Set;
 
 /**
  * 局域网与公网双栈网络探测工具类。
@@ -227,6 +232,7 @@ public class NetworkUtil {
             );
             pb.redirectErrorStream(true);
             Process p = pb.start();
+            p.getInputStream().readAllBytes();
             return p.waitFor() == 0;
         } catch (Exception e) {
             return false;
@@ -234,9 +240,13 @@ public class NetworkUtil {
     }
 
     /**
-     * 检查当前 Windows 防火墙是否已存在针对 WebRTC UDP 入站端口范围 (1024-65535 edge=yes) 的放行规则
+     * 检查当前进程是否具备 Windows 管理员权限
      */
     public static boolean isCurrentProcessAdmin() {
+        String os = System.getProperty("os.name", "").toLowerCase();
+        if (!os.contains("win")) {
+            return false;
+        }
         try {
             Process p = new ProcessBuilder("net", "session").redirectErrorStream(true).start();
             p.getInputStream().readAllBytes();
@@ -244,6 +254,21 @@ public class NetworkUtil {
         } catch (Exception e) {
             return false;
         }
+    }
+
+    static String resolveCurrentJavaExe() {
+        String cmd = ProcessHandle.current().info().command().orElse("");
+        if (!cmd.isBlank()) {
+            return cmd.replace("\"", "").trim();
+        }
+        String javaHome = System.getProperty("java.home", "");
+        if (!javaHome.isBlank()) {
+            File javaBin = new File(javaHome, "bin\\java.exe");
+            if (javaBin.exists()) {
+                return javaBin.getAbsolutePath().replace("\"", "").trim();
+            }
+        }
+        return "";
     }
 
     public static void ensureWindowsFirewallPort(int port) {
@@ -290,36 +315,54 @@ public class NetworkUtil {
     }
 
     static String buildWindowsNetworkAndFirewallSetupScript(int port) {
-        String javaExe = ProcessHandle.current().info().command().orElse("");
+        String javaExe = resolveCurrentJavaExe();
         String jcefHelperExe = new java.io.File(
                 System.getProperty("user.home"),
                 ".scoutingpro27\\jcef-bundle\\jcef_helper.exe"
         ).getAbsolutePath();
+        return buildWindowsNetworkAndFirewallSetupScript(port, javaExe, jcefHelperExe);
+    }
+
+    static String buildWindowsNetworkAndFirewallSetupScript(int port, String javaExe, String jcefHelperExe) {
+        String cleanJavaExe = javaExe == null ? "" : javaExe.replace("\"", "").trim();
+        String cleanJcefExe = jcefHelperExe == null ? "" : jcefHelperExe.replace("\"", "").trim();
 
         StringBuilder sb = new StringBuilder();
         sb.append("$ErrorActionPreference = 'SilentlyContinue'; ");
 
-        // 1. 放行 TCP 端口与全范围 WebRTC UDP 端口 (1024-65535)，开启 edge=yes 以允许跨网/跨境 UDP 入站
+        // 1. 幂等清理并重建仅属于 ScoutingPro27 的防火墙规则（严禁扫描或删除第三方 Java/CEF 规则）
         sb.append("netsh advfirewall firewall delete rule name=\"ScoutingPro27 WebRTC UDP\" | Out-Null; ");
         sb.append("netsh advfirewall firewall delete rule name=\"ScoutingPro27 WebRTC UDP v2\" | Out-Null; ");
-        sb.append("netsh advfirewall firewall add rule name=\"ScoutingPro27 Inbound (").append(port).append(")\" dir=in action=allow protocol=TCP localport=").append(port).append(" profile=any | Out-Null; ");
-        sb.append("netsh advfirewall firewall add rule name=\"ScoutingPro27 WebRTC UDP v2\" dir=in action=allow protocol=UDP localport=1024-65535 profile=any edge=yes | Out-Null; ");
+        sb.append("netsh advfirewall firewall delete rule name=\"ScoutingPro27 Inbound (").append(port).append(")\" | Out-Null; ");
+        sb.append("netsh advfirewall firewall delete rule name=\"ScoutingPro27 App Java\" | Out-Null; ");
+        sb.append("netsh advfirewall firewall delete rule name=\"ScoutingPro27 App JCEF\" | Out-Null; ");
+        sb.append("Get-NetFirewallRule -DisplayName 'ScoutingPro27*' -ErrorAction SilentlyContinue | ")
+          .append("Where-Object { $_.Direction -eq 'Inbound' -and $_.Action -eq 'Block' } | ")
+          .append("Remove-NetFirewallRule -ErrorAction SilentlyContinue; ");
 
-        // 2. 极速移除针对 java / jcef_helper / scoutingpro 的入站 Block 规则
-        sb.append("Get-NetFirewallApplicationFilter -ErrorAction SilentlyContinue | Where-Object { $_.Program -match 'java|jcef|scoutingpro' } | ForEach-Object { ");
-        sb.append("$r = $_ | Get-NetFirewallRule -ErrorAction SilentlyContinue | Where-Object { $_.Direction -eq 'Inbound' -and $_.Action -eq 'Block' }; ");
-        sb.append("if ($r) { $r | Remove-NetFirewallRule -ErrorAction SilentlyContinue } ");
-        sb.append("}; ");
-
-        // 3. 显式为当前 Java 进程和 jcef_helper.exe 添加带 edge=yes 的应用程序级入站 Allow 规则
-        if (!javaExe.isEmpty()) {
-            sb.append("netsh advfirewall firewall add rule name=\"ScoutingPro27 App Java\" dir=in action=allow program=\"")
-              .append(javaExe.replace("\"", "")).append("\" profile=any edge=yes | Out-Null; ");
+        // 2. 放行 TCP 服务端口（当 javaExe 可用时绑定到当前 Java 进程）
+        sb.append("netsh advfirewall firewall add rule name=\"ScoutingPro27 Inbound (").append(port)
+          .append(")\" dir=in action=allow protocol=TCP localport=").append(port);
+        if (!cleanJavaExe.isEmpty()) {
+            sb.append(" program=\"").append(cleanJavaExe).append("\"");
         }
-        sb.append("if (Test-Path '").append(jcefHelperExe.replace("'", "''")).append("') { ");
-        sb.append("netsh advfirewall firewall add rule name=\"ScoutingPro27 App JCEF\" dir=in action=allow program=\"")
-          .append(jcefHelperExe.replace("\"", "")).append("\" profile=any edge=yes | Out-Null; ");
-        sb.append("}; ");
+        sb.append(" profile=any | Out-Null; ");
+
+        // 3. 仅在已知当前 Java 进程路径时放行作用域限定的 WebRTC UDP 端口与 Java 应用规则，严禁为全系统进程全局开放 UDP 1024-65535
+        if (!cleanJavaExe.isEmpty()) {
+            sb.append("netsh advfirewall firewall add rule name=\"ScoutingPro27 WebRTC UDP v2\" dir=in action=allow protocol=UDP localport=1024-65535 program=\"")
+              .append(cleanJavaExe).append("\" profile=any edge=yes | Out-Null; ");
+            sb.append("netsh advfirewall firewall add rule name=\"ScoutingPro27 App Java\" dir=in action=allow program=\"")
+              .append(cleanJavaExe).append("\" profile=any edge=yes | Out-Null; ");
+        }
+
+        // 4. 若存在内置 jcef_helper.exe，显式为其添加带 edge=yes 的应用程序级入站 Allow 规则
+        if (!cleanJcefExe.isEmpty()) {
+            sb.append("if (Test-Path '").append(cleanJcefExe.replace("'", "''")).append("') { ");
+            sb.append("netsh advfirewall firewall add rule name=\"ScoutingPro27 App JCEF\" dir=in action=allow program=\"")
+              .append(cleanJcefExe).append("\" profile=any edge=yes | Out-Null; ");
+            sb.append("}; ");
+        }
 
         // 注意：此脚本只允许修改 Windows 防火墙规则，严禁修改任何系统路由、接口跃点数 (InterfaceMetric)、
         // WeakHost 模型或 TUN/Loopback 上的路由与地址。历史版本曾对此进行“自愈”，会破坏 Clash/Mihomo 等
@@ -360,27 +403,70 @@ public class NetworkUtil {
         }
     }
 
+    static List<Charset> resolveWindowsConsoleCharsets() {
+        Set<Charset> charsets = new LinkedHashSet<>();
+        for (String prop : new String[]{"sun.stdout.encoding", "native.encoding", "sun.jnu.encoding"}) {
+            String name = System.getProperty(prop);
+            if (name != null && !name.isBlank()) {
+                try {
+                    charsets.add(Charset.forName(name.trim()));
+                } catch (Exception ignored) {}
+            }
+        }
+        charsets.add(Charset.defaultCharset());
+        charsets.add(StandardCharsets.UTF_8);
+        return new ArrayList<>(charsets);
+    }
+
+    static boolean matchesJavaExeInNetshOutput(byte[] rawOutput, String javaExe) {
+        if (rawOutput == null || rawOutput.length == 0 || javaExe == null || javaExe.isBlank()) {
+            return false;
+        }
+        String needle = javaExe.toLowerCase(Locale.ROOT);
+        for (Charset cs : resolveWindowsConsoleCharsets()) {
+            String decoded = new String(rawOutput, cs).toLowerCase(Locale.ROOT);
+            if (decoded.contains(needle)) {
+                return true;
+            }
+        }
+        return false;
+    }
+
     private static boolean isWindowsFirewallWebRtcUdpAllowed() {
+        String os = System.getProperty("os.name", "").toLowerCase();
+        if (!os.contains("win")) {
+            return true;
+        }
+        String javaExe = resolveCurrentJavaExe();
+        if (javaExe.isEmpty()) {
+            return true;
+        }
         try {
             ProcessBuilder pb = new ProcessBuilder(
                     "netsh", "advfirewall", "firewall", "show", "rule",
-                    "name=ScoutingPro27 WebRTC UDP v2"
+                    "name=ScoutingPro27 WebRTC UDP v2", "verbose"
             );
+            pb.redirectErrorStream(true);
             Process p = pb.start();
+            byte[] rawOut = p.getInputStream().readAllBytes();
             int exitCode = p.waitFor();
-            return exitCode == 0;
+            return exitCode == 0 && matchesJavaExeInNetshOutput(rawOut, javaExe);
         } catch (Exception e) {
             return false;
         }
     }
 
     public static boolean hasWindowsFirewallAppBlockRule() {
+        String os = System.getProperty("os.name", "").toLowerCase();
+        if (!os.contains("win")) {
+            return false;
+        }
         try {
             ProcessBuilder pb = new ProcessBuilder(
                     "powershell.exe", "-NoProfile", "-NonInteractive", "-Command",
-                    "Get-NetFirewallApplicationFilter -ErrorAction SilentlyContinue | Where-Object { $_.Program -match 'java|jcef|scoutingpro' } | ForEach-Object { " +
-                    "$r = $_ | Get-NetFirewallRule -ErrorAction SilentlyContinue | Where-Object { $_.Direction -eq 'Inbound' -and $_.Action -eq 'Block' -and $_.Enabled -eq 'True' }; " +
-                    "if ($r) { Write-Output 'BLOCKED'; break } }"
+                    "Get-NetFirewallRule -DisplayName 'ScoutingPro27*' -ErrorAction SilentlyContinue | " +
+                    "Where-Object { $_.Direction -eq 'Inbound' -and $_.Action -eq 'Block' -and $_.Enabled -eq 'True' } | " +
+                    "Select-Object -First 1 | ForEach-Object { Write-Output 'BLOCKED' }"
             );
             pb.redirectErrorStream(true);
             Process p = pb.start();

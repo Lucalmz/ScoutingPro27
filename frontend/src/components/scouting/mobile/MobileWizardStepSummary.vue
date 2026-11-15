@@ -1,8 +1,10 @@
 <script setup lang="ts">
+import { computed } from 'vue'
 import { useI18n } from 'vue-i18n'
 import type { MobileTeamScoutData } from './useMobileWizardForm'
+import { calcMatchPredictCycleTime } from '@/utils/analytics/predictCycleTime'
 
-defineProps<{
+const props = defineProps<{
   matchNumber: string
   allianceColor: 'none' | 'red' | 'blue'
   team: MobileTeamScoutData
@@ -16,6 +18,10 @@ defineProps<{
 }>()
 
 const { t } = useI18n()
+
+const predictCycleSec = computed(() =>
+  calcMatchPredictCycleTime(props.team.teleopCycles, props.team.teleopCycleTimestamps)
+)
 </script>
 
 <template>
@@ -58,8 +64,19 @@ const { t } = useI18n()
         <div class="breakdown-col">
           <span class="breakdown-label">{{ t('wizard.endgame_stage') }}</span>
           <span class="breakdown-val">{{ endgameScore }} {{ t('wizard.pts_unit') }}</span>
-          <span class="breakdown-sub">{{ t('wizard.endgame_summary_sub', { flower: team.flowerPlaced ? '✓' : '✕', park: team.teleopPark ? '✓' : '✕' }) }}</span>
+          <span class="breakdown-sub">{{ t('wizard.endgame_summary_v2', { nectars: team.flowerNectars, bottom: team.flowerBottomBonusCount, pollens: team.flowerPollens, garden: team.gardenBalls, park: team.teleopPark ? '✓' : '✕' }) }}</span>
         </div>
+      </div>
+
+      <div v-if="team.teleopCycles.length > 0" class="predict-cycle-summary-row">
+        <span>{{ t('scouting.predict_cycle_time') }}:</span>
+        <strong>
+          {{
+            predictCycleSec !== null
+              ? t('scouting.predict_cycle_value', { sec: predictCycleSec })
+              : t('scouting.predict_cycle_insufficient')
+          }}
+        </strong>
       </div>
 
       <div v-if="team.isBroken" class="broken-alert-banner">
@@ -295,5 +312,21 @@ const { t } = useI18n()
   color: #ffffff;
   font-size: 13px;
   font-weight: 600;
+}
+
+.predict-cycle-summary-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 7px 10px;
+  border-radius: 8px;
+  background: rgba(56, 189, 248, 0.08);
+  border: 1px solid rgba(56, 189, 248, 0.25);
+  font-size: 12px;
+  color: var(--muted-foreground, #8e8d87);
+}
+
+.predict-cycle-summary-row strong {
+  color: #38bdf8;
 }
 </style>

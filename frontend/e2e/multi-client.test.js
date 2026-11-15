@@ -291,10 +291,10 @@ async function runTest() {
     const goToHistoryTab = async (page) => {
       await page.evaluate(() => {
         const tabs = Array.from(document.querySelectorAll('.tab-btn'));
-        const historyTab = tabs.find(b => {
+        const historyTab = document.querySelector('.tab-btn[data-tab="history"]') || tabs.find(b => {
           const text = (b.textContent || '').trim();
           return text.includes('历史') || text.includes('History');
-        }) || (tabs.length > 4 ? tabs[4] : null);
+        }) || (tabs.length > 5 ? tabs[5] : null);
         if (historyTab) historyTab.click();
       });
       await waitForTransition(page);

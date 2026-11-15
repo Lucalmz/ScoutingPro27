@@ -5,6 +5,7 @@ import com.bear27570.app.db.JdbiConfig;
 import com.bear27570.app.db.UserDeterministicIdMigrator;
 import com.google.gson.JsonArray;
 import com.google.gson.JsonElement;
+import com.google.gson.JsonNull;
 import com.google.gson.JsonObject;
 import org.flywaydb.core.Flyway;
 import org.jdbi.v3.core.Jdbi;
@@ -184,11 +185,14 @@ public class SimulateScouting {
                 // 3. 生成 16 支队伍的 BIOBUZZ 展位侦察记录 (Pit Scouting)
                 System.out.println("正在生成 16 支战队的 2026 BIOBUZZ 展位硬件构型与自述量化数据...");
                 Random rng = new Random(42); // 固定种子保证生成确定性测试数据
+                Random traitRng = new Random(1337L); // 独立随机源避免扰动既有模拟数值序列
                 String[] compatibilities = {"universal", "sorting", "pollen_only"};
-                String[] launcherTypes = {"差速双飞轮", "单大飞轮", "弹簧凸轮抛射", "气动弹射"};
-                String[] flowerMechanisms = {"垂直级联高升降", "地槽推球", "仰角抛射", "无"};
+                String[] launcherTypes = {"差速双飞轮", "单飞轮抛射", "曲面滑轨", "弹簧敲击"};
+                String[] flowerMechanisms = {"垂直级联高抬升", "仰角抛射", "摆臂直投", "无"};
+                String[] chassisSizes = {"紧凑小车 (≤15\")", "标准中型 (16\"-17\")", "宽体大车 (~18\")"};
                 String[] drivetrains = {"swerve", "mecanum", "tank"};
                 String[] odometries = {"pinpoint", "sparkfun_otos", "three_wheel", "two_wheel", "none"};
+                Map<Integer, TeamPitTraits> teamTraitsByNumber = new HashMap<>();
                 int pitIndex = 0;
 
                 for (JsonElement tElem : teams) {
@@ -200,30 +204,57 @@ public class SimulateScouting {
                     if (teamNum == 27570) hasSensor = true;
 
                     String launcher = launcherTypes[rng.nextInt(launcherTypes.length)];
-                    String flower = flowerMechanisms[rng.nextInt(flowerMechanisms.length)];
+                    String flower = teamNum == 27570 ? "垂直级联高抬升" : flowerMechanisms[rng.nextInt(flowerMechanisms.length)];
                     String dt = drivetrains[rng.nextInt(drivetrains.length)];
                     String odom = odometries[rng.nextInt(odometries.length)];
                     double weight = 32.0 + rng.nextInt(12) + (rng.nextInt(10) / 10.0);
+                    String chassisSize = teamNum == 27570 ? "标准中型 (16\"-17\")" : chassisSizes[traitRng.nextInt(chassisSizes.length)];
+                    boolean hasDescoreMech = (teamNum == 27570) || (rng.nextInt(10) < 4);
+                    boolean hasApriltagVision = (teamNum == 27570) || (rng.nextInt(10) < 6);
+                    TeamPitTraits traits = new TeamPitTraits(compat, flower, hasDescoreMech);
+                    teamTraitsByNumber.put(teamNum, traits);
 
                     int claimedAuto = 6 + rng.nextInt(9); // 6~14 分
                     int claimedCycles = 4 + rng.nextInt(5); // 4~8 轮
                     int claimedTeleop = claimedCycles * (2 + rng.nextInt(3)) * 2; // 30~80 分
-                    int claimedEndgame = (rng.nextBoolean() ? 10 : 0) + (rng.nextBoolean() ? 5 : 0) + 5;
+                    boolean claimedTeleopPark = (teamNum == 27570) || (rng.nextInt(10) < 8);
+                    int claimedFlowerNectars = traits.canScoreNectar() ? (1 + rng.nextInt(3)) : 0;
+                    int claimedFlowerBottomBonus = (traits.canScoreNectar() && claimedFlowerNectars > 0)
+                            ? rng.nextInt(Math.min(2, claimedFlowerNectars) + 1) : 0;
+                    int claimedFlowerPollens = traits.canScorePollen() ? rng.nextInt(5) : 0;
+                    int claimedGardenBalls = rng.nextInt(5);
+                    int claimedEndgame = (claimedTeleopPark ? 5 : 0)
+                            + (claimedFlowerNectars * 2)
+                            + (claimedFlowerBottomBonus * 5)
+                            + (claimedFlowerPollens * 2)
+                            + claimedGardenBalls;
                     int claimedTotal = claimedAuto + claimedTeleop + claimedEndgame;
-                    String strategy = teamNum == 27570 ? "预载进球+花园两球+快速停泊" : "预载直射 + 地面摄入 + 终局放花";
+                    String strategy = teamNum == 27570 ? "预载进球+花园两球+快速停泊" : "预载直射 + 地面摄入 + 花朵/停泊";
+
+                    int pitScoutIdx = rng.nextInt(4);
+                    String pitScoutId = scouterIds[pitScoutIdx];
+                    String pitScoutName = "Scouter " + (char)('A' + pitScoutIdx);
 
                     JsonObject pitRawJson = new JsonObject();
                     pitRawJson.addProperty("teamNumber", teamNum);
                     pitRawJson.addProperty("robotName", t.get("robotName").getAsString());
                     pitRawJson.addProperty("drivetrainType", dt);
                     pitRawJson.addProperty("weightLbs", weight);
+                    pitRawJson.addProperty("chassisSize", chassisSize);
                     pitRawJson.addProperty("odometryType", odom);
                     pitRawJson.addProperty("ballCompatibility", compat);
                     pitRawJson.addProperty("launcherType", launcher);
                     pitRawJson.addProperty("flowerMechanism", flower);
                     pitRawJson.addProperty("hasColorSensor", hasSensor);
+                    pitRawJson.addProperty("hasDescoreMech", hasDescoreMech);
+                    pitRawJson.addProperty("hasApriltagVision", hasApriltagVision);
                     pitRawJson.addProperty("claimedAutoStrategy", strategy);
                     pitRawJson.addProperty("claimedTeleopCycles", claimedCycles);
+                    pitRawJson.addProperty("claimedTeleopPark", claimedTeleopPark);
+                    pitRawJson.addProperty("claimedFlowerNectars", claimedFlowerNectars);
+                    pitRawJson.addProperty("claimedFlowerBottomBonus", claimedFlowerBottomBonus);
+                    pitRawJson.addProperty("claimedFlowerPollens", claimedFlowerPollens);
+                    pitRawJson.addProperty("claimedGardenBalls", claimedGardenBalls);
                     pitRawJson.addProperty("claimedEndgameScore", claimedEndgame);
                     pitRawJson.addProperty("claimedAutoScore", claimedAuto);
                     pitRawJson.addProperty("claimedTeleopScore", claimedTeleop);
@@ -239,16 +270,22 @@ public class SimulateScouting {
                     handle.createUpdate("""
                         INSERT INTO pit_scouting_records (
                             id, event_id, team_number, scout_id, scout_name, robot_name,
-                            drivetrain_type, weight_lbs, odometry_type,
+                            drivetrain_type, weight_lbs, chassis_size, odometry_type,
                             ball_compatibility, launcher_type, flower_mechanism, has_color_sensor,
-                            claimed_auto_strategy, claimed_teleop_cycles, claimed_endgame_score,
+                            has_descore_mech, has_apriltag_vision,
+                            claimed_auto_strategy, claimed_teleop_cycles,
+                            claimed_teleop_park, claimed_flower_nectars, claimed_flower_bottom_bonus, claimed_flower_pollens, claimed_garden_balls,
+                            claimed_endgame_score,
                             claimed_auto_score, claimed_teleop_score, claimed_total_score,
                             photo_keys, version, host_seq, is_deleted, raw_data, created_at, updated_at
                         ) VALUES (
                             ?, ?, ?, ?, ?, ?,
-                            ?, ?, ?,
                             ?, ?, ?, ?,
-                            ?, ?, ?,
+                            ?, ?, ?, ?,
+                            ?, ?,
+                            ?, ?,
+                            ?, ?, ?, ?, ?,
+                            ?,
                             ?, ?, ?,
                             '[]', 1, ?, FALSE, ?, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP
                         )
@@ -256,29 +293,38 @@ public class SimulateScouting {
                     .bind(0, UUID.randomUUID().toString())
                     .bind(1, eventId)
                     .bind(2, teamNum)
-                    .bind(3, scouterIds[rng.nextInt(4)])
-                    .bind(4, "Scouter " + (char)('A' + rng.nextInt(4)))
+                    .bind(3, pitScoutId)
+                    .bind(4, pitScoutName)
                     .bind(5, t.get("robotName").getAsString())
                     .bind(6, dt)
                     .bind(7, weight)
-                    .bind(8, odom)
-                    .bind(9, compat)
-                    .bind(10, launcher)
-                    .bind(11, flower)
-                    .bind(12, hasSensor)
-                    .bind(13, strategy)
-                    .bind(14, claimedCycles)
-                    .bind(15, claimedEndgame)
-                    .bind(16, claimedAuto)
-                    .bind(17, claimedTeleop)
-                    .bind(18, claimedTotal)
-                    .bind(19, pitIndex)
-                    .bind(20, pitRawJson.toString())
+                    .bind(8, chassisSize)
+                    .bind(9, odom)
+                    .bind(10, compat)
+                    .bind(11, launcher)
+                    .bind(12, flower)
+                    .bind(13, hasSensor)
+                    .bind(14, hasDescoreMech)
+                    .bind(15, hasApriltagVision)
+                    .bind(16, strategy)
+                    .bind(17, claimedCycles)
+                    .bind(18, claimedTeleopPark)
+                    .bind(19, claimedFlowerNectars)
+                    .bind(20, claimedFlowerBottomBonus)
+                    .bind(21, claimedFlowerPollens)
+                    .bind(22, claimedGardenBalls)
+                    .bind(23, claimedEndgame)
+                    .bind(24, claimedAuto)
+                    .bind(25, claimedTeleop)
+                    .bind(26, claimedTotal)
+                    .bind(27, pitIndex)
+                    .bind(28, pitRawJson.toString())
                     .execute();
                 }
 
                 // 4. 生成 48 条真实的比赛打分记录 (Scouting Records with Cycle Tracker)
                 System.out.println("正在生成 48 条 2026 BIOBUZZ 轮次出球打分记录...");
+                Random tsRng = new Random(2026042L); // 独立随机源生成拟真循环完成时间戳
                 int recordCount = 0;
                 int globalScoutIndex = 0;
 
@@ -291,6 +337,10 @@ public class SimulateScouting {
                         JsonObject team = teamElement.getAsJsonObject();
                         int teamNumber = team.get("teamNumber").getAsInt();
                         String alliance = team.get("alliance").getAsString().toLowerCase();
+                        TeamPitTraits traits = teamTraitsByNumber.getOrDefault(
+                                teamNumber,
+                                new TeamPitTraits("universal", "垂直级联高抬升", false)
+                        );
 
                         int sIndex = globalScoutIndex % 4;
                         String scouterId = scouterIds[sIndex];
@@ -316,11 +366,22 @@ public class SimulateScouting {
                         }
                         int teleopScore = totalBalls * 2;
 
-                        // Endgame (花朵大球 10分, 花底加分 5分, 停泊 5分)
-                        boolean flowerPlaced = !isBroken && rng.nextBoolean(); // 50%
-                        boolean flowerBottomBonus = !isBroken && flowerPlaced && rng.nextBoolean(); // 25%
+                        // Endgame (2026 BIOBUZZ: 停泊 +5, 花朵 Nectar +2/颗, 占底 +5/朵, 花朵 Pollen +2/颗, Garden +1/球)
                         boolean teleopPark = !isBroken && (rng.nextInt(10) < 8); // 80%
-                        int endgameScore = (flowerPlaced ? 10 : 0) + (flowerBottomBonus ? 5 : 0) + (teleopPark ? 5 : 0);
+                        int flowerNectars = (!isBroken && traits.canScoreNectar()) ? rng.nextInt(4) : 0; // 0~3 颗大球
+                        int flowerBottomBonusCount = (!isBroken && traits.canScoreNectar() && flowerNectars > 0)
+                                ? rng.nextInt(Math.min(4, Math.min(2, flowerNectars)) + 1) : 0; // 0~2 朵且 <= min(4, flowerNectars)
+                        int flowerPollens = (!isBroken && traits.canScorePollen()) ? rng.nextInt(5) : 0; // 0~4 颗小球
+                        int gardenBalls = !isBroken ? rng.nextInt(5) : 0; // 0~4 球
+                        boolean flowerDescore = !isBroken && traits.hasDescoreMech() && (rng.nextInt(10) < 3); // 具备掏球机构时约30%触发敌方花底掏球
+                        boolean g410EarlyFlowerFoul = !isBroken && traits.canScoreNectar() && (rng.nextInt(20) == 0); // 5% G410 提前误投 Nectar 大犯规
+                        boolean flowerPlaced = flowerNectars > 0;
+                        boolean flowerBottomBonus = flowerBottomBonusCount > 0;
+                        int endgameScore = (teleopPark ? 5 : 0)
+                                + (flowerNectars * 2)
+                                + (flowerBottomBonusCount * 5)
+                                + (flowerPollens * 2)
+                                + gardenBalls;
 
                         int totalScore = autoScore + teleopScore + endgameScore;
 
@@ -332,7 +393,7 @@ public class SimulateScouting {
                         rawJson.addProperty("autoLeave", autoLeave);
                         rawJson.addProperty("autoBalls", autoBalls);
                         rawJson.addProperty("autoPreload", autoBalls > 0);
-                        rawJson.addProperty("autoSecondary", !isBroken && rng.nextBoolean());
+                        rawJson.addProperty("autoSecondary", !isBroken && autoBalls > 1);
                         rawJson.addProperty("autoPark", autoPark);
 
                         JsonArray autoCyclesArr = new JsonArray();
@@ -351,9 +412,38 @@ public class SimulateScouting {
                         }
                         rawJson.add("teleopMissedCycles", teleopMissedArr);
 
+                        JsonArray cycleTimestampsArr = new JsonArray();
+                        List<Long> cycleTimestampList = new ArrayList<>();
+                        if (cycleCount > 0) {
+                            long matchTeleopStartMs = 1_760_000_000_000L + (matchNum * 300_000L);
+                            int teamBaseCycleMs = 7_500 + (Math.floorMod(teamNumber * 31, 7) * 1_100);
+                            long cursorMs = matchTeleopStartMs + 8_000L + tsRng.nextInt(5_000);
+                            for (int c = 0; c < cycleCount; c++) {
+                                if (c > 0) {
+                                    int intervalMs = Math.max(4_500, teamBaseCycleMs + tsRng.nextInt(3_200) - 800);
+                                    cursorMs += intervalMs;
+                                }
+                                cycleTimestampsArr.add(cursorMs);
+                                cycleTimestampList.add(cursorMs);
+                            }
+                        }
+                        Double predictCycleTimeSec = computePredictCycleTimeSec(cycleTimestampList);
+                        rawJson.add("teleopCycleTimestamps", cycleTimestampsArr);
+                        if (predictCycleTimeSec != null) {
+                            rawJson.addProperty("predictCycleTimeSec", predictCycleTimeSec);
+                        } else {
+                            rawJson.add("predictCycleTimeSec", JsonNull.INSTANCE);
+                        }
+
+                        rawJson.addProperty("teleopPark", teleopPark);
+                        rawJson.addProperty("flowerNectars", flowerNectars);
+                        rawJson.addProperty("flowerBottomBonusCount", flowerBottomBonusCount);
+                        rawJson.addProperty("flowerPollens", flowerPollens);
+                        rawJson.addProperty("gardenBalls", gardenBalls);
+                        rawJson.addProperty("flowerDescore", flowerDescore);
+                        rawJson.addProperty("g410EarlyFlowerFoul", g410EarlyFlowerFoul);
                         rawJson.addProperty("flowerPlaced", flowerPlaced);
                         rawJson.addProperty("flowerBottomBonus", flowerBottomBonus);
-                        rawJson.addProperty("teleopPark", teleopPark);
                         rawJson.addProperty("isBroken", isBroken);
 
                         JsonObject matchCustomFields = new JsonObject();
@@ -470,5 +560,63 @@ public class SimulateScouting {
         } finally {
             JdbiConfig.closeDataSources();
         }
+    }
+
+    record TeamPitTraits(String ballCompatibility, String flowerMechanism, boolean hasDescoreMech) {
+        boolean hasFlowerMechanism() {
+            return flowerMechanism != null
+                    && !flowerMechanism.isBlank()
+                    && !"无".equals(flowerMechanism.trim())
+                    && !"none".equalsIgnoreCase(flowerMechanism.trim());
+        }
+
+        boolean canScoreNectar() {
+            return hasFlowerMechanism() && !"pollen_only".equalsIgnoreCase(ballCompatibility);
+        }
+
+        boolean canScorePollen() {
+            return hasFlowerMechanism() && !"nectar_only".equalsIgnoreCase(ballCompatibility);
+        }
+    }
+
+    /**
+     * 按 BIOBUZZ predictCycleTime 契约计算单场预测循环耗时（秒）：
+     * - 仅保留正且严格单调递增的时间戳，相邻有效间隔 dt = (t[i] - t[i-1]) / 1000，仅保留 0 < dt <= 120；
+     * - 若有效间隔 < 5 个，返回 null（不达标）；
+     * - 若 >= 5 个，升序排序后去掉最短 1 次，取接下来较短的 4 次求均值并四舍五入到 0.1 秒精度。
+     */
+    public static Double computePredictCycleTimeSec(List<Long> timestamps) {
+        if (timestamps == null || timestamps.size() < 6) {
+            return null;
+        }
+        List<Long> validTimestamps = new ArrayList<>();
+        for (Long ts : timestamps) {
+            if (ts == null || ts <= 0L) {
+                continue;
+            }
+            if (!validTimestamps.isEmpty() && ts <= validTimestamps.get(validTimestamps.size() - 1)) {
+                continue;
+            }
+            validTimestamps.add(ts);
+        }
+        if (validTimestamps.size() < 6) {
+            return null;
+        }
+        List<Double> validIntervals = new ArrayList<>();
+        for (int i = 1; i < validTimestamps.size(); i++) {
+            double dtSec = (validTimestamps.get(i) - validTimestamps.get(i - 1)) / 1000.0;
+            if (dtSec > 0.0 && dtSec <= 120.0) {
+                validIntervals.add(dtSec);
+            }
+        }
+        if (validIntervals.size() < 5) {
+            return null;
+        }
+        Collections.sort(validIntervals);
+        double sum = 0.0;
+        for (int i = 1; i < 5; i++) {
+            sum += validIntervals.get(i);
+        }
+        return Math.round((sum / 4.0) * 10.0) / 10.0;
     }
 }

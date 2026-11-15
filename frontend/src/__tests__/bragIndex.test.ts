@@ -1,8 +1,16 @@
-import { describe, it, expect } from 'vitest'
+import { describe, it, expect, beforeEach, afterEach } from 'vitest'
 import { calculateBragIndex } from '../utils/bragIndex'
+import { switchLanguage } from '../i18n'
 import type { PitScoutingRecord, ScoutingRecord } from '../types'
 
-const createDummyMatch = (matchNumber: number, autoScore: number, teleopScore: number, endgameScore: number): ScoutingRecord => ({
+const createDummyMatch = (
+  matchNumber: number,
+  autoScore: number,
+  teleopScore: number,
+  endgameScore: number,
+  rawDataObj: Record<string, unknown> = {},
+  overrides: Partial<ScoutingRecord> = {}
+): ScoutingRecord => ({
   id: `m_${matchNumber}`,
   eventId: 'evt_test',
   scoutId: 's1',
@@ -14,13 +22,20 @@ const createDummyMatch = (matchNumber: number, autoScore: number, teleopScore: n
   endgameScore,
   totalScore: autoScore + teleopScore + endgameScore,
   notes: '',
-  rawData: '{}',
+  rawData: JSON.stringify(rawDataObj),
   syncStatus: 'SYNCED',
   createdAt: '',
-  updatedAt: ''
+  updatedAt: '',
+  ...overrides
 })
 
-const createClaimedRecord = (claimedAuto: number, claimedTeleop: number, claimedEndgame: number, claimedTotal: number): PitScoutingRecord => ({
+const createClaimedRecord = (
+  claimedAuto: number,
+  claimedTeleop: number,
+  claimedEndgame: number,
+  claimedTotal: number,
+  overrides: Partial<PitScoutingRecord> = {}
+): PitScoutingRecord => ({
   id: 'pit_1',
   eventId: 'evt_test',
   teamNumber: 27570,
@@ -28,137 +43,181 @@ const createClaimedRecord = (claimedAuto: number, claimedTeleop: number, claimed
   scoutName: 'Scout 1',
   drivetrainType: 'mecanum',
   weightLbs: 38.0,
+  chassisSize: '标准中型 (16"-17")',
   ballCompatibility: 'universal',
   launcherType: '差速双飞轮',
   flowerMechanism: '垂直级联高抬升',
   hasColorSensor: true,
+  hasDescoreMech: false,
+  hasApriltagVision: true,
   odometryType: 'two_wheel',
   claimedAutoStrategy: '3 balls',
   claimedAutoScore: claimedAuto,
   claimedTeleopCycles: 6,
   claimedTeleopScore: claimedTeleop,
+  claimedTeleopPark: false,
+  claimedFlowerNectars: 2,
+  claimedFlowerBottomBonus: 1,
+  claimedFlowerPollens: 0,
+  claimedGardenBalls: 0,
   claimedEndgameScore: claimedEndgame,
   claimedTotalScore: claimedTotal,
-  version: 1
+  version: 1,
+  ...overrides
 })
 
-describe('Brag Index Calculator (吹牛指数算法)', () => {
+describe('Brag Index Calculator (BIOBUZZ 2026-2027)', () => {
+  beforeEach(() => {
+    localStorage.clear()
+    switchLanguage('en')
+  })
+
+  afterEach(() => {
+    switchLanguage('en')
+  })
+
   it('returns undefined if no claimed pit record', () => {
     expect(calculateBragIndex(null, [])).toBeUndefined()
   })
 
-  it('returns pending tier when team has not played any match yet', () => {
-    const claimed = createClaimedRecord(60, 80, 2, 160)
-    const res = calculateBragIndex(claimed, [])
-    expect(res).toBeDefined()
-    expect(res?.tier).toBe('pending')
-    expect(res?.label).toContain('待实测')
+  it('returns pending tier when team has not played any match yet in both EN and ZH locales', () => {
+    const claimed = createClaimedRecord(60, 80, 9, 149)
+
+    const enRes = calculateBragIndex(claimed, [])
+    expect(enRes).toBeDefined()
+    expect(enRes?.tier).toBe('pending')
+    expect(enRes?.labelKey).toBe('pit_scout.brag_pending_matches')
+    expect(enRes?.label).toBe('Pending Matches')
+    expect(/[\u4e00-\u9fa5]/.test(enRes!.label)).toBe(false)
+
+    switchLanguage('zh')
+    const zhRes = calculateBragIndex(claimed, [])
+    expect(zhRes?.label).toContain('待实测')
   })
 
-  it('identifies realistic team (真实守信, ratio <= 1.25)', () => {
-    const claimed = createClaimedRecord(50, 60, 2, 130)
+  it('identifies realistic, optimistic, overclaimed, and mythical tiers cleanly with endgameRatio', () => {
     const matches = [
-      createDummyMatch(1, 45, 55, 20), // total 120
-      createDummyMatch(2, 50, 60, 20)  // total 130
+      createDummyMatch(1, 45, 55, 10, { flowerNectars: 2, teleopPark: true }), // 110
+      createDummyMatch(2, 50, 60, 10, { flowerNectars: 2, teleopPark: true })  // 120 -> baseline max(120, 115*1.05)=120.75
     ]
-    const res = calculateBragIndex(claimed, matches)
-    expect(res).toBeDefined()
-    expect(res?.tier).toBe('realistic')
-    expect(res?.overallRatio).toBeLessThanOrEqual(1.25)
-    expect(res?.hangUnfulfilled).toBe(false)
+
+    const realistic = calculateBragIndex(createClaimedRecord(50, 60, 10, 120), matches)
+    expect(realistic?.tier).toBe('realistic')
+    expect(realistic?.overallRatio).toBeLessThanOrEqual(1.25)
+    expect(realistic?.endgameRatio).toBe(1)
+
+    const optimistic = calculateBragIndex(createClaimedRecord(70, 80, 20, 170), matches)
+    expect(optimistic?.tier).toBe('optimistic')
+    expect(optimistic?.overallRatio).toBeGreaterThan(1.25)
+    expect(optimistic?.overallRatio).toBeLessThanOrEqual(1.65)
+    expect(optimistic?.endgameRatio).toBe(2)
+
+    const overclaimed = calculateBragIndex(createClaimedRecord(90, 110, 20, 220), matches)
+    expect(overclaimed?.tier).toBe('overclaimed')
+    expect(overclaimed?.overallRatio).toBeGreaterThan(1.65)
+    expect(overclaimed?.overallRatio).toBeLessThanOrEqual(2.2)
+
+    const mythical = calculateBragIndex(createClaimedRecord(120, 150, 30, 300), matches)
+    expect(mythical?.tier).toBe('mythical')
+    expect(mythical?.overallRatio).toBeGreaterThan(2.2)
   })
 
-  it('identifies optimistic team (略偏乐观, 1.25 < ratio <= 1.65)', () => {
-    const claimed = createClaimedRecord(70, 80, 2, 170)
+  it('verifies flower from rawData (flowerNectars / flowerBottomBonusCount / legacy flowerPlaced) without hardcoded Chinese in EN mode', () => {
+    const claimed = createClaimedRecord(50, 60, 9, 119, {
+      flowerMechanism: 'Vertical Cascading Lift',
+      claimedFlowerNectars: 2,
+      claimedFlowerBottomBonus: 1
+    })
     const matches = [
-      createDummyMatch(1, 45, 55, 20), // 120
-      createDummyMatch(2, 50, 60, 20)  // 130
+      createDummyMatch(1, 40, 50, 0, { flowerNectars: 0 }),
+      createDummyMatch(2, 45, 55, 9, { flowerNectars: 2, flowerBottomBonusCount: 1 })
     ]
-    const res = calculateBragIndex(claimed, matches)
-    expect(res).toBeDefined()
-    expect(res?.tier).toBe('optimistic')
-    expect(res?.overallRatio).toBeGreaterThan(1.25)
-    expect(res?.overallRatio).toBeLessThanOrEqual(1.65)
+
+    const enRes = calculateBragIndex(claimed, matches)
+    expect(enRes?.flowerVerified).toBe(true)
+    expect(enRes?.flowerPending).toBe(false)
+    expect(enRes?.endgameVerified).toBe(true)
+    expect(enRes?.endgameUnfulfilled).toBe(false)
+    expect(enRes?.statusKeys).toContain('pit_scout.flower_verified')
+    expect(enRes?.label).toContain('Flower Verified')
+    expect(/[\u4e00-\u9fa5]/.test(enRes!.label)).toBe(false)
+
+    // Legacy flowerPlaced flag in rawData also counts as flower verification
+    const legacyMatches = [
+      createDummyMatch(1, 45, 55, 10, { flowerPlaced: true })
+    ]
+    const legacyRes = calculateBragIndex(claimed, legacyMatches)
+    expect(legacyRes?.flowerVerified).toBe(true)
+
+    switchLanguage('zh')
+    const zhRes = calculateBragIndex(claimed, matches)
+    expect(zhRes?.label).toContain('花朵已证实')
   })
 
-  it('identifies overclaimed team (夸大其词, 1.65 < ratio <= 2.2)', () => {
-    const claimed = createClaimedRecord(90, 100, 2, 210)
+  it('NEVER treats endgameScore >= 10 from teleopPark + gardenBalls as flowerVerified', () => {
+    const claimed = createClaimedRecord(50, 60, 15, 125, {
+      flowerMechanism: '垂直级联高抬升',
+      claimedFlowerNectars: 2
+    })
     const matches = [
-      createDummyMatch(1, 40, 50, 20), // 110
-      createDummyMatch(2, 45, 55, 20)  // 120
+      createDummyMatch(1, 45, 55, 12, { teleopPark: true, gardenBalls: 7, flowerNectars: 0, flowerBottomBonusCount: 0 }),
+      createDummyMatch(2, 45, 55, 11, { teleopPark: true, gardenBalls: 6, flowerNectars: 0, flowerBottomBonusCount: 0 })
     ]
-    const res = calculateBragIndex(claimed, matches)
-    expect(res).toBeDefined()
-    expect(res?.tier).toBe('overclaimed')
-    expect(res?.overallRatio).toBeGreaterThan(1.65)
-    expect(res?.overallRatio).toBeLessThanOrEqual(2.2)
-  })
 
-  it('identifies mythical team (吹破牛皮, ratio > 2.2)', () => {
-    const claimed = createClaimedRecord(120, 140, 3, 290)
-    const matches = [
-      createDummyMatch(1, 30, 40, 10), // 80
-      createDummyMatch(2, 35, 45, 10)  // 90
-    ]
     const res = calculateBragIndex(claimed, matches)
-    expect(res).toBeDefined()
-    expect(res?.tier).toBe('mythical')
-    expect(res?.overallRatio).toBeGreaterThan(2.2)
-  })
-
-  it('grants pardon for endgame flower unfulfilled (claimed flower but never scored in 3 matches, pardoned due to strategy)', () => {
-    const claimed = createClaimedRecord(50, 60, 15, 130)
-    const matches = [
-      createDummyMatch(1, 40, 50, 0),
-      createDummyMatch(2, 45, 55, 0),
-      createDummyMatch(3, 40, 50, 0)
-    ]
-    const res = calculateBragIndex(claimed, matches)
-    expect(res).toBeDefined()
+    expect(res?.flowerVerified).toBe(false)
+    expect(res?.flowerPending).toBe(true)
+    expect(res?.endgameVerified).toBe(false)
     expect(res?.endgameUnfulfilled).toBe(true)
     expect(res?.endgamePardoned).toBe(true)
-    // 130 / 100 = 1.30x => optimistic, NOT penalized to mythical or overclaimed
-    expect(res?.tier).toBe('optimistic')
-    expect(res?.label).toContain('花朵待验证')
+    expect(res?.statusKeys).toContain('pit_scout.flower_pending_verify')
+    expect(res?.label).toContain('Flower Pending')
+    expect(/[\u4e00-\u9fa5]/.test(res!.label)).toBe(false)
   })
 
-  it('confirms endgame flower verified (as long as at least 1 match scored flower >= 10 pts, proves they did not lie)', () => {
-    const claimed = createClaimedRecord(50, 60, 15, 140)
-    const matches = [
-      createDummyMatch(1, 40, 50, 0),
-      createDummyMatch(2, 45, 55, 15), // Achieved Flower + Bonus here!
-      createDummyMatch(3, 40, 50, 0)
+  it('evaluates teleopPark execution rate (>= 50% -> parkVerified, < 50% -> parkPending)', () => {
+    const claimedPark = createClaimedRecord(50, 60, 5, 115, {
+      flowerMechanism: 'none',
+      claimedFlowerNectars: 0,
+      claimedFlowerBottomBonus: 0,
+      claimedTeleopPark: true
+    })
+
+    const stableMatches = [
+      createDummyMatch(1, 50, 60, 5, { teleopPark: true }),
+      createDummyMatch(2, 50, 60, 0, { teleopPark: false })
     ]
-    const res = calculateBragIndex(claimed, matches)
-    expect(res).toBeDefined()
-    expect(res?.endgameVerified).toBe(true)
-    expect(res?.endgameUnfulfilled).toBe(false)
-    expect(res?.endgamePardoned).toBe(false)
-    expect(res?.label).toContain('花朵已证实')
+    const verifiedRes = calculateBragIndex(claimedPark, stableMatches)
+    expect(verifiedRes?.parkVerified).toBe(true)
+    expect(verifiedRes?.parkPending).toBe(false)
+    expect(verifiedRes?.flowerVerified).toBe(false)
+    expect(verifiedRes?.flowerPending).toBe(false)
+    expect(verifiedRes?.statusKeys).toContain('pit_scout.park_verified')
+
+    const unstableMatches = [
+      createDummyMatch(1, 50, 60, 5, { teleopPark: true }),
+      createDummyMatch(2, 50, 60, 0, { teleopPark: false }),
+      createDummyMatch(3, 50, 60, 0, { teleopPark: false })
+    ]
+    const pendingRes = calculateBragIndex(claimedPark, unstableMatches)
+    expect(pendingRes?.parkVerified).toBe(false)
+    expect(pendingRes?.parkPending).toBe(true)
+    expect(pendingRes?.statusKeys).toContain('pit_scout.park_pending')
   })
 
   it('handles 0 or unfilled claimed total score gracefully without misidentifying as realistic', () => {
     const claimed = createClaimedRecord(0, 0, 0, 0)
     const matches = [
-      createDummyMatch(1, 40, 50, 15),
-      createDummyMatch(2, 45, 55, 15)
+      createDummyMatch(1, 40, 50, 15, { flowerNectars: 2 }),
+      createDummyMatch(2, 45, 55, 15, { flowerNectars: 2 })
     ]
-    const res = calculateBragIndex(claimed, matches)
-    expect(res).toBeDefined()
-    expect(res?.tier).toBe('pending')
-    expect(res?.label).toContain('自述待补充')
-  })
+    const enRes = calculateBragIndex(claimed, matches)
+    expect(enRes?.tier).toBe('pending')
+    expect(enRes?.labelKey).toBe('pit_scout.brag_pending_claims')
+    expect(enRes?.label).toBe('Claims Incomplete')
 
-  it('rejects flower verification when claimed flower (>=10 pts) but only park (5 pts) was achieved', () => {
-    const claimed = createClaimedRecord(50, 60, 15, 140) // Claims flower (15 pts)
-    const matches = [
-      createDummyMatch(1, 40, 50, 5), // Only park achieved (5 pts)
-      createDummyMatch(2, 45, 55, 5)
-    ]
-    const res = calculateBragIndex(claimed, matches)
-    expect(res).toBeDefined()
-    expect(res?.endgameVerified).toBe(false)
-    expect(res?.endgameUnfulfilled).toBe(true)
-    expect(res?.label).not.toContain('花朵已证实')
+    switchLanguage('zh')
+    const zhRes = calculateBragIndex(claimed, matches)
+    expect(zhRes?.label).toContain('自述待补充')
   })
 })

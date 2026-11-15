@@ -1,5 +1,10 @@
 import { describe, it, expect } from 'vitest'
 import { OPENAI_PRESETS, findPresetByBaseUrl, getPresetById } from '@/components/ai/presets'
+import {
+  LAUNCHER_PRESETS,
+  FLOWER_PRESETS,
+  CHASSIS_SIZE_PRESETS
+} from '@/constants/pitScoutPresets'
 
 describe('OpenAI Presets', () => {
   it('contains essential provider presets including DeepSeek, OpenAI, SiliconFlow, Kimi, Zhipu, DashScope, Ollama', () => {
@@ -56,6 +61,38 @@ describe('OpenAI Presets', () => {
     for (const preset of OPENAI_PRESETS) {
       expect((zh.ai.presets as any)[preset.id]).toBeDefined()
       expect((en.ai.presets as any)[preset.id]).toBeDefined()
+    }
+  })
+})
+
+describe('PitScout Presets (BIOBUZZ 2026-2027)', () => {
+  it('excludes bottom_chute from FLOWER_PRESETS and matches all pit preset keys in zh.json & en.json', async () => {
+    const zh = (await import('@/locales/zh.json')).default
+    const en = (await import('@/locales/en.json')).default
+
+    expect(FLOWER_PRESETS.map((p) => p.key)).toEqual([
+      'vertical_lift',
+      'angled_launcher',
+      'pivot_arm',
+      'none'
+    ])
+    expect(CHASSIS_SIZE_PRESETS.map((p) => p.key)).toEqual([
+      'compact_small',
+      'standard_mid',
+      'wide_large'
+    ])
+
+    for (const p of LAUNCHER_PRESETS) {
+      expect((zh.pit_scout.launcher_presets as any)[p.key]).toBeDefined()
+      expect((en.pit_scout.launcher_presets as any)[p.key]).toBeDefined()
+    }
+    for (const p of FLOWER_PRESETS) {
+      expect((zh.pit_scout.flower_presets as any)[p.key]).toBeDefined()
+      expect((en.pit_scout.flower_presets as any)[p.key]).toBeDefined()
+    }
+    for (const p of CHASSIS_SIZE_PRESETS) {
+      expect((zh.pit_scout.chassis_size_presets as any)[p.key]).toBeDefined()
+      expect((en.pit_scout.chassis_size_presets as any)[p.key]).toBeDefined()
     }
   })
 })

@@ -191,4 +191,172 @@ class FtcApiClientTest {
         FtcApiClient client = new FtcApiClient("http://127.0.0.1:" + mockPort, "testuser", "testtoken");
         assertThat(client.eventExists(2025, "NO_SUCH_EVENT")).isFalse();
     }
+
+    @Test
+    void testPascalCaseUpstreamFtcApiSupport() throws Exception {
+        String pascalRankings = "{\"Rankings\":[{\"Rank\":1,\"TeamNumber\":27570,\"SortOrder1\":140.0}]}";
+        mockServer.createContext("/v2.0/2026/rankings/PASCAL_EVT", exchange -> {
+            byte[] bytes = pascalRankings.getBytes(StandardCharsets.UTF_8);
+            exchange.getResponseHeaders().set("Content-Type", "application/json");
+            exchange.sendResponseHeaders(200, bytes.length);
+            try (OutputStream os = exchange.getResponseBody()) {
+                os.write(bytes);
+            }
+        });
+
+        String pascalAwards = "{\"Awards\":[{\"Name\":\"Inspire Award\",\"Series\":1,\"TeamNumber\":27570}]}";
+        mockServer.createContext("/v2.0/2026/awards/PASCAL_EVT", exchange -> {
+            byte[] bytes = pascalAwards.getBytes(StandardCharsets.UTF_8);
+            exchange.getResponseHeaders().set("Content-Type", "application/json");
+            exchange.sendResponseHeaders(200, bytes.length);
+            try (OutputStream os = exchange.getResponseBody()) {
+                os.write(bytes);
+            }
+        });
+
+        String pascalAlliances = "{\"Alliances\":[{\"Number\":1,\"Captain\":27570,\"Round1\":11115}]}";
+        mockServer.createContext("/v2.0/2026/alliances/PASCAL_EVT", exchange -> {
+            byte[] bytes = pascalAlliances.getBytes(StandardCharsets.UTF_8);
+            exchange.getResponseHeaders().set("Content-Type", "application/json");
+            exchange.sendResponseHeaders(200, bytes.length);
+            try (OutputStream os = exchange.getResponseBody()) {
+                os.write(bytes);
+            }
+        });
+
+        FtcApiClient client = new FtcApiClient("http://127.0.0.1:" + mockPort, "testuser", "testtoken");
+        JsonArray ranks = client.fetchNormalizedRankings(2026, "PASCAL_EVT");
+        assertThat(ranks).hasSize(1);
+        assertThat(ranks.get(0).getAsJsonObject().get("teamNumber").getAsInt()).isEqualTo(27570);
+        assertThat(ranks.get(0).getAsJsonObject().get("rank").getAsInt()).isEqualTo(1);
+        assertThat(ranks.get(0).getAsJsonObject().get("sortOrder1").getAsDouble()).isEqualTo(140.0);
+
+        JsonArray awards = client.fetchAwards(2026, "PASCAL_EVT");
+        assertThat(awards).hasSize(1);
+        assertThat(awards.get(0).getAsJsonObject().get("teamNumber").getAsInt()).isEqualTo(27570);
+        assertThat(awards.get(0).getAsJsonObject().get("name").getAsString()).isEqualTo("Inspire Award");
+
+        JsonArray alliances = client.fetchAlliances(2026, "PASCAL_EVT");
+        assertThat(alliances).hasSize(1);
+        assertThat(alliances.get(0).getAsJsonObject().get("captain").getAsInt()).isEqualTo(27570);
+    }
+
+    @Test
+    void testLiveFtcApiV2NestedAllianceTeamObjectsAndOfficialSlots() throws Exception {
+        String rankingsJson = "{\"rankings\":[" +
+                "{\"rank\":1,\"teamNumber\":23400,\"sortOrder1\":160.0,\"sortOrder2\":80.0}," +
+                "{\"rank\":2,\"teamNumber\":11115,\"sortOrder1\":140.0,\"sortOrder2\":70.0}," +
+                "{\"rank\":3,\"teamNumber\":8417,\"sortOrder1\":130.0,\"sortOrder2\":60.0}," +
+                "{\"rank\":4,\"teamNumber\":18457,\"sortOrder1\":120.0,\"sortOrder2\":50.0}," +
+                "{\"rank\":5,\"teamNumber\":11260,\"sortOrder1\":110.0,\"sortOrder2\":40.0}," +
+                "{\"rank\":6,\"teamNumber\":8644,\"sortOrder1\":100.0,\"sortOrder2\":30.0}" +
+                "]}";
+        mockServer.createContext("/v2.0/2025/rankings/AUADQ", exchange -> {
+            byte[] bytes = rankingsJson.getBytes(StandardCharsets.UTF_8);
+            exchange.getResponseHeaders().set("Content-Type", "application/json");
+            exchange.sendResponseHeaders(200, bytes.length);
+            try (OutputStream os = exchange.getResponseBody()) {
+                os.write(bytes);
+            }
+        });
+
+        String alliancesJson = "{\"alliances\":[" +
+                "{\"number\":1,\"name\":\"Alliance 1\"," +
+                "\"captain\":{\"teamNumber\":23400,\"displayTeamNumber\":\"23400\",\"teamName\":\"UFORCE \"}," +
+                "\"round1\":{\"teamNumber\":11115,\"displayTeamNumber\":\"11115\",\"teamName\":\"Gluten Free\"}," +
+                "\"round2\":null,\"round3\":null,\"backup\":null}," +
+                "{\"number\":2,\"name\":\"Alliance 2\"," +
+                "\"captain\":{\"teamNumber\":8417,\"displayTeamNumber\":\"8417\",\"teamName\":\"Team 8417\"}," +
+                "\"round1\":{\"teamNumber\":18457,\"displayTeamNumber\":\"18457\",\"teamName\":\"Team 18457\"}," +
+                "\"round2\":null,\"round3\":null,\"backup\":null}" +
+                "],\"count\":2}";
+        mockServer.createContext("/v2.0/2025/alliances/AUADQ", exchange -> {
+            byte[] bytes = alliancesJson.getBytes(StandardCharsets.UTF_8);
+            exchange.getResponseHeaders().set("Content-Type", "application/json");
+            exchange.sendResponseHeaders(200, bytes.length);
+            try (OutputStream os = exchange.getResponseBody()) {
+                os.write(bytes);
+            }
+        });
+
+        String awardsJson = "{\"awards\":[" +
+                "{\"awardId\":10,\"name\":\"Sustain Award\",\"series\":1,\"teamNumber\":11260}," +
+                "{\"awardId\":11,\"name\":\"Reach Award\",\"series\":2,\"teamNumber\":8644}" +
+                "]}";
+        mockServer.createContext("/v2.0/2025/awards/AUADQ", exchange -> {
+            byte[] bytes = awardsJson.getBytes(StandardCharsets.UTF_8);
+            exchange.getResponseHeaders().set("Content-Type", "application/json");
+            exchange.sendResponseHeaders(200, bytes.length);
+            try (OutputStream os = exchange.getResponseBody()) {
+                os.write(bytes);
+            }
+        });
+
+        String matchesJson = "{\"matches\":[]}";
+        mockServer.createContext("/v2.0/2025/matches/AUADQ", exchange -> {
+            byte[] bytes = matchesJson.getBytes(StandardCharsets.UTF_8);
+            exchange.getResponseHeaders().set("Content-Type", "application/json");
+            exchange.sendResponseHeaders(200, bytes.length);
+            try (OutputStream os = exchange.getResponseBody()) {
+                os.write(bytes);
+            }
+        });
+
+        String officialAdvancementJson = "{\"advancesTo\":\"AU Regional\",\"slots\":5,\"fcmpReserved\":0,\"advancement\":[]}";
+        mockServer.createContext("/v2.0/2025/advancement/AUADQ", exchange -> {
+            byte[] bytes = officialAdvancementJson.getBytes(StandardCharsets.UTF_8);
+            exchange.getResponseHeaders().set("Content-Type", "application/json");
+            exchange.sendResponseHeaders(200, bytes.length);
+            try (OutputStream os = exchange.getResponseBody()) {
+                os.write(bytes);
+            }
+        });
+
+        FtcApiClient client = new FtcApiClient("http://127.0.0.1:" + mockPort, "testuser", "testtoken");
+        JsonArray alliances = client.fetchAlliances(2025, "AUADQ");
+        assertThat(alliances).hasSize(2);
+        assertThat(alliances.get(0).getAsJsonObject().get("captain").getAsInt()).isEqualTo(23400);
+        assertThat(alliances.get(0).getAsJsonObject().get("round1").getAsInt()).isEqualTo(11115);
+
+        JsonArray adv = client.fetchAdvancement(2025, "AUADQ");
+        assertThat(adv).hasSize(6);
+        assertThat(adv.get(0).getAsJsonObject().get("teamNumber").getAsInt()).isEqualTo(23400);
+        assertThat(adv.get(0).getAsJsonObject().get("alliancePoints").getAsInt()).isEqualTo(20);
+        // Official /advancement/AUADQ reports slots=5 -> rank 5 is ADVANCING and rank 6 is BUBBLE
+        assertThat(adv.get(4).getAsJsonObject().get("advancementStatus").getAsString()).isEqualTo("ADVANCING");
+        assertThat(adv.get(5).getAsJsonObject().get("advancementStatus").getAsString()).isEqualTo("BUBBLE");
+
+        int sustainPts = -1;
+        int reachPts = -1;
+        for (int i = 0; i < adv.size(); i++) {
+            JsonObject row = adv.get(i).getAsJsonObject();
+            if (row.get("teamNumber").getAsInt() == 11260) sustainPts = row.get("awardPoints").getAsInt();
+            if (row.get("teamNumber").getAsInt() == 8644) reachPts = row.get("awardPoints").getAsInt();
+        }
+        assertThat(sustainPts).isEqualTo(12);
+        assertThat(reachPts).isEqualTo(6);
+    }
+
+    @Test
+    void testFetchNormalizedMatchesPreservesSeriesAndDescription() throws Exception {
+        String playoffMatchesJson = "{\"matches\":[" +
+                "{\"matchNumber\":1,\"tournamentLevel\":\"PLAYOFF\",\"series\":3,\"description\":\"Finals 1\"," +
+                "\"scoreRedFinal\":150,\"scoreBlueFinal\":120,\"teams\":[]}" +
+                "]}";
+        mockServer.createContext("/v2.0/2026/matches/PLAYOFF_EVT", exchange -> {
+            byte[] bytes = playoffMatchesJson.getBytes(StandardCharsets.UTF_8);
+            exchange.getResponseHeaders().set("Content-Type", "application/json");
+            exchange.sendResponseHeaders(200, bytes.length);
+            try (OutputStream os = exchange.getResponseBody()) {
+                os.write(bytes);
+            }
+        });
+
+        FtcApiClient client = new FtcApiClient("http://127.0.0.1:" + mockPort, "testuser", "testtoken");
+        JsonArray matches = client.fetchNormalizedMatches(2026, "PLAYOFF_EVT", "playoff");
+        assertThat(matches).hasSize(1);
+        JsonObject m = matches.get(0).getAsJsonObject();
+        assertThat(m.get("series").getAsInt()).isEqualTo(3);
+        assertThat(m.get("description").getAsString()).isEqualTo("Finals 1");
+    }
 }

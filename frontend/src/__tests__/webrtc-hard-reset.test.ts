@@ -151,4 +151,42 @@ describe('WebRTC Hard Reset & Channel Teardown Architecture', () => {
 
     hostService.disconnect()
   })
+
+  it('removes all window online listeners cleanly on client and host disconnect without leaking', async () => {
+    const addedOnline = new Set<EventListenerOrEventListenerObject>()
+    const addSpy = vi.spyOn(window, 'addEventListener').mockImplementation((type: string, listener: any) => {
+      if (type === 'online') addedOnline.add(listener)
+    })
+    const removeSpy = vi.spyOn(window, 'removeEventListener').mockImplementation((type: string, listener: any) => {
+      if (type === 'online') addedOnline.delete(listener)
+    })
+
+    try {
+      const clientService = createWebRtcService({
+        onStatusChange: vi.fn(),
+        onRecordsReceived: vi.fn(),
+        onAckReceived: vi.fn(),
+        onRequestSync: vi.fn()
+      })
+      await clientService.join('online-leak-client')
+      await clientService.reconnectNow()
+      expect(addedOnline.size).toBeGreaterThan(0)
+      clientService.disconnect()
+      expect(addedOnline.size).toBe(0)
+
+      const hostService = createWebRtcService({
+        onStatusChange: vi.fn(),
+        onRecordsReceived: vi.fn(),
+        onAckReceived: vi.fn(),
+        onRequestSync: vi.fn()
+      })
+      await hostService.host('online-leak-host')
+      expect(addedOnline.size).toBeGreaterThan(0)
+      hostService.disconnect()
+      expect(addedOnline.size).toBe(0)
+    } finally {
+      addSpy.mockRestore()
+      removeSpy.mockRestore()
+    }
+  })
 })

@@ -45,3 +45,12 @@ app_data.trace.db
 
 ### Frontend build artifacts ###
 src/main/resources/public/
+
+# Maven shade generated artifacts
+dependency-reduced-pom.xml
+
+# Build output
+dist/
+
+# Agent directory
+.agents/

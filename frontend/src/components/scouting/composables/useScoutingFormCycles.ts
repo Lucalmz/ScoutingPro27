@@ -1,6 +1,7 @@
 import { ref } from 'vue'
 import { hapticLight, hapticMedium, hapticSelection } from '@/utils/haptics'
 import { useBumpAnimation } from '@/composables/useBumpAnimation'
+import { calcBiobuzzEndgameScore, parseBiobuzzEndgame } from '@/utils/analytics/rankings'
 import type { TeamScoutData } from './useScoutingDraft'
 
 export interface CycleTapState {
@@ -61,9 +62,21 @@ export function useScoutingFormCycles() {
     const cycles = phase === 'auto' ? team.autoCycles : team.teleopCycles
     const now = Date.now()
 
+    function stampTeleopAt(index: number) {
+      if (phase !== 'teleop') return
+      if (!Array.isArray(team.teleopCycleTimestamps)) {
+        team.teleopCycleTimestamps = []
+      }
+      while (team.teleopCycleTimestamps.length <= index) {
+        team.teleopCycleTimestamps.push(0)
+      }
+      team.teleopCycleTimestamps[index] = now
+    }
+
     // 显式指定球数调用 (如单测 addCycle(team, 2))：直接添加并返回
     if (isExplicitBalls) {
       cycles.push(initialBalls)
+      stampTeleopAt(cycles.length - 1)
       hapticMedium()
       if (phase === 'auto') {
         syncAutoBalls(team)
@@ -86,6 +99,7 @@ export function useScoutingFormCycles() {
       const current = cycles[lastIdx] ?? 0
       if (current < 4) {
         cycles[lastIdx] = current + 1
+        stampTeleopAt(lastIdx)
         hapticMedium()
         bump(lastIdx, phase === 'auto' ? 'autoCycle' : 'teleopCycle', 'up')
         if (phase === 'auto') {
@@ -147,6 +161,16 @@ export function useScoutingFormCycles() {
       cycles[cycles.length - 1] = balls
     }
 
+    if (phase === 'teleop') {
+      if (!Array.isArray(team.teleopCycleTimestamps)) {
+        team.teleopCycleTimestamps = []
+      }
+      while (team.teleopCycleTimestamps.length < cycles.length) {
+        team.teleopCycleTimestamps.push(0)
+      }
+      team.teleopCycleTimestamps[cycles.length - 1] = Date.now()
+    }
+
     bump(cycles.length - 1, phase === 'auto' ? 'autoCycle' : 'teleopCycle', 'up')
     if (phase === 'auto') {
       syncAutoBalls(team)
@@ -165,6 +189,9 @@ export function useScoutingFormCycles() {
     const cycles = phase === 'auto' ? team.autoCycles : team.teleopCycles
     if (cycles.length > 0) {
       cycles.pop()
+      if (phase === 'teleop' && Array.isArray(team.teleopCycleTimestamps)) {
+        team.teleopCycleTimestamps.length = Math.min(team.teleopCycleTimestamps.length, cycles.length)
+      }
       if (phase === 'auto') {
         syncAutoBalls(team)
       }
@@ -265,9 +292,7 @@ export function useScoutingFormCycles() {
                  (team.autoPark ? 5 : 0)
     const totalBalls = getCycleBallsTotal(team)
     const teleop = totalBalls * 2
-    const endgame = (team.flowerPlaced ? 10 : 0) +
-                    (team.flowerBottomBonus ? 5 : 0) +
-                    (team.teleopPark ? 5 : 0)
+    const endgame = calcBiobuzzEndgameScore(parseBiobuzzEndgame(team))
     return auto + teleop + endgame
   }
 

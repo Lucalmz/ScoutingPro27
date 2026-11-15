@@ -63,17 +63,25 @@ class PitScoutDaoTest {
         record.setRobotName("Polaris");
         record.setDrivetrainType("mecanum");
         record.setWeightLbs(38.5);
+        record.setChassisSize("compact");
         record.setOdometryType("two_wheel");
         record.setBallCompatibility("universal");
         record.setLauncherType("差速双飞轮");
         record.setFlowerMechanism("垂直级联高抬升");
         record.setHasColorSensor(true);
+        record.setHasDescoreMech(true);
+        record.setHasApriltagVision(true);
         record.setClaimedAutoStrategy("预载进球+花园两球+快速停泊");
         record.setClaimedAutoScore(85);
         record.setClaimedTeleopCycles(6);
         record.setClaimedTeleopScore(110);
-        record.setClaimedEndgameScore(15);
-        record.setClaimedTotalScore(210);
+        record.setClaimedTeleopPark(true);
+        record.setClaimedFlowerNectars(2);
+        record.setClaimedFlowerBottomBonus(1);
+        record.setClaimedFlowerPollens(3);
+        record.setClaimedGardenBalls(2);
+        record.setClaimedEndgameScore(22);
+        record.setClaimedTotalScore(217);
         record.setVersion(1);
 
         jdbi.useExtension(PitScoutDao.class, dao -> dao.upsertPitRecord(record));
@@ -84,35 +92,78 @@ class PitScoutDaoTest {
         assertThat(fetched.getTeamNumber()).isEqualTo(27570);
         assertThat(fetched.getRobotName()).isEqualTo("Polaris");
         assertThat(fetched.getWeightLbs()).isEqualTo(38.5);
+        assertThat(fetched.getChassisSize()).isEqualTo("compact");
         assertThat(fetched.getBallCompatibility()).isEqualTo("universal");
         assertThat(fetched.getLauncherType()).isEqualTo("差速双飞轮");
         assertThat(fetched.getFlowerMechanism()).isEqualTo("垂直级联高抬升");
         assertThat(fetched.isHasColorSensor()).isTrue();
+        assertThat(fetched.isHasDescoreMech()).isTrue();
+        assertThat(fetched.isHasApriltagVision()).isTrue();
         assertThat(fetched.getClaimedAutoStrategy()).isEqualTo("预载进球+花园两球+快速停泊");
         assertThat(fetched.getClaimedAutoScore()).isEqualTo(85);
         assertThat(fetched.getClaimedTeleopCycles()).isEqualTo(6);
-        assertThat(fetched.getClaimedEndgameScore()).isEqualTo(15);
-        assertThat(fetched.getClaimedTotalScore()).isEqualTo(210);
+        assertThat(fetched.isClaimedTeleopPark()).isTrue();
+        assertThat(fetched.getClaimedFlowerNectars()).isEqualTo(2);
+        assertThat(fetched.getClaimedFlowerBottomBonus()).isEqualTo(1);
+        assertThat(fetched.getClaimedFlowerPollens()).isEqualTo(3);
+        assertThat(fetched.getClaimedGardenBalls()).isEqualTo(2);
+        assertThat(fetched.getClaimedEndgameScore()).isEqualTo(22);
+        assertThat(fetched.getClaimedTotalScore()).isEqualTo(217);
 
         // Update record (LWW / edit)
+        record.setChassisSize("17.5x17.5 in");
         record.setClaimedAutoScore(95);
+        record.setHasDescoreMech(false);
+        record.setClaimedFlowerNectars(4);
+        record.setClaimedFlowerBottomBonus(2);
+        record.setClaimedEndgameScore(31);
         record.setVersion(2);
         jdbi.useExtension(PitScoutDao.class, dao -> dao.upsertPitRecord(record));
 
         PitScoutingRecord updated = jdbi.withExtension(PitScoutDao.class, dao -> dao.findPitRecordByTeam("evt_pit", 27570));
         assertThat(updated).isNotNull();
+        assertThat(updated.getChassisSize()).isEqualTo("17.5x17.5 in");
         assertThat(updated.getClaimedAutoScore()).isEqualTo(95);
+        assertThat(updated.isHasDescoreMech()).isFalse();
+        assertThat(updated.getClaimedFlowerNectars()).isEqualTo(4);
+        assertThat(updated.getClaimedFlowerBottomBonus()).isEqualTo(2);
+        assertThat(updated.getClaimedEndgameScore()).isEqualTo(31);
         assertThat(updated.getVersion()).isEqualTo(2);
 
         // Attempting to overwrite with an older version (v1) must be rejected by MERGE
+        record.setChassisSize("compact");
         record.setClaimedAutoScore(40);
+        record.setHasDescoreMech(true);
+        record.setClaimedFlowerNectars(1);
         record.setVersion(1);
         jdbi.useExtension(PitScoutDao.class, dao -> dao.upsertPitRecord(record));
 
         PitScoutingRecord staleIgnored = jdbi.withExtension(PitScoutDao.class, dao -> dao.findPitRecordByTeam("evt_pit", 27570));
         assertThat(staleIgnored).isNotNull();
+        assertThat(staleIgnored.getChassisSize()).isEqualTo("17.5x17.5 in");
         assertThat(staleIgnored.getClaimedAutoScore()).isEqualTo(95);
+        assertThat(staleIgnored.isHasDescoreMech()).isFalse();
+        assertThat(staleIgnored.getClaimedFlowerNectars()).isEqualTo(4);
         assertThat(staleIgnored.getVersion()).isEqualTo(2);
+    }
+
+    @Test
+    void testDefaultValuesForMinimalInsert() {
+        jdbi.useHandle(handle -> handle.execute("""
+            INSERT INTO pit_scouting_records (id, event_id, team_number, scout_id, scout_name)
+            VALUES ('pit_min_1', 'evt_pit', 18223, 'host_1', 'hostuser')
+        """));
+
+        PitScoutingRecord fetched = jdbi.withExtension(PitScoutDao.class, dao -> dao.findPitRecordByTeam("evt_pit", 18223));
+        assertThat(fetched).isNotNull();
+        assertThat(fetched.getChassisSize()).isEmpty();
+        assertThat(fetched.isHasDescoreMech()).isFalse();
+        assertThat(fetched.isHasApriltagVision()).isFalse();
+        assertThat(fetched.isClaimedTeleopPark()).isFalse();
+        assertThat(fetched.getClaimedFlowerNectars()).isZero();
+        assertThat(fetched.getClaimedFlowerBottomBonus()).isZero();
+        assertThat(fetched.getClaimedFlowerPollens()).isZero();
+        assertThat(fetched.getClaimedGardenBalls()).isZero();
     }
 
     @Test

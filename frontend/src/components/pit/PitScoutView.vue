@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref, onMounted, computed } from 'vue'
+import { ref, onMounted, computed, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { usePitScoutStore } from '@/stores/pitScout'
 import { useEventStore } from '@/stores/events'
@@ -27,13 +27,25 @@ const searchedTeamNumber = computed(() => {
   return /^\d+$/.test(q) ? parseInt(q, 10) : null
 })
 
+function loadEventPitData(eventId: string) {
+  if (!eventId) return
+  pitStore.fetchPitData(eventId)
+  pitStore.flushPendingPitRecords(eventId)
+  flushOfflinePhotos(eventId)
+}
+
 onMounted(() => {
-  if (props.eventId) {
-    pitStore.fetchPitData(props.eventId)
-    pitStore.flushPendingPitRecords(props.eventId)
-    flushOfflinePhotos(props.eventId)
-  }
+  loadEventPitData(props.eventId)
 })
+
+watch(
+  () => props.eventId,
+  (newId, oldId) => {
+    if (newId && newId !== oldId) {
+      loadEventPitData(newId)
+    }
+  }
+)
 
 const canSyncOfficial = computed(() => {
   return Boolean(

@@ -63,9 +63,10 @@ async function selectEventTab(page, tabKey) {
         'scout': 0,
         'pit': 1,
         'schedule': 2,
-        'rankings': 3,
-        'history': 4,
-        'ai': 5,
+        'whiteboard': 3,
+        'rankings': 4,
+        'history': 5,
+        'ai': 6,
         'scouts': -1
       };
       const idx = keyMap[key];
@@ -314,21 +315,34 @@ async function runComprehensiveInteractiveE2E() {
       await autoCards[1].click(); // Auto Park
     }
 
-    // Toggle Endgame Flower (+10 pts)
+    // BIOBUZZ Endgame: Flower Nectars = 2 (+4 pts), Bottom Bonus = 1 (+5 pts), TeleOp Park = true (+5 pts)
     await hostPage.evaluate(() => {
-      const cards = Array.from(document.querySelectorAll('.toggle-card'));
-      const flower = cards.find(c => c.textContent.includes('Flower') || c.textContent.includes('花朵') || c.textContent.includes('放置'));
-      if (flower) {
-        flower.click();
-        return true;
-      }
-      return false;
+      const nectarsCard = document.querySelector('.biobuzz-endgame-steppers .endgame-stepper-card:nth-child(1)');
+      const chip2 = nectarsCard
+        ? Array.from(nectarsCard.querySelectorAll('.quick-ball-btn')).find(b => b.textContent.trim() === '2')
+        : null;
+      if (chip2) chip2.click();
     });
+    await delay(100);
+
+    await hostPage.evaluate(() => {
+      const bottomCard = document.querySelector('.biobuzz-endgame-steppers .endgame-stepper-card:nth-child(2)');
+      const chip1 = bottomCard
+        ? Array.from(bottomCard.querySelectorAll('.quick-ball-btn')).find(b => b.textContent.trim() === '1')
+        : null;
+      if (chip1 && !chip1.disabled) chip1.click();
+    });
+    await delay(100);
+
+    const teleopParkToggle = await hostPage.$('.form-section:has(.biobuzz-endgame-steppers) .biobuzz-toggles-grid .toggle-card:nth-child(1)');
+    if (teleopParkToggle) {
+      await teleopParkToggle.click();
+    }
 
     await delay(200);
     const dynamicTotal = await hostPage.$eval('.total-score-inline .total-value', el => Number(el.textContent.trim()));
-    // Expected: Auto Leave (3) + Auto Park (5) + Flower (10) = 18 pts
-    recordCheck('Dynamic scoring calculation updated accurately in real-time', dynamicTotal >= 18, `Total: ${dynamicTotal} pts`);
+    // Expected: Auto Leave (3) + Auto Park (5) + 2 Flower Nectars (4) + 1 Bottom Bonus (5) + TeleOp Park (5) = 22 pts
+    recordCheck('Dynamic scoring calculation updated accurately in real-time', dynamicTotal === 22, `Total: ${dynamicTotal} pts`);
 
     // Submit match 1
     console.log('Submitting match 1 record...');
@@ -563,7 +577,19 @@ async function runComprehensiveInteractiveE2E() {
     const rankingRowCount = await hostPage.$$eval('.rankings-panel table tbody tr', els => els.length);
     recordCheck('Rankings table rendered aggregated team scores', rankingRowCount >= 2, `${rankingRowCount} teams`);
 
-    // Test Column Sorting
+    // Test First Column ("Advancement Points" / "晋级分") Header & Cells + Sorting
+    const hasAdvCol = await hostPage.evaluate(() => {
+      const th = document.querySelector('.rankings-panel table thead th:first-child');
+      const td = document.querySelector('.rankings-panel table tbody tr:first-child td:first-child');
+      return Boolean(
+        th &&
+        th.classList.contains('advancement-col-th') &&
+        td &&
+        td.classList.contains('advancement-cell')
+      );
+    });
+    recordCheck('Rankings first column renders Advancement Points header & cell', hasAdvCol);
+
     console.log('Testing column sort toggles...');
     await hostPage.evaluate(() => {
       const th = document.querySelector('.rankings-panel table th');

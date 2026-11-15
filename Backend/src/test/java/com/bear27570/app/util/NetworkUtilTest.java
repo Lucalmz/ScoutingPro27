@@ -80,24 +80,88 @@ class NetworkUtilTest {
     }
 
     /**
-     * 回归守卫：防火墙提权脚本只允许改防火墙规则。
-     * 历史版本在此脚本中修改 WeakHost / InterfaceMetric / 增删 TUN 与 Loopback 路由，
-     * 直接导致 Clash/Mihomo TUN 模式全部节点不可用。
+     * 回归守卫：防火墙提权脚本只允许改 ScoutingPro27 自身防火墙规则。
+     * 1. 历史版本曾修改 WeakHost / InterfaceMetric / 增删 TUN 与 Loopback 路由，导致 Clash/Mihomo TUN 模式全部节点不可用。
+     * 2. 历史版本曾扫描 Get-NetFirewallApplicationFilter 并按 'java|jcef|scoutingpro' 跨应用删除第三方防火墙规则，
+     *    且添加无 program= 过滤的全局 UDP 1024-65535 放行规则。
      */
     @Test
     void testFirewallScriptNeverTouchesRoutesOrInterfaces() {
+        String javaExe = NetworkUtil.resolveCurrentJavaExe();
         String script = NetworkUtil.buildWindowsNetworkAndFirewallSetupScript(8080);
         assertThat(script).contains("localport=8080");
-        assertThat(script).contains("ScoutingPro27 WebRTC UDP v2");
         for (String forbidden : new String[]{
                 "New-NetRoute", "Remove-NetRoute", "Set-NetRoute",
                 "Set-NetIPInterface", "WeakHost", "InterfaceMetric",
                 "Remove-NetIPAddress", "New-NetIPAddress", "Set-NetIPAddress",
                 "Disable-NetAdapter", "Set-NetAdapter", "route add", "route delete",
-                "netsh interface"
+                "netsh interface",
+                "Get-NetFirewallApplicationFilter", "java|jcef|scoutingpro"
         }) {
             assertThat(script).as("firewall script must not contain '%s'", forbidden).doesNotContainIgnoringCase(forbidden);
         }
+
+        // Remove-NetFirewallRule must only be piped from Get-NetFirewallRule -DisplayName 'ScoutingPro27*'
+        if (script.contains("Remove-NetFirewallRule")) {
+            assertThat(script).contains("Get-NetFirewallRule -DisplayName 'ScoutingPro27*'");
+        }
+
+        // Idempotent delete-before-add for ScoutingPro27 rules
+        assertThat(script).contains("delete rule name=\"ScoutingPro27 Inbound (8080)\"");
+        assertThat(script).contains("delete rule name=\"ScoutingPro27 WebRTC UDP\"");
+        assertThat(script).contains("delete rule name=\"ScoutingPro27 WebRTC UDP v2\"");
+        assertThat(script).contains("delete rule name=\"ScoutingPro27 App Java\"");
+        assertThat(script).contains("delete rule name=\"ScoutingPro27 App JCEF\"");
+
+        // When javaExe is known, both TCP and WebRTC UDP rules must be scoped with program="<javaExe>"
+        if (!javaExe.isEmpty()) {
+            assertThat(script).contains("name=\"ScoutingPro27 WebRTC UDP v2\" dir=in action=allow protocol=UDP localport=1024-65535 program=\"" + javaExe + "\"");
+            assertThat(script).contains("name=\"ScoutingPro27 Inbound (8080)\" dir=in action=allow protocol=TCP localport=8080 program=\"" + javaExe + "\"");
+        }
+    }
+
+    @Test
+    void testFirewallScriptLeastPrivilegeScoping() {
+        String customJava = "C:\\Program Files\\Java\\jdk-21\\bin\\java.exe";
+        String customJcef = "C:\\Users\\test\\.scoutingpro27\\jcef-bundle\\jcef_helper.exe";
+        String scopedScript = NetworkUtil.buildWindowsNetworkAndFirewallSetupScript(8080, customJava, customJcef);
+
+        assertThat(scopedScript)
+                .contains("name=\"ScoutingPro27 WebRTC UDP v2\" dir=in action=allow protocol=UDP localport=1024-65535 program=\"" + customJava + "\" profile=any edge=yes")
+                .contains("name=\"ScoutingPro27 Inbound (8080)\" dir=in action=allow protocol=TCP localport=8080 program=\"" + customJava + "\" profile=any")
+                .contains("name=\"ScoutingPro27 App Java\" dir=in action=allow program=\"" + customJava + "\" profile=any edge=yes")
+                .contains("name=\"ScoutingPro27 App JCEF\" dir=in action=allow program=\"" + customJcef + "\" profile=any edge=yes")
+                .doesNotContainIgnoringCase("Get-NetFirewallApplicationFilter")
+                .doesNotContainIgnoringCase("java|jcef|scoutingpro");
+
+        // When javaExe is unknown/empty, never emit a global unscoped UDP 1024-65535 rule for every process on Windows
+        String noJavaScript = NetworkUtil.buildWindowsNetworkAndFirewallSetupScript(8080, "", "");
+        assertThat(noJavaScript)
+                .doesNotContain("add rule name=\"ScoutingPro27 WebRTC UDP v2\"")
+                .doesNotContain("add rule name=\"ScoutingPro27 App Java\"")
+                .contains("name=\"ScoutingPro27 Inbound (8080)\" dir=in action=allow protocol=TCP localport=8080 profile=any");
+    }
+
+    @Test
+    void testHasWindowsFirewallAppBlockRuleReadOnly() {
+        boolean blocked = NetworkUtil.hasWindowsFirewallAppBlockRule();
+        assertThat(blocked).isIn(true, false);
+    }
+
+    @Test
+    void testNetshOutputMatchesNonAsciiJavaPathAcrossNativeAndUtf8Charsets() throws Exception {
+        String nonAsciiJava = "C:\\Users\\测试用户\\jdk-21\\bin\\java.exe";
+        java.nio.charset.Charset nativeCs = NetworkUtil.resolveWindowsConsoleCharsets().get(0);
+        byte[] nativeBytes = ("Program: " + nonAsciiJava + "\r\n").getBytes(nativeCs);
+        byte[] utf8Bytes = ("Program: " + nonAsciiJava + "\r\n").getBytes(java.nio.charset.StandardCharsets.UTF_8);
+
+        assertThat(NetworkUtil.matchesJavaExeInNetshOutput(nativeBytes, nonAsciiJava)).isTrue();
+        assertThat(NetworkUtil.matchesJavaExeInNetshOutput(utf8Bytes, nonAsciiJava)).isTrue();
+        assertThat(NetworkUtil.matchesJavaExeInNetshOutput("Program: C:\\Other\\java.exe\r\n".getBytes(java.nio.charset.StandardCharsets.UTF_8), nonAsciiJava)).isFalse();
+        assertThat(NetworkUtil.matchesJavaExeInNetshOutput(new byte[0], nonAsciiJava)).isFalse();
+
+        // Verify InetAddress.isSiteLocalAddress() already excludes 28.0.0.0/8 Fake-IP addresses
+        assertThat(java.net.InetAddress.getByName("28.0.0.1").isSiteLocalAddress()).isFalse();
     }
 
     @Test

@@ -113,6 +113,7 @@ export function isPrivateIpv4Address(ip: string): boolean {
 /**
  * 检查 IP 地址是否为代理软件 TUN 虚拟网卡地址 (Clash / Mihomo / sing-box / Surge Fake-IP 或 ULA)
  * - 198.18.0.0/15 (198.18.x.x ~ 198.19.x.x): 标准 TUN Fake-IP 段
+ * - 28.0.0.0/8 (28.x.x.x): 部分 Clash / Surge / Shadowrocket 自定义 Fake-IP 虚拟段
  * - 100.64.0.0/10: CGNAT / Tailscale / Clash TUN 段
  * - fc00::/7 (fc00:: ~ fdff::, 如 fdfe:dcba:9876::1): TUN IPv6 ULA 虚拟地址段
  */
@@ -120,7 +121,7 @@ export function isTunVirtualAddress(ip: string): boolean {
   if (!ip || typeof ip !== 'string') return false
   const clean = cleanIpAddress(ip)
   if (!clean) return false
-  if (clean.startsWith('198.18.') || clean.startsWith('198.19.')) return true
+  if (clean.startsWith('198.18.') || clean.startsWith('198.19.') || clean.startsWith('28.')) return true
   // 识别移动端 v2rayNG / Xray / NekoBox 默认虚拟网卡地址段 (10.10.14.x / 26.26.26.x)
   if (clean.startsWith('10.10.14.') || clean.startsWith('26.26.26.')) return true
   // 识别 sing-box / Mihomo (Clash Meta) / NekoBox 默认 TUN IPv4 段 (172.19.0.x) 及 Docker/WSL 虚拟网桥网关 (.0.1/.0.2)

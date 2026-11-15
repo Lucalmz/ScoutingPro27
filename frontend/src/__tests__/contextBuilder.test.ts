@@ -240,7 +240,12 @@ describe('buildEventDataContext', () => {
         endgameScore: 30,
         totalScore: 140,
         notes: 'Great match',
-        rawData: '{}',
+        rawData: JSON.stringify({
+          flowerNectars: 4,
+          flowerBottomBonusCount: 2,
+          flowerPollens: 4,
+          gardenBalls: 4
+        }),
         syncStatus: 'SYNCED',
         createdAt: '2026-08-20T10:00:00Z',
         updatedAt: '2026-08-20T10:00:00Z',
@@ -418,7 +423,11 @@ describe('buildEventDataContext', () => {
       endgameScore: 25,
       totalScore: 135,
       notes: 'Solid cycle performance',
-      rawData: '{}',
+      rawData: JSON.stringify({
+        flowerNectars: 4,
+        flowerBottomBonusCount: 3,
+        gardenBalls: 2
+      }),
       syncStatus: 'SYNCED',
       createdAt: '2026-08-20T10:00:00Z',
       updatedAt: '2026-08-20T10:00:00Z',
@@ -433,9 +442,107 @@ describe('buildEventDataContext', () => {
       pitRecords: [mockBiobuzzPit]
     })
 
-    expect(result).toContain('Team # | Drivetrain | Ball Compat | Launcher | Flower Mech | Sensor | Odom | Claimed Auto | Claimed TeleOp | Claimed Endgame | Claimed Total | Brag Index (Audit)')
+    expect(result).toContain('Team # | Drivetrain | Ball Compat | Launcher | Flower Mech | Sensor | Odom | Claimed Auto | Claimed TeleOp | Claimed Endgame | Claimed Total | Brag Index (Audit) | Chassis Size')
     expect(result).toContain('27570 | swerve | universal | dual_flywheel | cascade_lift | Yes | pinpoint_otos | 45 pts (preload + 2 garden + park) | 70 pts (7 cycles) | 25 pts | 140 pts | 0.99x (realistic, Flower Verified)')
     expect(result).toContain('Avg Tips')
+  })
+
+  it('includes BIOBUZZ Mobility RP, TeleOp Park %, Predict Cycle Time, and Chassis Size in AI context', () => {
+    const baseMs = 1_700_000_000_000
+    const ts = [0, 8, 9, 10, 11, 12].reduce<number[]>((acc, g, idx) => {
+      acc.push(idx === 0 ? baseMs : acc[idx - 1]! + g * 1000)
+      return acc
+    }, [])
+
+    const result = buildEventDataContext({
+      event: null,
+      rankings: [
+        {
+          teamNumber: 27570,
+          matchCount: 2,
+          avgAutoScore: 24,
+          avgTeleopScore: 54,
+          avgEndgameScore: 28,
+          maxScore: 112,
+          avgRating: 106,
+          brokenCount: 0,
+          trend: 'up',
+          teleopParkRate: 0.75,
+          avgMobilityRpPts: 8.5,
+          avgFlowerNectars: 4.5,
+          avgFlowerBottomBonus: 2.0,
+          avgFlowerPollens: 2.0,
+          avgGardenBalls: 3.0,
+          g410FoulRate: 0.5,
+          predictCycleTime: 10.5,
+          predictCycleMatches: 1,
+          predictCycleSpread: 1.1,
+          estimatedMaxCycles: 8.6
+        }
+      ],
+      records: [
+        {
+          id: 'rec_bb_ctx',
+          eventId: 'evt_1',
+          scoutId: 's1',
+          scoutName: 'Alice',
+          matchNumber: 1,
+          teamNumber: 27570,
+          autoScore: 24,
+          teleopScore: 54,
+          endgameScore: 28,
+          totalScore: 106,
+          notes: 'Quick nectar cap',
+          rawData: JSON.stringify({
+            teleopPark: true,
+            flowerNectars: 4,
+            flowerBottomBonusCount: 2,
+            flowerPollens: 2,
+            gardenBalls: 1,
+            g410EarlyFlowerFoul: true,
+            teleopCycles: [2, 2, 2, 2, 2, 2],
+            teleopCycleTimestamps: ts
+          }),
+          syncStatus: 'SYNCED',
+          createdAt: '2026-08-20T10:00:00Z',
+          updatedAt: '2026-08-20T10:00:00Z',
+          isBroken: false,
+          version: 1
+        }
+      ],
+      pitRecords: [
+        {
+          id: 'pit_bb_ctx',
+          eventId: 'evt_1',
+          teamNumber: 27570,
+          scoutId: 's1',
+          scoutName: 'Alice',
+          drivetrainType: 'swerve',
+          chassisSize: 'compact_small',
+          weightLbs: 36,
+          ballCompatibility: 'universal',
+          launcherType: 'dual_flywheel',
+          flowerMechanism: 'vertical_lift',
+          hasColorSensor: true,
+          odometryType: 'pinpoint',
+          claimedAutoScore: 24,
+          claimedTeleopCycles: 8,
+          claimedTeleopScore: 56,
+          claimedTeleopPark: true,
+          claimedEndgameScore: 24,
+          claimedTotalScore: 104,
+          syncStatus: 'SYNCED',
+          createdAt: '2026-08-20T09:00:00Z',
+          updatedAt: '2026-08-20T09:00:00Z',
+          version: 1
+        }
+      ]
+    })
+
+    expect(result).toContain('TeleOp Park % | Mobility RP (/13) | BIOBUZZ Endgame (N/B/P/G) | G410 % | Predict Cycle | Est. Max Cycles')
+    expect(result).toContain('75% | 8.5 | N:4.5 B:2 P:2 G:3 | 50% | 10.5s (1m) | 8.6')
+    expect(result).toContain('compact_small')
+    expect(result).toContain('EndPark N:4 B:2 P:2 G:1 G410! | 10.5s')
   })
 })
 

@@ -36,9 +36,11 @@ public interface PitScoutDao {
         MERGE INTO pit_scouting_records AS target
         USING (VALUES (
             :id, :eventId, :teamNumber, :scoutId, :scoutName, :robotName,
-            :drivetrainType, :weightLbs, :odometryType,
+            :drivetrainType, :weightLbs, :chassisSize, :odometryType,
             :ballCompatibility, :launcherType, :flowerMechanism, :hasColorSensor,
+            :hasDescoreMech, :hasApriltagVision,
             :claimedAutoStrategy, :claimedAutoScore, :claimedTeleopCycles, :claimedTeleopScore,
+            :claimedTeleopPark, :claimedFlowerNectars, :claimedFlowerBottomBonus, :claimedFlowerPollens, :claimedGardenBalls,
             :claimedEndgameScore, :claimedTotalScore,
             :photoKeys, :version, :hostSeq, :isDeleted, :rawData,
             COALESCE(CAST(REPLACE(REPLACE(NULLIF(TRIM(:createdAt), ''), 'T', ' '), 'Z', '') AS TIMESTAMP), CURRENT_TIMESTAMP),
@@ -48,9 +50,11 @@ public interface PitScoutDao {
             END
         )) AS src (
             id, event_id, team_number, scout_id, scout_name, robot_name,
-            drivetrain_type, weight_lbs, odometry_type,
+            drivetrain_type, weight_lbs, chassis_size, odometry_type,
             ball_compatibility, launcher_type, flower_mechanism, has_color_sensor,
+            has_descore_mech, has_apriltag_vision,
             claimed_auto_strategy, claimed_auto_score, claimed_teleop_cycles, claimed_teleop_score,
+            claimed_teleop_park, claimed_flower_nectars, claimed_flower_bottom_bonus, claimed_flower_pollens, claimed_garden_balls,
             claimed_endgame_score, claimed_total_score,
             photo_keys, version, host_seq, is_deleted, raw_data,
             created_at, updated_at
@@ -76,15 +80,23 @@ public interface PitScoutDao {
             robot_name                  = src.robot_name,
             drivetrain_type             = src.drivetrain_type,
             weight_lbs                  = src.weight_lbs,
+            chassis_size                = src.chassis_size,
             odometry_type               = src.odometry_type,
             ball_compatibility          = src.ball_compatibility,
             launcher_type               = src.launcher_type,
             flower_mechanism            = src.flower_mechanism,
             has_color_sensor            = src.has_color_sensor,
+            has_descore_mech            = src.has_descore_mech,
+            has_apriltag_vision         = src.has_apriltag_vision,
             claimed_auto_strategy       = src.claimed_auto_strategy,
             claimed_auto_score          = src.claimed_auto_score,
             claimed_teleop_cycles       = src.claimed_teleop_cycles,
             claimed_teleop_score        = src.claimed_teleop_score,
+            claimed_teleop_park         = src.claimed_teleop_park,
+            claimed_flower_nectars      = src.claimed_flower_nectars,
+            claimed_flower_bottom_bonus = src.claimed_flower_bottom_bonus,
+            claimed_flower_pollens      = src.claimed_flower_pollens,
+            claimed_garden_balls        = src.claimed_garden_balls,
             claimed_endgame_score       = src.claimed_endgame_score,
             claimed_total_score         = src.claimed_total_score,
             photo_keys                  = src.photo_keys,
@@ -99,17 +111,21 @@ public interface PitScoutDao {
         WHEN NOT MATCHED THEN
           INSERT (
             id, event_id, team_number, scout_id, scout_name, robot_name,
-            drivetrain_type, weight_lbs, odometry_type,
+            drivetrain_type, weight_lbs, chassis_size, odometry_type,
             ball_compatibility, launcher_type, flower_mechanism, has_color_sensor,
+            has_descore_mech, has_apriltag_vision,
             claimed_auto_strategy, claimed_auto_score, claimed_teleop_cycles, claimed_teleop_score,
+            claimed_teleop_park, claimed_flower_nectars, claimed_flower_bottom_bonus, claimed_flower_pollens, claimed_garden_balls,
             claimed_endgame_score, claimed_total_score,
             photo_keys, version, host_seq, is_deleted, raw_data,
             created_at, updated_at
           ) VALUES (
             src.id, src.event_id, src.team_number, src.scout_id, src.scout_name, src.robot_name,
-            src.drivetrain_type, src.weight_lbs, src.odometry_type,
+            src.drivetrain_type, src.weight_lbs, src.chassis_size, src.odometry_type,
             src.ball_compatibility, src.launcher_type, src.flower_mechanism, src.has_color_sensor,
+            src.has_descore_mech, src.has_apriltag_vision,
             src.claimed_auto_strategy, src.claimed_auto_score, src.claimed_teleop_cycles, src.claimed_teleop_score,
+            src.claimed_teleop_park, src.claimed_flower_nectars, src.claimed_flower_bottom_bonus, src.claimed_flower_pollens, src.claimed_garden_balls,
             src.claimed_endgame_score, src.claimed_total_score,
             src.photo_keys, src.version, src.host_seq, src.is_deleted, src.raw_data,
             src.created_at, src.updated_at

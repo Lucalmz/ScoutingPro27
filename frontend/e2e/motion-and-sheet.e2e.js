@@ -241,9 +241,11 @@ async function runMotionE2ETest() {
 
     // Tab switching motion test
     console.log('\n--- Step 5: EventView Tab Indicator Motion ---');
+    const rankingsTab = await page.$('.tab-btn[data-tab="rankings"]');
     const tabButtons = await page.$$('.tab-btn');
-    if (tabButtons.length >= 2) {
-      await tabButtons[1].click(); // click Rankings tab
+    const targetTab = rankingsTab || tabButtons[4] || tabButtons[1];
+    if (targetTab) {
+      await targetTab.click(); // click Rankings tab
       await delay(350);
       const indicatorStyle = await page.evaluate(() => {
         const ind = document.querySelector('.tab-indicator');

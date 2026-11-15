@@ -10,6 +10,8 @@ import { useEventStore } from '@/stores/events'
 import { useToastStore } from '@/stores/toast'
 import { hapticLight, hapticSuccess, hapticWarning } from '@/utils/haptics'
 import { getRecordTournamentLevel, sortRecordsChronologically } from '@/utils/tournament'
+import { parseScoutRawData } from '@/utils/analytics/rankings'
+import { calcMatchPredictCycleTime } from '@/utils/analytics/predictCycleTime'
 
 const { t } = useI18n()
 const recordStore = useRecordStore()
@@ -152,6 +154,28 @@ function getScoutDisplayName(rec: ScoutingRecord): string {
   return t('history.anonymous_scout')
 }
 
+function getMatchSummaryMeta(rec: ScoutingRecord) {
+  const parsed = parseScoutRawData(rec.rawData)
+  const e = parsed.endgame
+  const predictCycleSec =
+    parsed.predictCycleTimeSec ??
+    calcMatchPredictCycleTime(parsed.teleopCycles, parsed.teleopCycleTimestamps)
+  const hasBiobuzzDetails =
+    e.teleopPark ||
+    e.flowerNectars > 0 ||
+    e.flowerBottomBonusCount > 0 ||
+    e.flowerPollens > 0 ||
+    e.gardenBalls > 0 ||
+    e.flowerDescore ||
+    e.g410EarlyFlowerFoul ||
+    predictCycleSec !== null
+  return {
+    endgame: e,
+    predictCycleSec,
+    hasBiobuzzDetails
+  }
+}
+
 const highlightTop = ref(0)
 const highlightHeight = ref(0)
 const highlightVisible = ref(false)
@@ -276,6 +300,33 @@ function enter(el: Element, done: () => void) {
           <span>{{ t('history.auto') }}: {{ rec.autoScore }} {{ t('history.pts') }}</span>
           <span>{{ t('history.teleop') }}: {{ rec.teleopScore }} {{ t('history.pts') }}</span>
           <span>{{ t('history.endgame') }}: {{ rec.endgameScore }} {{ t('history.pts') }}</span>
+        </div>
+
+        <div v-if="getMatchSummaryMeta(rec).hasBiobuzzDetails" class="card-biobuzz-pills">
+          <span v-if="getMatchSummaryMeta(rec).endgame.flowerNectars > 0" class="biobuzz-pill">
+            N {{ getMatchSummaryMeta(rec).endgame.flowerNectars }}
+            <template v-if="getMatchSummaryMeta(rec).endgame.flowerBottomBonusCount > 0">
+              (B{{ getMatchSummaryMeta(rec).endgame.flowerBottomBonusCount }})
+            </template>
+          </span>
+          <span v-if="getMatchSummaryMeta(rec).endgame.flowerPollens > 0" class="biobuzz-pill">
+            P {{ getMatchSummaryMeta(rec).endgame.flowerPollens }}
+          </span>
+          <span v-if="getMatchSummaryMeta(rec).endgame.gardenBalls > 0" class="biobuzz-pill">
+            G {{ getMatchSummaryMeta(rec).endgame.gardenBalls }}
+          </span>
+          <span v-if="getMatchSummaryMeta(rec).endgame.teleopPark" class="biobuzz-pill is-park">
+            Park +5
+          </span>
+          <span v-if="getMatchSummaryMeta(rec).endgame.flowerDescore" class="biobuzz-pill is-descore">
+            Descore
+          </span>
+          <span v-if="getMatchSummaryMeta(rec).endgame.g410EarlyFlowerFoul" class="biobuzz-pill is-foul">
+            G410
+          </span>
+          <span v-if="getMatchSummaryMeta(rec).predictCycleSec !== null" class="biobuzz-pill is-cycle">
+            {{ t('scouting.predict_cycle_time') }}: {{ getMatchSummaryMeta(rec).predictCycleSec }}s
+          </span>
         </div>
 
         <!-- Edit & Resync buttons -->
@@ -546,6 +597,46 @@ function enter(el: Element, done: () => void) {
 
 .btn-resync:active {
   transform: scale(0.97);
+}
+
+.card-biobuzz-pills {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-top: 8px;
+}
+
+.biobuzz-pill {
+  display: inline-flex;
+  align-items: center;
+  padding: 2px 7px;
+  border-radius: 999px;
+  font-size: 11px;
+  font-weight: 600;
+  background: rgba(255, 255, 255, 0.05);
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  color: var(--foreground, #f0efe9);
+}
+
+.biobuzz-pill.is-park {
+  border-color: rgba(59, 130, 246, 0.4);
+  color: #60a5fa;
+}
+
+.biobuzz-pill.is-cycle {
+  border-color: rgba(57, 255, 20, 0.35);
+  color: #39ff14;
+}
+
+.biobuzz-pill.is-descore {
+  border-color: rgba(168, 85, 247, 0.4);
+  color: #c084fc;
+}
+
+.biobuzz-pill.is-foul {
+  border-color: rgba(245, 158, 11, 0.5);
+  background: rgba(245, 158, 11, 0.12);
+  color: #fbbf24;
 }
 </style>
 

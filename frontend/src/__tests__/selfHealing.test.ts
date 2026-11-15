@@ -188,5 +188,27 @@ describe('setupSelfHealing', () => {
     expect(reconnectNow).toHaveBeenCalledWith(true)
     selfHealing.dispose()
   })
+
+  it('clears pending 500ms reconnect cooldown timer on dispose()', async () => {
+    vi.useFakeTimers()
+    const clearTimeoutSpy = vi.spyOn(globalThis, 'clearTimeout')
+    try {
+      const reconnectNow = vi.fn().mockResolvedValue(true)
+      const selfHealing = setupSelfHealing({
+        getStatus: () => 'offline',
+        reconnectNow
+      })
+
+      await listeners['online'][0]()
+      expect(reconnectNow).toHaveBeenCalledTimes(1)
+
+      selfHealing.dispose()
+      expect(clearTimeoutSpy).toHaveBeenCalled()
+      await vi.advanceTimersByTimeAsync(600)
+    } finally {
+      clearTimeoutSpy.mockRestore()
+      vi.useRealTimers()
+    }
+  })
 })
 

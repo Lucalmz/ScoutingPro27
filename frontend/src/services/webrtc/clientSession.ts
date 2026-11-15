@@ -249,6 +249,28 @@ export function createClientSession(ctx: ClientSessionContext) {
     handleIncomingEncryptedVirtualFrame
   } = virtualFallbackCtrl
 
+  let onlineListenerAttached = false
+  const handleWindowOnline = () => {
+    if (ctx.isHostMode?.() || ctx.isExplicitlyClosed()) return
+    log.info('[WebRTC Client] Network online detected; re-evaluating silent upgrade')
+    silentUpgradeProbeCount = 0
+    void checkAndScheduleSilentUpgrade(true)
+  }
+
+  function ensureOnlineListener() {
+    if (typeof window !== 'undefined' && !onlineListenerAttached && !ctx.isExplicitlyClosed()) {
+      window.addEventListener('online', handleWindowOnline)
+      onlineListenerAttached = true
+    }
+  }
+
+  function removeOnlineListener() {
+    if (typeof window !== 'undefined' && onlineListenerAttached) {
+      window.removeEventListener('online', handleWindowOnline)
+      onlineListenerAttached = false
+    }
+  }
+
   function hardResetChannels() {
     // 递增纪元：所有旧尝试的异步续体与回调从此刻起全部失效
     attemptEpoch++
@@ -257,6 +279,9 @@ export function createClientSession(ctx: ClientSessionContext) {
     resetSilentUpgradeState()
     stopDataChannelHeartbeat()
     silentUpgradeProbeCount = 0
+    if (ctx.isExplicitlyClosed()) {
+      removeOnlineListener()
+    }
 
     const oldSender = ctx.getClientSender?.()
     if (oldSender) {
@@ -307,6 +332,9 @@ export function createClientSession(ctx: ClientSessionContext) {
    * 确保建连：若已有进行中的建连尝试则复用，不重复拆建。
    */
   function setupClientConnection(forceRelay = false): Promise<void> {
+    if (!ctx.isExplicitlyClosed() && !ctx.isHostMode?.()) {
+      ensureOnlineListener()
+    }
     if (activeSetupPromise) {
       log.info('setupClientConnection already in flight; awaiting active setup.')
       return activeSetupPromise
@@ -977,15 +1005,6 @@ export function createClientSession(ctx: ClientSessionContext) {
     } else if (data.type === 'sas_rejected') {
       log.warn(`Host rejected SAS verification. Reason: ${data.reason}`)
     }
-  }
-
-  if (typeof window !== 'undefined') {
-    window.addEventListener('online', () => {
-      if (ctx.isHostMode?.() || ctx.isExplicitlyClosed()) return
-      log.info('[WebRTC Client] Network online detected; re-evaluating silent upgrade')
-      silentUpgradeProbeCount = 0
-      void checkAndScheduleSilentUpgrade(true)
-    })
   }
 
   return {

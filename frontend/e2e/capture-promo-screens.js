@@ -215,8 +215,9 @@ async function capture() {
 
     if (eventId) {
       await page.evaluate(async (eid) => {
-        // 1. 注入 Pit Scouting 展位数据
-        const pitRecords = [
+        // 1. 注入 2026-2027 BIOBUZZ Pit Scouting 展位数据
+        const nowIso = new Date().toISOString();
+        const pitSpecs = [
           {
             id: `pit_${eid}_27570`,
             eventId: eid,
@@ -226,23 +227,31 @@ async function capture() {
             robotName: 'Titanium Bear Mk.IV',
             drivetrainType: 'swerve',
             weightLbs: 41.5,
+            chassisSize: 'standard_mid',
             ballCompatibility: 'universal',
             launcherType: 'dual_flywheel',
-            flowerMechanism: 'cascade_lift',
+            flowerMechanism: 'vertical_lift',
             hasColorSensor: true,
+            hasDescoreMech: true,
+            hasApriltagVision: true,
             odometryType: 'sparkfun_otos',
-            claimedAutoStrategy: '3 Samples + High Basket + Level 1 Park',
-            claimedAutoScore: 60,
-            claimedTeleopCycles: 9,
-            claimedTeleopScore: 90,
-            claimedEndgameScore: 30,
-            claimedTotalScore: 180,
+            claimedAutoStrategy: '预载 2 球直射 + 完全离墙 + 自动停泊；双花 Nectar 占底',
+            claimedAutoScore: 14,
+            claimedTeleopCycles: 7,
+            claimedTeleopScore: 52,
+            claimedTeleopPark: true,
+            claimedFlowerNectars: 3,
+            claimedFlowerBottomBonus: 2,
+            claimedFlowerPollens: 4,
+            claimedGardenBalls: 3,
+            claimedEndgameScore: 32,
+            claimedTotalScore: 98,
             photoKeys: [],
             version: 1,
             hostSeq: 1,
             isDeleted: false,
-            createdAt: new Date().toISOString(),
-            updatedAt: new Date().toISOString()
+            createdAt: nowIso,
+            updatedAt: nowIso
           },
           {
             id: `pit_${eid}_11115`,
@@ -252,24 +261,32 @@ async function capture() {
             scoutName: 'Alex',
             robotName: 'Gluten Free Special',
             drivetrainType: 'mecanum',
-            weightLbs: 39.8,
+            weightLbs: 36.4,
+            chassisSize: 'compact_small',
             ballCompatibility: 'universal',
-            launcherType: 'catapult',
-            flowerMechanism: 'linkage_arm',
+            launcherType: 'curved_rail',
+            flowerMechanism: 'pivot_arm',
             hasColorSensor: true,
-            odometryType: 'optical_flow',
-            claimedAutoStrategy: '4 Samples Net + High Hang',
-            claimedAutoScore: 70,
-            claimedTeleopCycles: 11,
-            claimedTeleopScore: 110,
-            claimedEndgameScore: 30,
-            claimedTotalScore: 210,
+            hasDescoreMech: true,
+            hasApriltagVision: true,
+            odometryType: 'pinpoint',
+            claimedAutoStrategy: '预载进球 + 离墙停泊；紧凑小车 6 轮高速循环 + 底口掏球拆台',
+            claimedAutoScore: 11,
+            claimedTeleopCycles: 6,
+            claimedTeleopScore: 44,
+            claimedTeleopPark: true,
+            claimedFlowerNectars: 2,
+            claimedFlowerBottomBonus: 1,
+            claimedFlowerPollens: 3,
+            claimedGardenBalls: 2,
+            claimedEndgameScore: 22,
+            claimedTotalScore: 77,
             photoKeys: [],
             version: 1,
             hostSeq: 2,
             isDeleted: false,
-            createdAt: new Date().toISOString(),
-            updatedAt: new Date().toISOString()
+            createdAt: nowIso,
+            updatedAt: nowIso
           },
           {
             id: `pit_${eid}_28410`,
@@ -280,114 +297,248 @@ async function capture() {
             robotName: 'Cyber Dragon',
             drivetrainType: 'swerve',
             weightLbs: 42.0,
-            ballCompatibility: 'specialized',
-            launcherType: 'dual_flywheel',
-            flowerMechanism: 'scissor_lift',
-            hasColorSensor: false,
-            odometryType: 'deadwheel_3wire',
-            claimedAutoStrategy: '2 Samples + Level 2 Hang',
-            claimedAutoScore: 45,
-            claimedTeleopCycles: 8,
-            claimedTeleopScore: 85,
-            claimedEndgameScore: 30,
-            claimedTotalScore: 160,
+            chassisSize: 'wide_large',
+            ballCompatibility: 'sorting',
+            launcherType: 'single_flywheel',
+            flowerMechanism: 'angled_launcher',
+            hasColorSensor: true,
+            hasDescoreMech: false,
+            hasApriltagVision: false,
+            odometryType: 'three_wheel',
+            claimedAutoStrategy: '自动 2 球 + 离墙停泊；宽体对抗推进 Garden 与分选发射',
+            claimedAutoScore: 14,
+            claimedTeleopCycles: 7,
+            claimedTeleopScore: 56,
+            claimedTeleopPark: true,
+            claimedFlowerNectars: 3,
+            claimedFlowerBottomBonus: 2,
+            claimedFlowerPollens: 2,
+            claimedGardenBalls: 4,
+            claimedEndgameScore: 29,
+            claimedTotalScore: 99,
             photoKeys: [],
             version: 1,
             hostSeq: 3,
             isDeleted: false,
-            createdAt: new Date().toISOString(),
-            updatedAt: new Date().toISOString()
+            createdAt: nowIso,
+            updatedAt: nowIso
           }
         ];
 
-        // 2. 注入比赛实测记录
-        const matchRecords = [
-          {
-            id: `rec_${eid}_1`,
+        const pitRecords = pitSpecs.map((p) => ({
+          ...p,
+          rawData: JSON.stringify(p)
+        }));
+
+        // 2. 注入 2026-2027 BIOBUZZ 比赛实测记录 (含结构化轮次时间戳与 Endgame 明细)
+        const tsBase = Date.now() - 3_600_000;
+        const computePredictSec = (timestamps) => {
+          if (!Array.isArray(timestamps) || timestamps.length < 6) return null;
+          const valid = [];
+          for (let i = 1; i < timestamps.length; i++) {
+            const dt = (timestamps[i] - timestamps[i - 1]) / 1000;
+            if (dt > 0 && dt <= 120) valid.push(dt);
+          }
+          if (valid.length < 5) return null;
+          valid.sort((a, b) => a - b);
+          const avg = (valid[1] + valid[2] + valid[3] + valid[4]) / 4;
+          return Math.round(avg * 10) / 10;
+        };
+
+        const makePromoMatchRecord = ({
+          id,
+          scoutId,
+          scoutName,
+          matchNumber,
+          teamNumber,
+          allianceColor,
+          autoLeave,
+          autoBalls,
+          autoPark,
+          teleopCycles,
+          teleopMissedCycles,
+          gapSequenceMs,
+          teleopPark,
+          flowerNectars,
+          flowerBottomBonusCount,
+          flowerPollens,
+          gardenBalls,
+          flowerDescore,
+          notes,
+          createdOffsetMs
+        }) => {
+          const autoScore = (autoLeave ? 3 : 0) + autoBalls * 3 + (autoPark ? 5 : 0);
+          const teleopScore = teleopCycles.reduce((sum, v) => sum + v, 0) * 2;
+          const clampedBottom = Math.min(4, flowerNectars, flowerBottomBonusCount);
+          const endgameScore =
+            (teleopPark ? 5 : 0) +
+            flowerNectars * 2 +
+            clampedBottom * 5 +
+            flowerPollens * 2 +
+            gardenBalls;
+          const totalScore = autoScore + teleopScore + endgameScore;
+
+          const teleopCycleTimestamps = [];
+          let cursor = tsBase + matchNumber * 300_000 + 8_000;
+          for (let i = 0; i < teleopCycles.length; i++) {
+            if (i > 0) {
+              cursor += gapSequenceMs[i - 1] ?? 9000;
+            }
+            teleopCycleTimestamps.push(cursor);
+          }
+          const predictCycleTimeSec = computePredictSec(teleopCycleTimestamps);
+
+          const rawObj = {
+            matchNumber,
+            tournamentLevel: 'QUALIFICATION',
+            teamNumber,
+            allianceColor,
+            isBroken: false,
+            autoLeave,
+            autoBalls,
+            autoCycles: autoBalls > 0 ? [autoBalls] : [],
+            autoMissedCycles: autoBalls > 0 ? [0] : [],
+            autoPreload: autoBalls > 0,
+            autoPark,
+            teleopCycles,
+            teleopMissedCycles,
+            teleopCycleTimestamps,
+            predictCycleTimeSec,
+            teleopPark,
+            flowerNectars,
+            flowerBottomBonusCount: clampedBottom,
+            flowerPollens,
+            gardenBalls,
+            flowerDescore,
+            g410EarlyFlowerFoul: false,
+            flowerPlaced: flowerNectars > 0,
+            flowerBottomBonus: clampedBottom > 0
+          };
+
+          return {
+            id,
             eventId: eid,
+            scoutId,
+            scoutName,
+            matchNumber,
+            teamNumber,
+            autoScore,
+            teleopScore,
+            endgameScore,
+            totalScore,
+            notes,
+            rawData: JSON.stringify(rawObj),
+            syncStatus: 'SYNCED',
+            isBroken: false,
+            version: 1,
+            createdAt: new Date(Date.now() - createdOffsetMs).toISOString(),
+            updatedAt: nowIso
+          };
+        };
+
+        const matchRecords = [
+          makePromoMatchRecord({
+            id: `rec_${eid}_1`,
             scoutId: 'scout_1',
             scoutName: 'Commander',
             matchNumber: 1,
             teamNumber: 27570,
-            autoScore: 50,
-            teleopScore: 92,
-            endgameScore: 30,
-            totalScore: 172,
-            notes: 'Swerve 走位极其丝滑，中场球控场极佳，末端 Level 3 稳定高挂！',
-            rawData: JSON.stringify({ allianceColor: 'red' }),
-            syncStatus: 'SYNCED',
-            version: 1,
-            createdAt: new Date(Date.now() - 3600000).toISOString(),
-            updatedAt: new Date().toISOString()
-          },
-          {
+            allianceColor: 'red',
+            autoLeave: true,
+            autoBalls: 2,
+            autoPark: true,
+            teleopCycles: [4, 4, 4, 4, 4, 3, 2],
+            teleopMissedCycles: [0, 1, 0, 0, 1, 0, 0],
+            gapSequenceMs: [8200, 8700, 8100, 8500, 8900, 8400],
+            teleopPark: true,
+            flowerNectars: 3,
+            flowerBottomBonusCount: 2,
+            flowerPollens: 4,
+            gardenBalls: 3,
+            flowerDescore: true,
+            notes: 'Swerve 走位丝滑，7 轮稳定循环（Predict 8.5s），终局 3 颗 Nectar 占 2 朵花底并完成停泊！',
+            createdOffsetMs: 3_600_000
+          }),
+          makePromoMatchRecord({
             id: `rec_${eid}_2`,
-            eventId: eid,
             scoutId: 'scout_2',
             scoutName: 'Alex',
             matchNumber: 1,
             teamNumber: 11115,
-            autoScore: 65,
-            teleopScore: 105,
-            endgameScore: 30,
-            totalScore: 200,
-            notes: '投石发射机构射速极高，循环周期 8 秒以内，高篮命中率 100%！',
-            rawData: JSON.stringify({ allianceColor: 'blue' }),
-            syncStatus: 'SYNCED',
-            version: 1,
-            createdAt: new Date(Date.now() - 3000000).toISOString(),
-            updatedAt: new Date().toISOString()
-          },
-          {
+            allianceColor: 'blue',
+            autoLeave: true,
+            autoBalls: 1,
+            autoPark: true,
+            teleopCycles: [4, 3, 4, 3, 4, 3],
+            teleopMissedCycles: [0, 1, 0, 0, 1, 0],
+            gapSequenceMs: [9100, 9600, 8800, 9400, 9200],
+            teleopPark: true,
+            flowerNectars: 2,
+            flowerBottomBonusCount: 1,
+            flowerPollens: 3,
+            gardenBalls: 2,
+            flowerDescore: true,
+            notes: '紧凑小车穿梭极快，6 轮稳定输出，末段掏球拆台 (G418) + 花朵占底稳拿 Swarm RP！',
+            createdOffsetMs: 3_000_000
+          }),
+          makePromoMatchRecord({
             id: `rec_${eid}_3`,
-            eventId: eid,
             scoutId: 'scout_1',
             scoutName: 'Commander',
             matchNumber: 2,
             teamNumber: 27570,
-            autoScore: 55,
-            teleopScore: 96,
-            endgameScore: 30,
-            totalScore: 181,
-            notes: '创下赛季新高！自研 OTOS 航向角零飘移，自主阶段完美收拢 4 球。',
-            rawData: JSON.stringify({ allianceColor: 'blue' }),
-            syncStatus: 'SYNCED',
-            version: 1,
-            createdAt: new Date(Date.now() - 1800000).toISOString(),
-            updatedAt: new Date().toISOString()
-          },
-          {
+            allianceColor: 'blue',
+            autoLeave: true,
+            autoBalls: 2,
+            autoPark: true,
+            teleopCycles: [4, 4, 3, 4, 4, 4],
+            teleopMissedCycles: [0, 0, 1, 0, 0, 0],
+            gapSequenceMs: [8600, 8100, 8500, 8800, 8300],
+            teleopPark: true,
+            flowerNectars: 2,
+            flowerBottomBonusCount: 2,
+            flowerPollens: 3,
+            gardenBalls: 3,
+            flowerDescore: false,
+            notes: 'OTOS 航向角零漂移，自动 14 分 + 终局停泊拿满 13 分机动分，双花封顶！',
+            createdOffsetMs: 1_800_000
+          }),
+          makePromoMatchRecord({
             id: `rec_${eid}_4`,
-            eventId: eid,
             scoutId: 'scout_3',
             scoutName: 'Chris',
             matchNumber: 2,
             teamNumber: 28410,
-            autoScore: 40,
-            teleopScore: 80,
-            endgameScore: 25,
-            totalScore: 145,
-            notes: '底盘推力强劲，防守端压制力出色，拦截率 80%。',
-            rawData: JSON.stringify({ allianceColor: 'red' }),
-            syncStatus: 'SYNCED',
-            version: 1,
-            createdAt: new Date(Date.now() - 1200000).toISOString(),
-            updatedAt: new Date().toISOString()
-          }
+            allianceColor: 'red',
+            autoLeave: true,
+            autoBalls: 1,
+            autoPark: false,
+            teleopCycles: [3, 2, 3, 2, 3, 2],
+            teleopMissedCycles: [1, 1, 0, 1, 0, 0],
+            gapSequenceMs: [11200, 12100, 10900, 11800, 11500],
+            teleopPark: false,
+            flowerNectars: 1,
+            flowerBottomBonusCount: 0,
+            flowerPollens: 2,
+            gardenBalls: 3,
+            flowerDescore: false,
+            notes: '宽体底盘推球进 Garden 稳定，但未回装载区停泊且实测轮次略低于展位自述。',
+            createdOffsetMs: 1_200_000
+          })
         ];
 
-        // 3. 注入 AI 对话历史
+        // 3. 注入 2026-2027 BIOBUZZ AI 战术分析对话历史
         const aiHistory = [
           {
             id: 'ai_msg_1',
             role: 'user',
-            content: '军师，请分析 Team 27570 与上位联盟搭配的契合度，以及自主阶段得分走势。',
+            content: '军师，请结合 Predict Cycle Time、Swarm RP 和吹牛指数，分析 Team 27570 与上位联盟搭配的契合度。',
             timestamp: Date.now() - 600000
           },
           {
             id: 'ai_msg_2',
             role: 'assistant',
-            content: '🤖 **ScoutingPro27 战术军师数据分析报告：**\n\n- 🏆 **Team 27570（Titanium Bear）核心指标：**\n  - 自主阶段均分 **52.5 分**（Swerve 底盘零死角航向控制，稳定挂钩 + 4 样本清场）。\n  - **展位自报吻合度（吹牛审计）**：自报 180 分，实测最高 181 分，实测吻合度 **100.5%**（实干型硬核战队，无虚标）。\n\n- 🤝 **最优首选搭档：Team 11115**\n  - 两队场均综合输出预计突破 **370 分**。\n  - 建议分工：27570 承担中场球源分配与重型防守压制，11115 专职 8 秒快速装填，具备区域锦标赛夺冠实力！',
+            content: '🤖 **ScoutingPro27 BIOBUZZ 战术军师数据分析报告：**\n\n- 🏆 **Team 27570（Titanium Bear Mk.IV）核心指标：**\n  - **Predict Cycle Time 8.5s**（6+ 轮稳定触发，预估上限 **10.6 轮**）；场均 **Auto 14.0 / TeleOp 48.0 / Endgame 30.0 / 总分 92.0 分**（最高 **96 分**），Swarm 机动 RP **13.0 / 13 分**（离墙 + 自动停泊 + 终局停泊全稳）。\n  - **展位自报吻合度（吹牛指数）**：自报 **98 分**，实测最高 **96 分** / 场均 **92.0 分**（基准 96.6 分 → **1.01x 真实守信**，放花已证实 · 停泊已证实）。\n\n- 🤝 **最优首选搭档：Team 11115（紧凑小车 ≤15"）**\n  - 场均 **Auto 11.0 / TeleOp 42.0 / Endgame 22.0 / 总分 75.0 分**，**Predict Cycle Time 9.3s**，机动 RP **13.0 / 13 分**，并具备 **G418 敌方花底掏球拆台** 能力。\n  - 两队机动分合计达 **26.0 分**（远超 ≥16 分 Swarm RP 门槛），联盟预期场均总分 **167.0 分**（峰值 **171 分**）；建议 27570 主打高节奏轮次与场均 2.5 颗 Nectar 双花占底，11115 钻缝补 Pollen 并协助拆台！',
             timestamp: Date.now() - 580000
           }
         ];

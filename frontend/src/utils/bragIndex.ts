@@ -1,8 +1,74 @@
 import type { PitScoutingRecord, ScoutingRecord, BragInfo, BragTier } from '@/types'
+import { i18n } from '@/i18n'
+
+interface ParsedMatchEndgame {
+  didFlower: boolean
+  didPark: boolean
+}
+
+function translate(key: string, params?: Record<string, unknown>): string {
+  try {
+    if (i18n?.global?.t) {
+      return String(params ? i18n.global.t(key, params) : i18n.global.t(key))
+    }
+  } catch {
+    // Fallback to key if i18n is unavailable in isolated test runners
+  }
+  return key
+}
+
+function isNoneFlowerMech(mech?: string): boolean {
+  const normalized = (mech || '').trim().toLowerCase()
+  return !normalized || normalized === 'none' || normalized === '无' || normalized === 'n/a'
+}
+
+function parseMatchEndgame(rawData?: string): ParsedMatchEndgame {
+  if (!rawData || typeof rawData !== 'string') {
+    return { didFlower: false, didPark: false }
+  }
+  try {
+    const parsed = JSON.parse(rawData)
+    if (!parsed || typeof parsed !== 'object') {
+      return { didFlower: false, didPark: false }
+    }
+    const didFlower =
+      Number(parsed.flowerNectars || 0) > 0 ||
+      Number(parsed.flowerBottomBonusCount || 0) > 0 ||
+      parsed.flowerPlaced === true ||
+      parsed.flowerBottomBonus === true
+    const didPark = parsed.teleopPark === true
+    return { didFlower, didPark }
+  } catch {
+    return { didFlower: false, didPark: false }
+  }
+}
+
+function buildPendingResult(labelKey: string): BragInfo {
+  return {
+    tier: 'pending',
+    overallRatio: 1.0,
+    autoRatio: 1.0,
+    teleopRatio: 1.0,
+    endgameRatio: 1.0,
+    endgameUnfulfilled: false,
+    endgamePardoned: false,
+    endgameVerified: false,
+    flowerVerified: false,
+    flowerPending: false,
+    parkVerified: false,
+    parkPending: false,
+    statusKeys: [],
+    labelKey,
+    hangUnfulfilled: false,
+    hangPardoned: false,
+    hangVerified: false,
+    label: translate(labelKey)
+  }
+}
 
 /**
  * 战队"吹牛指数" (Brag Index) 自动化计算工具
- * 将展位自述标准量化数据 (claimed) 与赛场实际排位赛表现 (actualMatches) 进行多维对账
+ * 将展位自述量化数据 (claimed) 与赛场实际排位赛表现 (actualMatches) 进行多维对账 (BIOBUZZ 2026-2027)
  */
 export function calculateBragIndex(
   claimed?: PitScoutingRecord | null,
@@ -16,28 +82,12 @@ export function calculateBragIndex(
 
   // 尚未登场打比赛
   if (validMatches.length === 0) {
-    return {
-      tier: 'pending',
-      overallRatio: 1.0,
-      autoRatio: 1.0,
-      teleopRatio: 1.0,
-      endgameUnfulfilled: false,
-      hangUnfulfilled: false,
-      label: '待实测'
-    }
+    return buildPendingResult('pit_scout.brag_pending_matches')
   }
 
   // 未填写自述得分
   if (!claimed.claimedTotalScore || claimed.claimedTotalScore <= 0) {
-    return {
-      tier: 'pending',
-      overallRatio: 1.0,
-      autoRatio: 1.0,
-      teleopRatio: 1.0,
-      endgameUnfulfilled: false,
-      hangUnfulfilled: false,
-      label: '自述待补充'
-    }
+    return buildPendingResult('pit_scout.brag_pending_claims')
   }
 
   // 过滤机械/断电故障场次（若存在正常场次则排除 isBroken 干扰；若全为故障场次则保留作为参考）
@@ -64,36 +114,62 @@ export function calculateBragIndex(
     ? Number((claimed.claimedTeleopScore / Math.max(maxTeleopScore, 1)).toFixed(2))
     : 1.0
 
-  // 4. 残局与高难花朵机构履约核验 (BIOBUZZ 2026-2027: 花朵放置 10-15 分, 停靠 5 分)
+  // 4. 终局吹牛倍率
   const claimedEndgame = claimed.claimedEndgameScore || 0
-  const claimsFlower = claimedEndgame >= 10
-  const endgameVerified = claimsFlower && maxEndgameScore >= 10
-  const endgameUnfulfilled = claimsFlower && validMatches.length >= 2 && maxEndgameScore < 10
-  const endgamePardoned = endgameUnfulfilled // 针对花朵机构策略性留力特赦免责
+  const endgameRatio = claimedEndgame > 0
+    ? Number((claimedEndgame / Math.max(maxEndgameScore, 1)).toFixed(2))
+    : 1.0
 
-  // 5. 判定档位（以赛场实际展现的峰值上限与产出比率为准，放宽阈值以包容赛场正常波动与最佳成绩自报）
+  // 5. BIOBUZZ 真实 rawData 履约核验（花朵投放与终局停泊，不依赖总分 >= 10 猜测）
+  const validParsed = validMatches.map((m) => parseMatchEndgame(m.rawData))
+  const evalParsed = evalMatches.map((m) => parseMatchEndgame(m.rawData))
+
+  const claimsFlower =
+    !isNoneFlowerMech(claimed.flowerMechanism) ||
+    (claimed.claimedFlowerNectars ?? 0) > 0 ||
+    (claimed.claimedFlowerBottomBonus ?? 0) > 0
+
+  const actualFlowerMatches = validParsed.filter((p) => p.didFlower).length
+  const flowerVerified = claimsFlower && actualFlowerMatches > 0
+  const flowerPending = claimsFlower && !flowerVerified
+  const endgameUnfulfilled = claimsFlower && !flowerVerified && validMatches.length >= 2
+  const endgamePardoned = endgameUnfulfilled
+  const endgameVerified = flowerVerified
+
+  const claimsPark = Boolean(claimed.claimedTeleopPark)
+  const actualParkMatches = evalParsed.filter((p) => p.didPark).length
+  const parkRate = evalMatches.length > 0 ? actualParkMatches / evalMatches.length : 0
+  const parkVerified = claimsPark && actualParkMatches > 0 && parkRate >= 0.5
+  const parkPending = claimsPark && !parkVerified
+
+  // 6. 判定档位
   let tier: BragTier = 'realistic'
-  let label = `${overallRatio}x 真实守信`
-
   if (overallRatio > 2.2) {
     tier = 'mythical'
-    label = `${overallRatio}x 吹破牛皮`
   } else if (overallRatio > 1.65) {
     tier = 'overclaimed'
-    label = `${overallRatio}x 夸大其词`
   } else if (overallRatio > 1.25) {
     tier = 'optimistic'
-    label = `${overallRatio}x 略偏乐观`
-  } else {
-    tier = 'realistic'
-    label = `${overallRatio}x 真实守信`
   }
 
-  // 标注状态修饰
-  if (endgameVerified) {
-    label += ' (花朵已证实)'
-  } else if (endgamePardoned) {
-    label += ' (花朵待验证)'
+  const labelKey = `pit_scout.brag_tiers.${tier}`
+  const statusKeys: string[] = []
+  if (flowerVerified) {
+    statusKeys.push('pit_scout.flower_verified')
+  } else if (flowerPending) {
+    statusKeys.push('pit_scout.flower_pending_verify')
+  }
+  if (parkVerified) {
+    statusKeys.push('pit_scout.park_verified')
+  } else if (parkPending) {
+    statusKeys.push('pit_scout.park_pending')
+  }
+
+  const tierText = translate(labelKey)
+  let label = translate('pit_scout.brag_label_format', { ratio: overallRatio, tier: tierText })
+  if (statusKeys.length > 0) {
+    const statusText = statusKeys.map((k) => translate(k)).join(' · ')
+    label += ` (${statusText})`
   }
 
   return {
@@ -101,9 +177,16 @@ export function calculateBragIndex(
     overallRatio,
     autoRatio,
     teleopRatio,
+    endgameRatio,
     endgameUnfulfilled,
     endgamePardoned,
     endgameVerified,
+    flowerVerified,
+    flowerPending,
+    parkVerified,
+    parkPending,
+    statusKeys,
+    labelKey,
     hangUnfulfilled: endgameUnfulfilled,
     hangPardoned: endgamePardoned,
     hangVerified: endgameVerified,

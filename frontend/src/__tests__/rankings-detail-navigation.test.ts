@@ -20,6 +20,8 @@ const i18n = createI18n({
   messages: {
     en: {
       rankings: {
+        advancement_points: 'Advancement Pts',
+        advancement_points_desc: 'Advancement Points',
         team: 'Team',
         matches: 'Matches',
         breakdown: 'Breakdown',

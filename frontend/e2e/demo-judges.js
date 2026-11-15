@@ -268,7 +268,7 @@ async function runDemo() {
     
     // Host 去计分板页监控 (Tab: rankings) 展示爬榜动画
     await pageHost.evaluate(() => {
-      const btn = document.querySelector('.tab-btn[data-tab="rankings"]') || document.querySelectorAll('.tab-btn')[3];
+      const btn = document.querySelector('.tab-btn[data-tab="rankings"]') || document.querySelectorAll('.tab-btn')[4];
       if (btn) btn.click();
     });
     await waitForTransition(pageHost);
@@ -351,13 +351,13 @@ async function runDemo() {
     // Client 端展示导航切换动画
     await highlightElement(pageClient, '.tab-bar, .mobile-bottom-nav', '8. 体验媲美原生 App 的 View Transitions 视口动画');
     await pageClient.evaluate(() => {
-      const btn = document.querySelector('.tab-btn[data-tab="rankings"]') || document.querySelectorAll('.tab-btn')[3];
+      const btn = document.querySelector('.tab-btn[data-tab="rankings"]') || document.querySelectorAll('.tab-btn')[4];
       if (btn) btn.click();
     });
     await waitForTransition(pageClient);
     await delay(1000);
     await pageClient.evaluate(() => {
-      const btn = document.querySelector('.tab-btn[data-tab="history"]') || document.querySelectorAll('.tab-btn')[4];
+      const btn = document.querySelector('.tab-btn[data-tab="history"]') || document.querySelectorAll('.tab-btn')[5];
       if (btn) btn.click();
     });
     await waitForTransition(pageClient);
@@ -370,7 +370,7 @@ async function runDemo() {
     
     // Host 端回到 Rankings 展示看板交互
     await pageHost.evaluate(() => {
-      const btn = document.querySelector('.tab-btn[data-tab="rankings"]') || document.querySelectorAll('.tab-btn')[3];
+      const btn = document.querySelector('.tab-btn[data-tab="rankings"]') || document.querySelectorAll('.tab-btn')[4];
       if (btn) btn.click();
     });
     await waitForTransition(pageHost);
@@ -418,7 +418,7 @@ async function runDemo() {
     // Host 切到 Scouts 页面
     await highlightElement(pageHost, '.tab-btn[data-tab="scouts"]', '13. 主机切换到人员管理页');
     await pageHost.evaluate(() => {
-      const btn = document.querySelector('.tab-btn[data-tab="scouts"]') || document.querySelectorAll('.tab-btn')[6];
+      const btn = document.querySelector('.tab-btn[data-tab="scouts"]') || document.querySelectorAll('.tab-btn')[7];
       if (btn) btn.click();
     });
     await waitForTransition(pageHost);
