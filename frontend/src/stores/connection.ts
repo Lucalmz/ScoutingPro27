@@ -11,7 +11,8 @@ export const useConnectionStore = defineStore('connection', () => {
   const status = ref<ConnectionStatus>('offline')
   const transportInfo = ref<ConnectionTransportInfo | null>(null)
   const rtcService = ref<WebRtcService | null>(null)
-  const connectedScouts = ref<{ id: string, name: string }[]>([])
+  const connectedScouts = ref<{ id: string; name: string; transportInfo?: ConnectionTransportInfo | null }[]>([])
+  const scoutTransports = ref<Record<string, ConnectionTransportInfo>>({})
   const isReconnecting = ref(false)
   const sessionConflict = ref<{
     conflictingUsername: string
@@ -260,14 +261,45 @@ export const useConnectionStore = defineStore('connection', () => {
     rtcService.value?.initHostSeq(maxSeq)
   }
 
-  function addConnectedScout(id: string, name: string) {
-    if (!connectedScouts.value.find(s => s.id === id)) {
-      connectedScouts.value.push({ id, name })
+  function addConnectedScout(id: string, name: string, transportInfo?: ConnectionTransportInfo | null) {
+    if (transportInfo) {
+      scoutTransports.value[id] = transportInfo
     }
+    const existing = connectedScouts.value.find(s => s.id === id)
+    if (existing) {
+      if (name) existing.name = name
+      existing.transportInfo = transportInfo ?? scoutTransports.value[id] ?? existing.transportInfo ?? null
+    } else {
+      connectedScouts.value.push({
+        id,
+        name,
+        transportInfo: transportInfo ?? scoutTransports.value[id] ?? null
+      })
+    }
+  }
+
+  function setScoutTransportInfo(id: string, info: ConnectionTransportInfo | null) {
+    if (!id) return
+    if (info) {
+      scoutTransports.value[id] = info
+    } else {
+      delete scoutTransports.value[id]
+    }
+    const existing = connectedScouts.value.find(s => s.id === id)
+    if (existing) {
+      existing.transportInfo = info
+    }
+  }
+
+  function removeConnectedScout(id: string) {
+    if (!id) return
+    connectedScouts.value = connectedScouts.value.filter(s => s.id !== id)
+    delete scoutTransports.value[id]
   }
 
   function clearConnectedScouts() {
     connectedScouts.value = []
+    scoutTransports.value = {}
   }
 
   function broadcastTagUpdate(tag: import('@/types').TeamTagItem, action: 'ADD' | 'REMOVE') {
@@ -391,7 +423,10 @@ export const useConnectionStore = defineStore('connection', () => {
     stampHostSeq,
     initHostSeq,
     connectedScouts,
+    scoutTransports,
     addConnectedScout,
+    setScoutTransportInfo,
+    removeConnectedScout,
     clearConnectedScouts,
     broadcastTagUpdate,
     isStandbyHost,

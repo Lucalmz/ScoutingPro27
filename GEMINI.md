@@ -27,6 +27,10 @@
 ## 6. 交付前用户行为全链路自测
 - 每次交付阶段性成果前，必须先像真实用户一样自走完整流程（填表单、点按钮、看结果），确认整条链路无断点后再提交验收。
 
+## 7. Swarm / `/teamwork` 默认集群模型规约
+- 在本项目中通过 `/teamwork` 或 `swarm` 工具拉起集群时，除非用户在当前指令中另有指定，所有通过 `swarm{action:"add"}` 创建的 worker（含 `narrator`、`monitor` 等辅助角色）**默认显式指定 `model: "gemini-4-hydrogen-medium"`**（对应 Gemini 4 Hydrogen (Medium)）。
+- 若需调整默认档位，可将上述模型 ID 替换为 `gemini-4-hydrogen-low`、`gemini-4-hydrogen-high` 或 `gemini-4-hydrogen-xhigh`。
+
 ---
 
 > 详细规范与自动化验证工具已封装在 Skill: `rigorous-verification-delivery` 中。

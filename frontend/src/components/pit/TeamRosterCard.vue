@@ -266,17 +266,20 @@ const bragLabel = computed(() => {
 
 <style scoped>
 .team-roster-card {
-  background: var(--card, #141413);
-  border: 1px solid var(--border, #262624);
+  background: var(--card);
+  border: 1px solid var(--border);
   border-radius: 12px;
   padding: 16px;
   display: flex;
   flex-direction: column;
   gap: 12px;
   cursor: pointer;
-  transition: all 0.22s cubic-bezier(0.16, 1, 0.3, 1);
+  transition: background-color var(--motion-duration-moderate) var(--motion-ease-out),
+              border-color var(--motion-duration-moderate) var(--motion-ease-out),
+              transform var(--motion-duration-moderate) var(--motion-ease-out),
+              box-shadow var(--motion-duration-moderate) var(--motion-ease-out);
   position: relative;
-  animation: card-cascade-in var(--motion-duration-moderate, 0.4s) var(--motion-ease-out, ease-out) both;
+  animation: card-cascade-in var(--motion-duration-moderate) var(--motion-ease-out) both;
   animation-delay: min(calc(var(--card-index, 0) * 30ms), 240ms);
 }
 
@@ -317,14 +320,14 @@ const bragLabel = computed(() => {
 }
 
 .team-roster-card:hover {
-  background: var(--surface-elevated, #1c1c1a);
-  border-color: var(--primary, #39ff14);
+  background: var(--surface-elevated);
+  border-color: var(--primary);
   transform: translateY(-2px);
-  box-shadow: 0 12px 28px rgba(0, 0, 0, 0.6), 0 0 16px rgba(57, 255, 20, 0.14);
+  box-shadow: var(--shadow-2);
 }
 
 .team-roster-card.is-scouted {
-  border-left: 3px solid var(--primary, #39ff14);
+  border-left: 3px solid var(--primary);
 }
 
 .card-header {
@@ -341,15 +344,17 @@ const bragLabel = computed(() => {
 }
 
 .team-number {
+  font-family: var(--font-numeric);
+  font-variant-numeric: tabular-nums;
   font-size: 18px;
   font-weight: 800;
-  color: var(--foreground, #ededed);
+  color: var(--foreground);
   letter-spacing: -0.02em;
 }
 
 .team-name {
   font-size: 14px;
-  color: var(--muted-foreground, #888888);
+  color: var(--muted-foreground);
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -362,9 +367,9 @@ const bragLabel = computed(() => {
   gap: 5px;
   padding: 3px 8px;
   border-radius: 6px;
-  background: rgba(59, 130, 246, 0.15);
-  border: 1px solid rgba(59, 130, 246, 0.35);
-  color: #60a5fa;
+  background: var(--status-info-bg);
+  border: 1px solid var(--status-info-border);
+  color: var(--status-info);
   font-size: 11px;
   font-weight: 700;
   width: fit-content;
@@ -374,7 +379,7 @@ const bragLabel = computed(() => {
   display: flex;
   gap: 12px;
   font-size: 12px;
-  color: var(--muted-foreground, #888888);
+  color: var(--muted-foreground);
 }
 
 .hardware-pills {
@@ -390,9 +395,9 @@ const bragLabel = computed(() => {
   font-size: 11px;
   padding: 3px 10px;
   border-radius: 9999px;
-  background: rgba(255, 255, 255, 0.05);
-  border: 1px solid var(--border, #262626);
-  color: var(--foreground, #ededed);
+  background: var(--surface-elevated);
+  border: 1px solid var(--border);
+  color: var(--foreground);
   font-weight: 500;
 }
 
@@ -402,23 +407,23 @@ const bragLabel = computed(() => {
 }
 
 .pill-drivetrain {
-  background: rgba(57, 255, 20, 0.1);
-  border-color: rgba(57, 255, 20, 0.3);
-  color: var(--primary, #39ff14);
+  background: var(--status-success-bg);
+  border-color: var(--status-success-border);
+  color: var(--primary);
 }
 
 .pill-feature {
-  background: rgba(59, 130, 246, 0.1);
-  border-color: rgba(59, 130, 246, 0.28);
-  color: #93c5fd;
+  background: var(--status-info-bg);
+  border-color: var(--status-info-border);
+  color: var(--status-info);
 }
 
 .quant-grid {
   display: grid;
   grid-template-columns: repeat(2, 1fr);
   gap: 8px 12px;
-  background: var(--surface-recessed, #080807);
-  border: 1px solid var(--border, #262624);
+  background: var(--surface-recessed);
+  border: 1px solid var(--border);
   border-radius: 8px;
   padding: 10px 12px;
 }
@@ -431,7 +436,7 @@ const bragLabel = computed(() => {
 
 .quant-label {
   font-size: 10px;
-  color: var(--muted-foreground, #8e8d87);
+  color: var(--muted-foreground);
   text-transform: uppercase;
   letter-spacing: 0.04em;
 }
@@ -440,12 +445,13 @@ const bragLabel = computed(() => {
   font-size: 13px;
   font-weight: 700;
   font-variant-numeric: tabular-nums;
-  color: var(--foreground, #f0efe9);
+  color: var(--foreground);
 }
 
 .quant-value.highlight {
-  color: var(--primary, #39ff14);
-  font-family: 'Orbitron', sans-serif;
+  color: var(--primary);
+  font-family: var(--font-numeric);
+  font-variant-numeric: tabular-nums;
   font-weight: 800;
 }
 
@@ -457,8 +463,8 @@ const bragLabel = computed(() => {
   gap: 6px;
   padding: 7px 10px;
   border-radius: 8px;
-  background: var(--surface-recessed, #080807);
-  border: 1px solid var(--border, #262624);
+  background: var(--surface-recessed);
+  border: 1px solid var(--border);
   font-size: 11px;
   font-variant-numeric: tabular-nums;
 }
@@ -466,7 +472,7 @@ const bragLabel = computed(() => {
 .reconcile-scores {
   display: flex;
   gap: 8px;
-  color: var(--muted-foreground, #8e8d87);
+  color: var(--muted-foreground);
 }
 
 .reconcile-badges {
@@ -486,15 +492,15 @@ const bragLabel = computed(() => {
 }
 
 .verify-pill.is-verified {
-  background: rgba(57, 255, 20, 0.12);
-  color: #39ff14;
-  border: 1px solid rgba(57, 255, 20, 0.35);
+  background: var(--status-success-bg);
+  color: var(--status-success);
+  border: 1px solid var(--status-success-border);
 }
 
 .verify-pill.is-pending {
-  background: rgba(250, 204, 21, 0.12);
-  color: #facc15;
-  border: 1px solid rgba(250, 204, 21, 0.3);
+  background: var(--status-warning-bg);
+  color: var(--status-warning);
+  border: 1px solid var(--status-warning-border);
 }
 
 .brag-tier-pill {
@@ -511,19 +517,19 @@ const bragLabel = computed(() => {
   font-size: 12px;
 }
 
-.tier-realistic { background: #0d1f0e; color: #39ff14; border: 1px solid rgba(57, 255, 20, 0.45); }
-.tier-optimistic { background: #211a08; color: #facc15; border: 1px solid rgba(234, 179, 8, 0.45); }
-.tier-overclaimed { background: #231308; color: #fb923c; border: 1px solid rgba(249, 115, 22, 0.45); }
-.tier-mythical { background: #220d0d; color: #f87171; border: 1px solid #ef4444; box-shadow: 0 0 12px rgba(239, 68, 68, 0.35); }
-.tier-pending { background: #181816; color: #8e8d87; border: 1px solid #262624; }
+.tier-realistic { background: var(--status-success-bg); color: var(--status-success); border: 1px solid var(--status-success-border); }
+.tier-optimistic { background: var(--status-warning-bg); color: var(--status-warning); border: 1px solid var(--status-warning-border); }
+.tier-overclaimed { background: color-mix(in srgb, var(--status-warning-bg) 50%, var(--status-error-bg)); color: color-mix(in srgb, var(--status-warning) 55%, var(--status-error)); border: 1px solid color-mix(in srgb, var(--status-warning-border) 50%, var(--status-error-border)); }
+.tier-mythical { background: var(--status-error-bg); color: var(--status-error); border: 1px solid var(--status-error-border); }
+.tier-pending { background: var(--surface-elevated); color: var(--muted-foreground); border: 1px solid var(--border); }
 
 .card-thumbnail {
   width: 100%;
   height: 120px;
   border-radius: 8px;
   overflow: hidden;
-  background: #000;
-  border: 1px solid var(--border, #262626);
+  background: var(--surface-recessed);
+  border: 1px solid var(--border);
   position: relative;
   cursor: zoom-in;
 }
@@ -532,7 +538,7 @@ const bragLabel = computed(() => {
   width: 100%;
   height: 100%;
   object-fit: cover;
-  transition: transform 0.2s ease;
+  transition: transform var(--motion-duration-fast) var(--motion-ease-out);
 }
 
 .card-thumbnail:hover img {
@@ -545,12 +551,12 @@ const bragLabel = computed(() => {
   left: 0;
   right: 0;
   bottom: 0;
-  background: rgba(0, 0, 0, 0.35);
+  background: color-mix(in srgb, var(--g-950) 35%, transparent);
   opacity: 0;
   display: flex;
   align-items: center;
   justify-content: center;
-  transition: opacity 0.2s ease;
+  transition: opacity var(--motion-duration-fast) var(--motion-ease-out);
   pointer-events: none;
 }
 
@@ -560,20 +566,20 @@ const bragLabel = computed(() => {
 
 .zoom-icon {
   font-size: 28px;
-  color: #fff;
-  filter: drop-shadow(0 2px 4px rgba(0, 0, 0, 0.8));
+  color: var(--g-50);
+  filter: drop-shadow(0 2px 4px color-mix(in srgb, var(--g-950) 80%, transparent));
 }
 
 .photo-count-badge {
   position: absolute;
   bottom: 6px;
   right: 6px;
-  background: rgba(0, 0, 0, 0.7);
-  color: #fff;
+  background: color-mix(in srgb, var(--g-950) 70%, transparent);
+  color: var(--g-50);
   font-size: 10px;
   padding: 2px 6px;
   border-radius: 10px;
-  border: 1px solid rgba(255, 255, 255, 0.2);
+  border: 1px solid color-mix(in srgb, var(--g-50) 20%, transparent);
 }
 
 .card-footer {
@@ -583,19 +589,21 @@ const bragLabel = computed(() => {
 .action-btn {
   width: 100%;
   padding: 8px 12px;
-  border: 1px solid rgba(57, 255, 20, 0.3);
+  border: 1px solid var(--status-success-border);
   border-radius: 8px;
-  background: rgba(57, 255, 20, 0.08);
-  color: var(--primary, #39ff14);
+  background: var(--status-success-bg);
+  color: var(--primary);
   font-size: 12px;
   font-weight: 600;
   cursor: pointer;
-  transition: all 0.2s ease;
+  transition: background-color var(--motion-duration-fast) var(--motion-ease-out),
+              border-color var(--motion-duration-fast) var(--motion-ease-out),
+              color var(--motion-duration-fast) var(--motion-ease-out);
 }
 
 .team-roster-card:hover .action-btn {
-  background: var(--primary, #39ff14);
-  color: var(--primary-foreground, #000000);
+  background: var(--primary);
+  color: var(--primary-foreground);
 }
 </style>
 

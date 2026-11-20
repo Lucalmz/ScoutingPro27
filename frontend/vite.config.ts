@@ -19,8 +19,8 @@ export default defineConfig({
         name: 'ScoutingPro 27',
         short_name: 'ScoutingPro',
         description: 'FTC Robotics Scouting System - WebRTC Offline PWA',
-        theme_color: '#0d1117',
-        background_color: '#0d1117',
+        theme_color: '#0B0E10',
+        background_color: '#0B0E10',
         display: 'standalone',
         orientation: 'portrait',
         icons: [

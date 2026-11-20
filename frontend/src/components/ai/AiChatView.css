@@ -27,7 +27,8 @@
   color: var(--muted-foreground);
   cursor: pointer;
   border-radius: 6px;
-  transition: all 0.2s;
+  transition: background-color var(--motion-duration-fast) var(--motion-ease-out),
+              color var(--motion-duration-fast) var(--motion-ease-out);
 }
 
 .inner-tabs button.active {
@@ -44,23 +45,24 @@
   display: flex;
   flex-direction: column;
   flex: 1;
-  background: var(--card, #141413);
-  border: 1px solid var(--border, #262624);
-  border-top: 2px solid #38bdf8;
+  background: var(--card);
+  border: 1px solid var(--border);
+  border-top: 2px solid var(--status-ai);
   border-radius: 12px;
   overflow: hidden;
-  box-shadow: 0 12px 36px rgba(0, 0, 0, 0.65);
+  box-shadow: var(--shadow-3);
 }
 
 /* Header & Collapsible Prompt Bar */
 .chat-header {
-  background: var(--surface-elevated, #1c1c1a);
-  border-bottom: 1px solid var(--border, #262624);
+  background: var(--surface-elevated);
+  border-bottom: 1px solid var(--border);
   padding: 8px 14px;
   display: flex;
   flex-direction: column;
   gap: 10px;
-  transition: all 0.25s ease-in-out;
+  transition: background-color var(--motion-duration-moderate) var(--motion-ease-out),
+              border-color var(--motion-duration-moderate) var(--motion-ease-out);
   flex-shrink: 0;
 }
 
@@ -83,7 +85,7 @@
   display: inline-flex;
   align-items: center;
   gap: 6px;
-  background: rgba(255, 255, 255, 0.05);
+  background: color-mix(in srgb, var(--g-50) 5%, transparent);
   color: var(--foreground);
   border: 1px solid var(--border);
   border-radius: 20px;
@@ -91,13 +93,15 @@
   font-size: 12px;
   font-weight: 600;
   cursor: pointer;
-  transition: all 0.15s ease-in-out;
+  transition: background-color var(--motion-duration-fast) var(--motion-ease-out),
+              border-color var(--motion-duration-fast) var(--motion-ease-out),
+              color var(--motion-duration-fast) var(--motion-ease-out);
 }
 
 .btn-toggle-prompt:hover,
 .btn-toggle-prompt.active {
-  background: rgba(57, 255, 20, 0.12);
-  border-color: rgba(57, 255, 20, 0.35);
+  background: var(--status-success-bg);
+  border-color: var(--status-success-border);
   color: var(--primary);
 }
 
@@ -108,16 +112,16 @@
 
 .btn-toggle-prompt .chevron-icon {
   font-size: 16px;
-  transition: transform 0.2s;
+  transition: transform var(--motion-duration-fast) var(--motion-ease-out);
 }
 
 .data-badge {
   display: inline-flex;
   align-items: center;
   gap: 4px;
-  background: rgba(57, 255, 20, 0.08);
+  background: var(--status-success-bg);
   color: var(--primary);
-  border: 1px solid rgba(57, 255, 20, 0.25);
+  border: 1px solid var(--status-success-border);
   border-radius: 12px;
   padding: 3px 10px;
   font-size: 11.5px;
@@ -125,9 +129,9 @@
 }
 
 .data-badge.empty {
-  background: rgba(163, 163, 163, 0.1);
+  background: var(--surface);
   color: var(--muted-foreground);
-  border-color: rgba(163, 163, 163, 0.2);
+  border-color: var(--border);
 }
 
 .header-actions {
@@ -156,9 +160,9 @@
 }
 
 .btn-clear {
-  background: rgba(239, 68, 68, 0.08);
+  background: var(--status-error-bg);
   color: var(--destructive);
-  border: 1px solid rgba(239, 68, 68, 0.2);
+  border: 1px solid var(--status-error-border);
   border-radius: 6px;
   padding: 4px 10px;
   display: inline-flex;
@@ -167,12 +171,14 @@
   cursor: pointer;
   font-size: 12px;
   font-weight: 600;
-  transition: all 0.15s;
+  transition: background-color var(--motion-duration-fast) var(--motion-ease-out),
+              border-color var(--motion-duration-fast) var(--motion-ease-out),
+              color var(--motion-duration-fast) var(--motion-ease-out);
 }
 
 .btn-clear:hover {
   background: var(--destructive);
-  color: #ffffff;
+  color: var(--destructive-foreground);
 }
 
 /* Expanded Prompt Panel */
@@ -208,7 +214,7 @@
 .prompt-textarea-wrapper textarea:focus {
   outline: none;
   border-color: var(--primary);
-  box-shadow: 0 0 0 1px var(--primary);
+  box-shadow: var(--focus-ring-sm);
 }
 
 .prompt-footer-row {
@@ -235,40 +241,41 @@
   align-items: center;
   gap: 4px;
   cursor: pointer;
-  transition: all 0.15s;
+  transition: background-color var(--motion-duration-fast) var(--motion-ease-out);
 }
 
 .btn-apply-prompt:hover {
-  background: #32e012;
+  background: var(--s-300);
 }
 
 .chat-input-area {
   padding: 10px 14px;
-  border-top: 1px solid var(--border, #262624);
+  border-top: 1px solid var(--border);
   display: flex;
   gap: 10px;
-  background: var(--surface-elevated, #1c1c1a);
+  background: var(--surface-elevated);
   flex-shrink: 0;
 }
 
 .chat-input-area textarea {
   flex: 1;
   padding: 10px 12px;
-  border: 1px solid var(--border, #262624);
+  border: 1px solid var(--border);
   border-radius: 8px;
-  background: var(--surface-recessed, #080807);
+  background: var(--surface-recessed);
   color: var(--foreground);
   font-family: inherit;
   resize: none;
   font-size: 13.5px;
   line-height: 1.45;
-  transition: border-color 0.2s, box-shadow 0.2s;
+  transition: border-color var(--motion-duration-fast) var(--motion-ease-out),
+              box-shadow var(--motion-duration-fast) var(--motion-ease-out);
 }
 
 .chat-input-area textarea:focus {
   outline: none;
   border-color: var(--primary);
-  box-shadow: 0 0 0 2px rgba(57, 255, 20, 0.18);
+  box-shadow: var(--focus-ring-sm);
 }
 
 .input-buttons {
@@ -287,24 +294,24 @@
   align-items: center;
   justify-content: center;
   cursor: pointer;
-  box-shadow: var(--glow-primary);
-  transition: opacity 0.15s, transform 0.1s, box-shadow 0.15s;
+  transition: opacity var(--motion-duration-fast) var(--motion-ease-out),
+              transform var(--motion-duration-fast) var(--motion-ease-out),
+              background-color var(--motion-duration-fast) var(--motion-ease-out);
 }
 
 .btn-send:disabled {
   opacity: 0.4;
   cursor: not-allowed;
-  box-shadow: none;
 }
 
 .btn-send:hover:not(:disabled) {
-  box-shadow: var(--glow-primary-hover);
+  background: var(--s-300);
   transform: translateY(-1px);
 }
 
 .btn-stop {
-  background: var(--destructive, #ef4444);
-  color: white;
+  background: var(--destructive);
+  color: var(--destructive-foreground);
   border: none;
   border-radius: 8px;
   padding: 0 12px;
@@ -315,7 +322,8 @@
   cursor: pointer;
   font-size: 12px;
   font-weight: 600;
-  transition: opacity 0.15s, transform 0.1s;
+  transition: opacity var(--motion-duration-fast) var(--motion-ease-out),
+              transform var(--motion-duration-fast) var(--motion-ease-out);
   white-space: nowrap;
 }
 
@@ -331,7 +339,7 @@
   display: inline-block;
   width: 7px;
   height: 15px;
-  background-color: var(--primary, #3498db);
+  background-color: var(--primary);
   margin-left: 3px;
   vertical-align: -2px;
   animation: cursor-blink 0.8s infinite;

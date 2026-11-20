@@ -103,7 +103,7 @@ const predictCycleSec = computed(() =>
   display: flex;
   flex-direction: column;
   gap: 12px;
-  animation: pane-fade 0.22s ease-out;
+  animation: pane-fade var(--motion-duration-moderate) var(--motion-ease-out);
 }
 
 @keyframes pane-fade {
@@ -118,13 +118,13 @@ const predictCycleSec = computed(() =>
 .pane-title {
   font-size: 1.1rem;
   font-weight: 800;
-  color: var(--foreground, #f0efe9);
+  color: var(--foreground);
   margin: 0;
 }
 
 .pane-subtitle {
   font-size: 11px;
-  color: var(--muted-foreground, #8e8d87);
+  color: var(--muted-foreground);
 }
 
 .alliance-dot {
@@ -136,13 +136,13 @@ const predictCycleSec = computed(() =>
 }
 
 .alliance-dot.red {
-  background: #ef4444;
-  box-shadow: 0 0 8px #ef4444;
+  background: var(--alliance-red);
+  box-shadow: none;
 }
 
 .alliance-dot.blue {
-  background: #38bdf8;
-  box-shadow: 0 0 8px #38bdf8;
+  background: var(--alliance-blue);
+  box-shadow: none;
 }
 
 .alliance-dot.mini {
@@ -153,8 +153,8 @@ const predictCycleSec = computed(() =>
 
 /* Summary Card */
 .summary-hero-card {
-  background: #141413;
-  border: 1.5px solid #262624;
+  background: var(--card);
+  border: 1.5px solid var(--border);
   border-radius: 14px;
   padding: 16px;
   display: flex;
@@ -163,15 +163,15 @@ const predictCycleSec = computed(() =>
 }
 
 .summary-hero-card.alliance-red {
-  border-color: #ef4444;
-  border-top: 3px solid #f97316;
-  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.5), 0 0 18px rgba(239, 68, 68, 0.15);
+  border-color: var(--alliance-red-border);
+  border-top: 3px solid var(--alliance-red);
+  box-shadow: var(--shadow-2);
 }
 
 .summary-hero-card.alliance-blue {
-  border-color: #38bdf8;
-  border-top: 3px solid #3b82f6;
-  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.5), 0 0 18px rgba(56, 189, 248, 0.15);
+  border-color: var(--alliance-blue-border);
+  border-top: 3px solid var(--alliance-blue);
+  box-shadow: var(--shadow-2);
 }
 
 .summary-hero-top {
@@ -182,10 +182,11 @@ const predictCycleSec = computed(() =>
 
 .summary-match-badge,
 .summary-team-badge {
-  font-family: 'Orbitron', monospace;
+  font-family: var(--font-numeric);
+  font-variant-numeric: tabular-nums;
   font-size: 13px;
   font-weight: 700;
-  color: var(--foreground, #f0efe9);
+  color: var(--foreground);
 }
 
 .summary-alliance-badge {
@@ -196,15 +197,15 @@ const predictCycleSec = computed(() =>
 }
 
 .summary-alliance-badge.red {
-  background: #1b1111;
-  color: #f87171;
-  border: 1px solid #ef4444;
+  background: var(--alliance-red-bg);
+  color: var(--red-300);
+  border: 1px solid var(--alliance-red-border);
 }
 
 .summary-alliance-badge.blue {
-  background: #0f1622;
-  color: #38bdf8;
-  border: 1px solid #38bdf8;
+  background: var(--alliance-blue-bg);
+  color: var(--blue-300);
+  border: 1px solid var(--alliance-blue-border);
 }
 
 .summary-total-row {
@@ -212,30 +213,30 @@ const predictCycleSec = computed(() =>
   align-items: center;
   justify-content: space-between;
   padding: 12px 14px;
-  background: #080807;
-  border: 1px solid #262624;
-  border-left: 3px solid #39ff14;
+  background: var(--surface-recessed);
+  border: 1px solid var(--border);
+  border-left: 3px solid var(--primary);
   border-radius: 10px;
 }
 
 .total-label-text {
   font-size: 14px;
   font-weight: 700;
-  color: var(--foreground, #f0efe9);
+  color: var(--foreground);
   display: block;
 }
 
 .total-label-sub {
   font-size: 9px;
-  color: var(--muted-foreground, #8e8d87);
+  color: var(--muted-foreground);
   letter-spacing: 0.5px;
 }
 
 .total-score-val {
   font-size: 2.2rem;
   font-weight: 900;
-  color: #39ff14;
-  font-family: 'Orbitron', monospace;
+  color: var(--primary);
+  font-family: var(--font-numeric);
   font-variant-numeric: tabular-nums;
 }
 
@@ -250,28 +251,29 @@ const predictCycleSec = computed(() =>
   flex-direction: column;
   align-items: center;
   padding: 8px 4px;
-  background: #080807;
-  border: 1px solid #262624;
+  background: var(--surface-recessed);
+  border: 1px solid var(--border);
   border-radius: 8px;
   text-align: center;
 }
 
 .breakdown-label {
   font-size: 10px;
-  color: var(--muted-foreground, #8e8d87);
+  color: var(--muted-foreground);
 }
 
 .breakdown-val {
   font-size: 14px;
   font-weight: 800;
-  color: var(--foreground, #f0efe9);
+  color: var(--foreground);
   margin: 2px 0;
+  font-family: var(--font-numeric);
   font-variant-numeric: tabular-nums;
 }
 
 .breakdown-sub {
   font-size: 9px;
-  color: var(--muted-foreground, #8e8d87);
+  color: var(--muted-foreground);
 }
 
 .broken-alert-banner {
@@ -279,25 +281,25 @@ const predictCycleSec = computed(() =>
   align-items: center;
   gap: 6px;
   padding: 8px 10px;
-  background: #1b1111;
-  border: 1px solid #ef4444;
+  background: var(--status-error-bg);
+  border: 1px solid var(--status-error-border);
   border-radius: 8px;
-  color: #f87171;
+  color: var(--status-error-text);
   font-size: 12px;
   font-weight: 600;
 }
 
 .notes-preview-box {
   font-size: 12px;
-  color: var(--foreground, #f0efe9);
-  background: #080807;
-  border: 1px solid #262624;
+  color: var(--foreground);
+  background: var(--surface-recessed);
+  border: 1px solid var(--border);
   padding: 8px 10px;
   border-radius: 8px;
 }
 
 .notes-preview-title {
-  color: var(--muted-foreground, #8e8d87);
+  color: var(--muted-foreground);
   font-weight: 600;
 }
 
@@ -306,10 +308,10 @@ const predictCycleSec = computed(() =>
   align-items: center;
   gap: 8px;
   padding: 10px 12px;
-  background: #1b1111;
-  border: 1px solid #ef4444;
+  background: var(--status-error-bg);
+  border: 1px solid var(--status-error-border);
   border-radius: 10px;
-  color: #ffffff;
+  color: var(--status-error-text);
   font-size: 13px;
   font-weight: 600;
 }
@@ -320,13 +322,15 @@ const predictCycleSec = computed(() =>
   justify-content: space-between;
   padding: 7px 10px;
   border-radius: 8px;
-  background: rgba(56, 189, 248, 0.08);
-  border: 1px solid rgba(56, 189, 248, 0.25);
+  background: var(--status-info-bg);
+  border: 1px solid var(--status-info-border);
   font-size: 12px;
-  color: var(--muted-foreground, #8e8d87);
+  color: var(--muted-foreground);
 }
 
 .predict-cycle-summary-row strong {
-  color: #38bdf8;
+  color: var(--status-info);
+  font-family: var(--font-numeric);
+  font-variant-numeric: tabular-nums;
 }
 </style>

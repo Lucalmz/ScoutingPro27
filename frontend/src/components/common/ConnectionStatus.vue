@@ -16,7 +16,21 @@ async function handleReconnect() {
   await conn.reconnectNow()
 }
 
+const isVirtualTunnel = computed(() => {
+  const info = conn.transportInfo
+  if (!info || info.type !== 'relay') return false
+  return Boolean(
+    info.isVirtualTunnel ||
+    info.protocol === 'wss/tls' ||
+    info.localCandidateType === 'virtual' ||
+    info.label === 'ECDH Tunnel (TLS)'
+  )
+})
+
 const transportIcon = computed(() => {
+  if (isVirtualTunnel.value) {
+    return 'lock'
+  }
   const type = conn.transportInfo?.type
   switch (type) {
     case 'ipv6_p2p':
@@ -35,6 +49,9 @@ const transportIcon = computed(() => {
 const transportLabel = computed(() => {
   const type = conn.transportInfo?.type
   if (!type) return ''
+  if (isVirtualTunnel.value) {
+    return t('connection.transport_virtual_tunnel')
+  }
   switch (type) {
     case 'ipv6_p2p':
       return t('connection.transport_ipv6')
@@ -52,7 +69,8 @@ const transportLabel = computed(() => {
 const transportTooltip = computed(() => {
   const info = conn.transportInfo
   if (!info) return ''
-  const key = info.type === 'ipv6_p2p' ? 'transport_tooltip_ipv6'
+  const key = isVirtualTunnel.value ? 'transport_tooltip_virtual_tunnel'
+    : info.type === 'ipv6_p2p' ? 'transport_tooltip_ipv6'
     : info.type === 'lan_p2p' ? 'transport_tooltip_lan'
     : info.type === 'nat_p2p' ? 'transport_tooltip_nat'
     : info.type === 'relay' ? 'transport_tooltip_relay'
@@ -76,7 +94,7 @@ const transportTooltip = computed(() => {
     <div
       v-if="!isHost && conn.isConnected && conn.transportInfo && conn.transportInfo.type !== 'unknown'"
       class="transport-badge"
-      :class="conn.transportInfo.type"
+      :class="[conn.transportInfo.type, { 'virtual-tunnel': isVirtualTunnel }]"
       :title="transportTooltip"
     >
       <span class="material-icons transport-icon">{{ transportIcon }}</span>
@@ -145,9 +163,9 @@ const transportTooltip = computed(() => {
   align-items: center;
   gap: 0.35rem;
   padding: 0.25rem 0.6rem;
-  background: rgba(245, 158, 11, 0.18);
-  border: 1px solid rgba(245, 158, 11, 0.4);
-  color: #fbbf24;
+  background: var(--status-warning-bg);
+  border: 1px solid var(--status-warning-border);
+  color: var(--status-warning);
   border-radius: 9999px;
   font-size: 0.8rem;
   font-weight: 500;
@@ -167,7 +185,9 @@ const transportTooltip = computed(() => {
   font-weight: 500;
   background: var(--input);
   color: var(--muted-foreground);
-  transition: all 0.3s ease;
+  transition: background-color var(--motion-duration-normal) var(--motion-ease-out),
+              border-color var(--motion-duration-normal) var(--motion-ease-out),
+              color var(--motion-duration-normal) var(--motion-ease-out);
 }
 
 .status-icon {
@@ -177,7 +197,7 @@ const transportTooltip = computed(() => {
 .connection-status.connected {
   background: var(--card);
   color: var(--status-success);
-  border: 1px solid rgba(34, 197, 94, 0.3);
+  border: 1px solid var(--status-success-border);
 }
 
 .connection-status.connected .status-icon {
@@ -210,9 +230,8 @@ const transportTooltip = computed(() => {
 
 .connection-status.long_offline {
   background: var(--card);
-  color: #f97316;
-  border: 1px solid rgba(249, 115, 22, 0.4);
-  box-shadow: 0 0 8px rgba(249, 115, 22, 0.3);
+  color: var(--status-error);
+  border: 1px solid var(--status-error-border);
 }
 
 .connection-status.degraded {
@@ -224,7 +243,7 @@ const transportTooltip = computed(() => {
 .connection-status.unstable {
   background: var(--card);
   color: var(--status-warning);
-  box-shadow: 0 0 8px rgba(234, 179, 8, 0.4);
+  border: 1px solid var(--status-warning-border);
 }
 .connection-status.unstable .status-icon {
   animation: pulse 1s infinite;
@@ -233,7 +252,7 @@ const transportTooltip = computed(() => {
 .connection-status.waiting {
   background: var(--card);
   color: var(--primary);
-  box-shadow: var(--glow-primary);
+  border: 1px solid var(--status-success-border);
 }
 .connection-status.waiting .status-icon {
   animation: pulse 2s infinite;
@@ -247,16 +266,18 @@ const transportTooltip = computed(() => {
   border-radius: 6px;
   font-size: 12px;
   font-weight: 600;
-  background: rgba(249, 115, 22, 0.15);
-  color: #f97316;
-  border: 1px solid rgba(249, 115, 22, 0.35);
+  background: var(--status-error-bg);
+  color: var(--status-error);
+  border: 1px solid var(--status-error-border);
   cursor: pointer;
-  transition: all 0.2s ease;
+  transition: background-color var(--motion-duration-fast) var(--motion-ease-out),
+              border-color var(--motion-duration-fast) var(--motion-ease-out),
+              color var(--motion-duration-fast) var(--motion-ease-out);
 }
 
 .reconnect-btn:hover:not(:disabled) {
-  background: rgba(249, 115, 22, 0.25);
-  border-color: #f97316;
+  background: color-mix(in srgb, var(--status-error) 22%, transparent);
+  border-color: var(--status-error);
 }
 
 .reconnect-btn:disabled {
@@ -272,35 +293,37 @@ const transportTooltip = computed(() => {
   display: inline-flex;
   align-items: center;
   gap: 5px;
-  background: rgba(245, 158, 11, 0.15);
-  border: 1px solid rgba(245, 158, 11, 0.5);
-  color: #fbbf24;
+  background: var(--status-warning-bg);
+  border: 1px solid var(--status-warning-border);
+  color: var(--status-warning);
   font-size: 11px;
   font-weight: 600;
   padding: 3px 8px;
   border-radius: 6px;
   cursor: pointer;
   animation: pulsePending 2s infinite ease-in-out;
-  transition: all 0.2s;
+  transition: background-color var(--motion-duration-fast) var(--motion-ease-out),
+              border-color var(--motion-duration-fast) var(--motion-ease-out),
+              color var(--motion-duration-fast) var(--motion-ease-out);
 }
 
 .pending-sas-btn:hover {
-  background: rgba(245, 158, 11, 0.25);
-  border-color: #f59e0b;
-  color: #ffffff;
+  background: color-mix(in srgb, var(--status-warning) 24%, transparent);
+  border-color: var(--status-warning);
+  color: var(--g-50);
 }
 
 .pending-icon {
   font-size: 13px;
-  color: #f59e0b;
+  color: var(--status-warning);
 }
 
 @keyframes pulsePending {
   0%, 100% {
-    box-shadow: 0 0 0 0 rgba(245, 158, 11, 0.4);
+    box-shadow: 0 0 0 0 color-mix(in srgb, var(--status-warning) 40%, transparent);
   }
   50% {
-    box-shadow: 0 0 0 5px rgba(245, 158, 11, 0);
+    box-shadow: 0 0 0 5px transparent;
   }
 }
 
@@ -326,7 +349,8 @@ const transportTooltip = computed(() => {
   font-size: 12px;
   font-weight: 600;
   cursor: help;
-  transition: all 0.2s ease;
+  transition: background-color var(--motion-duration-fast) var(--motion-ease-out),
+              border-color var(--motion-duration-fast) var(--motion-ease-out);
   user-select: none;
 }
 
@@ -338,37 +362,44 @@ const transportTooltip = computed(() => {
   font-size: 11px;
   padding: 1px 4px;
   border-radius: 4px;
-  background: rgba(0, 0, 0, 0.2);
-  font-family: monospace;
+  background: color-mix(in srgb, var(--g-950) 45%, transparent);
+  font-family: var(--font-mono);
+  font-variant-numeric: tabular-nums;
 }
 
 /* IPv6 Direct: vibrant cyan/teal badge */
 .transport-badge.ipv6_p2p {
-  background: rgba(6, 182, 212, 0.15);
-  color: #06b6d4;
-  border: 1px solid rgba(6, 182, 212, 0.35);
-  box-shadow: 0 0 8px rgba(6, 182, 212, 0.2);
+  background: var(--status-info-bg);
+  color: var(--status-info);
+  border: 1px solid var(--status-info-border);
 }
 
 /* LAN: vibrant blue badge */
 .transport-badge.lan_p2p {
-  background: rgba(59, 130, 246, 0.15);
-  color: #3b82f6;
-  border: 1px solid rgba(59, 130, 246, 0.35);
+  background: var(--blue-900);
+  color: var(--blue-400);
+  border: 1px solid var(--blue-700);
 }
 
 /* NAT hole-punch: green badge */
 .transport-badge.nat_p2p {
-  background: rgba(34, 197, 94, 0.15);
-  color: #22c55e;
-  border: 1px solid rgba(34, 197, 94, 0.35);
+  background: var(--status-success-bg);
+  color: var(--status-success);
+  border: 1px solid var(--status-success-border);
 }
 
 /* TURN Relay: amber badge */
 .transport-badge.relay {
-  background: rgba(245, 158, 11, 0.15);
-  color: #f59e0b;
-  border: 1px solid rgba(245, 158, 11, 0.35);
+  background: var(--status-warning-bg);
+  color: var(--status-warning);
+  border: 1px solid var(--status-warning-border);
+}
+
+/* ECDH Virtual Tunnel (TLS, 0 TURN quota): teal badge */
+.transport-badge.relay.virtual-tunnel {
+  background: color-mix(in srgb, var(--status-info-bg) 70%, var(--status-success-bg));
+  color: color-mix(in srgb, var(--status-info) 65%, var(--status-success));
+  border: 1px solid color-mix(in srgb, var(--status-info-border) 65%, var(--status-success-border));
 }
 
 /* Security Fingerprint (SAS) Badge */
@@ -379,11 +410,12 @@ const transportTooltip = computed(() => {
   padding: 4px 8px;
   border-radius: 6px;
   font-size: 11px;
-  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+  font-family: var(--font-mono);
+  font-variant-numeric: tabular-nums;
   font-weight: 600;
-  background: rgba(16, 185, 129, 0.12);
-  color: #10b981;
-  border: 1px solid rgba(16, 185, 129, 0.3);
+  background: var(--status-success-bg);
+  color: var(--s-300);
+  border: 1px solid var(--status-success-border);
   cursor: help;
   user-select: all;
   letter-spacing: 0.5px;

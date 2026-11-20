@@ -244,7 +244,7 @@ async function handleLogin() {
   align-items: center;
   justify-content: center;
   min-height: 100vh;
-  background-color: var(--background);
+  background-color: transparent;
   position: relative;
   overflow: hidden;
 }
@@ -268,7 +268,9 @@ async function handleLogin() {
   font-size: 13px;
   font-weight: 600;
   cursor: pointer;
-  transition: all 0.2s;
+  transition: background-color var(--motion-duration-fast) var(--motion-ease-out),
+              border-color var(--motion-duration-fast) var(--motion-ease-out),
+              color var(--motion-duration-fast) var(--motion-ease-out);
   width: auto;
   margin-top: 0;
 }
@@ -288,8 +290,8 @@ async function handleLogin() {
   padding: 44px 38px;
   width: 100%;
   max-width: 420px;
-  box-shadow: 0 28px 64px rgba(0, 0, 0, 0.72);
-  animation: login-card-enter 0.72s var(--motion-ease-out) both;
+  box-shadow: var(--shadow-3);
+  animation: login-card-enter var(--motion-duration-slow) var(--motion-ease-out) both;
 }
 
 .invite-banner {
@@ -321,6 +323,8 @@ async function handleLogin() {
 }
 
 .invite-code-text {
+  font-family: var(--font-numeric);
+  font-variant-numeric: tabular-nums;
   font-size: 16px;
   font-weight: 700;
   color: var(--foreground);
@@ -330,7 +334,7 @@ async function handleLogin() {
 .btn-rescan {
   margin-left: auto;
   background: var(--card);
-  border: 1px solid rgba(57, 255, 20, 0.4);
+  border: 1px solid var(--status-success-border);
   color: var(--primary);
   width: 36px;
   height: 36px;
@@ -339,13 +343,14 @@ async function handleLogin() {
   align-items: center;
   justify-content: center;
   cursor: pointer;
-  transition: all 0.2s;
+  transition: background-color var(--motion-duration-fast) var(--motion-ease-out),
+              border-color var(--motion-duration-fast) var(--motion-ease-out);
   padding: 0;
   flex-shrink: 0;
 }
 
 .btn-rescan:hover {
-  background: rgba(57, 255, 20, 0.15);
+  background: var(--status-success-bg);
   border-color: var(--primary);
 }
 
@@ -368,7 +373,9 @@ async function handleLogin() {
   justify-content: center;
   gap: 8px;
   cursor: pointer;
-  transition: all 0.2s;
+  transition: background-color var(--motion-duration-fast) var(--motion-ease-out),
+              border-color var(--motion-duration-fast) var(--motion-ease-out),
+              color var(--motion-duration-fast) var(--motion-ease-out);
 }
 
 .btn-scan-login:hover {
@@ -415,7 +422,7 @@ async function handleLogin() {
 .logo-area {
   text-align: center;
   margin-bottom: 28px;
-  animation: tactical-stagger-rise 0.65s var(--motion-ease-out) 0.08s both;
+  animation: tactical-stagger-rise var(--motion-duration-normal) var(--motion-ease-out) 80ms both;
 }
 
 .login-brand-logo {
@@ -429,21 +436,22 @@ async function handleLogin() {
 h1 {
   font-size: 27px;
   font-weight: 800;
-  color: var(--foreground);
+  color: var(--g-50);
   margin: 0 0 4px;
-  letter-spacing: 0.04em;
+  letter-spacing: -0.01em;
 }
 
 .powered-by {
   color: var(--muted-foreground);
   font-size: 11px;
-  font-family: 'Orbitron', sans-serif;
+  font-family: inherit;
+  font-variant-numeric: tabular-nums;
   letter-spacing: 0.08em;
   margin-top: 6px;
 }
 
 form {
-  animation: tactical-stagger-rise 0.65s var(--motion-ease-out) 0.16s both;
+  animation: tactical-stagger-rise var(--motion-duration-normal) var(--motion-ease-out) 160ms both;
 }
 
 label {
@@ -465,13 +473,14 @@ input {
   color: var(--foreground);
   font-size: 15px;
   outline: none;
-  transition: border-color 0.2s, box-shadow 0.2s;
+  transition: border-color var(--motion-duration-fast) var(--motion-ease-out),
+              box-shadow var(--motion-duration-fast) var(--motion-ease-out);
   box-sizing: border-box;
 }
 
 input:focus {
   border-color: var(--primary);
-  box-shadow: 0 0 0 3px rgba(57, 255, 20, 0.14);
+  box-shadow: var(--focus-ring-sm);
 }
 
 input:disabled {
@@ -484,14 +493,16 @@ button[type="submit"] {
   padding: 13px;
   background: var(--primary);
   color: var(--primary-foreground);
-  font-family: 'Orbitron', 'Manrope', sans-serif;
+  font-family: inherit;
   font-size: 15px;
   font-weight: 800;
   letter-spacing: 0.04em;
   border: none;
   border-radius: 10px;
   cursor: pointer;
-  transition: transform 0.2s, box-shadow 0.2s, background 0.2s;
+  transition: transform var(--motion-duration-fast) var(--motion-ease-out),
+              box-shadow var(--motion-duration-fast) var(--motion-ease-out),
+              background-color var(--motion-duration-fast) var(--motion-ease-out);
   display: flex;
   align-items: center;
   justify-content: center;
@@ -499,7 +510,11 @@ button[type="submit"] {
 }
 
 button[type="submit"]:hover:not(:disabled) {
-  box-shadow: var(--glow-primary);
+  background: var(--s-300);
+}
+
+button[type="submit"]:active:not(:disabled) {
+  background: var(--s-600);
 }
 
 button[type="submit"]:disabled {
@@ -510,7 +525,7 @@ button[type="submit"]:disabled {
 .spinner {
   width: 16px;
   height: 16px;
-  border: 2px solid rgba(255, 255, 255, 0.3);
+  border: 2px solid color-mix(in srgb, var(--on-primary) 30%, transparent);
   border-top-color: var(--primary-foreground);
   border-radius: 50%;
   animation: spin 0.6s linear infinite;

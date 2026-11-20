@@ -21,6 +21,8 @@ export type WebRtcCallbacks = {
   /** 动态获取当前登录的真实用户身份，杜绝幽灵伪用户 */
   getCurrentUser?: () => { userId?: string; username?: string }
   onClientConnected?: (userId: string, userName: string) => void
+  onClientDisconnected?: (userId: string) => void
+  onScoutTransportInfoChanged?: (userId: string, info: ConnectionTransportInfo | null) => void
   onTagUpdateReceived?: (tag: TeamTagItem, action: 'ADD' | 'REMOVE', eventId: string, teamNumber: number) => void
   onRequestTagsSync?: (senderId?: string) => void
   onTagsFullSyncReceived?: (tags: TeamTagItem[], eventId: string) => void
@@ -126,6 +128,7 @@ export interface WebRtcService {
   getSasFingerprint: (peerId?: string) => string | undefined
   getStatus: () => ConnectionStatus
   getTransportInfo: () => ConnectionTransportInfo | null
+  getScoutTransportInfo?: (userId: string) => ConnectionTransportInfo | null
   getDataChannel: () => RTCDataChannel | null
   isHostMode: () => boolean
   isQuarantinedPeer?: (peerId: string) => boolean

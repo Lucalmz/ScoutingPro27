@@ -1,6 +1,8 @@
 <script setup lang="ts">
+import { watch, onBeforeUnmount } from 'vue'
 import type { ScoutingRecord } from '@/types'
 import { useMobileWizardForm } from './useMobileWizardForm'
+import { useScoutAllianceHalo } from '@/composables/useScoutAllianceHalo'
 import MobileWizardStepPreMatch from './MobileWizardStepPreMatch.vue'
 import MobileWizardStepAuto from './MobileWizardStepAuto.vue'
 import MobileWizardStepTeleop from './MobileWizardStepTeleop.vue'
@@ -82,6 +84,21 @@ const {
   submitErrorMsg,
   handleSubmit
 } = useMobileWizardForm(props, emit)
+
+const { setScoutAllianceHalo, clearScoutAllianceHalo } = useScoutAllianceHalo()
+const haloOwner = Symbol('mobile-wizard-form')
+
+watch(
+  allianceColor,
+  (color) => {
+    setScoutAllianceHalo(color, haloOwner)
+  },
+  { immediate: true }
+)
+
+onBeforeUnmount(() => {
+  clearScoutAllianceHalo(haloOwner)
+})
 </script>
 
 <template>
@@ -89,7 +106,7 @@ const {
     <!-- Edit Mode Header Banner -->
     <div v-if="editRecord" class="edit-mode-bar">
       <div class="edit-mode-info">
-        <span class="material-icons" style="font-size: 16px; color: #f59e0b;">edit_note</span>
+        <span class="material-icons" style="font-size: 16px; color: var(--status-warning);">edit_note</span>
         <span>{{ t('history.btn_edit') }} (Match #{{ editRecord.matchNumber }} • #{{ editRecord.teamNumber }})</span>
       </div>
       <button type="button" class="btn-cancel-edit-chip" @click="emit('cancelEdit')">
@@ -284,8 +301,7 @@ const {
 
 <style scoped>
 .mobile-wizard-container {
-  --wizard-accent: #39ff14;
-  --wizard-accent-glow: rgba(57, 255, 20, 0.28);
+  --wizard-accent: var(--primary);
   display: flex;
   flex-direction: column;
   min-height: calc(100vh - 120px);
@@ -296,13 +312,11 @@ const {
 }
 
 .mobile-wizard-container.color-red {
-  --wizard-accent: #ef4444;
-  --wizard-accent-glow: rgba(239, 68, 68, 0.28);
+  --wizard-accent: var(--alliance-red);
 }
 
 .mobile-wizard-container.color-blue {
-  --wizard-accent: #38bdf8;
-  --wizard-accent-glow: rgba(56, 189, 248, 0.28);
+  --wizard-accent: var(--alliance-blue);
 }
 
 /* Edit Mode Top Bar */
@@ -310,8 +324,8 @@ const {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  background: #1c160d;
-  border: 1px solid rgba(245, 158, 11, 0.45);
+  background: var(--status-warning-bg);
+  border: 1px solid var(--status-warning-border);
   border-radius: 10px;
   padding: 6px 12px;
   margin-bottom: 10px;
@@ -323,13 +337,14 @@ const {
   gap: 6px;
   font-size: 12px;
   font-weight: 600;
-  color: #f59e0b;
+  color: var(--status-warning);
+  font-variant-numeric: tabular-nums;
 }
 
 .btn-cancel-edit-chip {
-  background: #141413;
-  border: 1px solid #353532;
-  color: var(--foreground, #f0efe9);
+  background: var(--surface-elevated);
+  border: 1px solid var(--border-strong);
+  color: var(--foreground);
   border-radius: 6px;
   padding: 3px 8px;
   font-size: 11px;
@@ -339,18 +354,18 @@ const {
   gap: 2px;
 }
 
-/* Stepper Progress Bar — Claude Matte Flat Dark (No Blur) */
+/* Stepper Progress Bar — Pit Wall Flat Dark */
 .wizard-stepper {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  background: #141413;
-  border: 1px solid #262624;
-  border-top: 2px solid var(--wizard-accent, #39ff14);
+  background: var(--card);
+  border: 1px solid var(--border);
+  border-top: 2px solid var(--wizard-accent, var(--primary));
   border-radius: 12px;
   padding: 8px 6px;
   margin-bottom: 12px;
-  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.45);
+  box-shadow: var(--shadow-2);
 }
 
 .stepper-step {
@@ -364,7 +379,7 @@ const {
   cursor: pointer;
   padding: 4px 2px;
   border-radius: 8px;
-  transition: all 0.2s ease;
+  transition: background-color var(--motion-duration-fast) var(--motion-ease-out), border-color var(--motion-duration-fast) var(--motion-ease-out), color var(--motion-duration-fast) var(--motion-ease-out), opacity var(--motion-duration-fast) var(--motion-ease-out);
 }
 
 .step-num-bubble {
@@ -374,38 +389,39 @@ const {
   display: flex;
   align-items: center;
   justify-content: center;
-  font-family: 'Orbitron', monospace;
+  font-family: var(--font-numeric);
+  font-variant-numeric: tabular-nums;
   font-size: 11px;
   font-weight: 700;
-  background: #080807;
-  border: 1px solid #262624;
-  color: var(--muted-foreground, #8e8d87);
-  transition: all 0.25s ease;
+  background: var(--surface-recessed);
+  border: 1px solid var(--border);
+  color: var(--muted-foreground);
+  transition: background-color var(--motion-duration-moderate) var(--motion-ease-out), border-color var(--motion-duration-moderate) var(--motion-ease-out), color var(--motion-duration-moderate) var(--motion-ease-out);
 }
 
 .step-label-text {
   font-size: 10px;
-  color: var(--muted-foreground, #8e8d87);
+  color: var(--muted-foreground);
   font-weight: 600;
   white-space: nowrap;
 }
 
 .stepper-step.is-active .step-num-bubble {
-  background: var(--primary, #39ff14);
-  border-color: var(--primary, #39ff14);
-  color: #080807;
-  box-shadow: 0 0 10px rgba(57, 255, 20, 0.45);
+  background: var(--primary);
+  border-color: var(--primary);
+  color: var(--on-primary);
+  box-shadow: none;
 }
 
 .stepper-step.is-active .step-label-text {
-  color: var(--foreground, #f0efe9);
+  color: var(--foreground);
   font-weight: 800;
 }
 
 .stepper-step.is-completed .step-num-bubble {
-  background: rgba(57, 255, 20, 0.14);
-  border-color: rgba(57, 255, 20, 0.4);
-  color: #39ff14;
+  background: var(--status-success-bg);
+  border-color: var(--status-success-border);
+  color: var(--primary);
 }
 
 .stepper-step.is-disabled {
@@ -418,16 +434,16 @@ const {
   flex: 1;
 }
 
-/* Sticky Bottom Wizard Action Bar — Claude Matte Flat Dark (Zero Blur) */
+/* Sticky Bottom Wizard Action Bar — Pit Wall Flat Dark */
 .wizard-bottom-bar {
   position: fixed;
   bottom: calc(56px + var(--sab, env(safe-area-inset-bottom, 0px)));
   left: 0;
   right: 0;
   padding: 8px 12px;
-  background: #141413;
-  border-top: 1px solid #262624;
-  box-shadow: 0 -8px 24px rgba(0, 0, 0, 0.65);
+  background: var(--card);
+  border-top: 1px solid var(--border);
+  box-shadow: var(--shadow-2);
   display: flex;
   align-items: center;
   gap: 10px;
@@ -443,7 +459,7 @@ const {
   align-items: center;
   justify-content: center;
   cursor: pointer;
-  transition: all 0.18s ease;
+  transition: transform var(--motion-duration-fast) var(--motion-ease-out), background-color var(--motion-duration-fast) var(--motion-ease-out), border-color var(--motion-duration-fast) var(--motion-ease-out), color var(--motion-duration-fast) var(--motion-ease-out);
   user-select: none;
 }
 
@@ -453,31 +469,31 @@ const {
 
 .btn-wizard-prev {
   flex: 0.38;
-  background: #1c1c1a;
-  border: 1px solid #353532;
-  color: var(--foreground, #f0efe9);
+  background: var(--surface-elevated);
+  border: 1px solid var(--border-strong);
+  color: var(--foreground);
 }
 
 .btn-wizard-cancel {
   flex: 0.38;
-  background: #1b1111;
-  border: 1px solid rgba(239, 68, 68, 0.45);
-  color: #f87171;
+  background: var(--status-error-bg);
+  border: 1px solid var(--status-error-border);
+  color: var(--status-error);
 }
 
 .btn-wizard-primary {
   flex: 1;
-  background: #39ff14;
-  border: 1px solid #39ff14;
-  color: #080807;
+  background: var(--primary);
+  border: 1px solid var(--primary);
+  color: var(--on-primary);
   font-weight: 800;
-  box-shadow: 0 4px 14px rgba(57, 255, 20, 0.28);
+  box-shadow: var(--shadow-1);
 }
 
 .btn-wizard-primary:disabled {
-  background: #1c1c1a;
-  border-color: #262624;
-  color: var(--muted-foreground, #8e8d87);
+  background: var(--surface-hover);
+  border-color: var(--border);
+  color: var(--g-500);
   box-shadow: none;
   cursor: not-allowed;
 }
@@ -485,12 +501,12 @@ const {
 .btn-wizard-submit {
   flex: 1;
   height: 50px;
-  background: #39ff14;
-  border: 1px solid #39ff14;
-  color: #080807;
+  background: var(--primary);
+  border: 1px solid var(--primary);
+  color: var(--on-primary);
   font-size: 15px;
   font-weight: 900;
-  box-shadow: 0 6px 20px rgba(57, 255, 20, 0.35);
+  box-shadow: var(--shadow-1);
 }
 
 .btn-wizard-submit:disabled {

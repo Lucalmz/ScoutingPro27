@@ -62,6 +62,14 @@ function safeClone(obj: any): any {
   }
 }
 
+function readCssToken(varName: string, fallback: string): string {
+  if (typeof document !== 'undefined' && typeof getComputedStyle === 'function') {
+    const val = getComputedStyle(document.documentElement).getPropertyValue(varName).trim()
+    if (val) return val
+  }
+  return fallback
+}
+
 export function addLogEntry(level: LogLevel, tag: string, message: string, details?: any): LogEntry {
   const now = new Date()
   let entry: LogEntry = {
@@ -73,7 +81,7 @@ export function addLogEntry(level: LogLevel, tag: string, message: string, detai
     message
   }
 
-  if (ENABLE_DIAGNOSTICS) {
+  if (ENABLE_DIAGNOSTICS || tag === 'WebRTC:IceStats') {
     const cloned = safeClone(details)
     entry.details = cloned
     entry.data = cloned
@@ -102,20 +110,20 @@ export function addLogEntry(level: LogLevel, tag: string, message: string, detai
       else console.log(text)
     }
   } else {
-    const timeStyle = 'color: #94a3b8; font-family: monospace;'
+    const timeStyle = `color: ${readCssToken('--g-300', 'rgb(151, 162, 171)')}; font-family: monospace;`
     const tagColor = tag.includes('Signaling')
-      ? '#38bdf8'
+      ? readCssToken('--status-info', 'rgb(94, 211, 224)')
       : tag.includes('Host')
-      ? '#a855f7'
+      ? readCssToken('--status-ai', 'rgb(164, 140, 255)')
       : tag.includes('Client')
-      ? '#34d399'
+      ? readCssToken('--s-300', 'rgb(141, 245, 110)')
       : tag.includes('SAS')
-      ? '#f59e0b'
+      ? readCssToken('--status-warning', 'rgb(247, 181, 59)')
       : tag.includes('Data')
-      ? '#60a5fa'
+      ? readCssToken('--blue-400', 'rgb(79, 163, 255)')
       : tag.includes('SelfHealing')
-      ? '#10b981'
-      : '#f43f5e'
+      ? readCssToken('--status-success', 'rgb(57, 255, 20)')
+      : readCssToken('--status-error', 'rgb(255, 85, 119)')
     const tagStyle = `color: ${tagColor}; font-weight: bold; font-family: monospace;`
 
     const prefix = `%c[${entry.time}]%c [${tag}] ${message}`

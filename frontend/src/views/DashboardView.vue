@@ -11,8 +11,10 @@ import { useInboxStore } from '@/stores/inbox'
 import { useConfirm } from '@/composables/useConfirm'
 import { isDesktopHost } from '@/services/photoStorage'
 import { useIsMobile } from '@/composables/useIsMobile'
+import { useUserProfileTransition } from '@/composables/useUserProfileTransition'
 import { hapticLight } from '@/utils/haptics'
 import { transitionState } from '@/utils/transitionState'
+import { hasDesktopTitleBar } from '@/utils/desktopShell'
 import RenameModal from '@/components/common/RenameModal.vue'
 import QrScannerModal from '@/components/common/QrScannerModal.vue'
 import MobileQrModal from '@/components/common/MobileQrModal.vue'
@@ -37,6 +39,8 @@ const eventStore = useEventStore()
 const inboxStore = useInboxStore()
 const { showConfirm } = useConfirm()
 const { isMobile } = useIsMobile()
+const { openProfileModal } = useUserProfileTransition()
+const inDesktopShell = hasDesktopTitleBar()
 const isMobileClient = computed(() => isMobile.value && !isDesktopHost())
 
 const showCreateModal = ref(false)
@@ -228,27 +232,29 @@ function onCardMouseMove(e: MouseEvent) {
     card.style.setProperty('--mouse-y', `${clientY - rect.top}px`)
   })
 }
-function handleOpenRenameModal() {
-  if (typeof document !== 'undefined' && 'startViewTransition' in document) {
-    document.documentElement.dataset.transitionType = 'user-profile'
-    const vt = document.startViewTransition(async () => {
-      showRenameModal.value = true
-      await nextTick()
-    })
-    vt.finished.finally(() => {
-      document.documentElement.removeAttribute('data-transition-type')
-    })
-  } else {
-    showRenameModal.value = true
-  }
+function handleOpenRenameModal(e?: MouseEvent) {
+  const triggerEl = (e?.currentTarget as HTMLElement | null) ?? null
+  openProfileModal((val) => {
+    showRenameModal.value = val
+  }, triggerEl)
 }
 </script>
 
 <template>
   <div class="dashboard">
-    <header class="topbar">
+    <header class="topbar" :class="{ 'is-desktop-shell': inDesktopShell }">
       <div class="topbar-left">
-        <span class="brand" style="display: flex; align-items: center; gap: 10px;">
+        <span v-if="inDesktopShell" class="page-heading">
+          <svg class="page-heading-icon" viewBox="0 0 16 16" width="16" height="16" fill="none" aria-hidden="true">
+            <rect x="1.5" y="1.5" width="5.25" height="5.25" rx="1.25" stroke="currentColor" stroke-width="1.5" />
+            <rect x="9.25" y="1.5" width="5.25" height="5.25" rx="1.25" stroke="currentColor" stroke-width="1.5" />
+            <rect x="1.5" y="9.25" width="5.25" height="5.25" rx="1.25" stroke="currentColor" stroke-width="1.5" />
+            <rect x="9.25" y="9.25" width="5.25" height="5.25" rx="1.25" stroke="currentColor" stroke-width="1.5" />
+          </svg>
+          <span class="page-heading-title">{{ t('dashboard.title') }}</span>
+          <span v-if="eventStore.events.length > 0" class="page-heading-count">{{ eventStore.events.length }}</span>
+        </span>
+        <span v-else class="brand">
           <img src="/logo_60.png" srcset="/logo_30.png 1x, /logo_60.png 2x" alt="SP27" class="brand-logo" />
           <span>ScoutingPro 27</span>
         </span>
@@ -274,6 +280,7 @@ function handleOpenRenameModal() {
         </button>
         <button
           class="user-tag-btn user-profile-btn"
+          :class="{ 'is-profile-open': showRenameModal }"
           @click="handleOpenRenameModal"
           :title="t('user.edit_nickname')"
           :style="{ viewTransitionName: !showRenameModal ? 'user-profile-box' : 'none' }"

@@ -1,9 +1,10 @@
 <script setup lang="ts">
-import { ref, computed, watch } from 'vue'
+import { ref, computed, watch, onBeforeUnmount } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { useRecordStore } from '@/stores/records'
 import { useScheduleStore } from '@/stores/schedule'
 import { usePitScoutStore } from '@/stores/pitScout'
+import { useScoutAllianceHalo } from '@/composables/useScoutAllianceHalo'
 import {
   hapticFeedback,
   hapticSelection,
@@ -131,6 +132,21 @@ const allianceColor = ref<'none' | 'red' | 'blue'>('none')
 const matchNumber = ref('1')
 const currentTournamentLevel = ref<string>('QUALIFICATION')
 const teamsData = ref<TeamScoutData[]>([createEmptyTeam()])
+
+const { setScoutAllianceHalo, clearScoutAllianceHalo } = useScoutAllianceHalo()
+const haloOwner = Symbol('scouting-form')
+
+watch(
+  allianceColor,
+  (color) => {
+    setScoutAllianceHalo(color, haloOwner)
+  },
+  { immediate: true }
+)
+
+onBeforeUnmount(() => {
+  clearScoutAllianceHalo(haloOwner)
+})
 
 const submitting = ref(false)
 const submitStatus = ref<'none' | 'success' | 'error'>('none')
@@ -458,9 +474,9 @@ const wrapperClass = computed(() => {
     <form class="scouting-form" @submit.prevent="handleSubmit">
       
       <!-- Draft Restored Banner -->
-      <div v-if="isDraftRestored" class="assigned-task-banner draft-restored-banner" style="border-color: rgba(59, 130, 246, 0.4); background: rgba(59, 130, 246, 0.1);">
+      <div v-if="isDraftRestored" class="assigned-task-banner draft-restored-banner">
         <div class="task-info">
-          <span class="material-icons task-icon" style="color: #60a5fa;">restore_page</span>
+          <span class="material-icons task-icon">restore_page</span>
           <span>{{ t('scouting.draft_restored') }}</span>
         </div>
         <button type="button" class="btn-load-task" @click="clearDraft">
@@ -508,7 +524,7 @@ const wrapperClass = computed(() => {
         <div class="field-row" style="display: flex; gap: 12px; align-items: flex-end; flex-wrap: wrap;">
           <label class="field" style="flex: 1; min-width: 140px;">
             <span>{{ t('scouting.match_number') }}</span>
-            <input v-model="matchNumber" type="text" inputmode="numeric" placeholder="1-999" :class="{ 'invalid-field': isInvalidFormat(matchNumber) }" />
+            <input v-model="matchNumber" type="text" inputmode="numeric" placeholder="1-999" class="numeric-input" :class="{ 'invalid-field': isInvalidFormat(matchNumber) }" />
           </label>
           <div class="setting-group" style="margin-bottom: 2px;">
             <span style="font-size: 12px; color: var(--muted-foreground); margin-right: 8px;">{{ t('wizard.tournament_level') }}</span>
@@ -527,7 +543,7 @@ const wrapperClass = computed(() => {
       <div class="teams-grid" :class="{ 'alliance-grid': scoutMode === 'alliance' }">
         <div v-for="(team, index) in (scoutMode === 'single' ? teamsData.slice(0, 1) : teamsData)" :key="index" class="team-column">
           <h2 class="team-header" v-if="scoutMode === 'alliance'">
-            {{ index === 0 ? t('scouting.team_1') : t('scouting.team_2') }}: #{{ team.teamNumber || '?' }}
+            {{ index === 0 ? t('scouting.team_1') : t('scouting.team_2') }}: <span class="team-header-num">#{{ team.teamNumber || '?' }}</span>
           </h2>
 
           <section class="form-section">
@@ -537,8 +553,8 @@ const wrapperClass = computed(() => {
                   <span>{{ t('scouting.team_number') }}</span>
                   <PitStatusIndicator v-if="parseInt(team.teamNumber) > 0" :team-number="parseInt(team.teamNumber)" :show-label="true" />
                 </div>
-                <input v-model="team.teamNumber" type="text" inputmode="numeric" placeholder="e.g. 12345" :class="{ 'invalid-field': isInvalidFormat(team.teamNumber) }" />
-                <div v-if="getPitSummary(team.teamNumber)" class="pit-quick-hint" style="font-size: 11px; color: var(--color-primary, #38bdf8); margin-top: 4px; display: flex; flex-direction: column; gap: 3px;">
+                <input v-model="team.teamNumber" type="text" inputmode="numeric" placeholder="e.g. 12345" class="numeric-input" :class="{ 'invalid-field': isInvalidFormat(team.teamNumber) }" />
+                <div v-if="getPitSummary(team.teamNumber)" class="pit-quick-hint" style="font-size: 11px; color: var(--status-info); margin-top: 4px; display: flex; flex-direction: column; gap: 3px;">
                   <div style="display: inline-flex; align-items: center; gap: 4px;">
                     <span class="material-icons" style="font-size: 13px;">lightbulb</span>
                     <span>{{ t('pit_scout.quick_summary_v2', { drivetrain: formatDrivetrain(getPitSummary(team.teamNumber)?.drivetrain), ball: formatBallCompat(getPitSummary(team.teamNumber)?.ballCompatibility), auto: getPitSummary(team.teamNumber)?.autoScore ?? 0, teleop: getPitSummary(team.teamNumber)?.teleopCycles ?? 0, endgame: getPitSummary(team.teamNumber)?.claimedEndgameScore ?? 0 }) }}</span>
@@ -573,7 +589,7 @@ const wrapperClass = computed(() => {
           </section>
 
           <!-- Autonomous -->
-          <section class="form-section">
+          <section class="form-section phase-section phase-auto">
             <PhaseCycleTracker
               phase="auto"
               :title="t('scouting.autonomous')"
@@ -611,7 +627,7 @@ const wrapperClass = computed(() => {
           </section>
 
           <!-- TeleOp (Cycle Tracker) -->
-          <section class="form-section">
+          <section class="form-section phase-section phase-teleop">
             <PhaseCycleTracker
               phase="teleop"
               :title="t('scouting.teleop')"
@@ -647,8 +663,8 @@ const wrapperClass = computed(() => {
           </section>
 
           <!-- Endgame -->
-          <section class="form-section">
-            <h3><span class="material-icons">flag</span> {{ t('scouting.endgame') }}</h3>
+          <section class="form-section phase-section phase-endgame">
+            <h3 class="phase-title"><span class="material-icons phase-title-icon">flag</span> {{ t('scouting.endgame') }}</h3>
             <p class="endgame-subtitle">{{ t('scouting.endgame_sub') }}</p>
 
             <div v-if="allianceFlowerCapWarning" class="endgame-warn-banner">
@@ -775,9 +791,9 @@ const wrapperClass = computed(() => {
 
               <label class="toggle-card is-g410-card" :class="{ 'is-active': team.g410EarlyFlowerFoul }">
                 <input v-model="team.g410EarlyFlowerFoul" type="checkbox" @change="hapticSelection" />
-                <span class="material-icons check-icon" :style="team.g410EarlyFlowerFoul ? 'color: #f59e0b;' : ''">{{ team.g410EarlyFlowerFoul ? 'check_box' : 'check_box_outline_blank' }}</span>
+                <span class="material-icons check-icon">{{ team.g410EarlyFlowerFoul ? 'check_box' : 'check_box_outline_blank' }}</span>
                 <div class="toggle-info">
-                  <span class="toggle-title" style="color: #fbbf24;">{{ t('scouting.g410_early_flower_foul') }}</span>
+                  <span class="toggle-title">{{ t('scouting.g410_early_flower_foul') }}</span>
                   <span class="toggle-sub">{{ t('scouting.g410_early_flower_foul_desc') }}</span>
                 </div>
               </label>
@@ -863,9 +879,9 @@ const wrapperClass = computed(() => {
   font-size: 11px;
   padding: 2px 7px;
   border-radius: 999px;
-  background: rgba(56, 189, 248, 0.14);
-  border: 1px solid rgba(56, 189, 248, 0.28);
-  color: var(--color-primary, #38bdf8);
+  background: var(--status-info-bg);
+  border: 1px solid var(--status-info-border);
+  color: var(--status-info);
 }
 
 .teleop-predict-bar {
@@ -875,8 +891,8 @@ const wrapperClass = computed(() => {
   justify-content: space-between;
   padding: 8px 12px;
   border-radius: 10px;
-  background: rgba(255, 255, 255, 0.04);
-  border: 1px solid var(--border-subtle, rgba(255, 255, 255, 0.1));
+  background: var(--surface-recessed);
+  border: 1px solid var(--border-subtle);
   font-size: 12px;
 }
 
@@ -884,23 +900,26 @@ const wrapperClass = computed(() => {
   display: inline-flex;
   align-items: center;
   gap: 5px;
-  color: var(--text-secondary, #94a3b8);
+  color: var(--muted-foreground);
 }
 
 .predict-val {
+  font-family: var(--font-numeric);
+  font-variant-numeric: tabular-nums;
   font-weight: 700;
-  color: var(--color-primary, #38bdf8);
+  color: var(--status-info);
 }
 
 .predict-val.is-insufficient {
+  font-family: var(--font-sans);
   font-weight: 500;
-  color: var(--text-muted, #64748b);
+  color: var(--g-400);
 }
 
 .endgame-subtitle {
   margin: -4px 0 12px;
   font-size: 12px;
-  color: var(--text-secondary, #94a3b8);
+  color: var(--muted-foreground);
 }
 
 .biobuzz-endgame-steppers {
@@ -923,8 +942,8 @@ const wrapperClass = computed(() => {
   box-sizing: border-box;
   padding: 10px 12px;
   border-radius: 12px;
-  background: rgba(255, 255, 255, 0.03);
-  border: 1px solid var(--border-subtle, rgba(255, 255, 255, 0.1));
+  background: var(--surface-recessed);
+  border: 1px solid var(--border-subtle);
 }
 
 .endgame-stepper-card .quick-ball-chips {
@@ -958,12 +977,12 @@ const wrapperClass = computed(() => {
 .endgame-stepper-title {
   font-size: 13px;
   font-weight: 600;
-  color: var(--text-primary, #f8fafc);
+  color: var(--foreground);
 }
 
 .endgame-stepper-rate {
   font-size: 11px;
-  color: var(--text-secondary, #94a3b8);
+  color: var(--muted-foreground);
 }
 
 .endgame-warn-banner {
@@ -973,9 +992,9 @@ const wrapperClass = computed(() => {
   padding: 8px 12px;
   margin-bottom: 10px;
   border-radius: 10px;
-  background: rgba(245, 158, 11, 0.14);
-  border: 1px solid rgba(245, 158, 11, 0.4);
-  color: #fbbf24;
+  background: var(--status-warning-bg);
+  border: 1px solid var(--status-warning-border);
+  color: var(--status-warning);
   font-size: 12px;
   font-weight: 600;
 }
@@ -986,9 +1005,9 @@ const wrapperClass = computed(() => {
   gap: 6px;
   padding: 6px 8px;
   border-radius: 8px;
-  background: rgba(245, 158, 11, 0.1);
-  border: 1px solid rgba(245, 158, 11, 0.3);
-  color: #fbbf24;
+  background: var(--status-warning-bg);
+  border: 1px solid var(--status-warning-border);
+  color: var(--status-warning);
   font-size: 11px;
   line-height: 1.35;
 }
@@ -996,13 +1015,21 @@ const wrapperClass = computed(() => {
 .toggle-sub {
   display: block;
   font-size: 11px;
-  color: var(--text-secondary, #94a3b8);
+  color: var(--muted-foreground);
   margin-top: 2px;
 }
 
+.is-g410-card .toggle-title {
+  color: var(--status-warning);
+}
+
 .is-g410-card.is-active {
-  border-color: rgba(245, 158, 11, 0.55);
-  background: rgba(245, 158, 11, 0.12);
+  border-color: var(--status-warning-border);
+  background: var(--status-warning-bg);
+}
+
+.is-g410-card.is-active .check-icon {
+  color: var(--status-warning);
 }
 </style>
 

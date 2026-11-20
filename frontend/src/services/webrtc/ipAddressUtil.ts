@@ -8,10 +8,12 @@
 export function cleanIpAddress(ip: string): string {
   if (!ip || typeof ip !== 'string') return ''
   let clean = ip.trim()
-  // 匹配带中括号的形式 [2409:...]:port 或 [2409:...]
-  const bracketMatch = clean.match(/^\[([0-9a-fA-F:]+)\](?::\d+)?$/)
-  if (bracketMatch && bracketMatch[1]) {
-    clean = bracketMatch[1].trim()
+  // 匹配带中括号的形式 [2409:...]:port、[fe80::1%eth0]:port、[ ::ffff:192.0.2.1 ]:port 及空括号 []:port / [   ]:port
+  const bracketMatch = clean.match(/^\[([^\]]*)\](?::\d+)?$/)
+  if (bracketMatch) {
+    const inner = bracketMatch[1]?.trim() ?? ''
+    if (!inner) return ''
+    clean = inner
   } else {
     clean = clean.replace(/^\[|\]$/g, '').trim()
     // 若为 IPv4:port 形式（含点号且仅含单个冒号加端口数字，如 1.2.3.4:8080）
@@ -31,68 +33,102 @@ export function cleanIpAddress(ip: string): string {
 }
 
 /**
+ * 将 IPv6 地址严格解析并展开为 8 个 16 位无符号整数组（0..0xffff）；
+ * 畸形形式（如 ":::"、多个 "::"、无 "::" 时不足或超过 8 段、超长十六进制段）一律返回 null。
+ */
+function expandIpv6Hextets(ip: string): number[] | null {
+  if (!ip || typeof ip !== 'string') return null
+  const clean = cleanIpAddress(ip)
+  if (!clean || !clean.includes(':')) return null
+  if (clean.includes(':::')) return null
+
+  const doubleColonParts = clean.split('::')
+  if (doubleColonParts.length > 2) return null
+
+  const parseSegmentList = (segStr: string, allowIpv4Tail: boolean): number[] | null => {
+    if (segStr === '') return []
+    const tokens = segStr.split(':')
+    const out: number[] = []
+    for (let i = 0; i < tokens.length; i++) {
+      const tok = tokens[i]!
+      if (!tok) return null
+      if (tok.includes('.')) {
+        if (!allowIpv4Tail || i !== tokens.length - 1) return null
+        const octets = tok.split('.')
+        if (octets.length !== 4) return null
+        const nums: number[] = []
+        for (const o of octets) {
+          if (!/^\d{1,3}$/.test(o)) return null
+          const n = parseInt(o, 10)
+          if (n < 0 || n > 255) return null
+          nums.push(n)
+        }
+        out.push((nums[0]! << 8) | nums[1]!)
+        out.push((nums[2]! << 8) | nums[3]!)
+      } else {
+        if (!/^[0-9a-f]{1,4}$/i.test(tok)) return null
+        out.push(parseInt(tok, 16))
+      }
+    }
+    return out
+  }
+
+  if (doubleColonParts.length === 2) {
+    const left = parseSegmentList(doubleColonParts[0]!, false)
+    const right = parseSegmentList(doubleColonParts[1]!, true)
+    if (!left || !right) return null
+    const missing = 8 - (left.length + right.length)
+    if (missing < 1) return null
+    return [...left, ...Array<number>(missing).fill(0), ...right]
+  }
+
+  const all = parseSegmentList(clean, true)
+  if (!all || all.length !== 8) return null
+  return all
+}
+
+/**
  * 校验是否为合法的公网全球单播 IPv6 地址 (Global Unicast Address, 2000::/3)
  */
 export function isGlobalIpv6Address(ip: string): boolean {
-  if (!ip || typeof ip !== 'string') return false
-  const clean = cleanIpAddress(ip)
-  if (!clean.includes(':')) return false
+  const hextets = expandIpv6Hextets(ip)
+  if (!hextets) return false
 
-  // 基础特殊地址排除
-  if (
-    clean === '::1' ||
-    clean === '::' ||
-    clean.startsWith('::ffff:') ||
-    clean.startsWith('100:') ||
-    clean.startsWith('64:ff9b:') ||
-    clean.startsWith('ff') // Multicast ff00::/8
-  ) {
-    return false
-  }
+  const h0 = hextets[0]!
+  const h1 = hextets[1]!
 
-  // 排除链路本地 fe80::/10 (fe80 ~ febf)
-  if (
-    clean.startsWith('fe8') ||
-    clean.startsWith('fe9') ||
-    clean.startsWith('fea') ||
-    clean.startsWith('feb')
-  ) {
-    return false
-  }
-
-  // 排除唯一本地 ULA fc00::/7 (fc00 ~ fdff)
-  if (clean.startsWith('fc') || clean.startsWith('fd')) {
+  // 全球单播前缀 2000::/3 (0x2000 ~ 0x3fff，自动排除 :: / ::1 / ::ffff: / fe80::/10 / fc00::/7 / ff00::/8)
+  if (h0 < 0x2000 || h0 > 0x3fff) {
     return false
   }
 
   // 排除 6to4 前缀 2002::/16
-  if (clean.startsWith('2002:')) {
+  if (h0 === 0x2002) {
     return false
   }
 
-  // 排除 2001:: 特殊保留段 (Teredo, Docs, Benchmarking, ORCHID)
-  if (
-    clean.startsWith('2001:0:') ||
-    clean.startsWith('2001::') ||
-    clean.startsWith('2001:db8:') ||
-    clean.startsWith('2001:0db8:') ||
-    clean.startsWith('2001:2:') ||
-    /^2001:(1[0-9a-f]|2[0-9a-f]):/i.test(clean)
-  ) {
-    return false
+  // 排除 2001:: 特殊保留段（按数值对比 hextets[1]，防前导零如 2001:0000::1 / 2001:0002::1 / 2001:0010::1 绕过）：
+  // - 2001:0000::/32 (Teredo)
+  // - 2001:0002::/32 (Benchmarking)
+  // - 2001:0010::/28 ~ 2001:002f:: (ORCHID / ORCHIDv2)
+  // - 2001:0db8::/32 (Documentation)
+  if (h0 === 0x2001) {
+    if (h1 === 0x0000 || h1 === 0x0002 || h1 === 0x0db8) {
+      return false
+    }
+    if (h1 >= 0x0010 && h1 <= 0x002f) {
+      return false
+    }
   }
 
-  // 全球单播前缀 2000::/3 (首十六进制位为 2 或 3，且具有合法冒号十六进制格式)
-  return /^[23][0-9a-f]{0,3}:[0-9a-f:]+$/i.test(clean)
+  return true
 }
 
 /**
  * 校验是否为任意有效 IPv6 地址
  */
 export function isIpv6Address(ip: string): boolean {
-  if (!ip || typeof ip !== 'string') return false
-  const clean = cleanIpAddress(ip)
-  return clean.includes(':') && /^[0-9a-f:]+$/i.test(clean)
+  return expandIpv6Hextets(ip) !== null
 }
 
 /**
@@ -121,13 +157,31 @@ export function isTunVirtualAddress(ip: string): boolean {
   if (!ip || typeof ip !== 'string') return false
   const clean = cleanIpAddress(ip)
   if (!clean) return false
-  if (clean.startsWith('198.18.') || clean.startsWith('198.19.') || clean.startsWith('28.')) return true
-  // 识别移动端 v2rayNG / Xray / NekoBox 默认虚拟网卡地址段 (10.10.14.x / 26.26.26.x)
-  if (clean.startsWith('10.10.14.') || clean.startsWith('26.26.26.')) return true
-  // 识别 sing-box / Mihomo (Clash Meta) / NekoBox 默认 TUN IPv4 段 (172.19.0.x) 及 Docker/WSL 虚拟网桥网关 (.0.1/.0.2)
-  if (/^172\.(1[7-9]|2\d|3[0-1])\.0\.\d+$/.test(clean)) return true
-  if (/^100\.(6[4-9]|[7-9]\d|1[01]\d|12[0-7])\./.test(clean)) return true
-  if (clean.startsWith('fc') || clean.startsWith('fd')) return true
+
+  const ipv4Parts = clean.split('.')
+  if (ipv4Parts.length === 4 && ipv4Parts.every((p) => /^\d{1,3}$/.test(p) && Number(p) <= 255)) {
+    const a = Number(ipv4Parts[0])
+    const b = Number(ipv4Parts[1])
+    const c = Number(ipv4Parts[2])
+    if (a === 198 && (b === 18 || b === 19)) return true
+    if (a === 28) return true
+    // 识别移动端 v2rayNG / Xray / NekoBox 默认虚拟网卡地址段 (10.10.14.x / 26.26.26.x)
+    if ((a === 10 && b === 10 && c === 14) || (a === 26 && b === 26 && c === 26)) return true
+    if (a === 100 && b >= 64 && b <= 127) return true
+    // 识别 Cloudflare WARP (172.16.0.x)、Docker 默认网桥 (172.17.0.0/16)、
+    // sing-box / Mihomo / NekoBox 默认 TUN IPv4 段 (172.18..31.0.x) 及 WSL2 / Hyper-V /20 虚拟网桥段
+    // （172.18..31 内第三八位组 >= 16 的完整 /20 区间，如 172.21.64.0/20 -> 172.21.64.x..172.21.79.x）；
+    // 精准放行 iOS 个人热点 (172.20.10.x) 与蜂窝网络真实内网段 (10.61.x.x 等)
+    if (a === 172) {
+      if (b === 16 && c === 0) return true
+      if (b === 17) return true
+      if (b >= 18 && b <= 31 && (c === 0 || c >= 16)) return true
+    }
+    return false
+  }
+
+  const hextets = expandIpv6Hextets(clean)
+  if (hextets && hextets[0]! >= 0xfc00 && hextets[0]! <= 0xfdff) return true
   return false
 }
 
@@ -147,11 +201,18 @@ export function isDomesticCarrierIpv6(ip: string): boolean {
   )
 }
 
+/**
+ * 提取 IPv6 的 /64 前缀（前 4 个规范化十六进制 hextet）：
+ * 先将含 "::" 的压缩 IPv6 完整展开为 8 个十六进制段，并去掉前导零，
+ * 确保 "2409:8a00::1" 与 "2409:8a00:0000:0000:abcd::2" 得到一致的 "2409:8a00:0:0"。
+ */
 export function getIpv6Prefix64(ip: string): string {
-  const clean = cleanIpAddress(ip).toLowerCase()
-  if (!clean.includes(':')) return ''
-  const parts = clean.split(':')
-  return parts.slice(0, 4).join(':')
+  const hextets = expandIpv6Hextets(ip)
+  if (!hextets) return ''
+  return hextets
+    .slice(0, 4)
+    .map((h) => h.toString(16))
+    .join(':')
 }
 
 /**

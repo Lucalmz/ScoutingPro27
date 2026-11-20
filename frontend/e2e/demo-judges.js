@@ -141,12 +141,13 @@ async function runDemo() {
     'exec:java', 
     os.platform() === 'win32' ? '"-Dexec.mainClass=com.bear27570.app.Main"' : '-Dexec.mainClass=com.bear27570.app.Main', 
     os.platform() === 'win32' ? '"-Dexec.args=--headless"' : '-Dexec.args=--headless',
-    '-DENABLE_TEST_CLEANUP=true'
+    '-DENABLE_TEST_CLEANUP=true',
+    '-DSKIP_FIREWALL_CHECK=true'
   ], {
     cwd: path.join(__dirname, '../../Backend'),
     detached: os.platform() !== 'win32',
     shell: os.platform() === 'win32',
-    env: { ...process.env, DEV_PORT: '7071', ENABLE_TEST_CLEANUP: 'true' }
+    env: { ...process.env, DEV_PORT: '7071', ENABLE_TEST_CLEANUP: 'true', SKIP_FIREWALL_CHECK: 'true' }
   });
 
   process.on('SIGINT', () => {

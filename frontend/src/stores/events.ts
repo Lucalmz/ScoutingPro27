@@ -5,7 +5,8 @@ import { isDesktopHost } from '@/services/photoStorage'
 import { isMobileDevice } from '@/composables/useIsMobile'
 import { useUserStore } from '@/stores/user'
 import { useConnectionStore } from '@/stores/connection'
-import type { ScoutingEvent } from '@/types'
+import { setCustomTurnConfig } from '@/services/webrtc/connectivity'
+import type { CustomTurnConfig, ScoutingEvent } from '@/types'
 
 export const useEventStore = defineStore('events', () => {
   const events = ref<ScoutingEvent[]>([])
@@ -97,6 +98,7 @@ export const useEventStore = defineStore('events', () => {
               ? `Event ${code}`
               : 'Scouting Event'
           currentEvent.value = parsedCurrent
+          setCustomTurnConfig(parsedCurrent?.customTurnConfig ?? null)
         }
       }
     } catch {}
@@ -117,6 +119,7 @@ export const useEventStore = defineStore('events', () => {
   watch(
     currentEvent,
     (cur) => {
+      setCustomTurnConfig(cur?.customTurnConfig ?? null)
       if (typeof localStorage !== 'undefined') {
         try {
           if (cur) {
@@ -127,7 +130,7 @@ export const useEventStore = defineStore('events', () => {
         } catch {}
       }
     },
-    { deep: true }
+    { deep: true, flush: 'sync' }
   )
 
   const isHost = computed(() => {
@@ -158,6 +161,9 @@ export const useEventStore = defineStore('events', () => {
           map.set(re.id, re)
         }
         events.value = sanitizeEventList(Array.from(map.values()))
+        if (currentEvent.value && map.has(currentEvent.value.id)) {
+          currentEvent.value = map.get(currentEvent.value.id)!
+        }
       }
     } catch (e: any) {
       console.warn('[eventStore] Failed to fetch events from backend:', e)
@@ -256,6 +262,7 @@ export const useEventStore = defineStore('events', () => {
 
   function setCurrentEvent(evt: ScoutingEvent | null) {
     currentEvent.value = evt
+    setCustomTurnConfig(evt?.customTurnConfig ?? null)
   }
 
   function updateFtcConfig(eventId: string, ftcYear: number, ftcEventCode: string) {
@@ -270,6 +277,24 @@ export const useEventStore = defineStore('events', () => {
         ftcYear,
         ftcEventCode
       }
+    }
+  }
+
+  function updateTurnConfig(eventId: string, config: CustomTurnConfig | null) {
+    const hasCustomTurn = Boolean(config && Array.isArray(config.urls) && config.urls.length > 0)
+    const normalized: CustomTurnConfig | null = hasCustomTurn ? config : null
+    const target = events.value.find(e => e.id === eventId)
+    if (target) {
+      target.customTurnConfig = normalized
+      target.hasCustomTurn = hasCustomTurn
+    }
+    if (currentEvent.value && currentEvent.value.id === eventId) {
+      currentEvent.value = {
+        ...currentEvent.value,
+        customTurnConfig: normalized,
+        hasCustomTurn
+      }
+      setCustomTurnConfig(normalized)
     }
   }
 
@@ -395,6 +420,7 @@ export const useEventStore = defineStore('events', () => {
     syncExternal,
     setCurrentEvent,
     updateFtcConfig,
+    updateTurnConfig,
     clearError,
     restoreFromCache,
     deleteEvent,

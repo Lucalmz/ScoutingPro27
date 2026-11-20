@@ -49,6 +49,8 @@ export interface ChannelMessageHandlerContext {
   waitForTakeoverReconciliation?: () => Promise<void>
   finishTakeoverReconciliation?: (reason?: string) => void
   onPongReceived?: (timestamp: number) => void
+  onPeerPingReceived?: (senderId: string, msg: any) => void
+  onPeerIdentityBound?: (senderId: string, userId: string) => void
 }
 
 export type ChannelMessageHandler = ((ev: MessageEvent, senderId?: string) => Promise<void>) & {
@@ -135,6 +137,9 @@ export function createChannelMessageHandler(ctx: ChannelMessageHandlerContext): 
       case 'PING' as any: {
         if (isHostMode) {
           await ctx.sendMessage({ type: 'PONG' as any, timestamp: (msg as any).timestamp }, senderId)
+          if (senderId) {
+            ctx.onPeerPingReceived?.(senderId, msg)
+          }
         }
         return
       }
@@ -275,6 +280,7 @@ export function createChannelMessageHandler(ctx: ChannelMessageHandlerContext): 
               ctx.clientIdToScoutName.set(senderId, senderUserName)
               callbacks.onClientConnected?.(senderUserId, senderUserName)
             }
+            ctx.onPeerIdentityBound?.(senderId, senderUserId)
             const pending = ctx.offlineMessages.flush(senderUserId)
             if (pending && pending.length > 0) {
               const now = Date.now()
@@ -341,6 +347,7 @@ export function createChannelMessageHandler(ctx: ChannelMessageHandlerContext): 
               ctx.clientIdToScoutName.set(senderId, senderUserName)
               callbacks.onClientConnected?.(senderUserId, senderUserName)
             }
+            ctx.onPeerIdentityBound?.(senderId, senderUserId)
           }
         }
 

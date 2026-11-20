@@ -167,4 +167,91 @@ describe('MobileStatusPill.vue', () => {
     expect(popover!.textContent).toContain('Connection Type')
     expect(popover!.textContent).toContain('LAN Direct')
   })
+
+  it('distinguishes zero-quota ECDH Tunnel (TLS) from TURN Relay in HUD popover', async () => {
+    const connStore = useConnectionStore()
+    connStore.status = 'connected'
+    connStore.setTransportInfo({
+      type: 'relay',
+      localCandidateType: 'virtual-e2ee',
+      remoteCandidateType: 'wss-broker:8084',
+      protocol: 'wss/tls',
+      label: 'ECDH Tunnel (TLS)',
+      isVirtualTunnel: true,
+      rttMs: 45
+    })
+
+    const vdcWrapper = mount(MobileStatusPill, {
+      props: {
+        eventName: 'Virtual Event',
+        inviteCode: 'VIRT01'
+      }
+    })
+    await vdcWrapper.find('.status-pill').trigger('click')
+    const vdcPopover = document.body.querySelector('.hud-popover')
+    expect(vdcPopover!.textContent).toContain('connection.transport_virtual_tunnel')
+    expect(vdcPopover!.textContent).not.toContain('Relay')
+    vdcWrapper.unmount()
+
+    connStore.setTransportInfo({
+      type: 'relay',
+      localCandidateType: 'relay',
+      remoteCandidateType: 'relay',
+      protocol: 'TCP',
+      rttMs: 135
+    })
+    const turnWrapper = mount(MobileStatusPill, {
+      props: {
+        eventName: 'Turn Event',
+        inviteCode: 'TURN01'
+      }
+    })
+    await turnWrapper.find('.status-pill').trigger('click')
+    const turnPopover = document.body.querySelector('.hud-popover')
+    expect(turnPopover!.textContent).toContain('Relay')
+    turnWrapper.unmount()
+  })
+
+  it('renders connection mode and RTT directly on the floating status pill surface without opening HUD', async () => {
+    const connStore = useConnectionStore()
+    connStore.status = 'connected'
+    connStore.setTransportInfo({
+      type: 'ipv6_p2p',
+      localCandidateType: 'host',
+      remoteCandidateType: 'host',
+      localAddress: '2409:8a00::1',
+      remoteAddress: '2409:8900::2',
+      protocol: 'UDP',
+      rttMs: 19
+    })
+
+    const wrapper = mount(MobileStatusPill, {
+      props: {
+        eventName: 'Mobile Direct Test',
+        inviteCode: 'BUZZ26'
+      }
+    })
+
+    const pill = wrapper.find('.status-pill')
+    expect(pill.find('.pill-transport-badge').exists()).toBe(true)
+    expect(pill.text()).toContain('IPv6 Direct')
+    expect(pill.text()).toContain('19ms')
+
+    connStore.setTransportInfo({
+      type: 'relay',
+      localCandidateType: 'virtual',
+      remoteCandidateType: 'wss-broker:8084',
+      localAddress: 'virtual-e2ee',
+      remoteAddress: 'wss-broker:8084',
+      protocol: 'wss/tls',
+      label: 'ECDH Tunnel (TLS)',
+      isVirtualTunnel: true,
+      rttMs: 45
+    })
+    await wrapper.vm.$nextTick()
+
+    expect(pill.find('.pill-transport-badge.virtual-tunnel').exists()).toBe(true)
+    expect(pill.text()).toContain('connection.transport_virtual_tunnel')
+    expect(pill.text()).toContain('45ms')
+  })
 })

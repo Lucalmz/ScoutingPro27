@@ -45,6 +45,12 @@ export interface SystemMessage {
 }
 
 // --- Event ---
+export interface CustomTurnConfig {
+  urls: string[]
+  username: string
+  credential?: string
+}
+
 export interface ScoutingEvent {
   id: string
   name: string
@@ -52,6 +58,8 @@ export interface ScoutingEvent {
   hostId: string
   ftcYear?: number
   ftcEventCode?: string
+  customTurnConfig?: CustomTurnConfig | null
+  hasCustomTurn?: boolean
 }
 
 // --- Scouting Record (后端存储的粗粒度版本) ---
@@ -583,6 +591,8 @@ export type TransportType = 'ipv6_p2p' | 'lan_p2p' | 'nat_p2p' | 'relay' | 'unkn
 
 export interface ConnectionTransportInfo {
   type: TransportType
+  label?: string
+  isVirtualTunnel?: boolean
   localCandidateType: string
   remoteCandidateType: string
   localAddress: string

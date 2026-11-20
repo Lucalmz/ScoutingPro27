@@ -1,7 +1,7 @@
 .offline-sync-backdrop {
   position: fixed;
   inset: 0;
-  background: rgba(8, 8, 7, 0.82);
+  background: color-mix(in srgb, var(--g-950) 82%, transparent);
   z-index: 1200;
   display: flex;
   align-items: center;
@@ -12,10 +12,10 @@
 .offline-sync-modal {
   width: 100%;
   max-width: 540px;
-  background: var(--surface);
-  border: 1px solid var(--border);
-  border-radius: 14px;
-  box-shadow: 0 16px 40px rgba(0, 0, 0, 0.4);
+  background: var(--popover);
+  border: 1px solid var(--border-strong);
+  border-radius: 18px;
+  box-shadow: var(--shadow-3);
   display: flex;
   flex-direction: column;
   overflow: hidden;
@@ -88,7 +88,7 @@
   justify-content: center;
   gap: 8px;
   border-bottom: 2px solid transparent;
-  transition: all 0.2s ease;
+  transition: color var(--motion-duration-fast) var(--motion-ease-out), border-color var(--motion-duration-fast) var(--motion-ease-out), background-color var(--motion-duration-fast) var(--motion-ease-out);
 }
 
 .tab-btn.active {
@@ -191,9 +191,10 @@
   flex-shrink: 0;
 }
 .filename-box code {
+  font-family: var(--font-mono);
   font-size: 0.76rem;
   color: var(--primary);
-  background: rgba(var(--primary-rgb, 59, 130, 246), 0.1);
+  background: color-mix(in srgb, var(--primary) 10%, transparent);
   padding: 2px 6px;
   border-radius: 4px;
   overflow: hidden;
@@ -212,7 +213,7 @@
   font-weight: 600;
   cursor: pointer;
   border: none;
-  transition: opacity 0.2s ease;
+  transition: opacity var(--motion-duration-fast) var(--motion-ease-out), background-color var(--motion-duration-fast) var(--motion-ease-out);
 }
 .btn-action:disabled {
   opacity: 0.5;
@@ -220,7 +221,7 @@
 }
 .btn-action.primary {
   background: var(--primary);
-  color: var(--primary-foreground, #000000);
+  color: var(--on-primary);
 }
 .btn-action.secondary {
   background: var(--surface-hover);
@@ -247,11 +248,11 @@
   gap: 8px;
   cursor: pointer;
   background: var(--background);
-  transition: all 0.2s ease;
+  transition: border-color var(--motion-duration-fast) var(--motion-ease-out), background-color var(--motion-duration-fast) var(--motion-ease-out);
 }
 .dropzone.dragging, .dropzone:hover {
   border-color: var(--primary);
-  background: rgba(var(--primary-rgb, 59, 130, 246), 0.05);
+  background: color-mix(in srgb, var(--primary) 6%, transparent);
 }
 
 .drop-icon {
@@ -284,7 +285,7 @@
   display: inline-flex;
   align-items: center;
   gap: 6px;
-  transition: all 0.2s ease;
+  transition: background-color var(--motion-duration-fast) var(--motion-ease-out), border-color var(--motion-duration-fast) var(--motion-ease-out), color var(--motion-duration-fast) var(--motion-ease-out);
 }
 .btn-choose:hover {
   background: var(--surface-hover);
@@ -292,12 +293,12 @@
   color: var(--primary);
 }
 .btn-choose.folder-btn {
-  background: rgba(57, 255, 20, 0.08);
-  border-color: rgba(57, 255, 20, 0.35);
+  background: color-mix(in srgb, var(--primary) 8%, transparent);
+  border-color: var(--status-success-border);
   color: var(--primary);
 }
 .btn-choose.folder-btn:hover {
-  background: rgba(57, 255, 20, 0.16);
+  background: color-mix(in srgb, var(--primary) 16%, transparent);
   border-color: var(--primary);
 }
 
@@ -319,19 +320,19 @@
 .scanning-spinner {
   width: 18px;
   height: 18px;
-  border: 2px solid rgba(57, 255, 20, 0.2);
+  border: 2px solid color-mix(in srgb, var(--primary) 20%, transparent);
   border-top-color: var(--primary);
   border-radius: 50%;
-  animation: spin 0.8s linear infinite;
+  animation: spin 800ms linear infinite;
 }
 @keyframes spin {
   to { transform: rotate(360deg); }
 }
 
 .import-error-banner {
-  background: rgba(239, 68, 68, 0.12);
-  border: 1px solid rgba(239, 68, 68, 0.35);
-  color: #ef4444;
+  background: var(--status-error-bg);
+  border: 1px solid var(--status-error-border);
+  color: var(--status-error);
   padding: 10px 14px;
   border-radius: 8px;
   font-size: 0.82rem;
@@ -341,9 +342,9 @@
 }
 
 .empty-scan-banner {
-  background: rgba(245, 158, 11, 0.1);
-  border: 1px solid rgba(245, 158, 11, 0.3);
-  color: #fbbf24;
+  background: var(--status-warning-bg);
+  border: 1px solid var(--status-warning-border);
+  color: var(--status-warning);
   padding: 12px 14px;
   border-radius: 8px;
   font-size: 0.84rem;
@@ -382,19 +383,20 @@
   border-radius: 9999px;
   font-size: 0.76rem;
   font-weight: 600;
+  font-variant-numeric: tabular-nums;
   background: var(--surface);
   border: 1px solid var(--border);
   color: var(--foreground);
 }
 .stat-pill.success {
-  background: rgba(57, 255, 20, 0.1);
-  border-color: rgba(57, 255, 20, 0.35);
+  background: var(--status-success-bg);
+  border-color: var(--status-success-border);
   color: var(--primary);
 }
 .stat-pill.warning {
-  background: rgba(245, 158, 11, 0.1);
-  border-color: rgba(245, 158, 11, 0.35);
-  color: #fbbf24;
+  background: var(--status-warning-bg);
+  border-color: var(--status-warning-border);
+  color: var(--status-warning);
 }
 .stat-pill.muted {
   color: var(--text-muted);
@@ -432,18 +434,18 @@
   border-radius: 4px;
   font-size: 0.7rem;
   font-weight: 700;
-  font-family: 'Orbitron', monospace;
+  font-family: var(--font-mono);
   white-space: nowrap;
 }
 .file-badge.event {
-  background: rgba(56, 189, 248, 0.2);
-  color: #38bdf8;
-  border: 1px solid rgba(56, 189, 248, 0.4);
+  background: var(--status-info-bg);
+  color: var(--status-info);
+  border: 1px solid var(--status-info-border);
 }
 .file-badge.info {
-  background: rgba(57, 255, 20, 0.15);
+  background: var(--status-success-bg);
   color: var(--primary);
-  border: 1px solid rgba(57, 255, 20, 0.35);
+  border: 1px solid var(--status-success-border);
 }
 
 .matched-file-name {

@@ -59,7 +59,10 @@ function resolveIcon(toast: Toast): string {
   align-items: center;
   gap: 10px;
   padding: 8px 18px;
-  border-radius: 9999px; /* pill shape */
+  border-radius: 10px;
+  background: var(--popover);
+  border: 1px solid var(--border-strong);
+  box-shadow: var(--shadow-2);
   font-size: 13.5px;
   font-weight: 600;
   white-space: nowrap;
@@ -68,7 +71,8 @@ function resolveIcon(toast: Toast): string {
   overflow: hidden;
   text-overflow: ellipsis;
   user-select: none;
-  transition: all 0.2s ease;
+  transition: transform var(--motion-duration-fast) var(--motion-ease-out),
+              opacity var(--motion-duration-fast) var(--motion-ease-out);
 }
 
 .toast-icon {
@@ -77,7 +81,7 @@ function resolveIcon(toast: Toast): string {
 }
 
 .toast-message {
-  color: #f1f5f9;
+  color: var(--foreground);
   letter-spacing: 0.02em;
 }
 
@@ -88,82 +92,75 @@ function resolveIcon(toast: Toast): string {
   border-radius: 9999px;
   font-size: 12px;
   font-weight: 700;
-  font-family: 'Orbitron', 'Manrope', monospace;
+  font-family: var(--font-mono);
+  font-variant-numeric: tabular-nums;
   letter-spacing: 0.04em;
-  background: rgba(255, 255, 255, 0.1);
-  border: 1px solid rgba(255, 255, 255, 0.15);
+  background: var(--g-750);
+  border: 1px solid var(--border-strong);
 }
 
-/* Success: Cyberpunk Fluorescent Green */
+/* Success: Pit Wall Signal Green */
 .toast-success {
-  background: rgba(8, 24, 12, 0.94);
-  border: 1px solid var(--primary, #39ff14);
-  box-shadow: 0 0 16px rgba(57, 255, 20, 0.4), 0 4px 16px rgba(0, 0, 0, 0.6);
+  border-left: 3px solid var(--status-success);
 }
 .toast-success .toast-icon {
-  color: var(--primary, #39ff14);
+  color: var(--status-success);
 }
 .toast-success .toast-detail-badge {
-  color: var(--primary, #39ff14);
-  background: rgba(57, 255, 20, 0.15);
-  border-color: rgba(57, 255, 20, 0.35);
+  color: var(--s-200);
+  background: var(--status-success-bg);
+  border-color: var(--status-success-border);
 }
 
-/* Warning: Tactical Amber */
+/* Warning: Pit Wall Amber */
 .toast-warning {
-  background: rgba(28, 18, 6, 0.94);
-  border: 1px solid #f59e0b;
-  box-shadow: 0 0 16px rgba(245, 158, 11, 0.4), 0 4px 16px rgba(0, 0, 0, 0.6);
+  border-left: 3px solid var(--status-warning);
 }
 .toast-warning .toast-icon {
-  color: #f59e0b;
+  color: var(--status-warning);
 }
 .toast-warning .toast-detail-badge {
-  color: #fbbf24;
-  background: rgba(245, 158, 11, 0.15);
-  border-color: rgba(245, 158, 11, 0.35);
+  color: var(--status-warning);
+  background: var(--status-warning-bg);
+  border-color: var(--status-warning-border);
 }
 
-/* Error: Neon Red */
+/* Error: Pit Wall Crimson */
 .toast-error {
-  background: rgba(30, 8, 8, 0.94);
-  border: 1px solid var(--destructive, #ef4444);
-  box-shadow: 0 0 16px rgba(239, 68, 68, 0.4), 0 4px 16px rgba(0, 0, 0, 0.6);
+  border-left: 3px solid var(--status-error);
 }
 .toast-error .toast-icon {
-  color: var(--destructive, #ef4444);
+  color: var(--status-error);
 }
 .toast-error .toast-detail-badge {
-  color: #fca5a5;
-  background: rgba(239, 68, 68, 0.15);
-  border-color: rgba(239, 68, 68, 0.35);
+  color: var(--status-error);
+  background: var(--status-error-bg);
+  border-color: var(--status-error-border);
 }
 
-/* Info: Neon Cyan / Blue */
+/* Info: Pit Wall Telemetry Cyan */
 .toast-info {
-  background: rgba(8, 20, 32, 0.94);
-  border: 1px solid #38bdf8;
-  box-shadow: 0 0 16px rgba(56, 189, 248, 0.35), 0 4px 16px rgba(0, 0, 0, 0.6);
+  border-left: 3px solid var(--status-info);
 }
 .toast-info .toast-icon {
-  color: #38bdf8;
+  color: var(--status-info);
 }
 .toast-info .toast-detail-badge {
-  color: #7dd3fc;
-  background: rgba(56, 189, 248, 0.15);
-  border-color: rgba(56, 189, 248, 0.35);
+  color: var(--status-info);
+  background: var(--status-info-bg);
+  border-color: var(--status-info-border);
 }
 
 /* Transitions */
 .toast-enter-active,
 .toast-leave-active {
-  transition: all 0.35s cubic-bezier(0.16, 1, 0.3, 1);
+  transition: all var(--motion-duration-moderate) var(--motion-ease-out);
 }
 .toast-leave-active {
   position: absolute;
 }
 .toast-move {
-  transition: transform 0.35s cubic-bezier(0.16, 1, 0.3, 1);
+  transition: transform var(--motion-duration-moderate) var(--motion-ease-out);
 }
 .toast-enter-from {
   opacity: 0;

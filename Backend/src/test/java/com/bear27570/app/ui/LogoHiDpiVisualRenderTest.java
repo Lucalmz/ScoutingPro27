@@ -20,7 +20,7 @@ public class LogoHiDpiVisualRenderTest {
             frame.setUndecorated(true);
             frame.setSize(800, 500);
 
-            Color windowBg = new Color(10, 10, 10);
+            Color windowBg = new Color(0x0B, 0x0E, 0x10);
             frame.setBackground(windowBg);
 
             CustomTitleBar titleBar = new CustomTitleBar(frame);

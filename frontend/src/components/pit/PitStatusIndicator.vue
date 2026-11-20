@@ -118,7 +118,8 @@ function handleClick(e: MouseEvent) {
   font-family: inherit;
   font-size: 11px;
   line-height: 1;
-  transition: opacity 0.15s ease, transform 0.15s ease;
+  transition: opacity var(--motion-duration-fast) var(--motion-ease-out),
+              transform var(--motion-duration-fast) var(--motion-ease-out);
 }
 
 .pit-status-indicator.is-clickable {
@@ -144,21 +145,21 @@ function handleClick(e: MouseEvent) {
 
 /* 已录入状态 - 荧光绿 */
 .status-recorded {
-  color: var(--primary, #39ff14);
+  color: var(--primary);
 }
 
 .status-recorded .status-dot {
-  background-color: var(--primary, #39ff14);
-  box-shadow: 0 0 6px rgba(57, 255, 20, 0.5);
+  background-color: var(--primary);
+  box-shadow: var(--glow-online);
 }
 
 /* 未录入状态 - 客观中性灰 */
 .status-unrecorded {
-  color: var(--muted-foreground, #888888);
+  color: var(--muted-foreground);
 }
 
 .status-unrecorded .status-dot {
-  background-color: var(--border, #444444);
+  background-color: var(--border-strong);
 }
 
 .status-text {
@@ -173,36 +174,37 @@ function handleClick(e: MouseEvent) {
   border-radius: 9999px;
   font-size: 10px;
   font-weight: 700;
+  font-variant-numeric: tabular-nums;
 }
 
 .tier-realistic {
-  background: rgba(57, 255, 20, 0.15);
-  color: #39ff14;
-  border: 1px solid rgba(57, 255, 20, 0.3);
+  background: var(--status-success-bg);
+  color: var(--status-success);
+  border: 1px solid var(--status-success-border);
 }
 
 .tier-optimistic {
-  background: rgba(234, 179, 8, 0.15);
-  color: #eab308;
-  border: 1px solid rgba(234, 179, 8, 0.3);
+  background: var(--status-warning-bg);
+  color: var(--status-warning);
+  border: 1px solid var(--status-warning-border);
 }
 
 .tier-overclaimed {
-  background: rgba(249, 115, 22, 0.15);
-  color: #fb923c;
-  border: 1px solid rgba(249, 115, 22, 0.3);
+  background: color-mix(in srgb, var(--status-warning-bg) 50%, var(--status-error-bg));
+  color: color-mix(in srgb, var(--status-warning) 55%, var(--status-error));
+  border: 1px solid color-mix(in srgb, var(--status-warning-border) 50%, var(--status-error-border));
 }
 
 .tier-mythical {
-  background: rgba(239, 68, 68, 0.2);
-  color: #ef4444;
-  border: 1px solid rgba(239, 68, 68, 0.3);
+  background: var(--status-error-bg);
+  color: var(--status-error);
+  border: 1px solid var(--status-error-border);
 }
 
 .tier-pending {
-  background: rgba(120, 120, 120, 0.15);
-  color: #888888;
-  border: 1px solid rgba(120, 120, 120, 0.3);
+  background: var(--surface-elevated);
+  color: var(--muted-foreground);
+  border: 1px solid var(--border);
 }
 </style>
 

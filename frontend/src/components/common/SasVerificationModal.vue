@@ -197,7 +197,7 @@ function handleLeaveEvent() {
   left: 0;
   right: 0;
   bottom: 0;
-  background: rgba(8, 8, 7, 0.84);
+  background: color-mix(in srgb, var(--g-950) 84%, transparent);
   z-index: 100000;
   display: flex;
   align-items: center;
@@ -207,12 +207,11 @@ function handleLeaveEvent() {
 }
 
 .sas-modal-card {
-  background: var(--card, #141413);
-  color: var(--foreground, #f0efe9);
-  border-radius: 14px;
-  border: 1px solid var(--border, #262624);
-  border-top: 3px solid var(--primary, #39ff14);
-  box-shadow: 0 24px 60px rgba(0, 0, 0, 0.85), 0 0 24px rgba(57, 255, 20, 0.08);
+  background: var(--popover);
+  color: var(--foreground);
+  border-radius: 18px;
+  border: 1px solid var(--border-strong);
+  box-shadow: var(--shadow-3);
   width: 100%;
   max-width: 480px;
   overflow-y: auto;
@@ -225,15 +224,15 @@ function handleLeaveEvent() {
   align-items: center;
   gap: 0.65rem;
   padding: 1.15rem 1.25rem;
-  background: #0c0c0b;
-  border-bottom: 1px solid var(--border, #262624);
+  background: var(--surface-recessed);
+  border-bottom: 1px solid var(--border);
 }
 
 .btn-close-sas {
   margin-left: auto;
-  background: #1c1c1a;
-  border: 1px solid #353532;
-  color: var(--text-muted, #9e9d95);
+  background: var(--surface-elevated);
+  border: 1px solid var(--border);
+  color: var(--muted-foreground);
   cursor: pointer;
   width: 32px;
   height: 32px;
@@ -242,13 +241,13 @@ function handleLeaveEvent() {
   display: flex;
   align-items: center;
   justify-content: center;
-  transition: all 0.16s ease;
+  transition: background-color var(--motion-duration-fast) var(--motion-ease-out), border-color var(--motion-duration-fast) var(--motion-ease-out), color var(--motion-duration-fast) var(--motion-ease-out);
 }
 
 .btn-close-sas:hover {
-  background: #262624;
-  border-color: #4a4a46;
-  color: #ffffff;
+  background: var(--surface-hover);
+  border-color: var(--border-strong);
+  color: var(--g-50);
 }
 
 .header-title-box {
@@ -261,9 +260,10 @@ function handleLeaveEvent() {
 .queue-badge {
   font-size: 0.75rem;
   font-weight: 600;
-  background: rgba(57, 255, 20, 0.12);
-  border: 1px solid rgba(57, 255, 20, 0.3);
-  color: var(--primary, #39ff14);
+  font-variant-numeric: tabular-nums;
+  background: var(--status-success-bg);
+  border: 1px solid var(--status-success-border);
+  color: var(--primary);
   padding: 2px 8px;
   border-radius: 9999px;
   letter-spacing: 0.02em;
@@ -271,14 +271,14 @@ function handleLeaveEvent() {
 
 .sas-modal-header h3 {
   margin: 0;
-  font-family: 'Orbitron', 'ZCOOLQingKeHuangYou', sans-serif;
+  font-family: var(--font-sans);
   font-size: 1.15rem;
   font-weight: 700;
-  color: var(--foreground, #f1f5f9);
+  color: var(--foreground);
 }
 
 .header-icon {
-  color: var(--primary, #39ff14);
+  color: var(--primary);
   font-size: 1.5rem;
 }
 
@@ -293,8 +293,8 @@ function handleLeaveEvent() {
   display: flex;
   align-items: flex-start;
   gap: 0.75rem;
-  background: rgba(245, 158, 11, 0.12);
-  border: 1px solid rgba(245, 158, 11, 0.3);
+  background: var(--status-warning-bg);
+  border: 1px solid var(--status-warning-border);
   padding: 0.75rem 1rem;
   border-radius: 8px;
 }
@@ -303,11 +303,11 @@ function handleLeaveEvent() {
   margin: 0;
   font-size: 0.85rem;
   line-height: 1.4;
-  color: #fbbf24;
+  color: var(--g-200);
 }
 
 .warning-icon {
-  color: #f59e0b;
+  color: var(--status-warning);
   font-size: 1.25rem;
   flex-shrink: 0;
   margin-top: 0.1rem;
@@ -321,12 +321,12 @@ function handleLeaveEvent() {
 }
 
 .peer-label {
-  color: var(--text-muted, #a3a3a3);
+  color: var(--muted-foreground);
 }
 
 .peer-value {
   font-weight: 600;
-  color: #f1f5f9;
+  color: var(--foreground);
 }
 
 .sas-code-container {
@@ -334,8 +334,8 @@ function handleLeaveEvent() {
   flex-direction: column;
   align-items: center;
   justify-content: center;
-  background: #080807;
-  border: 1px solid #262624;
+  background: var(--surface-recessed);
+  border: 1px solid var(--border);
   padding: 1.25rem;
   border-radius: 10px;
   gap: 0.5rem;
@@ -343,30 +343,31 @@ function handleLeaveEvent() {
 
 .sas-code-label {
   font-size: 0.8rem;
-  color: var(--text-muted, #9e9d95);
+  color: var(--muted-foreground);
   text-align: center;
 }
 
 .sas-code-display {
-  font-family: 'Orbitron', Consolas, Monaco, monospace;
+  font-family: var(--font-numeric);
+  font-variant-numeric: tabular-nums;
   font-size: 2.2rem;
   font-weight: 700;
   letter-spacing: 0.4rem;
-  color: var(--primary, #39ff14);
-  text-shadow: var(--glow-primary);
+  color: var(--primary);
   padding: 0.5rem 1rem;
-  background: #10160f;
+  background: var(--status-success-bg);
   border-radius: 8px;
-  border: 1px dashed rgba(57, 255, 20, 0.45);
+  border: 1px dashed var(--status-success-border);
 }
 
 .sas-countdown {
   font-size: 0.8rem;
-  color: var(--text-muted, #9e9d95);
+  color: var(--muted-foreground);
 }
 
 .sas-countdown strong {
-  color: var(--destructive, #ef4444);
+  color: var(--status-error);
+  font-variant-numeric: tabular-nums;
 }
 
 .sas-modal-footer {
@@ -374,8 +375,8 @@ function handleLeaveEvent() {
   justify-content: flex-end;
   gap: 0.75rem;
   padding: 1rem 1.25rem;
-  background: #0c0c0b;
-  border-top: 1px solid var(--border, #262624);
+  background: var(--surface-recessed);
+  border-top: 1px solid var(--border);
   flex-wrap: wrap;
 }
 
@@ -390,39 +391,39 @@ function handleLeaveEvent() {
   border-radius: 8px;
   border: 1px solid transparent;
   cursor: pointer;
-  transition: all 0.15s ease;
+  transition: background-color var(--motion-duration-fast) var(--motion-ease-out), border-color var(--motion-duration-fast) var(--motion-ease-out), color var(--motion-duration-fast) var(--motion-ease-out), transform var(--motion-duration-fast) var(--motion-ease-out);
 }
 
 .btn-secondary {
-  background: #1c1c1a;
-  color: #f0efe9;
-  border: 1px solid #353532;
+  background: var(--surface-elevated);
+  color: var(--foreground);
+  border: 1px solid var(--border);
 }
 
 .btn-secondary:hover {
-  background: #262624;
-  border-color: #4a4a46;
-  color: #ffffff;
+  background: var(--surface-hover);
+  border-color: var(--border-strong);
+  color: var(--g-50);
 }
 
 .btn-danger {
-  background: var(--destructive, #ef4444);
-  color: white;
+  background: var(--status-error);
+  color: var(--destructive-foreground);
 }
 
 .btn-danger:hover {
-  background: #dc2626;
+  background: color-mix(in srgb, var(--status-error) 85%, var(--g-950));
 }
 
 .btn-warning {
-  background: #f59e0b;
-  color: #000000;
+  background: var(--status-warning);
+  color: var(--g-950);
   font-weight: 700;
 }
 
 .btn-warning:hover:not(:disabled) {
-  background: #d97706;
-  color: #ffffff;
+  background: color-mix(in srgb, var(--status-warning) 85%, var(--g-950));
+  color: var(--g-950);
 }
 
 .btn-warning:disabled {
@@ -434,8 +435,8 @@ function handleLeaveEvent() {
   display: flex;
   align-items: flex-start;
   gap: 0.6rem;
-  background: rgba(245, 158, 11, 0.12);
-  border: 1px solid rgba(245, 158, 11, 0.35);
+  background: var(--status-warning-bg);
+  border: 1px solid var(--status-warning-border);
   border-radius: 8px;
   padding: 0.65rem 0.85rem;
   margin-top: 0.35rem;
@@ -445,7 +446,7 @@ function handleLeaveEvent() {
 }
 
 .timeout-banner-icon {
-  color: #f59e0b;
+  color: var(--status-warning);
   font-size: 1.3rem;
   flex-shrink: 0;
   margin-top: 0.1rem;
@@ -460,24 +461,22 @@ function handleLeaveEvent() {
 .timeout-banner-title {
   font-size: 0.85rem;
   font-weight: 700;
-  color: #fbbf24;
+  color: var(--status-warning);
 }
 
 .timeout-banner-desc {
   font-size: 0.78rem;
   line-height: 1.4;
-  color: #cbd5e1;
+  color: var(--g-200);
 }
 
 .btn-success {
-  background: var(--primary, #39ff14);
-  color: var(--primary-foreground, #000000);
-  box-shadow: var(--glow-primary);
+  background: var(--primary);
+  color: var(--on-primary);
 }
 
 .btn-success:hover {
-  filter: brightness(1.1);
-  box-shadow: var(--glow-primary-hover);
+  background: var(--s-300);
 }
 
 @media (max-width: 480px) {

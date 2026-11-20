@@ -64,14 +64,87 @@ export interface MatchWhiteboardPlan {
 
 export const STATION_LIST: StationType[] = ['red1', 'red2', 'blue1', 'blue2']
 
+export function readCssToken(
+  varName: string,
+  fallback: string,
+  computedStyle?: CSSStyleDeclaration | null
+): string {
+  const style =
+    computedStyle ??
+    (typeof document !== 'undefined' && typeof getComputedStyle === 'function'
+      ? getComputedStyle(document.documentElement)
+      : null)
+  const val = style?.getPropertyValue(varName).trim()
+  return val && !val.startsWith('var(') ? val : fallback
+}
+
+function parseRgbChannels(color: string): [number, number, number] | null {
+  const s = color.trim()
+  const hex = s.match(/^#([0-9a-f]{3}|[0-9a-f]{6}|[0-9a-f]{8})$/i)
+  if (hex) {
+    const h = hex[1]!
+    if (h.length === 3) {
+      return [
+        parseInt(h[0]! + h[0]!, 16),
+        parseInt(h[1]! + h[1]!, 16),
+        parseInt(h[2]! + h[2]!, 16)
+      ]
+    }
+    return [
+      parseInt(h.slice(0, 2), 16),
+      parseInt(h.slice(2, 4), 16),
+      parseInt(h.slice(4, 6), 16)
+    ]
+  }
+  const rgb = s.match(/^rgba?\(\s*([0-9.]+)\s*[,\s]\s*([0-9.]+)\s*[,\s]\s*([0-9.]+)/i)
+  if (rgb) {
+    return [
+      Math.max(0, Math.min(255, Math.round(Number(rgb[1])))),
+      Math.max(0, Math.min(255, Math.round(Number(rgb[2])))),
+      Math.max(0, Math.min(255, Math.round(Number(rgb[3]))))
+    ]
+  }
+  return null
+}
+
+export function toNormalizedHex(color: string, fallbackHex: string): string {
+  const [r, g, b] = parseRgbChannels(color) ?? parseRgbChannels(fallbackHex) ?? [255, 93, 82]
+  const hex = (n: number) => n.toString(16).padStart(2, '0').toUpperCase()
+  return `#${hex(r)}${hex(g)}${hex(b)}`
+}
+
+export function withAlpha(color: string, alpha: number, fallbackColor = 'rgb(57, 255, 20)'): string {
+  const clamped = Math.max(0, Math.min(1, alpha))
+  const [r, g, b] = parseRgbChannels(color) ?? parseRgbChannels(fallbackColor) ?? [57, 255, 20]
+  return `rgb(${r} ${g} ${b} / ${clamped})`
+}
+
+export function getStationThemeColors(computedStyle?: CSSStyleDeclaration | null): Record<StationType, string> {
+  return {
+    red1: toNormalizedHex(readCssToken('--red-400', '#FF5D52', computedStyle), '#FF5D52'),
+    red2: toNormalizedHex(readCssToken('--red-300', '#FF8F87', computedStyle), '#FF8F87'),
+    blue1: toNormalizedHex(readCssToken('--blue-400', '#4FA3FF', computedStyle), '#4FA3FF'),
+    blue2: toNormalizedHex(readCssToken('--status-info', '#5ED3E0', computedStyle), '#5ED3E0')
+  }
+}
+
+export function getStationColor(
+  station: StationType,
+  computedStyle?: CSSStyleDeclaration | null
+): string {
+  return getStationThemeColors(computedStyle)[station]
+}
+
+export const STATION_COLOR_MAP: Record<StationType, string> = getStationThemeColors()
+
 export const WHITEBOARD_COLORS = [
-  { id: 'red1', hex: '#ef4444', labelKey: 'whiteboard.color_red1' },
-  { id: 'red2', hex: '#f97316', labelKey: 'whiteboard.color_red2' },
-  { id: 'blue1', hex: '#3b82f6', labelKey: 'whiteboard.color_blue1' },
-  { id: 'blue2', hex: '#06b6d4', labelKey: 'whiteboard.color_blue2' },
-  { id: 'neon', hex: '#39ff14', labelKey: 'whiteboard.color_neon' },
-  { id: 'yellow', hex: '#eab308', labelKey: 'whiteboard.color_yellow' },
-  { id: 'white', hex: '#f8fafc', labelKey: 'whiteboard.color_white' }
+  { id: 'red1', hex: STATION_COLOR_MAP.red1, labelKey: 'whiteboard.color_red1' },
+  { id: 'red2', hex: STATION_COLOR_MAP.red2, labelKey: 'whiteboard.color_red2' },
+  { id: 'blue1', hex: STATION_COLOR_MAP.blue1, labelKey: 'whiteboard.color_blue1' },
+  { id: 'blue2', hex: STATION_COLOR_MAP.blue2, labelKey: 'whiteboard.color_blue2' },
+  { id: 'neon', hex: toNormalizedHex(readCssToken('--primary', '#39FF14'), '#39FF14'), labelKey: 'whiteboard.color_neon' },
+  { id: 'yellow', hex: toNormalizedHex(readCssToken('--status-warning', '#F7B53B'), '#F7B53B'), labelKey: 'whiteboard.color_yellow' },
+  { id: 'white', hex: toNormalizedHex(readCssToken('--g-50', '#F6F8F9'), '#F6F8F9'), labelKey: 'whiteboard.color_white' }
 ] as const
 
 const MAX_UNDO_STEPS = 50
@@ -441,7 +514,7 @@ export function useTacticalWhiteboard(options: UseTacticalWhiteboardOptions) {
 
   const activePhase = ref<WhiteboardPhase>('auto')
   const activeTool = ref<WhiteboardTool>('pen')
-  const activeColor = ref<string>('#ef4444')
+  const activeColor = ref<string>(getStationColor('red1'))
   const activeStrokeWidth = ref<number>(5)
   const fieldRotation = ref<FieldRotation>(0)
   const fieldFlipH = ref<boolean>(false)
@@ -851,13 +924,7 @@ export function useTacticalWhiteboard(options: UseTacticalWhiteboardOptions) {
   function selectStationForDetail(station: StationType, switchToDetail = true) {
     selectedStation.value = station
     // 联动画笔颜色为该联盟工位代表色
-    const colorMap: Record<StationType, string> = {
-      red1: '#ef4444',
-      red2: '#f97316',
-      blue1: '#3b82f6',
-      blue2: '#06b6d4'
-    }
-    activeColor.value = colorMap[station]
+    activeColor.value = getStationColor(station)
     if (switchToDetail) {
       sidebarMode.value = 'detail'
       showSidebar.value = true

@@ -17,10 +17,12 @@ import java.io.InputStream;
  */
 public class CustomTitleBar extends JPanel {
     private static final int TITLE_BAR_HEIGHT = 38;
-    private static final Color BG_COLOR = Color.BLACK; // Pure black #000000
-    private static final Color BORDER_COLOR = new Color(20, 20, 24);
-    private static final Color TEXT_COLOR = new Color(241, 245, 249);
-    private static final Color NEON_GREEN = new Color(57, 255, 20);
+    private static final Color BG_COLOR = new Color(0x0B, 0x0E, 0x10);     // Pit Wall --g-900 #0B0E10
+    private static final Color BORDER_COLOR = new Color(0x1B, 0x21, 0x26); // Pit Wall --g-750 #1B2126
+    private static final Color TEXT_COLOR = new Color(0xE6, 0xEB, 0xEE);   // Pit Wall --g-100 #E6EBEE
+    private static final Color NEON_GREEN = new Color(0x39, 0xFF, 0x14);   // Pit Wall --primary #39FF14
+    private static final Color BADGE_BG = new Color(0x0E, 0x22, 0x10);     // Pit Wall --s-900 #0E2210
+    private static final Color BADGE_BORDER = new Color(0x24, 0x66, 0x1A); // Pit Wall --s-700 #24661A
 
     private final JFrame frame;
     private Point mouseClickScreen;
@@ -69,13 +71,13 @@ public class CustomTitleBar extends JPanel {
                 g2.setRenderingHint(RenderingHints.KEY_RENDERING, RenderingHints.VALUE_RENDER_QUALITY);
                 double w = getWidth();
                 double h = getHeight();
-                // Translucent glow background
-                g2.setColor(new Color(57, 255, 20, 16));
-                g2.fill(new RoundRectangle2D.Double(0.0, 0.0, w, h, 14.0, 14.0));
-                // Soft neon border
-                g2.setColor(new Color(57, 255, 20, 90));
+                // Pit Wall Signal 900 badge background (#0E2210)
+                g2.setColor(BADGE_BG);
+                g2.fill(new RoundRectangle2D.Double(0.0, 0.0, w, h, 12.0, 12.0));
+                // Crisp 1px Signal 700 border (#24661A)
+                g2.setColor(BADGE_BORDER);
                 g2.setStroke(new BasicStroke(1.0f));
-                g2.draw(new RoundRectangle2D.Double(0.5, 0.5, w - 1.0, h - 1.0, 14.0, 14.0));
+                g2.draw(new RoundRectangle2D.Double(0.5, 0.5, w - 1.0, h - 1.0, 12.0, 12.0));
                 g2.dispose();
                 super.paintComponent(g);
             }
@@ -487,36 +489,31 @@ public class CustomTitleBar extends JPanel {
             int h = getHeight();
             boolean isClose = "close".equals(type);
 
-            // 1. High-contrast Fluent background
+            // 1. Pit Wall background highlight
             if (isClose) {
                 if (hoverProgress > 0.001f) {
-                    // Windows Red #E81123, deepening on press to #B80E1C
-                    int r = Math.round(232 - 48 * pressProgress);
-                    int gr = Math.round(17 - 3 * pressProgress);
-                    int b = Math.round(35 - 7 * pressProgress);
+                    // Pit Wall Status Error #FF5577 (255, 85, 119), deepening on press to #E0405F (224, 64, 95)
+                    int r = Math.round(255 - 31 * pressProgress);
+                    int gr = Math.round(85 - 21 * pressProgress);
+                    int b = Math.round(119 - 24 * pressProgress);
                     int a = Math.min(255, Math.max(0, Math.round(255 * hoverProgress)));
                     g2.setColor(new Color(r, gr, b, a));
-                    g2.fillRect(0, 0, w, h);
+                    g2.fillRect(0, 0, w, h - 1); // keep the title bar's bottom highlight line visible
                 }
             } else {
                 if (hoverProgress > 0.001f || pressProgress > 0.001f) {
-                    // Clear white highlight: hover ~19% opacity (#303030), press ~33% opacity
+                    // Cold Graphite hover highlight
                     int alpha = Math.min(255, Math.round(48 * hoverProgress + 36 * pressProgress));
-                    g2.setColor(new Color(255, 255, 255, alpha));
-                    g2.fillRect(0, 0, w, h);
+                    g2.setColor(new Color(230, 235, 238, alpha));
+                    g2.fillRect(0, 0, w, h - 1); // keep the title bar's bottom highlight line visible
                 }
             }
 
-            // 2. Icon color
-            Color iconColor;
-            if (isClose) {
-                // Idle: #CCCCCC, Hover: #FFFFFF
-                int gray = Math.min(255, Math.round(204 + (255 - 204) * hoverProgress));
-                iconColor = new Color(gray, gray, gray);
-            } else {
-                int gray = Math.min(255, Math.round(204 + (255 - 204) * hoverProgress));
-                iconColor = new Color(gray, gray, gray);
-            }
+            // 2. Icon color (Idle: --g-200 #C3CBD1 -> Hover: --g-50 #F6F8F9 / #FFFFFF)
+            int rCol = Math.min(255, Math.round(0xC3 + (0xF6 - 0xC3) * hoverProgress));
+            int gCol = Math.min(255, Math.round(0xCB + (0xF8 - 0xCB) * hoverProgress));
+            int bCol = Math.min(255, Math.round(0xD1 + (0xF9 - 0xD1) * hoverProgress));
+            Color iconColor = new Color(rCol, gCol, bCol);
             g2.setColor(iconColor);
 
             // 3. Dynamic micro-motion transform

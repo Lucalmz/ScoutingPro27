@@ -4,6 +4,7 @@
 
 import type {
   User,
+  CustomTurnConfig,
   ScoutingEvent,
   ScoutingRecord,
   LoginRequest,
@@ -99,6 +100,15 @@ function handleStaticHostFallback<T>(method: string, path: string, body?: unknow
   // 7b. Delete event
   if (path.startsWith('/events/') && method === 'DELETE') {
     return Promise.resolve(undefined as unknown as T)
+  }
+  // 7c. Update event custom TURN config
+  if (path.includes('/turn-config') && method === 'PUT') {
+    const b = (body || {}) as CustomTurnConfig & { clear?: boolean }
+    const hasUrls = Boolean(!b.clear && b?.urls?.length)
+    return Promise.resolve({
+      hasCustomTurn: hasUrls,
+      customTurnConfig: hasUrls ? { urls: b.urls, username: b.username, credential: b.credential } : null
+    } as unknown as T)
   }
   // 8. Records & Pit records write -> reject on static cloud host to prevent silent fake persistence
   if (
@@ -342,6 +352,22 @@ export function syncExternalEvent(event: ScoutingEvent): Promise<ScoutingEvent> 
 
 export function updateEventFtcConfig(eventId: string, ftcYear: number, ftcEventCode: string): Promise<void> {
   return request<void>('PUT', `/events/${eventId}/ftc-config`, { ftcYear, ftcEventCode })
+}
+
+export function updateEventTurnConfig(
+  eventId: string,
+  config: CustomTurnConfig | null
+): Promise<{ hasCustomTurn: boolean; customTurnConfig: CustomTurnConfig | null }> {
+  return request<{ hasCustomTurn: boolean; customTurnConfig: CustomTurnConfig | null }>(
+    'PUT',
+    `/events/${encodeURIComponent(eventId)}/turn-config`,
+    {
+      urls: config?.urls ?? [],
+      username: config?.username ?? '',
+      credential: config?.credential ?? '',
+      clear: !config || !config.urls?.length
+    }
+  )
 }
 
 export function fetchBannedTeams(eventId: string): Promise<number[]> {

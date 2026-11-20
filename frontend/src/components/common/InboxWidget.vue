@@ -97,8 +97,8 @@ function handleMessageClick(msg: SystemMessage) {
             <div style="display: flex; align-items: center; gap: 8px;">
               <h3 style="margin: 0;">{{ t('inbox.title') }}</h3>
               <span v-if="inboxStore.messages.length > 0" class="inbox-actions" style="display: flex; gap: 6px;">
-                <button type="button" class="action-btn" :title="t('inbox.mark_all_read')" @click.stop="handleMarkAllRead" style="font-size: 11px; padding: 2px 6px; cursor: pointer; border-radius: 4px; border: 1px solid #444; background: #222; color: #aaa;">{{ t('inbox.mark_all_read') }}</button>
-                <button type="button" class="action-btn" :title="t('inbox.clear_all')" @click.stop="handleClearAll" style="font-size: 11px; padding: 2px 6px; cursor: pointer; border-radius: 4px; border: 1px solid #444; background: #222; color: #e57373;">{{ t('inbox.clear_all') }}</button>
+                <button type="button" class="action-btn" :title="t('inbox.mark_all_read')" @click.stop="handleMarkAllRead">{{ t('inbox.mark_all_read') }}</button>
+                <button type="button" class="action-btn clear-all-btn" :title="t('inbox.clear_all')" @click.stop="handleClearAll">{{ t('inbox.clear_all') }}</button>
               </span>
             </div>
             <span class="material-icons close-btn" style="font-size: 20px; cursor: pointer;" @click.stop="toggleOpen">close</span>
@@ -119,7 +119,7 @@ function handleMessageClick(msg: SystemMessage) {
               <p>{{ msg.body }}</p>
               <div class="item-actions" style="display: flex; gap: 8px; align-items: center; margin-top: 6px;">
                 <button v-if="!msg.read" type="button" @click.stop="handleMarkRead(msg.id)" class="mark-read">{{ t('inbox.mark_read') }}</button>
-                <button type="button" @click.stop="handleDelete(msg.id)" class="delete-msg-btn" style="background: none; border: none; color: #888; cursor: pointer; font-size: 11px; padding: 0;">{{ t('inbox.delete') }}</button>
+                <button type="button" @click.stop="handleDelete(msg.id)" class="delete-msg-btn">{{ t('inbox.delete') }}</button>
               </div>
             </div>
           </div>
@@ -155,7 +155,7 @@ function handleMessageClick(msg: SystemMessage) {
   left: 0;
   right: 0;
   bottom: 0;
-  background: rgba(8, 8, 7, 0.72);
+  background: color-mix(in srgb, var(--g-950) 72%, transparent);
   z-index: 999;
 }
 
@@ -172,16 +172,16 @@ function handleMessageClick(msg: SystemMessage) {
   width: 56px;
   height: 56px;
   border-radius: 50%;
-  background: var(--primary, #39ff14);
-  border: 1px solid rgba(57, 255, 20, 0.5);
-  box-shadow: 0 4px 16px rgba(57, 255, 20, 0.35);
+  background: var(--primary);
+  border: 1px solid color-mix(in srgb, var(--primary) 50%, transparent);
+  box-shadow: var(--shadow-2);
   overflow: hidden;
-  transition: width 0.5s cubic-bezier(0.25, 1, 0.5, 1), 
-              height 0.5s cubic-bezier(0.25, 1, 0.5, 1), 
-              border-radius 0.5s cubic-bezier(0.25, 1, 0.5, 1),
-              box-shadow 0.5s cubic-bezier(0.25, 1, 0.5, 1),
-              background-color 0.4s cubic-bezier(0.25, 1, 0.5, 1),
-              border-color 0.4s ease;
+  transition: width var(--motion-duration-slow) var(--motion-ease-out), 
+              height var(--motion-duration-slow) var(--motion-ease-out), 
+              border-radius var(--motion-duration-slow) var(--motion-ease-out),
+              box-shadow var(--motion-duration-slow) var(--motion-ease-out),
+              background-color var(--motion-duration-normal) var(--motion-ease-out),
+              border-color var(--motion-duration-normal) var(--motion-ease-out);
   cursor: pointer;
   display: flex;
   flex-direction: column;
@@ -195,10 +195,10 @@ function handleMessageClick(msg: SystemMessage) {
   max-width: calc(100vw - 32px);
   max-height: calc(100vh - 120px);
   border-radius: 16px;
-  background-color: var(--card, #141413);
-  border: 1px solid var(--border, #262624);
-  border-top: 2px solid var(--primary, #39ff14);
-  box-shadow: 0 24px 60px rgba(0, 0, 0, 0.78);
+  background-color: var(--card);
+  border: 1px solid var(--border);
+  border-top: 2px solid var(--primary);
+  box-shadow: var(--shadow-3);
   cursor: default;
 }
 
@@ -208,7 +208,7 @@ function handleMessageClick(msg: SystemMessage) {
   display: flex;
   align-items: center;
   justify-content: center;
-  color: #080807;
+  color: var(--on-primary);
   position: absolute;
   top: 0;
   left: 0;
@@ -218,8 +218,8 @@ function handleMessageClick(msg: SystemMessage) {
   position: absolute;
   top: 0;
   right: 0;
-  background: #ef4444;
-  color: #ffffff;
+  background: var(--status-error);
+  color: var(--destructive-foreground);
   font-size: 11px;
   font-weight: 700;
   border-radius: 10px;
@@ -240,14 +240,14 @@ function handleMessageClick(msg: SystemMessage) {
 /* Crossfade transitions for content */
 .fade-enter-active, .fade-leave-active,
 .fade-delay-enter-active, .fade-delay-leave-active {
-  transition: opacity 0.3s ease;
+  transition: opacity var(--motion-duration-normal) var(--motion-ease-out);
 }
 
 .fade-delay-enter-active {
-  transition-delay: 0.3s;
+  transition-delay: var(--motion-duration-moderate);
 }
 .fade-delay-leave-active {
-  transition-duration: 0.2s;
+  transition-duration: var(--motion-duration-fast);
 }
 
 .fade-enter-from, .fade-leave-to,
@@ -257,45 +257,61 @@ function handleMessageClick(msg: SystemMessage) {
 
 .inbox-header {
   padding: 0.9rem 1rem;
-  background: var(--surface-elevated, #1c1c1a);
-  border-bottom: 1px solid var(--border, #262624);
+  background: var(--surface-elevated);
+  border-bottom: 1px solid var(--border);
 }
 
 .inbox-header h3 {
   margin: 0;
   font-size: 1rem;
   font-weight: 700;
-  color: var(--foreground, #f0efe9);
+  color: var(--foreground);
+}
+
+.inbox-actions .action-btn {
+  font-size: 11px;
+  padding: 2px 6px;
+  cursor: pointer;
+  border-radius: 4px;
+  border: 1px solid var(--border);
+  background: var(--surface-elevated);
+  color: var(--text-muted);
+}
+
+.inbox-actions .clear-all-btn {
+  border-color: var(--status-error-border);
+  background: var(--status-error-bg);
+  color: var(--status-error);
 }
 
 .close-btn {
-  color: var(--muted-foreground, #8e8d87);
-  transition: color 0.15s;
+  color: var(--muted-foreground);
+  transition: color var(--motion-duration-fast) var(--motion-ease-out);
 }
 
 .close-btn:hover {
-  color: var(--foreground, #f0efe9);
+  color: var(--foreground);
 }
 
 .inbox-list {
   flex: 1;
   overflow-y: auto;
   padding: 0;
-  background: var(--card, #141413);
+  background: var(--card);
 }
 
 .empty {
   padding: 2.5rem 1.5rem;
   text-align: center;
-  color: var(--muted-foreground, #8e8d87);
+  color: var(--muted-foreground);
   font-size: 0.9rem;
 }
 
 .inbox-item {
   padding: 0.95rem 1rem;
-  border-bottom: 1px solid var(--border, #262624);
-  background: var(--card, #141413);
-  transition: background 0.15s;
+  border-bottom: 1px solid var(--border);
+  background: var(--card);
+  transition: background-color var(--motion-duration-fast) var(--motion-ease-out);
 }
 
 .inbox-item.clickable {
@@ -303,12 +319,12 @@ function handleMessageClick(msg: SystemMessage) {
 }
 
 .inbox-item.clickable:hover {
-  background: var(--surface-elevated, #1c1c1a);
+  background: var(--surface-elevated);
 }
 
 .inbox-item.unread {
-  background: var(--surface-recessed, #080807);
-  border-left: 3px solid var(--primary, #39ff14);
+  background: var(--surface-recessed);
+  border-left: 3px solid var(--primary);
 }
 
 .inbox-item-header {
@@ -322,26 +338,26 @@ function handleMessageClick(msg: SystemMessage) {
   margin: 0;
   font-size: 0.95rem;
   font-weight: 700;
-  color: var(--foreground, #f0efe9);
+  color: var(--foreground);
 }
 
 .time {
   font-size: 0.75rem;
-  color: var(--muted-foreground, #8e8d87);
+  color: var(--muted-foreground);
   font-variant-numeric: tabular-nums;
 }
 
 .inbox-item p {
   margin: 0 0 0.5rem 0;
   font-size: 0.86rem;
-  color: var(--muted-foreground, #8e8d87);
+  color: var(--muted-foreground);
   line-height: 1.45;
 }
 
 .mark-read {
   background: none;
   border: none;
-  color: var(--primary, #39ff14);
+  color: var(--primary);
   cursor: pointer;
   font-size: 0.78rem;
   font-weight: 700;
@@ -349,5 +365,17 @@ function handleMessageClick(msg: SystemMessage) {
 }
 .mark-read:hover {
   text-decoration: underline;
+}
+
+.delete-msg-btn {
+  background: none;
+  border: none;
+  color: var(--text-muted);
+  cursor: pointer;
+  font-size: 11px;
+  padding: 0;
+}
+.delete-msg-btn:hover {
+  color: var(--status-error);
 }
 </style>

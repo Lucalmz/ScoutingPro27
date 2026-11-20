@@ -10,18 +10,21 @@ import {
 
 import type { WebRtcCallbacks } from './types'
 import {
+  buildIceConfiguration,
   optimizeCandidatePriority,
-  synthesizeSymmetricNatPortCandidates,
+  synthesizeSymmetricNatPortCandidatesForPeer,
   sortCandidatesPreferIpv6,
   isGlobalIpv6Address,
   isBogusOrTunCandidate,
   cleanIpAddress,
   shouldAllowTurnForAttempt,
   shouldForceRelayForAttempt,
+  TURN_FALLBACK_ATTEMPT,
   probeLocalInterfaceIpv6,
   resetLocalIpv6ProbeCache,
   getCachedPhysicalAddresses,
   waitForDoHStunIpv6Bounded,
+  setCustomTurnConfig,
   CONNECTION_TIMING
 } from './connectivity'
 import type { SignalingChannel } from './signaling'
@@ -35,6 +38,15 @@ import { createClientVirtualFallbackController } from './clientVirtualFallback'
 import { createLogger } from '@/utils/logger'
 
 const log = createLogger('WebRTC:Client')
+
+interface WebRtcClientTestFlags {
+  __TEST_ENABLE_LATE_SLAAC__?: boolean
+  __TEST_ALLOW_UNSIGNED_SIGNALING__?: unknown
+}
+
+function getTestFlags(): WebRtcClientTestFlags {
+  return globalThis as WebRtcClientTestFlags
+}
 
 /** 连续失败多少次后进入 long_offline（之后仅由 Host 心跳 / 自愈事件唤醒） */
 const MAX_RECONNECT_ATTEMPTS = 6
@@ -103,6 +115,41 @@ export function createClientSession(ctx: ClientSessionContext) {
   let lastPresenceRecoveryAt = 0
   let signalingQueue: Promise<void> = Promise.resolve()
   let silentUpgradeProbeCount = 0
+  let virtualDcFailedInRun = false
+  let initialIpv6ProbePromise: Promise<string | null> | null = null
+  const activeProbePeers = new Map<string, RTCPeerConnection>()
+  const probePendingCandidates = new Map<string, any[]>()
+  const hostHelloWaiters = new Set<() => void>()
+
+  function notifyHostHelloWaiters() {
+    for (const resolve of Array.from(hostHelloWaiters)) {
+      hostHelloWaiters.delete(resolve)
+      try { resolve() } catch {}
+    }
+  }
+
+  function waitForHostHello(maxWaitMs = 400): Promise<void> {
+    if (ctx.sas.clientSharedAesKey && ctx.getClientHostSenderId()) {
+      return Promise.resolve()
+    }
+    if (maxWaitMs <= 0) return Promise.resolve()
+    return new Promise<void>((resolve) => {
+      let done = false
+      let timer: ReturnType<typeof setTimeout> | null = null
+      const finish = () => {
+        if (done) return
+        done = true
+        if (timer) {
+          clearTimeout(timer)
+          timer = null
+        }
+        hostHelloWaiters.delete(finish)
+        resolve()
+      }
+      hostHelloWaiters.add(finish)
+      timer = setTimeout(finish, maxWaitMs)
+    })
+  }
 
   function clearReconnectTimer() {
     if (reconnectTimer) {
@@ -129,10 +176,19 @@ export function createClientSession(ctx: ClientSessionContext) {
 
   function resetReconnectAttempts() {
     reconnectAttempts = 0
+    virtualDcFailedInRun = false
   }
 
   function resetOfferTimestamp() {
     lastOfferTimestamp = 0
+  }
+
+  function canUseVirtualDc(): boolean {
+    if (virtualDcFailedInRun) return false
+    if (!ctx.sas.clientSharedAesKey || !ctx.getClientHostSenderId()) return false
+    const sig = ctx.getSignaling()
+    if (sig && typeof sig.isConnected === 'function' && !sig.isConnected()) return false
+    return true
   }
 
   /**
@@ -195,16 +251,113 @@ export function createClientSession(ctx: ClientSessionContext) {
     }
     if (failedEpoch === epoch) return
     failedEpoch = epoch
+    if (
+      isVirtualDcActiveOnClient() ||
+      isVirtualDcActivating() ||
+      reason === 'virtual_dc_encrypt_failed' ||
+      (reason === 'heartbeat_timeout' && Boolean(getActiveVirtualDc()))
+    ) {
+      virtualDcFailedInRun = true
+      log.warn(`VirtualDataChannel failed (${reason}); enabling direct/STUN -> last-resort TURN escalation on next retry.`)
+    }
     clearConnectWatchdog()
     log.warn(`Connection attempt failed (reason: ${reason}, epoch: ${epoch}, attempts so far: ${reconnectAttempts})`)
     triggerClientReconnect(reason)
+  }
+
+  function attachNativeDcLifecycleHandlers(
+    epoch: number,
+    pc: RTCPeerConnection,
+    dc: RTCDataChannel,
+    sender: DataChannelSender
+  ) {
+    dc.onmessage = (e) => ctx.handleChannelMessage(e)
+    dc.onopen = async () => {
+      if (epoch !== attemptEpoch || ctx.getClientPc() !== pc) return
+      log.info(`Native DataChannel 'scoutingpro-data' OPENED! Client connected via direct WebRTC (epoch: ${epoch}).`)
+      if (failedEpoch === epoch) failedEpoch = -1
+      // 若此前已激活了虚拟通道，无缝热切换升级到原生 UDP DataChannel！
+      if (getActiveVirtualDc()) {
+        log.info('Hot-upgrading active session from VirtualDataChannel to Native UDP DataChannel!')
+        closeActiveVirtualDc(true, true)
+      }
+      ctx.peerMgr.unmarkVirtualChannelActive?.(pc)
+      ctx.setClientDc(dc)
+      ctx.setClientSender(sender)
+      clearConnectWatchdog()
+      clearReconnectTimer()
+      reconnectAttempts = 0
+      virtualDcFailedInRun = false
+      ctx.setStatus('connected')
+      startDataChannelHeartbeat()
+      await ctx.peerMgr.updateTransportInfo(pc)
+      if (epoch !== attemptEpoch || ctx.getClientPc() !== pc) return
+      void checkAndScheduleSilentUpgrade()
+    }
+    dc.onclose = () => {
+      if (epoch !== attemptEpoch || ctx.getClientPc() !== pc) return
+      if (isVirtualDcActiveOnClient()) {
+        return
+      }
+      log.warn(`DataChannel 'scoutingpro-data' CLOSED (epoch: ${epoch}, sasState: ${ctx.sas.clientSasState})`)
+      stopDataChannelHeartbeat()
+      resetSilentUpgradeState()
+      const curSender = ctx.getClientSender?.()
+      curSender?.abort('DataChannel closed')
+      ctx.setClientSender(null)
+      if (ctx.isExplicitlyClosed() || ctx.getStatus() === 'long_offline') return
+      if (ctx.sas.clientSasState === 'PENDING_VERIFICATION' || ctx.sas.clientSasState === 'REJECTED') {
+        return
+      }
+      failAttempt(epoch, 'datachannel_closed')
+    }
   }
 
   const silentUpgradeMgr = createClientSilentUpgradeManager({
     ctx,
     getAttemptEpoch: () => attemptEpoch,
     getProbeCount: () => silentUpgradeProbeCount,
-    incrementProbeCount: () => ++silentUpgradeProbeCount
+    incrementProbeCount: () => ++silentUpgradeProbeCount,
+    registerProbePeer: (probeSessionId, probePc) => {
+      activeProbePeers.set(probeSessionId, probePc)
+      probePendingCandidates.set(probeSessionId, [])
+    },
+    unregisterProbePeer: (probeSessionId) => {
+      activeProbePeers.delete(probeSessionId)
+      probePendingCandidates.delete(probeSessionId)
+    },
+    promoteProbeConnection: (probePc, probeDc, probeSender, probeSessionId) => {
+      const oldSender = ctx.getClientSender?.()
+      if (oldSender && oldSender !== probeSender) {
+        try { oldSender.abort('Promoted probe connection') } catch {}
+      }
+      const oldDc = ctx.getClientDc()
+      const oldPc = ctx.getClientPc()
+      if (oldDc && oldDc !== probeDc) {
+        oldDc.onmessage = null
+        oldDc.onopen = null
+        oldDc.onerror = null
+        oldDc.onclose = null
+        try { oldDc.close() } catch {}
+      }
+      if (oldPc && oldPc !== probePc) {
+        oldPc.onicecandidate = null
+        oldPc.oniceconnectionstatechange = null
+        oldPc.onconnectionstatechange = null
+        try { oldPc.ondatachannel = () => {} } catch {}
+        try { oldPc.close() } catch {}
+      }
+      ctx.setClientPc(probePc)
+      ctx.setClientDc(probeDc)
+      ctx.setClientSender(probeSender)
+      ctx.setClientSessionId(probeSessionId)
+      attachNativeDcLifecycleHandlers(attemptEpoch, probePc, probeDc, probeSender)
+      reconnectAttempts = 0
+      virtualDcFailedInRun = false
+      ctx.setStatus('connected')
+      startDataChannelHeartbeat()
+    },
+    failAttempt: (epoch, reason) => failAttempt(epoch, reason)
   })
 
   const { checkAndScheduleSilentUpgrade, clearSilentUpgradeTimers, resetSilentUpgradeState } = silentUpgradeMgr
@@ -217,12 +370,19 @@ export function createClientSession(ctx: ClientSessionContext) {
   })
 
   const {
-    handlePong,
+    handlePong: rawHandlePong,
     pingHost,
     startDataChannelHeartbeat,
     stopDataChannelHeartbeat,
     abortPendingPings
   } = heartbeatMgr
+
+  const handlePong = (timestamp: number) => {
+    if (isVirtualDcActiveOnClient()) {
+      virtualDcFailedInRun = false
+    }
+    rawHandlePong(timestamp)
+  }
 
   const virtualFallbackCtrl = createClientVirtualFallbackController({
     ctx,
@@ -232,15 +392,24 @@ export function createClientSession(ctx: ClientSessionContext) {
     },
     clearConnectWatchdog,
     clearReconnectTimer,
+    resetReconnectAttempts: () => {
+      reconnectAttempts = 0
+    },
+    resetSilentUpgradeProbeCount: () => {
+      silentUpgradeProbeCount = 0
+      virtualDcFailedInRun = false
+    },
     startDataChannelHeartbeat,
     checkAndScheduleSilentUpgrade,
     getSilentUpgradeProbeCount: () => silentUpgradeProbeCount,
-    incrementSilentUpgradeProbeCount: () => ++silentUpgradeProbeCount
+    incrementSilentUpgradeProbeCount: () => ++silentUpgradeProbeCount,
+    failAttempt
   })
 
   const {
     getActiveVirtualDc,
     isVirtualDcOpen,
+    isVirtualDcActivating,
     isVirtualDcActiveOnClient,
     clearVirtualNativeUpgradeTimer,
     closeActiveVirtualDc,
@@ -313,6 +482,9 @@ export function createClientSession(ctx: ClientSessionContext) {
 
     ctx.setClientSender(null)
     ctx.setClientPendingCandidates([])
+    activeProbePeers.clear()
+    probePendingCandidates.clear()
+    initialIpv6ProbePromise = null
     resetOfferTimestamp()
     activeSetupPromise = null
   }
@@ -353,10 +525,10 @@ export function createClientSession(ctx: ClientSessionContext) {
     clearConnectWatchdog()
     const isTestEnv =
       (typeof process !== 'undefined' && (process.env?.NODE_ENV === 'test' || process.env?.VITEST === 'true')) ||
-      Boolean((globalThis as any).__vitest_worker__) ||
-      (globalThis as any).__TEST_ALLOW_UNSIGNED_SIGNALING__ !== undefined
+      Boolean((globalThis as { __vitest_worker__?: unknown }).__vitest_worker__) ||
+      getTestFlags().__TEST_ALLOW_UNSIGNED_SIGNALING__ !== undefined
 
-    if ((!isTestEnv || (globalThis as any).__TEST_ENABLE_LATE_SLAAC__) && sessionId) {
+    if ((!isTestEnv || getTestFlags().__TEST_ENABLE_LATE_SLAAC__) && sessionId) {
       // 记录首包发出瞬间网卡是否已探测到公网 GUA IPv6（兼顾 mDNS 混淆下 SDP 不含明文 IPv6 host 的情况）
       const initialPhysV6s = getCachedPhysicalAddresses().ipv6s
       const hadInitialNicV6 = initialPhysV6s.some((ip) => isGlobalIpv6Address(ip))
@@ -372,7 +544,17 @@ export function createClientSession(ctx: ClientSessionContext) {
         if (!curPc || curPc.connectionState === 'connected') return
         const localSdp = curPc.localDescription?.sdp || ''
         const hadInitialSdpV6 = /a=candidate:[^\r\n]*\s[23][0-9a-f]{0,3}:/i.test(localSdp)
-        if (!hadInitialSdpV6 && !hadInitialNicV6) {
+        let effectiveHadInitialNicV6 = hadInitialNicV6
+        if (!effectiveHadInitialNicV6 && initialIpv6ProbePromise) {
+          try {
+            const initialProbed = await initialIpv6ProbePromise
+            if (initialProbed && isGlobalIpv6Address(initialProbed)) {
+              effectiveHadInitialNicV6 = true
+            }
+          } catch {}
+        }
+        if (epoch !== attemptEpoch || isDcOpen() || isVirtualDcOpen()) return
+        if (!hadInitialSdpV6 && !effectiveHadInitialNicV6) {
           resetLocalIpv6ProbeCache()
           const freshV6 = await probeLocalInterfaceIpv6()
           if (
@@ -389,14 +571,14 @@ export function createClientSession(ctx: ClientSessionContext) {
       }, 1800)
 
       if (!isTestEnv) {
-        // 2. 给足零 TURN 原生双栈 (IPv6 + IPv4 srflx + 序列端口预测打洞) 3.8 秒黄金窗口；
-        // 若移动端 VPN 彻底封死所有 IPv6/UDP 报文，在 3.8 秒时极速启用基于 WSS TLS 的 VirtualDataChannel，同时后台继续尝试静默升级原生 P2P
+        // 2. 给足原生双栈 3.8 秒黄金窗口；
+        // 若移动端 VPN 彻底封死所有直连报文且 VirtualDataChannel 本身未在本轮失败过，在 3.8 秒时极速启用基于 WSS TLS 的 VirtualDataChannel，同时后台继续尝试热升级
         virtualFallbackTimer = setTimeout(() => {
           virtualFallbackTimer = null
-          if (epoch === attemptEpoch && dc.readyState !== 'open') {
+          if (epoch === attemptEpoch && dc.readyState !== 'open' && !virtualDcFailedInRun) {
             activateVirtualFallbackChannel(epoch, sessionId)
           }
-        }, 3800)
+        }, CONNECTION_TIMING.VIRTUAL_FALLBACK_DELAY_MS)
       }
     }
 
@@ -419,7 +601,8 @@ export function createClientSession(ctx: ClientSessionContext) {
       log.info('Skipping client setup: service is in active host mode.')
       return
     }
-    ctx.setClientForceRelay(forceRelay)
+    const effectiveForceRelay = forceRelay && !canUseVirtualDc()
+    ctx.setClientForceRelay(effectiveForceRelay)
     const newClientSessionId = `client-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`
     ctx.setClientSessionId(newClientSessionId)
     if (ctx.getStatus() !== 'connected' && ctx.getStatus() !== 'connecting') {
@@ -432,17 +615,18 @@ export function createClientSession(ctx: ClientSessionContext) {
       (globalThis as any).__TEST_ALLOW_UNSIGNED_SIGNALING__ !== undefined
 
     if (!isTestEnv || (globalThis as any).__TEST_ALLOW_DOH_WARMUP__) {
-      void probeLocalInterfaceIpv6().catch(() => {})
-      await waitForDoHStunIpv6Bounded(300)
+      initialIpv6ProbePromise = probeLocalInterfaceIpv6().catch(() => null)
+      await waitForDoHStunIpv6Bounded(0)
       if (epoch !== attemptEpoch) return
     }
 
     const turnDisabledByUser =
       typeof localStorage !== 'undefined' && localStorage.getItem('sp27-disable-turn') === 'true'
-    const allowTurn = !turnDisabledByUser && (shouldAllowTurnForAttempt(reconnectAttempts) || forceRelay)
+    const allowTurn = !turnDisabledByUser && (shouldAllowTurnForAttempt(reconnectAttempts) || effectiveForceRelay)
+    const primaryTurnOnly = allowTurn && !effectiveForceRelay && reconnectAttempts === TURN_FALLBACK_ATTEMPT && !isTestEnv
 
     log.info(
-      `Initiating setupClientConnection (sessionId: ${newClientSessionId}, epoch: ${epoch}, allowTurn: ${allowTurn}, icePolicy: ${forceRelay ? 'relay' : 'all'}, hostSenderId: ${ctx.getClientHostSenderId() || 'none'}, hostIpv6: ${lastHostIpv6 || 'unknown'})`
+      `Initiating setupClientConnection (sessionId: ${newClientSessionId}, epoch: ${epoch}, allowTurn: ${allowTurn}, primaryTurnOnly: ${primaryTurnOnly}, icePolicy: ${effectiveForceRelay ? 'relay' : 'all'}, hostSenderId: ${ctx.getClientHostSenderId() || 'none'}, hostIpv6: ${lastHostIpv6 || 'unknown'})`
     )
 
     const pc = ctx.peerMgr.createPeerConnection(
@@ -453,11 +637,44 @@ export function createClientSession(ctx: ClientSessionContext) {
           scheduleBackgroundNativeP2pRetry(epoch)
           return
         }
+        if (isVirtualDcActivating()) {
+          log.info(`Native PC reported ${reason}, while VirtualDataChannel activation is in flight; preserving activation.`)
+          return
+        }
+        const elapsedSinceOffer = lastOfferTimestamp > 0 ? Date.now() - lastOfferTimestamp : 0
+        const isEarlyIceFailure =
+          !virtualDcFailedInRun &&
+          lastOfferTimestamp > 0 &&
+          (reason === 'ice_failed' || reason === 'connection_failed') &&
+          elapsedSinceOffer < CONNECTION_TIMING.VIRTUAL_FALLBACK_DELAY_MS &&
+          dc.readyState !== 'open'
+        if (isEarlyIceFailure) {
+          if (ctx.sas.clientSharedAesKey && ctx.getClientHostSenderId()) {
+            const activated = activateVirtualFallbackChannel(epoch, newClientSessionId)
+            if (activated) {
+              log.info(
+                `[WebRTC Client] Early ${reason} (${elapsedSinceOffer}ms < ${CONNECTION_TIMING.VIRTUAL_FALLBACK_DELAY_MS}ms); activated VirtualDataChannel immediately without hardReset.`
+              )
+              if (pc.iceGatheringState === 'complete') {
+                try { pc.close() } catch {}
+              }
+              if (!isVirtualDcOpen() && ctx.getStatus() !== 'connected') {
+                ctx.setStatus('connecting')
+              }
+              return
+            }
+          }
+        }
         failAttempt(epoch, reason || 'peer_failure')
       },
-      forceRelay,
+      effectiveForceRelay,
       ctx.getClientHostSenderId(),
-      { sessionTag: newClientSessionId, holdLocalCandidates: true, allowTurn }
+      {
+        sessionTag: newClientSessionId,
+        holdLocalCandidates: true,
+        allowTurn,
+        primaryTurnOnly
+      }
     )
     ctx.setClientPc(pc)
 
@@ -471,42 +688,7 @@ export function createClientSession(ctx: ClientSessionContext) {
     })
     ctx.setClientSender(sender)
 
-    dc.onmessage = (e) => ctx.handleChannelMessage(e)
-    dc.onopen = () => {
-      if (epoch !== attemptEpoch) return
-      log.info(`Native DataChannel 'scoutingpro-data' OPENED! Client connected via direct WebRTC (epoch: ${epoch}).`)
-      if (failedEpoch === epoch) failedEpoch = -1
-      // 若此前已激活了虚拟通道，无缝热切换升级到原生 UDP DataChannel！
-      if (getActiveVirtualDc()) {
-        log.info('Hot-upgrading active session from VirtualDataChannel to Native UDP DataChannel!')
-        closeActiveVirtualDc(true, true)
-      }
-      ctx.setClientDc(dc)
-      ctx.setClientSender(sender)
-      clearConnectWatchdog()
-      clearReconnectTimer()
-      reconnectAttempts = 0
-      ctx.setStatus('connected')
-      startDataChannelHeartbeat()
-      void checkAndScheduleSilentUpgrade()
-    }
-    dc.onclose = () => {
-      if (epoch !== attemptEpoch) return
-      if (isVirtualDcActiveOnClient()) {
-        return
-      }
-      log.warn(`DataChannel 'scoutingpro-data' CLOSED (epoch: ${epoch}, sasState: ${ctx.sas.clientSasState})`)
-      stopDataChannelHeartbeat()
-      resetSilentUpgradeState()
-      const curSender = ctx.getClientSender?.()
-      curSender?.abort('DataChannel closed')
-      ctx.setClientSender(null)
-      if (ctx.isExplicitlyClosed() || ctx.getStatus() === 'long_offline') return
-      if (ctx.sas.clientSasState === 'PENDING_VERIFICATION' || ctx.sas.clientSasState === 'REJECTED') {
-        return
-      }
-      failAttempt(epoch, 'datachannel_closed')
-    }
+    attachNativeDcLifecycleHandlers(epoch, pc, dc, sender)
 
     const localEcdhPubHex = ctx.getLocalEcdhPubHex()
     const currentInviteCode = ctx.getCurrentInviteCode()
@@ -579,7 +761,8 @@ export function createClientSession(ctx: ClientSessionContext) {
         username: ctx.getUsername?.() || '',
         userId: ctx.getUserId?.() || '',
         allowTurn,
-        forceRelay
+        forceRelay: effectiveForceRelay,
+        primaryTurnOnly
       }
 
       let offerPayload: any = rawOffer
@@ -605,7 +788,8 @@ export function createClientSession(ctx: ClientSessionContext) {
         username: ctx.getUsername?.() || '',
         userId: ctx.getUserId?.() || '',
         allowTurn,
-        forceRelay
+        forceRelay: effectiveForceRelay,
+        primaryTurnOnly
       }, ctx.getClientHostSenderId())
 
       // Offer 已发出：放行暂存的本地候选（保证 Host 先建 PeerConnection 再收候选），并启动建联超时
@@ -639,6 +823,9 @@ export function createClientSession(ctx: ClientSessionContext) {
   function maybeRecoverOnHostPresence(data: any) {
     const status = ctx.getStatus()
     if (status !== 'long_offline' && status !== 'offline' && status !== 'degraded') return
+    if (status === 'degraded' && (isVirtualDcOpen() || isVirtualDcActivating() || ctx.getClientDc()?.readyState === 'open')) {
+      return
+    }
     if (activeSetupPromise || reconnectTimer) return
     if (!canAutoReconnect()) return
     const now = Date.now()
@@ -647,6 +834,7 @@ export function createClientSession(ctx: ClientSessionContext) {
 
     log.info(`Host presence detected (hostSessionId: ${data.hostSessionId || 'unknown'}) while ${status}; restarting connection ladder.`)
     reconnectAttempts = 0
+    virtualDcFailedInRun = false
     const localEcdhPubHex = ctx.getLocalEcdhPubHex()
     if (localEcdhPubHex) {
       ctx.getSignaling()?.send({ type: 'client_hello', ecdhPublicKey: localEcdhPubHex, deviceId: ctx.getLocalDeviceId() })
@@ -676,19 +864,25 @@ export function createClientSession(ctx: ClientSessionContext) {
           await evaluateAndApplyClientTrust(ctx, data.ecdhPublicKey, data.deviceId, data.username, data.userId)
         } catch {}
       }
-      // 若从机发出的首包 Offer 因订阅时序或无线丢包未被主机收到（卡在 have-local-offer 超过 3.5s），借主机心跳立即重发握手
+      if (sas.clientSharedAesKey && ctx.getClientHostSenderId()) {
+        notifyHostHelloWaiters()
+      }
+      // 若从机发出的首包 Offer 因订阅时序或无线丢包未被主机收到（卡在 have-local-offer 超过 5.5s，严格晚于 3.8s VirtualDC 兜底窗），借主机心跳重发握手
       const curPc = ctx.getClientPc()
       const curDc = ctx.getClientDc()
+      const offerStaleThresholdMs = Math.max(5500, CONNECTION_TIMING.VIRTUAL_FALLBACK_DELAY_MS + 1700)
       if (
         ctx.getStatus() === 'connecting' &&
         !activeSetupPromise &&
         (!curDc || curDc.readyState !== 'open') &&
+        !isVirtualDcOpen() &&
+        !isVirtualDcActivating() &&
         curPc &&
         curPc.signalingState === 'have-local-offer' &&
         lastOfferTimestamp > 0 &&
-        Date.now() - lastOfferTimestamp >= 3500
+        Date.now() - lastOfferTimestamp >= offerStaleThresholdMs
       ) {
-        log.info('Host heartbeat received while Offer has been unacknowledged for >3.5s; re-initiating handshake immediately.')
+        log.info(`Host heartbeat received while Offer has been unacknowledged for >${offerStaleThresholdMs}ms; re-initiating handshake immediately.`)
         void restartClientConnection(ctx.getClientForceRelay())
         return
       }
@@ -720,6 +914,7 @@ export function createClientSession(ctx: ClientSessionContext) {
         }
       }
       ctx.setClientHostSenderId(data.sender)
+      notifyHostHelloWaiters()
 
       const curPc = ctx.getClientPc()
       const curDc = ctx.getClientDc()
@@ -728,6 +923,10 @@ export function createClientSession(ctx: ClientSessionContext) {
         curDc.readyState === 'open' &&
         ((curDc as any)?.isVirtual || (curPc && curPc.connectionState === 'connected'))
       )
+      if (!previousHostSessionId && !isAlreadyConnected) {
+        reconnectAttempts = 0
+        virtualDcFailedInRun = false
+      }
       const isConnectingOrChecking = Boolean(
         curPc &&
         (curPc.connectionState === 'connecting' || curPc.iceConnectionState === 'checking')
@@ -745,6 +944,7 @@ export function createClientSession(ctx: ClientSessionContext) {
         log.info(`Host session changed (${previousHostSessionId} -> ${data.hostSessionId}); restarting handshake with new host.`)
         clearReconnectTimer()
         reconnectAttempts = 0
+        virtualDcFailedInRun = false
         void restartClientConnection(false)
       } else if (!isAlreadyConnected && !isConnectingOrChecking && !isHandshakeInFlight) {
         log.info(
@@ -776,6 +976,7 @@ export function createClientSession(ctx: ClientSessionContext) {
       }
       clearReconnectTimer()
       reconnectAttempts = 0
+      virtualDcFailedInRun = false
       void restartClientConnection(false)
       return
     }
@@ -783,6 +984,7 @@ export function createClientSession(ctx: ClientSessionContext) {
     if (data.type === 'HOST_LEAVING') {
       log.warn(`Host explicitly left the room: hostSessionId=${data.hostSessionId}`)
       // 彻底复位（递增纪元、清理所有计时器），等待 Host 心跳再次出现时由存在感知自动恢复
+      virtualDcFailedInRun = false
       hardResetChannels()
       ctx.setStatus('offline')
       ctx.callbacks.onActiveHostLeft?.()
@@ -790,10 +992,11 @@ export function createClientSession(ctx: ClientSessionContext) {
     }
 
     if (data.answer) {
-      const clientPc = ctx.getClientPc()
+      const targetProbePc = data.clientSessionId ? activeProbePeers.get(data.clientSessionId) : undefined
+      const clientPc = targetProbePc || ctx.getClientPc()
       if (!clientPc) return
       const currentSessionId = ctx.getClientSessionId()
-      if (data.clientSessionId && currentSessionId && data.clientSessionId !== currentSessionId) {
+      if (!targetProbePc && data.clientSessionId && currentSessionId && data.clientSessionId !== currentSessionId) {
         log.info(`Dropping stale Answer for session ${data.clientSessionId} (current: ${currentSessionId})`)
         return
       }
@@ -803,7 +1006,7 @@ export function createClientSession(ctx: ClientSessionContext) {
       }
       const epoch = attemptEpoch
       try {
-        log.info(`Processing Host Answer from ${data.sender || 'Active Host'}`)
+        log.info(`Processing Host Answer from ${data.sender || 'Active Host'}${targetProbePc ? ` (probe: ${data.clientSessionId})` : ''}`)
         ctx.setClientHostSenderId(data.sender)
         if (data.hostSessionId) {
           ctx.setCurrentHostSessionId(data.hostSessionId)
@@ -833,14 +1036,25 @@ export function createClientSession(ctx: ClientSessionContext) {
           }
         }
 
-        if (epoch !== attemptEpoch || ctx.getClientPc() !== clientPc) {
+        const expectedStillValid = targetProbePc
+          ? epoch === attemptEpoch && activeProbePeers.get(data.clientSessionId) === clientPc
+          : epoch === attemptEpoch && ctx.getClientPc() === clientPc
+        if (!expectedStillValid) {
           log.info('Answer arrived for a superseded connection attempt; ignoring.')
           return
+        }
+
+        if (answerData && 'customTurnConfig' in answerData) {
+          setCustomTurnConfig(answerData.customTurnConfig ?? null)
         }
 
         try {
           await clientPc.setRemoteDescription(toSessionDescription(answerData))
         } catch (sdpErr) {
+          if (targetProbePc) {
+            log.warn('Probe Answer rejected by PeerConnection:', sdpErr)
+            return
+          }
           log.error('Host Answer rejected by PeerConnection; failing attempt for fast rebuild:', sdpErr)
           failAttempt(epoch, 'answer_rejected')
           return
@@ -851,7 +1065,7 @@ export function createClientSession(ctx: ClientSessionContext) {
         if (answerData?.sdp && typeof answerData.sdp === 'string') {
           for (const line of answerData.sdp.split(/\r?\n/)) {
             if (line.startsWith('a=candidate:') && /\btyp\s+srflx\b/i.test(line)) {
-              const predictedList = synthesizeSymmetricNatPortCandidates(line.slice(2))
+              const predictedList = synthesizeSymmetricNatPortCandidatesForPeer(clientPc, line.slice(2))
               for (const predCandStr of predictedList) {
                 try {
                   await clientPc.addIceCandidate(
@@ -863,8 +1077,15 @@ export function createClientSession(ctx: ClientSessionContext) {
           }
         }
 
-        const sortedPending = sortCandidatesPreferIpv6(ctx.getClientPendingCandidates())
-        ctx.setClientPendingCandidates([])
+        const rawPending = targetProbePc
+          ? (probePendingCandidates.get(data.clientSessionId) || [])
+          : ctx.getClientPendingCandidates()
+        if (targetProbePc) {
+          probePendingCandidates.set(data.clientSessionId, [])
+        } else {
+          ctx.setClientPendingCandidates([])
+        }
+        const sortedPending = sortCandidatesPreferIpv6(rawPending)
         for (const c of sortedPending) {
           try {
             let candidateObj: any = c
@@ -886,7 +1107,7 @@ export function createClientSession(ctx: ClientSessionContext) {
             }
             await clientPc.addIceCandidate(toIceCandidate(candidateObj))
             if (candidateObj?.candidate) {
-              const predictedList = synthesizeSymmetricNatPortCandidates(candidateObj.candidate)
+              const predictedList = synthesizeSymmetricNatPortCandidatesForPeer(clientPc, candidateObj.candidate)
               for (const predCandStr of predictedList) {
                 try {
                   await clientPc.addIceCandidate(
@@ -914,10 +1135,11 @@ export function createClientSession(ctx: ClientSessionContext) {
     }
 
     if (data.candidate) {
-      const clientPc = ctx.getClientPc()
+      const targetProbePc = data.clientSessionId ? activeProbePeers.get(data.clientSessionId) : undefined
+      const clientPc = targetProbePc || ctx.getClientPc()
       if (!clientPc) return
       const currentSessionId = ctx.getClientSessionId()
-      if (data.clientSessionId && currentSessionId && data.clientSessionId !== currentSessionId) {
+      if (!targetProbePc && data.clientSessionId && currentSessionId && data.clientSessionId !== currentSessionId) {
         return
       }
       const clientHostSenderId = ctx.getClientHostSenderId()
@@ -944,14 +1166,16 @@ export function createClientSession(ctx: ClientSessionContext) {
         candidateData.candidate = optimizeCandidatePriority(candidateData.candidate)
       }
 
-      if (ctx.getClientPc() !== clientPc) return
+      if (targetProbePc ? activeProbePeers.get(data.clientSessionId) !== clientPc : ctx.getClientPc() !== clientPc) {
+        return
+      }
       try {
         if (candidateData?.candidate) {
           log.info(`Remote ICE Candidate added from Host: ${String(candidateData.candidate).trim()}`)
         }
         await clientPc.addIceCandidate(toIceCandidate(candidateData))
         if (candidateData?.candidate) {
-          const predictedList = synthesizeSymmetricNatPortCandidates(candidateData.candidate)
+          const predictedList = synthesizeSymmetricNatPortCandidatesForPeer(clientPc, candidateData.candidate)
           for (const predCandStr of predictedList) {
             try {
               await clientPc.addIceCandidate(
@@ -965,9 +1189,15 @@ export function createClientSession(ctx: ClientSessionContext) {
         }
       } catch (addErr) {
         if (!clientPc.remoteDescription) {
-          const pending = ctx.getClientPendingCandidates()
-          pending.push(candidateData)
-          ctx.setClientPendingCandidates(pending)
+          if (targetProbePc) {
+            const list = probePendingCandidates.get(data.clientSessionId) || []
+            list.push(candidateData)
+            probePendingCandidates.set(data.clientSessionId, list)
+          } else {
+            const pending = ctx.getClientPendingCandidates()
+            pending.push(candidateData)
+            ctx.setClientPendingCandidates(pending)
+          }
         } else {
           log.warn('Dropping remote candidate rejected by PeerConnection:', addErr)
         }
@@ -1007,6 +1237,12 @@ export function createClientSession(ctx: ClientSessionContext) {
     }
   }
 
+  function onPeerConnected(peer: RTCPeerConnection) {
+    if (peer === ctx.getClientPc() && ctx.getClientDc()?.readyState === 'open') {
+      void checkAndScheduleSilentUpgrade()
+    }
+  }
+
   return {
     setupClientConnection,
     restartClientConnection,
@@ -1021,6 +1257,8 @@ export function createClientSession(ctx: ClientSessionContext) {
     resetOfferTimestamp,
     hardResetChannels,
     checkAndScheduleSilentUpgrade,
-    clearSilentUpgradeTimers
+    clearSilentUpgradeTimers,
+    onPeerConnected,
+    waitForHostHello
   }
 }

@@ -1,5 +1,6 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
 import {
+  cleanIpAddress,
   probeLocalInterfaceIpv6,
   resetLocalIpv6ProbeCache,
   buildIceConfiguration,
@@ -17,6 +18,8 @@ import {
   STUN_SERVERS,
   TURN_SERVERS,
   isGlobalIpv6Address,
+  isIpv6Address,
+  getIpv6Prefix64,
   isBogusOrTunCandidate,
   isTunVirtualAddress,
   optimizeCandidatePriority,
@@ -773,6 +776,198 @@ describe('Parallel Dual-Stack ICE & Non-Locking Hole Punching Architecture', () 
       } finally {
         delete (globalThis as any).__TEST_ENABLE_LATE_SLAAC__
       }
+    })
+
+    it('getIpv6Prefix64 expands "::" compressed IPv6 addresses to 8 hextets before extracting /64', () => {
+      expect(getIpv6Prefix64('2409:8a00::1')).toBe('2409:8a00:0:0')
+      expect(getIpv6Prefix64('2409:8a00:0000:0000:abcd::2')).toBe('2409:8a00:0:0')
+      expect(getIpv6Prefix64('2409:8a00:1234::5')).toBe('2409:8a00:1234:0')
+      expect(getIpv6Prefix64('240e:3b4:801::ff')).toBe('240e:3b4:801:0')
+      expect(getIpv6Prefix64('2409:8a00::1%eth0')).toBe('2409:8a00:0:0')
+    })
+
+    it('isTunVirtualAddress filters WARP (172.16.0.x) and WSL/Hyper-V subnets while preserving cellular/iOS hotspot subnets', () => {
+      expect(isTunVirtualAddress('172.16.0.2')).toBe(true)
+      expect(isTunVirtualAddress('172.21.64.1')).toBe(true)
+      expect(isTunVirtualAddress('172.28.128.1')).toBe(true)
+      expect(isTunVirtualAddress('198.18.0.1')).toBe(true)
+      // Must preserve iOS personal hotspot (172.20.10.x) and carrier CGNAT / cellular (10.61.x.x)
+      expect(isTunVirtualAddress('172.20.10.2')).toBe(false)
+      expect(isTunVirtualAddress('10.61.166.27')).toBe(false)
+      expect(isTunVirtualAddress('192.168.1.50')).toBe(false)
+    })
+
+    it('warmUpDoHStunIpv6 resolves AliDNS A records for domestic STUN redundancy and registers them as domestic', async () => {
+      resetDoHStunCache()
+      const origFetch = globalThis.fetch
+      ;(globalThis as any).__TEST_ALLOW_DOH_WARMUP__ = true
+      globalThis.fetch = vi.fn().mockImplementation(async (input: RequestInfo | URL) => {
+        const url = String(input)
+        if (url.includes('dns.alidns.com/resolve') && url.includes('type=A') && !url.includes('type=AAAA')) {
+          if (url.includes('stun.miwifi.com')) {
+            return new Response(JSON.stringify({ Answer: [{ type: 1, data: '120.92.114.88' }] }), { status: 200 })
+          }
+          if (url.includes('stun.qq.com')) {
+            return new Response(JSON.stringify({ Answer: [{ type: 1, data: '203.205.239.42' }] }), { status: 200 })
+          }
+        }
+        return new Response(JSON.stringify({ Answer: [] }), { status: 200 })
+      }) as any
+
+      try {
+        const urls = await warmUpDoHStunIpv6()
+        expect(urls).toContain('stun:120.92.114.88:3478')
+        expect(urls).toContain('stun:203.205.239.42:3478')
+        expect(classifyStunUrlOrigin('stun:120.92.114.88:3478')).toBe('domestic')
+        expect(classifyStunUrlOrigin('stun:203.205.239.42:3478')).toBe('domestic')
+      } finally {
+        resetDoHStunCache()
+        delete (globalThis as any).__TEST_ALLOW_DOH_WARMUP__
+        globalThis.fetch = origFetch
+      }
+    })
+
+    it('rejects malformed IPv6 strings and zero-padded reserved prefixes in isGlobalIpv6Address & getIpv6Prefix64', () => {
+      // Zero-padded reserved 2001:: prefixes (Teredo 2001:0000::/32, Benchmarking 2001:0002::/32, ORCHID 2001:0010::/28, Docs 2001:0db8::/32)
+      expect(isGlobalIpv6Address('2001:0000::1')).toBe(false)
+      expect(isGlobalIpv6Address('2001:0002::1')).toBe(false)
+      expect(isGlobalIpv6Address('2001:0010::1')).toBe(false)
+      expect(isGlobalIpv6Address('2001:0db8::1')).toBe(false)
+      // Valid padded GUA remains accepted
+      expect(isGlobalIpv6Address('2001:0da8:0200::1')).toBe(true)
+
+      // Malformed IPv6 forms rejected by both isGlobalIpv6Address and getIpv6Prefix64
+      for (const bad of ['2409:::1', '2409:8a00::1::2', '2409:8a00:1:2', '2409:8a00:1:2:3:4:5:6:7']) {
+        expect(isGlobalIpv6Address(bad)).toBe(false)
+        expect(getIpv6Prefix64(bad)).toBe('')
+      }
+      expect(getIpv6Prefix64('::ffff:192.0.2.1')).toBe('0:0:0:0')
+    })
+
+    it('isTunVirtualAddress filters WSL2 /20 non-base 3rd-octet IPs and Docker bridge while preserving iOS hotspot & cellular', () => {
+      expect(isTunVirtualAddress('172.21.65.2')).toBe(true)
+      expect(isTunVirtualAddress('172.21.79.254')).toBe(true)
+      expect(isTunVirtualAddress('172.17.1.2')).toBe(true)
+      expect(isTunVirtualAddress('172.20.10.1')).toBe(false)
+      expect(isTunVirtualAddress('172.20.10.2')).toBe(false)
+      expect(isTunVirtualAddress('172.20.5.1')).toBe(false)
+      expect(isTunVirtualAddress('10.61.166.27')).toBe(false)
+    })
+
+    it('CandidateGate.release() preserves stunUrl origin across multi-candidate sorting so late domestic trickle srflx still boosts', async () => {
+      const mockPeer = createMockPeer()
+      global.RTCPeerConnection = vi.fn().mockImplementation(() => mockPeer) as any
+      const sentCands: any[] = []
+      const mockOptions = createMockOptions()
+      mockOptions.getSignaling = () => ({
+        send: vi.fn().mockImplementation((payload: any) => {
+          if (payload?.candidate) sentCands.push(payload.candidate)
+        })
+      }) as any
+      const manager = new PeerConnectionManager(mockOptions)
+      const pc = manager.createPeerConnection('host-peer-1', undefined, false, 'host-peer-1', {
+        sessionTag: 'sess-gate-sort',
+        holdLocalCandidates: true
+      })
+
+      // Queue overseas srflx BEFORE IPv4 host and IPv6 host so sorting reorders evaluated[]
+      mockPeer.onicecandidate({
+        candidate: {
+          candidate: 'candidate:1 1 udp 1509949439 103.152.112.88 52000 typ srflx raddr 0.0.0.0 rport 55000',
+          sdpMid: '0',
+          sdpMLineIndex: 0,
+          url: 'stun:74.125.250.129:19302'
+        }
+      })
+      mockPeer.onicecandidate({
+        candidate: {
+          candidate: 'candidate:2 1 udp 2130706431 192.168.1.10 55000 typ host',
+          sdpMid: '0',
+          sdpMLineIndex: 0
+        }
+      })
+      mockPeer.onicecandidate({
+        candidate: {
+          candidate: 'candidate:3 1 udp 2030043135 2409:8a00::1 55001 typ host',
+          sdpMid: '0',
+          sdpMLineIndex: 0
+        }
+      })
+      manager.releaseLocalCandidates(pc)
+      for (let i = 0; i < 12 && sentCands.length < 3; i++) {
+        await Promise.resolve()
+      }
+
+      expect(sentCands).toHaveLength(3)
+      const overseasItem = sentCands.find((c) => String(c.candidate).includes('103.152.112.88'))
+      const overseasTypePref = Math.floor(parseInt(overseasItem.candidate.split(/\s+/)[3], 10) / 16777216)
+      expect(overseasTypePref).toBe(90)
+
+      // Late domestic trickle srflx arrives after release() -> MUST be boosted to typePref 95
+      mockPeer.onicecandidate({
+        candidate: {
+          candidate: 'candidate:4 1 udp 1509949439 39.157.118.113 41000 typ srflx raddr 0.0.0.0 rport 55000',
+          sdpMid: '0',
+          sdpMLineIndex: 0,
+          url: 'stun:111.8.3.78:3478'
+        }
+      })
+      for (let i = 0; i < 12 && sentCands.length < 4; i++) {
+        await Promise.resolve()
+      }
+
+      expect(sentCands).toHaveLength(4)
+      const lateDomTypePref = Math.floor(parseInt(sentCands[3].candidate.split(/\s+/)[3], 10) / 16777216)
+      expect(lateDomTypePref).toBe(95)
+    })
+
+    it('oniceconnectionstatechange does NOT overwrite currentTransportInfo or setStatus("connected") for silentUpgradePeers probePc', async () => {
+      const probePeer = createMockPeer()
+      probePeer.getStats = vi.fn().mockResolvedValue(
+        new Map<string, any>([
+          ['loc', { id: 'loc', type: 'local-candidate', candidateType: 'host', address: '2409:8a00::1', port: 50000, protocol: 'udp' }],
+          ['rem', { id: 'rem', type: 'remote-candidate', candidateType: 'host', address: '2409:8a00::2', port: 50001, protocol: 'udp' }],
+          ['pair', { id: 'pair', type: 'candidate-pair', state: 'succeeded', nominated: true, selected: true, localCandidateId: 'loc', remoteCandidateId: 'rem', bytesSent: 100 }]
+        ])
+      )
+      global.RTCPeerConnection = vi.fn().mockImplementation(() => probePeer) as any
+
+      const mockOptions = createMockOptions()
+      mockOptions.getClientDcState = () => 'open'
+      const manager = new PeerConnectionManager(mockOptions)
+      const initialRelayInfo = {
+        type: 'relay' as const,
+        localCandidateType: 'relay',
+        remoteCandidateType: 'relay',
+        localAddress: '1.2.3.4',
+        remoteAddress: '5.6.7.8',
+        protocol: 'TCP',
+        rttMs: 120
+      }
+      manager.currentTransportInfo = initialRelayInfo
+
+      const pc = manager.createPeerConnection('host-target')
+      manager.beginSilentUpgrade(pc)
+
+      probePeer.iceConnectionState = 'connected'
+      probePeer.oniceconnectionstatechange()
+      await vi.advanceTimersByTimeAsync(3500)
+
+      expect(manager.currentTransportInfo).toBe(initialRelayInfo)
+      expect(mockOptions.setStatus).not.toHaveBeenCalledWith('connected')
+      expect(probePeer.getStats).not.toHaveBeenCalled()
+    })
+
+    it('cleanIpAddress strips brackets and port on bracketed IPv4-mapped IPv6 and scoped IPv6 addresses', () => {
+      expect(cleanIpAddress('[::ffff:192.0.2.1]:8080')).toBe('::ffff:192.0.2.1')
+      expect(isIpv6Address('[::ffff:192.0.2.1]:8080')).toBe(true)
+      expect(cleanIpAddress('[fe80::1%eth0]:8080')).toBe('fe80::1')
+      expect(isIpv6Address('[fe80::1%eth0]:8080')).toBe(true)
+      expect(cleanIpAddress('[]')).toBe('')
+      expect(cleanIpAddress('[]:8080')).toBe('')
+      expect(cleanIpAddress('[   ]:8080')).toBe('')
+      expect(isIpv6Address('[]:8080')).toBe(false)
+      expect(isIpv6Address('[   ]:8080')).toBe(false)
     })
   })
 })

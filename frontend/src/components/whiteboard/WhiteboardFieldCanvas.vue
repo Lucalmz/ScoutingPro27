@@ -11,6 +11,10 @@ import {
   formatFieldTileCoord,
   snapToFieldGrid,
   interpolatePointAlongPolyline,
+  getStationColor,
+  readCssToken,
+  toNormalizedHex,
+  withAlpha,
   STATION_LIST,
   type WhiteboardPhase,
   type WhiteboardTool,
@@ -19,6 +23,66 @@ import {
   type FieldRotation,
   type NormalizedPoint
 } from './useTacticalWhiteboard'
+
+interface CanvasTheme {
+  style: CSSStyleDeclaration | null
+  g950: string
+  g900: string
+  g850: string
+  g800: string
+  g100: string
+  g50: string
+  primary: string
+  s200: string
+  red300: string
+  red400: string
+  red900: string
+  blue300: string
+  blue400: string
+  blue900: string
+  warning: string
+  error: string
+  shadowBlack: string
+  fontSans: string
+  fontNumeric: string
+}
+
+function resolveCanvasTheme(): CanvasTheme {
+  const style =
+    typeof document !== 'undefined' && typeof getComputedStyle === 'function'
+      ? getComputedStyle(document.documentElement)
+      : null
+  return {
+    style,
+    g950: readCssToken('--g-950', 'rgb(7, 9, 10)', style),
+    g900: readCssToken('--g-900', 'rgb(11, 14, 16)', style),
+    g850: readCssToken('--g-850', 'rgb(16, 20, 23)', style),
+    g800: readCssToken('--g-800', 'rgb(21, 26, 30)', style),
+    g100: readCssToken('--g-100', 'rgb(230, 235, 238)', style),
+    g50: readCssToken('--g-50', 'rgb(246, 248, 249)', style),
+    primary: readCssToken('--primary', 'rgb(57, 255, 20)', style),
+    s200: readCssToken('--s-200', 'rgb(184, 255, 163)', style),
+    red300: readCssToken('--red-300', 'rgb(255, 143, 135)', style),
+    red400: readCssToken('--red-400', 'rgb(255, 93, 82)', style),
+    red900: readCssToken('--red-900', 'rgb(42, 19, 17)', style),
+    blue300: readCssToken('--blue-300', 'rgb(142, 197, 255)', style),
+    blue400: readCssToken('--blue-400', 'rgb(79, 163, 255)', style),
+    blue900: readCssToken('--blue-900', 'rgb(14, 27, 46)', style),
+    warning: readCssToken('--status-warning', 'rgb(247, 181, 59)', style),
+    error: readCssToken('--status-error', 'rgb(255, 85, 119)', style),
+    shadowBlack: 'rgb(0, 0, 0)',
+    fontSans: readCssToken(
+      '--font-sans',
+      "'Manrope', 'NotoSansSC', 'Segoe UI', 'Helvetica Neue', Arial, sans-serif",
+      style
+    ),
+    fontNumeric: readCssToken(
+      '--font-numeric',
+      "'Orbitron', 'Manrope', 'NotoSansSC', monospace",
+      style
+    )
+  }
+}
 
 const props = defineProps<{
   phase: WhiteboardPhase
@@ -145,7 +209,7 @@ function animateRobotTransition() {
   robotSpringRafId = requestAnimationFrame(step)
 }
 
-function spawnRipple(fx: number, fy: number, color = '#39ff14') {
+function spawnRipple(fx: number, fy: number, color = readCssToken('--primary', 'rgb(57, 255, 20)')) {
   ripples.value.push({ fx, fy, color, bornAt: performance.now() })
   if (rippleRafId === null && typeof requestAnimationFrame !== 'undefined') {
     const tickRipples = () => {
@@ -274,14 +338,14 @@ function drawArrowhead(
   ctx.fill()
 }
 
-function drawFtcFieldBase(ctx: CanvasRenderingContext2D, size: number) {
+function drawFtcFieldBase(ctx: CanvasRenderingContext2D, size: number, theme: CanvasTheme) {
   const tile = size / 6
 
   // 1. 6x6 地垫棋盘格底色
   for (let row = 0; row < 6; row++) {
     for (let col = 0; col < 6; col++) {
       const isEven = (row + col) % 2 === 0
-      ctx.fillStyle = isEven ? '#111210' : '#151714'
+      ctx.fillStyle = isEven ? theme.g900 : theme.g850
       ctx.fillRect(col * tile, row * tile, tile, tile)
     }
   }
@@ -294,13 +358,13 @@ function drawFtcFieldBase(ctx: CanvasRenderingContext2D, size: number) {
 
   ctx.save()
   ctx.lineWidth = Math.max(6, size * 0.012)
-  ctx.strokeStyle = 'rgba(239, 68, 68, 0.85)'
+  ctx.strokeStyle = withAlpha(theme.red400, 0.85)
   ctx.beginPath()
   ctx.moveTo(redWallA.x, redWallA.y)
   ctx.lineTo(redWallB.x, redWallB.y)
   ctx.stroke()
 
-  ctx.strokeStyle = 'rgba(59, 130, 246, 0.85)'
+  ctx.strokeStyle = withAlpha(theme.blue400, 0.85)
   ctx.beginPath()
   ctx.moveTo(blueWallA.x, blueWallA.y)
   ctx.lineTo(blueWallB.x, blueWallB.y)
@@ -333,8 +397,8 @@ function drawFtcFieldBase(ctx: CanvasRenderingContext2D, size: number) {
       [1 / 6, 0],
       [0, 1 / 6]
     ],
-    'rgba(239, 68, 68, 0.22)',
-    'rgba(239, 68, 68, 0.72)',
+    withAlpha(theme.red400, 0.22),
+    withAlpha(theme.red400, 0.72),
     true
   )
   drawPolyField(
@@ -343,8 +407,8 @@ function drawFtcFieldBase(ctx: CanvasRenderingContext2D, size: number) {
       [1 / 6, 1],
       [0, 1]
     ],
-    'rgba(239, 68, 68, 0.14)',
-    'rgba(239, 68, 68, 0.6)'
+    withAlpha(theme.red400, 0.14),
+    withAlpha(theme.red400, 0.6)
   )
 
   // 蓝方右下 F6 Corner Garden & 右上 A6 Loading/Park Zone
@@ -354,8 +418,8 @@ function drawFtcFieldBase(ctx: CanvasRenderingContext2D, size: number) {
       [1, 0],
       [1, 1 / 6]
     ],
-    'rgba(59, 130, 246, 0.14)',
-    'rgba(59, 130, 246, 0.6)'
+    withAlpha(theme.blue400, 0.14),
+    withAlpha(theme.blue400, 0.6)
   )
   drawPolyField(
     [
@@ -363,8 +427,8 @@ function drawFtcFieldBase(ctx: CanvasRenderingContext2D, size: number) {
       [5 / 6, 1],
       [1, 1]
     ],
-    'rgba(59, 130, 246, 0.22)',
-    'rgba(59, 130, 246, 0.72)',
+    withAlpha(theme.blue400, 0.22),
+    withAlpha(theme.blue400, 0.72),
     true
   )
 
@@ -392,9 +456,9 @@ function drawFtcFieldBase(ctx: CanvasRenderingContext2D, size: number) {
   }
 
   // 中场对角线与起始线
-  drawFieldLine(0.5, 0, 0.5, 1, 'rgba(255, 255, 255, 0.16)', 2, [8, 6])
-  drawFieldLine(1 / 6, 0, 1 / 6, 1, 'rgba(239, 68, 68, 0.28)', 1.5, [4, 4])
-  drawFieldLine(5 / 6, 0, 5 / 6, 1, 'rgba(59, 130, 246, 0.28)', 1.5, [4, 4])
+  drawFieldLine(0.5, 0, 0.5, 1, withAlpha(theme.g50, 0.16), 2, [8, 6])
+  drawFieldLine(1 / 6, 0, 1 / 6, 1, withAlpha(theme.red400, 0.28), 1.5, [4, 4])
+  drawFieldLine(5 / 6, 0, 5 / 6, 1, withAlpha(theme.blue400, 0.28), 1.5, [4, 4])
 
   // 5. 四侧边界花朵目标 (4 Perimeter Flowers along top/bottom side walls)
   const flowerSpots: Array<[number, number]> = [
@@ -410,15 +474,15 @@ function drawFtcFieldBase(ctx: CanvasRenderingContext2D, size: number) {
     ctx.save()
     ctx.beginPath()
     ctx.arc(fp.x, fp.y, flowerOuterR, 0, Math.PI * 2)
-    ctx.fillStyle = 'rgba(250, 204, 21, 0.18)'
+    ctx.fillStyle = withAlpha(theme.warning, 0.18)
     ctx.fill()
     ctx.lineWidth = 1.8
-    ctx.strokeStyle = 'rgba(250, 204, 21, 0.85)'
+    ctx.strokeStyle = withAlpha(theme.warning, 0.85)
     ctx.stroke()
 
     ctx.beginPath()
     ctx.arc(fp.x, fp.y, flowerInnerR, 0, Math.PI * 2)
-    ctx.fillStyle = 'rgba(57, 255, 20, 0.65)'
+    ctx.fillStyle = withAlpha(theme.primary, 0.65)
     ctx.fill()
     ctx.restore()
   }
@@ -431,8 +495,8 @@ function drawFtcFieldBase(ctx: CanvasRenderingContext2D, size: number) {
       [4 / 6, 4 / 6],
       [2 / 6, 4 / 6]
     ],
-    'rgba(57, 255, 20, 0.04)',
-    'rgba(57, 255, 20, 0.34)'
+    withAlpha(theme.primary, 0.04),
+    withAlpha(theme.primary, 0.34)
   )
 
   const centerPt = toViewPx(0.5, 0.5, size)
@@ -443,28 +507,28 @@ function drawFtcFieldBase(ctx: CanvasRenderingContext2D, size: number) {
   ctx.save()
   ctx.beginPath()
   ctx.arc(centerPt.x, centerPt.y, hiveR, 0, Math.PI * 2)
-  ctx.fillStyle = 'rgba(20, 22, 19, 0.9)'
+  ctx.fillStyle = withAlpha(theme.g800, 0.9)
   ctx.fill()
   ctx.lineWidth = 2.5
-  ctx.strokeStyle = 'rgba(57, 255, 20, 0.65)'
+  ctx.strokeStyle = withAlpha(theme.primary, 0.65)
   ctx.stroke()
 
   // 红侧半弧 vs 蓝侧半弧指示中央蜂巢归属
   ctx.beginPath()
   ctx.arc(centerPt.x, centerPt.y, hiveR * 0.76, blueAngle + Math.PI / 2, blueAngle + (3 * Math.PI) / 2)
   ctx.lineWidth = 3.5
-  ctx.strokeStyle = 'rgba(239, 68, 68, 0.78)'
+  ctx.strokeStyle = withAlpha(theme.red400, 0.78)
   ctx.stroke()
 
   ctx.beginPath()
   ctx.arc(centerPt.x, centerPt.y, hiveR * 0.76, blueAngle - Math.PI / 2, blueAngle + Math.PI / 2)
   ctx.lineWidth = 3.5
-  ctx.strokeStyle = 'rgba(59, 130, 246, 0.78)'
+  ctx.strokeStyle = withAlpha(theme.blue400, 0.78)
   ctx.stroke()
 
   ctx.beginPath()
   ctx.arc(centerPt.x, centerPt.y, size * 0.036, 0, Math.PI * 2)
-  ctx.fillStyle = 'rgba(57, 255, 20, 0.22)'
+  ctx.fillStyle = withAlpha(theme.primary, 0.22)
   ctx.fill()
   ctx.restore()
 
@@ -473,26 +537,26 @@ function drawFtcFieldBase(ctx: CanvasRenderingContext2D, size: number) {
     if (size < 320) return
     const p = toViewPx(fx, fy, size)
     ctx.save()
-    ctx.font = `700 ${Math.max(8, Math.floor(size * 0.015))}px "Manrope", sans-serif`
+    ctx.font = `700 ${Math.max(8, Math.floor(size * 0.015))}px ${theme.fontSans}`
     ctx.fillStyle = color
     ctx.textAlign = 'center'
     ctx.textBaseline = 'middle'
     ctx.fillText(label, p.x, p.y)
     ctx.restore()
   }
-  drawZoneLabel(0.5, 0.5 + 0.115, 'HIVE', 'rgba(134, 239, 172, 0.62)')
-  drawZoneLabel(0.065, 0.065, 'GARDEN', 'rgba(252, 165, 165, 0.65)')
-  drawZoneLabel(0.935, 0.935, 'GARDEN', 'rgba(147, 197, 253, 0.65)')
-  drawZoneLabel(0.065, 0.935, 'PARK', 'rgba(252, 165, 165, 0.55)')
-  drawZoneLabel(0.935, 0.065, 'PARK', 'rgba(147, 197, 253, 0.55)')
+  drawZoneLabel(0.5, 0.5 + 0.115, 'HIVE', withAlpha(theme.s200, 0.62))
+  drawZoneLabel(0.065, 0.065, 'GARDEN', withAlpha(theme.red300, 0.65))
+  drawZoneLabel(0.935, 0.935, 'GARDEN', withAlpha(theme.blue300, 0.65))
+  drawZoneLabel(0.065, 0.935, 'PARK', withAlpha(theme.red300, 0.55))
+  drawZoneLabel(0.935, 0.065, 'PARK', withAlpha(theme.blue300, 0.55))
   if (props.showGridCoords) {
-    drawZoneLabel(2 / 6, 0.095, 'FLOWER', 'rgba(253, 224, 71, 0.62)')
-    drawZoneLabel(4 / 6, 0.905, 'FLOWER', 'rgba(253, 224, 71, 0.62)')
+    drawZoneLabel(2 / 6, 0.095, 'FLOWER', withAlpha(theme.warning, 0.62))
+    drawZoneLabel(4 / 6, 0.905, 'FLOWER', withAlpha(theme.warning, 0.62))
   }
 
   // 6. 6x6 地垫网格细线与 A1-F6 坐标标签
   ctx.save()
-  ctx.strokeStyle = 'rgba(255, 255, 255, 0.08)'
+  ctx.strokeStyle = withAlpha(theme.g50, 0.08)
   ctx.lineWidth = 1
   for (let i = 1; i < 6; i++) {
     ctx.beginPath()
@@ -508,8 +572,8 @@ function drawFtcFieldBase(ctx: CanvasRenderingContext2D, size: number) {
 
   if (props.showGridCoords) {
     const rowLetters = ['A', 'B', 'C', 'D', 'E', 'F']
-    ctx.font = `600 ${Math.max(10, Math.floor(size * 0.019))}px "Manrope", sans-serif`
-    ctx.fillStyle = 'rgba(240, 239, 233, 0.24)'
+    ctx.font = `600 ${Math.max(10, Math.floor(size * 0.019))}px ${theme.fontSans}`
+    ctx.fillStyle = withAlpha(theme.g100, 0.24)
     ctx.textAlign = 'left'
     ctx.textBaseline = 'top'
     for (let r = 0; r < 6; r++) {
@@ -534,6 +598,7 @@ function drawSingleStroke(
     text?: string
   },
   size: number,
+  theme: CanvasTheme,
   options?: {
     isHovered?: boolean
     isEraserTarget?: boolean
@@ -557,18 +622,17 @@ function drawSingleStroke(
   }
 
   ctx.save()
-  ctx.strokeStyle = options?.isEraserTarget ? '#ef4444' : stroke.color
-  ctx.fillStyle = options?.isEraserTarget ? '#ef4444' : stroke.color
-  ctx.lineWidth = options?.isHovered || options?.isEraserTarget ? lineWidth + 2 : lineWidth
+  const activeStrokeColor = options?.isEraserTarget ? theme.error : stroke.color
+  ctx.strokeStyle = activeStrokeColor
+  ctx.fillStyle = activeStrokeColor
+  ctx.lineWidth = options?.isHovered || options?.isEraserTarget ? lineWidth + 2.5 : lineWidth
   ctx.lineCap = 'round'
   ctx.lineJoin = 'round'
 
-  if (options?.isHovered) {
-    ctx.shadowColor = stroke.color
-    ctx.shadowBlur = 10
-  } else if (options?.isEraserTarget) {
-    ctx.shadowColor = '#ef4444'
-    ctx.shadowBlur = 14
+  if (options?.isHovered || options?.isEraserTarget) {
+    ctx.shadowColor = withAlpha(theme.shadowBlack, 0.5)
+    ctx.shadowBlur = 6
+    ctx.shadowOffsetY = 2
   }
 
   if (stroke.type === 'text') {
@@ -579,15 +643,15 @@ function drawSingleStroke(
       return
     }
     const fontSize = Math.max(12, Math.floor(14 * scaleFactor))
-    ctx.font = `700 ${fontSize}px "Manrope", "Noto Sans SC", sans-serif`
+    ctx.font = `700 ${fontSize}px ${theme.fontSans}`
     const metrics = ctx.measureText(content)
     const padX = 8 * scaleFactor
     const padY = 5 * scaleFactor
     const boxW = metrics.width + padX * 2
     const boxH = fontSize + padY * 2
 
-    ctx.fillStyle = 'rgba(12, 13, 12, 0.88)'
-    ctx.strokeStyle = options?.isEraserTarget ? '#ef4444' : stroke.color
+    ctx.fillStyle = withAlpha(theme.g900, 0.9)
+    ctx.strokeStyle = activeStrokeColor
     ctx.lineWidth = options?.isHovered || options?.isEraserTarget ? 2.5 : 1.5
     ctx.beginPath()
     if (typeof ctx.roundRect === 'function') {
@@ -598,7 +662,7 @@ function drawSingleStroke(
     ctx.fill()
     ctx.stroke()
 
-    ctx.fillStyle = options?.isEraserTarget ? '#ef4444' : stroke.color
+    ctx.fillStyle = activeStrokeColor
     ctx.textAlign = 'center'
     ctx.textBaseline = 'middle'
     ctx.fillText(content, p0.x, p0.y)
@@ -692,14 +756,18 @@ function drawSingleStroke(
     if (prog < 1) {
       ctx.beginPath()
       ctx.arc(last.x, last.y, lineWidth * 1.35, 0, Math.PI * 2)
-      ctx.fillStyle = '#39ff14'
+      ctx.fillStyle = theme.primary
       ctx.fill()
     }
   }
   ctx.restore()
 }
 
-function resolveSimulatedRobotPose(st: StationType, baseRobot: RobotTokenState): {
+function resolveSimulatedRobotPose(
+  st: StationType,
+  baseRobot: RobotTokenState,
+  theme: CanvasTheme
+): {
   x: number
   y: number
   heading: number
@@ -713,8 +781,8 @@ function resolveSimulatedRobotPose(st: StationType, baseRobot: RobotTokenState):
     }
   }
 
-  const stationColor =
-    st === 'red1' ? '#ef4444' : st === 'red2' ? '#f97316' : st === 'blue1' ? '#3b82f6' : '#06b6d4'
+  const rawStationColor = getStationColor(st, theme.style)
+  const stationColor = toNormalizedHex(rawStationColor, rawStationColor)
 
   // 寻找属于该机器人的路径笔画（起点靠近该机器人或颜色匹配该工位）
   const candidate = props.strokes.find((s) => {
@@ -724,7 +792,7 @@ function resolveSimulatedRobotPose(st: StationType, baseRobot: RobotTokenState):
     if (!s.points || s.points.length < 2) return false
     const p0 = s.points[0]!
     const nearStart = Math.hypot(p0.x - baseRobot.x, p0.y - baseRobot.y) <= 0.14
-    const sameColor = s.color.toLowerCase() === stationColor.toLowerCase()
+    const sameColor = toNormalizedHex(s.color, s.color).toLowerCase() === stationColor.toLowerCase()
     return nearStart || sameColor
   })
 
@@ -742,7 +810,7 @@ function resolveSimulatedRobotPose(st: StationType, baseRobot: RobotTokenState):
   }
 }
 
-function drawRipplesAndSnapTarget(ctx: CanvasRenderingContext2D, size: number) {
+function drawRipplesAndSnapTarget(ctx: CanvasRenderingContext2D, size: number, theme: CanvasTheme) {
   const now = typeof performance !== 'undefined' ? performance.now() : Date.now()
   for (const rp of ripples.value) {
     const age = Math.max(0, Math.min(1, (now - rp.bornAt) / 650))
@@ -762,7 +830,7 @@ function drawRipplesAndSnapTarget(ctx: CanvasRenderingContext2D, size: number) {
   if (draggingStation.value && activeSnapPt.value) {
     const sp = toViewPx(activeSnapPt.value.x, activeSnapPt.value.y, size)
     ctx.save()
-    ctx.strokeStyle = 'rgba(57, 255, 20, 0.85)'
+    ctx.strokeStyle = withAlpha(theme.primary, 0.85)
     ctx.lineWidth = 1.5
     ctx.setLineDash([3, 3])
     ctx.beginPath()
@@ -779,7 +847,7 @@ function drawRipplesAndSnapTarget(ctx: CanvasRenderingContext2D, size: number) {
   }
 }
 
-function drawRobotTokens(ctx: CanvasRenderingContext2D, size: number) {
+function drawRobotTokens(ctx: CanvasRenderingContext2D, size: number, theme: CanvasTheme) {
   const tokenSize = Math.max(38, size * 0.086)
   const half = tokenSize / 2
 
@@ -787,30 +855,30 @@ function drawRobotTokens(ctx: CanvasRenderingContext2D, size: number) {
     const r = props.robots[st]
     if (!r) continue
 
-    const simPose = resolveSimulatedRobotPose(st, r)
+    const simPose = resolveSimulatedRobotPose(st, r, theme)
     const pos = toViewPx(simPose.x, simPose.y, size)
     const isRed = st.startsWith('red')
     const isSelected = props.selectedStation === st
     const isHighlighted = props.highlightedStation === st
     const isDraggingThis = draggingStation.value === st
 
-    const primaryColor =
-      st === 'red1' ? '#ef4444' : st === 'red2' ? '#f97316' : st === 'blue1' ? '#3b82f6' : '#06b6d4'
+    const primaryColor = getStationColor(st, theme.style)
 
     ctx.save()
     ctx.translate(pos.x, pos.y)
     if (isDraggingThis) {
       ctx.scale(1.12, 1.12)
-      ctx.shadowColor = primaryColor
-      ctx.shadowBlur = 18
+      ctx.shadowColor = withAlpha(theme.shadowBlack, 0.55)
+      ctx.shadowBlur = 12
+      ctx.shadowOffsetY = 4
     }
 
-    // 高亮脉冲光晕或选中光环
+    // 高亮脉冲环或选中环
     if (isHighlighted || isSelected || isDraggingThis) {
       ctx.save()
       ctx.beginPath()
       ctx.arc(0, 0, half * 1.38, 0, Math.PI * 2)
-      ctx.strokeStyle = isHighlighted ? '#39ff14' : primaryColor
+      ctx.strokeStyle = isHighlighted ? theme.primary : primaryColor
       ctx.lineWidth = isHighlighted ? 3.5 : 2
       if (!isHighlighted && !isDraggingThis) ctx.setLineDash([4, 3])
       ctx.stroke()
@@ -818,7 +886,7 @@ function drawRobotTokens(ctx: CanvasRenderingContext2D, size: number) {
     }
 
     // 机器人底盘方块
-    ctx.fillStyle = isRed ? 'rgba(32, 12, 12, 0.94)' : 'rgba(11, 22, 38, 0.94)'
+    ctx.fillStyle = isRed ? withAlpha(theme.red900, 0.94) : withAlpha(theme.blue900, 0.94)
     ctx.strokeStyle = primaryColor
     ctx.lineWidth = isSelected || isDraggingThis ? 3 : 2.2
     ctx.beginPath()
@@ -830,7 +898,7 @@ function drawRobotTokens(ctx: CanvasRenderingContext2D, size: number) {
     ctx.fill()
     ctx.stroke()
 
-    // 机头朝向小三角指示器 (计算视图旋转与镜像后的角度)
+    // 机头朝向小圆点指示器 (计算视图旋转与镜像后的角度)
     let viewHeading = ((simPose.heading || 0) + props.rotation) % 360
     if (props.flipH) {
       viewHeading = (360 - viewHeading) % 360
@@ -841,21 +909,21 @@ function drawRobotTokens(ctx: CanvasRenderingContext2D, size: number) {
     const iy = Math.sin(rad) * indicatorDist
     ctx.beginPath()
     ctx.arc(ix, iy, 3.8, 0, Math.PI * 2)
-    ctx.fillStyle = '#39ff14'
+    ctx.fillStyle = theme.primary
     ctx.fill()
 
     // 工位徽标 (R1 / R2 / B1 / B2)
     const stationLabel = st.toUpperCase().replace('RED', 'R').replace('BLUE', 'B')
     ctx.fillStyle = primaryColor
-    ctx.font = `800 ${Math.max(10, Math.floor(tokenSize * 0.25))}px "Orbitron", "Manrope", sans-serif`
+    ctx.font = `800 ${Math.max(10, Math.floor(tokenSize * 0.25))}px ${theme.fontNumeric}`
     ctx.textAlign = 'center'
     ctx.textBaseline = 'bottom'
     ctx.fillText(stationLabel, 0, -1)
 
     // 队伍编号
     const teamText = r.teamNumber > 0 ? `#${r.teamNumber}` : 'TBD'
-    ctx.fillStyle = '#f8fafc'
-    ctx.font = `700 ${Math.max(10, Math.floor(tokenSize * 0.25))}px "Manrope", sans-serif`
+    ctx.fillStyle = theme.g50
+    ctx.font = `700 ${Math.max(10, Math.floor(tokenSize * 0.25))}px ${theme.fontNumeric}`
     ctx.textBaseline = 'top'
     ctx.fillText(teamText, 0, 1)
 
@@ -863,12 +931,12 @@ function drawRobotTokens(ctx: CanvasRenderingContext2D, size: number) {
     if (isDraggingThis) {
       const tileLabel = formatFieldTileCoord(r.x, r.y)
       const hudText = `${activeSnapPt.value ? '🧲 ' : ''}${tileLabel} · ${r.heading}°`
-      ctx.font = `700 11px "Manrope", sans-serif`
+      ctx.font = `700 11px ${theme.fontSans}`
       const tw = ctx.measureText(hudText).width + 14
       const th = 20
       const ty = -half - 24
-      ctx.fillStyle = 'rgba(9, 10, 9, 0.94)'
-      ctx.strokeStyle = '#39ff14'
+      ctx.fillStyle = withAlpha(theme.g950, 0.94)
+      ctx.strokeStyle = theme.primary
       ctx.lineWidth = 1.2
       ctx.beginPath()
       if (typeof ctx.roundRect === 'function') {
@@ -878,7 +946,7 @@ function drawRobotTokens(ctx: CanvasRenderingContext2D, size: number) {
       }
       ctx.fill()
       ctx.stroke()
-      ctx.fillStyle = '#39ff14'
+      ctx.fillStyle = theme.primary
       ctx.textAlign = 'center'
       ctx.textBaseline = 'middle'
       ctx.fillText(hudText, 0, ty + th / 2)
@@ -901,6 +969,7 @@ function renderCanvas() {
 
   const size = canvasSize.value
   const dpr = canvas.width / size
+  const theme = resolveCanvasTheme()
 
   ctx.save()
   if (typeof ctx.setTransform === 'function') {
@@ -911,12 +980,12 @@ function renderCanvas() {
   }
 
   // 1. 绘制 FTC 场地底图
-  drawFtcFieldBase(ctx, size)
+  drawFtcFieldBase(ctx, size, theme)
 
   // 2. 绘制声呐水波纹与磁吸准星
-  drawRipplesAndSnapTarget(ctx, size)
+  drawRipplesAndSnapTarget(ctx, size, theme)
 
-  // 3. 绘制已保存笔画（支持悬停发光、橡皮擦预警与轨迹推演动画）
+  // 3. 绘制已保存笔画（支持悬停高亮、橡皮擦预警与轨迹推演动画）
   for (const stroke of props.strokes) {
     const isEraserHit =
       props.tool === 'eraser' &&
@@ -926,7 +995,7 @@ function renderCanvas() {
       props.tool === 'select' &&
       (hoveredStrokeId.value === stroke.id || draggingStrokeId.value === stroke.id)
 
-    drawSingleStroke(ctx, stroke, size, {
+    drawSingleStroke(ctx, stroke, size, theme, {
       isHovered,
       isEraserTarget: isEraserHit,
       simProgress: isSimulating.value ? simProgress.value : 1
@@ -949,20 +1018,21 @@ function renderCanvas() {
         width: props.strokeWidth,
         points: draftPoints.value
       },
-      size
+      size,
+      theme
     )
   }
 
   // 5. 绘制四台机器人机位 Token
-  drawRobotTokens(ctx, size)
+  drawRobotTokens(ctx, size, theme)
 
   // 6. 橡皮擦光标圈预览
   if (props.tool === 'eraser' && hoverViewPt.value) {
     ctx.save()
     ctx.beginPath()
     ctx.arc(hoverViewPt.value.x * size, hoverViewPt.value.y * size, size * 0.032, 0, Math.PI * 2)
-    ctx.strokeStyle = 'rgba(248, 250, 252, 0.9)'
-    ctx.fillStyle = 'rgba(239, 68, 68, 0.22)'
+    ctx.strokeStyle = withAlpha(theme.g50, 0.9)
+    ctx.fillStyle = withAlpha(theme.error, 0.22)
     ctx.lineWidth = 1.5
     ctx.fill()
     ctx.stroke()
@@ -1010,8 +1080,7 @@ function onPointerDown(e: PointerEvent) {
     draggingStation.value = hitStation
     dragStartViewPt.value = viewPt
     robotDragMoved.value = false
-    const stColor =
-      hitStation === 'red1' ? '#ef4444' : hitStation === 'red2' ? '#f97316' : hitStation === 'blue1' ? '#3b82f6' : '#06b6d4'
+    const stColor = getStationColor(hitStation)
     spawnRipple(props.robots[hitStation].x, props.robots[hitStation].y, stColor)
     emit('selectStation', hitStation)
     return
@@ -1139,7 +1208,7 @@ function onPointerUp(e: PointerEvent) {
     const st = draggingStation.value
     const r = props.robots[st]
     if (r && robotDragMoved.value) {
-      spawnRipple(r.x, r.y, '#39ff14')
+      spawnRipple(r.x, r.y)
     }
     draggingStation.value = null
     dragStartViewPt.value = null
@@ -1196,7 +1265,7 @@ function onDoubleClick(e: MouseEvent) {
   const { fieldPt } = getNormalizedFromPointerEvent(e)
   const hitStation = hitTestRobotToken(props.robots, fieldPt.x, fieldPt.y, 0.058)
   if (hitStation) {
-    spawnRipple(props.robots[hitStation].x, props.robots[hitStation].y, '#39ff14')
+    spawnRipple(props.robots[hitStation].x, props.robots[hitStation].y)
     emit('rotateRobot', hitStation)
   }
 }
@@ -1262,7 +1331,7 @@ watch(
   () => props.highlightedStation,
   (st) => {
     if (st && props.robots[st]) {
-      spawnRipple(props.robots[st].x, props.robots[st].y, '#39ff14')
+      spawnRipple(props.robots[st].x, props.robots[st].y)
     }
   }
 )
@@ -1390,9 +1459,9 @@ onUnmounted(() => {
   position: relative;
   border-radius: 14px;
   overflow: hidden;
-  border: 1px solid var(--border, #262624);
-  box-shadow: 0 16px 40px rgba(0, 0, 0, 0.55);
-  background: #0d0e0d;
+  border: 1px solid var(--border);
+  box-shadow: var(--shadow-2);
+  background: var(--background);
 }
 
 .wb-field-canvas {
@@ -1426,21 +1495,39 @@ onUnmounted(() => {
   gap: 8px;
   padding: 5px 10px;
   border-radius: 999px;
-  background: rgba(10, 12, 10, 0.92);
-  border: 1px solid rgba(57, 255, 20, 0.65);
-  color: #39ff14;
+  background: var(--popover);
+  border: 1px solid var(--status-success-border);
+  color: var(--primary);
   font-size: 11px;
   font-weight: 700;
-  box-shadow: 0 6px 20px rgba(0, 0, 0, 0.65);
+  box-shadow: var(--shadow-2);
   z-index: 15;
+}
+
+.wb-sim-text {
+  font-variant-numeric: tabular-nums;
 }
 
 .wb-sim-dot {
   width: 7px;
   height: 7px;
   border-radius: 50%;
-  background: #39ff14;
-  box-shadow: 0 0 8px #39ff14;
+  background: var(--primary);
+}
+
+@media (prefers-reduced-motion: no-preference) {
+  .wb-sim-dot {
+    animation: wb-sim-pulse var(--motion-duration-slow) var(--motion-ease-in-out) infinite alternate;
+  }
+}
+
+@keyframes wb-sim-pulse {
+  from {
+    opacity: 0.45;
+  }
+  to {
+    opacity: 1;
+  }
 }
 
 .wb-sim-stop-btn {
@@ -1450,14 +1537,15 @@ onUnmounted(() => {
   width: 22px;
   height: 22px;
   border-radius: 50%;
-  border: 1px solid rgba(239, 68, 68, 0.5);
-  background: rgba(239, 68, 68, 0.16);
-  color: #f87171;
+  border: 1px solid var(--status-error-border);
+  background: var(--status-error-bg);
+  color: var(--status-error);
   cursor: pointer;
 }
 
 .wb-sim-stop-btn:hover {
-  background: rgba(239, 68, 68, 0.3);
+  background: var(--status-error);
+  color: var(--g-950);
 }
 
 .wb-text-popover {
@@ -1468,19 +1556,19 @@ onUnmounted(() => {
   align-items: center;
   gap: 6px;
   padding: 6px 8px;
-  background: rgba(14, 15, 14, 0.96);
-  border: 1px solid var(--primary, #39ff14);
+  background: var(--popover);
+  border: 1px solid var(--border-strong);
   border-radius: 10px;
-  box-shadow: 0 12px 28px rgba(0, 0, 0, 0.75);
+  box-shadow: var(--shadow-3);
   z-index: 20;
-  animation: wb-pop-fade 150ms ease-out both;
+  animation: wb-pop-fade var(--motion-duration-fast) var(--motion-ease-out) both;
 }
 
 @media (prefers-reduced-motion: no-preference) {
   .wb-text-popover {
     animation:
-      wb-pop-spring 320ms linear(0, 0.45 15%, 1.08 35%, 0.97 55%, 1.01 75%, 1) both,
-      wb-pop-fade 150ms ease-out both;
+      wb-pop-spring var(--motion-duration-normal) var(--motion-ease-spring) both,
+      wb-pop-fade var(--motion-duration-fast) var(--motion-ease-out) both;
   }
 }
 
@@ -1500,15 +1588,16 @@ onUnmounted(() => {
   width: 190px;
   padding: 5px 8px;
   font-size: 13px;
-  background: #181917;
-  color: var(--foreground, #f0efe9);
-  border: 1px solid var(--border, #2c2d2a);
+  background: var(--input);
+  color: var(--foreground);
+  border: 1px solid var(--border);
   border-radius: 6px;
   outline: none;
 }
 
 .wb-text-input:focus {
-  border-color: var(--primary, #39ff14);
+  border-color: var(--primary);
+  box-shadow: var(--focus-ring-sm);
 }
 
 .wb-text-btn {
@@ -1525,13 +1614,13 @@ onUnmounted(() => {
 }
 
 .wb-text-btn.confirm {
-  background: var(--primary, #39ff14);
-  color: #080807;
+  background: var(--primary);
+  color: var(--on-primary);
 }
 
 .wb-text-btn.cancel {
-  background: #262724;
-  color: #a1a19a;
+  background: var(--surface-hover);
+  color: var(--g-200);
   padding: 4px 6px;
 }
 </style>

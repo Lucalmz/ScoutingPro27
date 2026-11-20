@@ -359,7 +359,7 @@ async function handleAddPresetTag(preset: typeof PRESET_TAGS[number]) {
   font-size: 0.78rem;
   font-weight: 600;
   border: 1px solid transparent;
-  transition: all 0.15s ease;
+  transition: background-color var(--motion-duration-fast) var(--motion-ease-out), border-color var(--motion-duration-fast) var(--motion-ease-out), color var(--motion-duration-fast) var(--motion-ease-out);
 }
 
 .btn-tag-remove {
@@ -371,41 +371,41 @@ async function handleAddPresetTag(preset: typeof PRESET_TAGS[number]) {
   cursor: pointer;
   padding: 0 0 0 2px;
   opacity: 0.65;
-  transition: opacity 0.15s;
+  transition: opacity var(--motion-duration-fast) var(--motion-ease-out);
 }
 
 .btn-tag-remove:hover {
   opacity: 1;
 }
 
-/* 色系（统一暗色赛博霓虹规范） */
-.tag-green  { background: rgba(57, 255, 20, 0.12); color: #39ff14; border-color: rgba(57, 255, 20, 0.35); }
-.tag-blue   { background: rgba(56, 189, 248, 0.12); color: #38bdf8; border-color: rgba(56, 189, 248, 0.35); }
-.tag-purple { background: rgba(192, 132, 252, 0.12); color: #c084fc; border-color: rgba(192, 132, 252, 0.35); }
-.tag-orange { background: rgba(251, 146, 60, 0.12); color: #fb923c; border-color: rgba(251, 146, 60, 0.35); }
-.tag-red    { background: rgba(248, 113, 113, 0.12); color: #f87171; border-color: rgba(248, 113, 113, 0.35); }
-.tag-yellow { background: rgba(250, 204, 21, 0.12); color: #facc15; border-color: rgba(250, 204, 21, 0.35); }
-.tag-gray   { background: rgba(156, 163, 175, 0.12); color: #9ca3af; border-color: rgba(156, 163, 175, 0.35); }
+/* 色系（Pit Wall 语义规范） */
+.tag-green  { background: var(--status-success-bg); color: var(--status-success); border-color: var(--status-success-border); }
+.tag-blue   { background: var(--status-info-bg); color: var(--status-info); border-color: var(--status-info-border); }
+.tag-purple { background: var(--status-ai-bg); color: var(--status-ai); border-color: var(--status-ai-border); }
+.tag-orange { background: color-mix(in srgb, var(--status-warning-bg) 50%, var(--red-900)); color: color-mix(in srgb, var(--status-warning) 50%, var(--red-400)); border-color: color-mix(in srgb, var(--status-warning-border) 50%, var(--red-700)); }
+.tag-red    { background: var(--status-error-bg); color: var(--status-error); border-color: var(--status-error-border); }
+.tag-yellow { background: var(--status-warning-bg); color: var(--status-warning); border-color: var(--status-warning-border); }
+.tag-gray   { background: color-mix(in srgb, var(--g-300) 12%, transparent); color: var(--g-300); border-color: color-mix(in srgb, var(--g-300) 35%, transparent); }
 
 /* 添加标签按钮 */
 .btn-add-tag {
   display: inline-flex;
   align-items: center;
   gap: 3px;
-  background: rgba(255, 255, 255, 0.04);
+  background: color-mix(in srgb, var(--g-50) 4%, transparent);
   border: 1px dashed var(--border);
   color: var(--muted-foreground);
   padding: 2px 8px;
   border-radius: 12px;
   font-size: 0.75rem;
   cursor: pointer;
-  transition: all 0.15s;
+  transition: background-color var(--motion-duration-fast) var(--motion-ease-out), border-color var(--motion-duration-fast) var(--motion-ease-out), color var(--motion-duration-fast) var(--motion-ease-out);
 }
 
 .btn-add-tag:hover:not(:disabled) {
   border-color: var(--primary);
   color: var(--primary);
-  background: rgba(57, 255, 20, 0.06);
+  background: color-mix(in srgb, var(--primary) 8%, transparent);
 }
 
 .btn-add-tag:disabled {
@@ -422,7 +422,7 @@ async function handleAddPresetTag(preset: typeof PRESET_TAGS[number]) {
   display: flex;
   flex-direction: column;
   gap: 8px;
-  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.4);
+  box-shadow: var(--shadow-2);
 }
 
 .edit-label {
@@ -438,7 +438,7 @@ async function handleAddPresetTag(preset: typeof PRESET_TAGS[number]) {
   flex-direction: column;
   gap: 6px;
   padding-bottom: 8px;
-  border-bottom: 1px solid rgba(255, 255, 255, 0.06);
+  border-bottom: 1px solid var(--border-subtle);
 }
 
 .preset-chips-row {
@@ -457,7 +457,7 @@ async function handleAddPresetTag(preset: typeof PRESET_TAGS[number]) {
   font-weight: 600;
   cursor: pointer;
   border: 1px solid transparent;
-  transition: all 0.15s ease;
+  transition: transform var(--motion-duration-fast) var(--motion-ease-out), filter var(--motion-duration-fast) var(--motion-ease-out), opacity var(--motion-duration-fast) var(--motion-ease-out);
 }
 
 .preset-chip:hover:not(:disabled) {
@@ -499,12 +499,12 @@ async function handleAddPresetTag(preset: typeof PRESET_TAGS[number]) {
   color: var(--foreground);
   font-size: 0.82rem;
   outline: none;
-  transition: border-color 0.15s, box-shadow 0.15s;
+  transition: border-color var(--motion-duration-fast) var(--motion-ease-out), box-shadow var(--motion-duration-fast) var(--motion-ease-out);
 }
 
 .tag-input:focus {
   border-color: var(--primary);
-  box-shadow: 0 0 0 1px var(--primary);
+  box-shadow: var(--focus-ring-sm);
 }
 
 .color-picker {
@@ -520,44 +520,41 @@ async function handleAddPresetTag(preset: typeof PRESET_TAGS[number]) {
   border: 2px solid transparent;
   cursor: pointer;
   padding: 0;
-  transition: transform 0.15s, border-color 0.15s, box-shadow 0.15s;
+  transition: transform var(--motion-duration-fast) var(--motion-ease-out), border-color var(--motion-duration-fast) var(--motion-ease-out);
 }
 
 .color-dot.selected {
   transform: scale(1.25);
-  border-color: #ffffff;
-  box-shadow: 0 0 6px rgba(255, 255, 255, 0.5);
+  border-color: var(--g-50);
 }
 
-.bg-green  { background: #39ff14; }
-.bg-blue   { background: #38bdf8; }
-.bg-purple { background: #c084fc; }
-.bg-orange { background: #fb923c; }
-.bg-red    { background: #f87171; }
-.bg-yellow { background: #facc15; }
-.bg-gray   { background: #9ca3af; }
+.bg-green  { background: var(--status-success); }
+.bg-blue   { background: var(--status-info); }
+.bg-purple { background: var(--status-ai); }
+.bg-orange { background: color-mix(in srgb, var(--status-warning) 50%, var(--red-400)); }
+.bg-red    { background: var(--status-error); }
+.bg-yellow { background: var(--status-warning); }
+.bg-gray   { background: var(--g-300); }
 
 .btn-confirm-add {
   padding: 5px 12px;
   border-radius: 6px;
   background: var(--primary);
-  color: var(--primary-foreground);
+  color: var(--on-primary);
   border: none;
   font-size: 0.78rem;
   font-weight: 700;
   cursor: pointer;
-  box-shadow: var(--glow-primary);
-  transition: all 0.15s;
+  transition: background-color var(--motion-duration-fast) var(--motion-ease-out), transform var(--motion-duration-fast) var(--motion-ease-out), opacity var(--motion-duration-fast) var(--motion-ease-out);
 }
 
 .btn-confirm-add:disabled {
   opacity: 0.5;
   cursor: not-allowed;
-  box-shadow: none;
 }
 
 .btn-confirm-add:hover:not(:disabled) {
-  box-shadow: var(--glow-primary-hover);
+  background: var(--s-300);
   transform: translateY(-1px);
 }
 
@@ -569,11 +566,11 @@ async function handleAddPresetTag(preset: typeof PRESET_TAGS[number]) {
   border: 1px solid var(--border);
   font-size: 0.78rem;
   cursor: pointer;
-  transition: all 0.15s;
+  transition: background-color var(--motion-duration-fast) var(--motion-ease-out), color var(--motion-duration-fast) var(--motion-ease-out), border-color var(--motion-duration-fast) var(--motion-ease-out);
 }
 
 .btn-cancel-add:hover {
-  background: rgba(255, 255, 255, 0.08);
+  background: var(--surface-hover);
   color: var(--foreground);
 }
 
@@ -585,7 +582,7 @@ async function handleAddPresetTag(preset: typeof PRESET_TAGS[number]) {
   font-size: 0.72rem;
   margin-top: 4px;
   padding-top: 6px;
-  border-top: 1px solid rgba(255, 255, 255, 0.06);
+  border-top: 1px solid var(--border-subtle);
 }
 
 .sugg-label {
@@ -593,19 +590,19 @@ async function handleAddPresetTag(preset: typeof PRESET_TAGS[number]) {
 }
 
 .sugg-chip {
-  background: rgba(255, 255, 255, 0.05);
+  background: color-mix(in srgb, var(--g-50) 5%, transparent);
   border: 1px solid var(--border);
   color: var(--foreground);
   border-radius: 6px;
   padding: 2px 7px;
   font-size: 0.72rem;
   cursor: pointer;
-  transition: all 0.15s;
+  transition: color var(--motion-duration-fast) var(--motion-ease-out), border-color var(--motion-duration-fast) var(--motion-ease-out), background-color var(--motion-duration-fast) var(--motion-ease-out);
 }
 
 .sugg-chip:hover {
   color: var(--primary);
   border-color: var(--primary);
-  background: rgba(57, 255, 20, 0.08);
+  background: color-mix(in srgb, var(--primary) 8%, transparent);
 }
 </style>

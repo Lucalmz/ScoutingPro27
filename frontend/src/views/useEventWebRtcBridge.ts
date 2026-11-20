@@ -336,7 +336,8 @@ export function useEventWebRtcBridge({
       },
 
       onClientConnected: (userId: string, userName: string) => {
-        connStore.addConnectedScout(userId, userName)
+        const initialTransport = connStore.rtcService?.getScoutTransportInfo?.(userId) ?? null
+        connStore.addConnectedScout(userId, userName, initialTransport)
         if (connStore.rtcService) {
           inboxStore.flushOutbox(connStore.rtcService, userId)
         }
@@ -473,6 +474,14 @@ export function useEventWebRtcBridge({
             void triggerClientSyncPipeline(false)
           }
         }
+      },
+
+      onClientDisconnected: (userId: string) => {
+        connStore.removeConnectedScout(userId)
+      },
+
+      onScoutTransportInfoChanged: (userId: string, info) => {
+        connStore.setScoutTransportInfo(userId, info)
       },
 
       onTransportInfoChanged: (info) => {

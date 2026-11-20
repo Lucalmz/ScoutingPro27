@@ -240,7 +240,7 @@ function close() {
   position: fixed;
   inset: 0;
   z-index: 1000;
-  background: rgba(8, 8, 7, 0.86);
+  background: color-mix(in srgb, var(--g-950) 86%, transparent);
   display: flex;
   align-items: center;
   justify-content: center;
@@ -250,19 +250,18 @@ function close() {
 }
 
 .qr-modal-dialog {
-  background: var(--card, #141413);
-  border: 1px solid var(--border, #262624);
-  border-top: 2px solid var(--primary, #39ff14);
-  border-radius: 14px;
+  background: var(--popover);
+  border: 1px solid var(--border-strong);
+  border-radius: 18px;
   width: 100%;
   max-width: 440px;
-  box-shadow: 0 24px 60px rgba(0, 0, 0, 0.85);
+  box-shadow: var(--shadow-3);
   display: flex;
   flex-direction: column;
-  color: var(--foreground, #f0efe9);
+  color: var(--foreground);
   font-family: inherit;
   overflow: hidden;
-  animation: modalPop 0.25s cubic-bezier(0.16, 1, 0.3, 1);
+  animation: modalPop var(--motion-duration-moderate) var(--motion-ease-out);
 }
 
 @keyframes modalPop {
@@ -281,8 +280,8 @@ function close() {
   align-items: center;
   justify-content: space-between;
   padding: 16px 20px;
-  border-bottom: 1px solid var(--border, #262626);
-  background: rgba(255, 255, 255, 0.02);
+  border-bottom: 1px solid var(--border);
+  background: var(--surface-recessed);
 }
 
 .title-with-icon {
@@ -293,35 +292,34 @@ function close() {
 
 .header-icon {
   font-size: 22px;
-  color: var(--primary, #39ff14);
-  text-shadow: 0 0 8px rgba(57, 255, 20, 0.5);
+  color: var(--primary);
 }
 
 .qr-modal-header h3 {
   margin: 0;
-  font-family: 'Orbitron', 'ZCOOLQingKeHuangYou', sans-serif;
+  font-family: var(--font-sans);
   font-size: 17px;
   font-weight: 700;
-  color: var(--foreground, #f1f5f9);
-  letter-spacing: 0.04em;
+  color: var(--foreground);
+  letter-spacing: -0.01em;
 }
 
 .close-btn {
   background: transparent;
   border: none;
-  color: var(--muted-foreground, #a3a3a3);
+  color: var(--muted-foreground);
   cursor: pointer;
   padding: 4px;
   border-radius: 6px;
   display: flex;
   align-items: center;
   justify-content: center;
-  transition: all 0.15s ease;
+  transition: background-color var(--motion-duration-fast) var(--motion-ease-out), color var(--motion-duration-fast) var(--motion-ease-out);
 }
 
 .close-btn:hover {
-  background: var(--muted, #1a1a1a);
-  color: var(--foreground, #f1f5f9);
+  background: var(--surface-hover);
+  color: var(--foreground);
 }
 
 .qr-modal-body {
@@ -335,14 +333,14 @@ function close() {
   margin: 0;
   font-size: 13px;
   line-height: 1.5;
-  color: var(--muted-foreground, #a3a3a3);
+  color: var(--muted-foreground);
   text-align: center;
 }
 
 .channel-pill-bar {
   display: flex;
-  background: var(--muted, #1a1a1a);
-  border: 1px solid var(--border, #262626);
+  background: var(--surface-recessed);
+  border: 1px solid var(--border);
   border-radius: 12px;
   padding: 4px;
   gap: 4px;
@@ -360,21 +358,20 @@ function close() {
   border-radius: 8px;
   border: 1px solid transparent;
   background: transparent;
-  color: var(--muted-foreground, #a3a3a3);
+  color: var(--muted-foreground);
   cursor: pointer;
-  transition: all 0.2s ease;
+  transition: background-color var(--motion-duration-fast) var(--motion-ease-out), border-color var(--motion-duration-fast) var(--motion-ease-out), color var(--motion-duration-fast) var(--motion-ease-out);
 }
 
 .channel-pill-item:hover {
-  color: var(--foreground, #f1f5f9);
-  background: rgba(255, 255, 255, 0.04);
+  color: var(--foreground);
+  background: var(--surface-hover);
 }
 
 .channel-pill-item.active {
-  background: rgba(57, 255, 20, 0.12);
-  color: var(--primary, #39ff14);
-  border-color: rgba(57, 255, 20, 0.35);
-  box-shadow: 0 0 10px rgba(57, 255, 20, 0.15);
+  background: var(--status-success-bg);
+  color: var(--primary);
+  border-color: var(--status-success-border);
 }
 
 .pill-icon {
@@ -386,18 +383,17 @@ function close() {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  background: linear-gradient(135deg, rgba(57, 255, 20, 0.1), rgba(0, 0, 0, 0.4));
-  border: 1px solid rgba(57, 255, 20, 0.3);
+  background: linear-gradient(135deg, rgba(var(--primary-rgb), 0.1), color-mix(in srgb, var(--g-950) 65%, transparent));
+  border: 1px solid var(--status-success-border);
   border-radius: 12px;
   padding: 12px 16px;
   cursor: pointer;
-  transition: all 0.2s ease;
+  transition: background-color var(--motion-duration-fast) var(--motion-ease-out), border-color var(--motion-duration-fast) var(--motion-ease-out);
 }
 
 .code-badge-bar:hover {
-  background: linear-gradient(135deg, rgba(57, 255, 20, 0.16), rgba(0, 0, 0, 0.5));
-  border-color: var(--primary, #39ff14);
-  box-shadow: var(--glow-primary);
+  background: linear-gradient(135deg, rgba(var(--primary-rgb), 0.16), color-mix(in srgb, var(--g-950) 75%, transparent));
+  border-color: var(--primary);
 }
 
 .code-badge-left {
@@ -407,50 +403,48 @@ function close() {
 }
 
 .code-label {
-  font-family: 'Orbitron', sans-serif;
+  font-family: var(--font-sans);
   font-size: 11px;
   font-weight: 600;
   text-transform: uppercase;
   letter-spacing: 0.05em;
-  color: var(--muted-foreground, #a3a3a3);
+  color: var(--muted-foreground);
 }
 
 .code-value {
-  font-family: 'Orbitron', monospace;
+  font-family: var(--font-numeric);
+  font-variant-numeric: tabular-nums;
   font-size: 26px;
   font-weight: 900;
-  color: var(--primary, #39ff14);
+  color: var(--primary);
   letter-spacing: 2px;
-  text-shadow: 0 0 10px rgba(57, 255, 20, 0.5);
 }
 
 .btn-copy-code-mini {
   display: flex;
   align-items: center;
   gap: 4px;
-  background: var(--card, #0a0a0a);
-  border: 1px solid var(--border, #262626);
+  background: var(--card);
+  border: 1px solid var(--border);
   border-radius: 8px;
   padding: 6px 10px;
-  color: var(--foreground, #f1f5f9);
+  color: var(--foreground);
   font-size: 12px;
   font-weight: 600;
   cursor: pointer;
-  transition: all 0.15s ease;
+  transition: background-color var(--motion-duration-fast) var(--motion-ease-out), border-color var(--motion-duration-fast) var(--motion-ease-out), color var(--motion-duration-fast) var(--motion-ease-out);
 }
 
 .btn-copy-code-mini:hover {
-  background: rgba(57, 255, 20, 0.12);
-  color: var(--primary, #39ff14);
-  border-color: var(--primary, #39ff14);
-  box-shadow: 0 0 10px rgba(57, 255, 20, 0.2);
+  background: var(--status-success-bg);
+  color: var(--primary);
+  border-color: var(--primary);
 }
 
 .btn-copy-code-mini.is-copied {
-  background: var(--primary, #39ff14);
-  color: var(--primary-foreground, #000000);
-  border-color: var(--primary, #39ff14);
-  box-shadow: var(--glow-primary);
+  background: var(--primary);
+  color: var(--on-primary);
+  border-color: var(--primary);
 }
 
 .btn-copy-code-mini .material-icons {
@@ -463,11 +457,11 @@ function close() {
   flex-direction: column;
   align-items: center;
   justify-content: center;
-  background: #ffffff;
+  background: var(--g-50);
   border-radius: 12px;
   padding: 16px;
-  box-shadow: 0 8px 30px rgba(0, 0, 0, 0.6);
-  border: 2px solid var(--border, #262626);
+  box-shadow: var(--shadow-2);
+  border: 1px solid var(--border);
   margin: 0 auto;
 }
 
@@ -483,15 +477,15 @@ function close() {
   margin-top: 10px;
   font-size: 12px;
   font-weight: 600;
-  color: #1a1a1a;
+  color: var(--g-900);
 }
 
 /* 链接输入框与复制 */
 .url-copy-box {
   display: flex;
   gap: 8px;
-  background: var(--input, #1a1a1a);
-  border: 1px solid var(--border, #262626);
+  background: var(--input);
+  border: 1px solid var(--border);
   border-radius: 10px;
   padding: 4px 4px 4px 12px;
   align-items: center;
@@ -501,8 +495,8 @@ function close() {
   flex: 1;
   background: transparent;
   border: none;
-  color: var(--foreground, #f1f5f9);
-  font-family: 'SF Mono', Monaco, Consolas, monospace;
+  color: var(--foreground);
+  font-family: var(--font-mono);
   font-size: 12px;
   outline: none;
   overflow: hidden;
@@ -514,8 +508,8 @@ function close() {
   display: flex;
   align-items: center;
   gap: 4px;
-  background: var(--primary, #39ff14);
-  color: var(--primary-foreground, #000000);
+  background: var(--primary);
+  color: var(--on-primary);
   border: none;
   border-radius: 7px;
   padding: 8px 14px;
@@ -523,12 +517,11 @@ function close() {
   font-weight: 700;
   cursor: pointer;
   white-space: nowrap;
-  transition: all 0.15s ease;
+  transition: background-color var(--motion-duration-fast) var(--motion-ease-out), transform var(--motion-duration-fast) var(--motion-ease-out);
 }
 
 .btn-copy:hover {
-  background: #2cd40e;
-  box-shadow: var(--glow-primary);
+  background: var(--s-300);
 }
 
 .btn-copy .material-icons {
@@ -541,7 +534,7 @@ function close() {
   flex-direction: column;
   gap: 8px;
   padding-top: 4px;
-  border-top: 1px dashed var(--border, #262626);
+  border-top: 1px dashed var(--border);
 }
 
 .cloud-url-header {
@@ -551,10 +544,10 @@ function close() {
 }
 
 .cloud-url-title {
-  font-family: 'Orbitron', 'ZCOOLQingKeHuangYou', sans-serif;
+  font-family: var(--font-sans);
   font-size: 11px;
   font-weight: 600;
-  color: var(--muted-foreground, #a3a3a3);
+  color: var(--muted-foreground);
   text-transform: uppercase;
   letter-spacing: 0.05em;
 }
@@ -565,17 +558,17 @@ function close() {
   gap: 4px;
   background: transparent;
   border: none;
-  color: var(--muted-foreground, #a3a3a3);
+  color: var(--muted-foreground);
   font-size: 11px;
   cursor: pointer;
   padding: 2px 6px;
   border-radius: 4px;
-  transition: all 0.15s ease;
+  transition: background-color var(--motion-duration-fast) var(--motion-ease-out), color var(--motion-duration-fast) var(--motion-ease-out);
 }
 
 .btn-edit-cloud-url:hover {
-  background: var(--muted, #1a1a1a);
-  color: var(--foreground, #f1f5f9);
+  background: var(--surface-hover);
+  color: var(--foreground);
 }
 
 .btn-edit-cloud-url .material-icons {
@@ -589,38 +582,38 @@ function close() {
 
 .cloud-url-input {
   flex: 1;
-  background: var(--input, #1a1a1a);
-  border: 1px solid var(--border, #262626);
+  background: var(--input);
+  border: 1px solid var(--border);
   border-radius: 6px;
   padding: 6px 10px;
-  color: var(--foreground, #f1f5f9);
+  color: var(--foreground);
   font-size: 12px;
   outline: none;
+  transition: border-color var(--motion-duration-fast) var(--motion-ease-out), box-shadow var(--motion-duration-fast) var(--motion-ease-out);
 }
 
 .cloud-url-input:focus {
-  border-color: var(--ring, #39ff14);
-  box-shadow: var(--glow-primary);
+  border-color: var(--ring);
+  box-shadow: var(--focus-ring-sm);
 }
 
 .btn-save-cloud-url {
   display: flex;
   align-items: center;
   gap: 4px;
-  background: var(--primary, #39ff14);
+  background: var(--primary);
   border: none;
   border-radius: 6px;
   padding: 6px 12px;
-  color: var(--primary-foreground, #000000);
+  color: var(--on-primary);
   font-size: 12px;
   font-weight: 700;
   cursor: pointer;
-  transition: all 0.15s ease;
+  transition: background-color var(--motion-duration-fast) var(--motion-ease-out), transform var(--motion-duration-fast) var(--motion-ease-out);
 }
 
 .btn-save-cloud-url:hover {
-  background: #2cd40e;
-  box-shadow: var(--glow-primary);
+  background: var(--s-300);
 }
 
 .btn-save-cloud-url .material-icons {
@@ -630,7 +623,7 @@ function close() {
 .cloud-url-hint {
   margin: 0;
   font-size: 11px;
-  color: var(--muted-foreground, #a3a3a3);
+  color: var(--muted-foreground);
   line-height: 1.4;
 }
 </style>

@@ -126,7 +126,9 @@ function formatTagLabel(tagKey?: string | null): string {
   font-size: 12px;
   font-weight: 500;
   cursor: pointer;
-  transition: all 0.2s ease;
+  transition: border-color var(--motion-duration-fast) var(--motion-ease-out),
+              color var(--motion-duration-fast) var(--motion-ease-out),
+              background-color var(--motion-duration-fast) var(--motion-ease-out);
 }
 
 .btn-custom-cols:hover {
@@ -135,13 +137,14 @@ function formatTagLabel(tagKey?: string | null): string {
 }
 
 .btn-custom-cols.has-selected {
-  border-color: rgba(57, 255, 20, 0.4);
-  color: var(--primary, #39ff14);
+  border-color: var(--status-success-border);
+  color: var(--primary);
 }
 
 .badge-col-count {
   font-weight: 700;
-  color: var(--primary, #39ff14);
+  color: var(--primary);
+  font-variant-numeric: tabular-nums;
 }
 
 .cols-dropdown-card {
@@ -150,11 +153,11 @@ function formatTagLabel(tagKey?: string | null): string {
   right: 0;
   z-index: 100;
   width: 260px;
-  background: var(--card, #121212);
+  background: var(--popover);
   border: 1px solid var(--border);
   border-radius: 8px;
   padding: 10px;
-  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.6);
+  box-shadow: var(--shadow-2);
   display: flex;
   flex-direction: column;
   gap: 8px;
@@ -189,7 +192,7 @@ function formatTagLabel(tagKey?: string | null): string {
 .btn-link {
   background: none;
   border: none;
-  color: var(--primary, #39ff14);
+  color: var(--primary);
   padding: 0;
   font-size: 11px;
   cursor: pointer;
@@ -215,15 +218,15 @@ function formatTagLabel(tagKey?: string | null): string {
   border-radius: 4px;
   cursor: pointer;
   font-size: 12px;
-  transition: background 0.15s ease;
+  transition: background-color var(--motion-duration-fast) var(--motion-ease-out);
 }
 
 .col-option-row:hover {
-  background: rgba(255, 255, 255, 0.05);
+  background: var(--surface-hover);
 }
 
 .col-option-row input[type="checkbox"] {
-  accent-color: var(--primary, #39ff14);
+  accent-color: var(--primary);
 }
 
 .col-option-row .opt-name {
@@ -237,7 +240,7 @@ function formatTagLabel(tagKey?: string | null): string {
 .col-option-row .opt-tag {
   font-size: 10px;
   color: var(--muted-foreground);
-  background: rgba(255, 255, 255, 0.06);
+  background: var(--surface-recessed);
   padding: 1px 4px;
   border-radius: 3px;
 }
@@ -268,11 +271,13 @@ function formatTagLabel(tagKey?: string | null): string {
   padding: 3px 9px;
   border-radius: 12px;
   font-size: 0.75rem;
-  background: rgba(255, 255, 255, 0.05);
+  background: var(--surface-elevated);
   border: 1px solid var(--border);
   color: var(--muted-foreground);
   cursor: pointer;
-  transition: all 0.15s ease;
+  transition: background-color var(--motion-duration-fast) var(--motion-ease-out),
+              border-color var(--motion-duration-fast) var(--motion-ease-out),
+              color var(--motion-duration-fast) var(--motion-ease-out);
 }
 
 .filter-chip:hover {

@@ -778,8 +778,8 @@ function openFullTeamPage(teamNumber: number) {
   width: 360px;
   min-width: 310px;
   max-width: 100%;
-  background: var(--card, #141413);
-  border: 1px solid var(--border, #262624);
+  background: var(--card);
+  border: 1px solid var(--border);
   border-radius: 14px;
   display: flex;
   flex-direction: column;
@@ -788,15 +788,15 @@ function openFullTeamPage(teamNumber: number) {
 
 .wb-sidebar-header {
   padding: 10px 12px;
-  border-bottom: 1px solid var(--border, #262624);
-  background: var(--surface-elevated, #1a1b19);
+  border-bottom: 1px solid var(--border);
+  background: var(--surface-elevated);
 }
 
 .wb-mode-tabs {
   display: grid;
   grid-template-columns: 1fr 1fr;
   gap: 6px;
-  background: #0e0f0e;
+  background: var(--surface-recessed);
   padding: 4px;
   border-radius: 9px;
 }
@@ -806,7 +806,7 @@ function openFullTeamPage(teamNumber: number) {
   border: none;
   border-radius: 6px;
   background: transparent;
-  color: var(--muted-foreground, #8e8d87);
+  color: var(--muted-foreground);
   font-size: 12px;
   font-weight: 700;
   display: inline-flex;
@@ -814,19 +814,19 @@ function openFullTeamPage(teamNumber: number) {
   justify-content: center;
   gap: 5px;
   cursor: pointer;
-  transition: all 0.15s ease;
+  transition: all var(--motion-duration-fast) var(--motion-ease-out);
 }
 
 .wb-mode-tab.active {
-  background: var(--card, #1c1d1b);
-  color: var(--primary, #39ff14);
-  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.45);
+  background: var(--surface-elevated);
+  color: var(--primary);
+  box-shadow: var(--shadow-1);
 }
 
 .wb-prediction-card {
   padding: 10px 12px;
-  border-bottom: 1px solid var(--border, #262624);
-  background: #101110;
+  border-bottom: 1px solid var(--border);
+  background: var(--surface-recessed);
 }
 
 .wb-pred-top {
@@ -851,33 +851,34 @@ function openFullTeamPage(teamNumber: number) {
   font-weight: 700;
   text-transform: uppercase;
   letter-spacing: 0.04em;
-  color: var(--muted-foreground, #8e8d87);
+  color: var(--muted-foreground);
 }
 
 .wb-pred-score {
   font-size: 18px;
   font-weight: 800;
+  font-family: var(--font-numeric);
   font-variant-numeric: tabular-nums;
 }
 
 .wb-pred-side.red .wb-pred-score {
-  color: #f87171;
+  color: var(--alliance-red);
 }
 
 .wb-pred-side.blue .wb-pred-score {
-  color: #60a5fa;
+  color: var(--alliance-blue);
 }
 
 .wb-pred-sub {
   font-size: 10px;
-  color: var(--muted-foreground, #8e8d87);
+  color: var(--muted-foreground);
   font-variant-numeric: tabular-nums;
 }
 
 .wb-pred-vs {
   font-size: 11px;
   font-weight: 800;
-  color: #666;
+  color: var(--g-400);
 }
 
 .wb-pred-bar {
@@ -885,23 +886,23 @@ function openFullTeamPage(teamNumber: number) {
   border-radius: 999px;
   overflow: hidden;
   display: flex;
-  background: #222;
+  background: var(--surface-hover);
 }
 
 .wb-pred-fill.red {
-  background: linear-gradient(90deg, #dc2626, #f97316);
-  transition: width 0.35s ease-out;
+  background: linear-gradient(90deg, var(--alliance-red-fill), var(--red-300));
+  transition: width var(--motion-duration-normal) var(--motion-ease-out);
 }
 
 .wb-pred-fill.blue {
-  background: linear-gradient(90deg, #06b6d4, #2563eb);
-  transition: width 0.35s ease-out;
+  background: linear-gradient(90deg, var(--status-info), var(--alliance-blue-fill));
+  transition: width var(--motion-duration-normal) var(--motion-ease-out);
 }
 
 @media (prefers-reduced-motion: no-preference) {
   .wb-pred-fill.red,
   .wb-pred-fill.blue {
-    transition: width 0.55s linear(0, 0.45 15%, 1.08 35%, 0.97 55%, 1.01 75%, 1);
+    transition: width var(--motion-duration-slow) linear(0, 0.45 15%, 1.08 35%, 0.97 55%, 1.01 75%, 1);
   }
 }
 
@@ -911,14 +912,14 @@ function openFullTeamPage(teamNumber: number) {
   gap: 3px;
   padding: 2px 6px;
   border-radius: 5px;
-  border: 1px solid rgba(57, 255, 20, 0.25);
-  background: rgba(57, 255, 20, 0.06);
-  color: var(--primary, #39ff14);
+  border: 1px solid var(--status-success-border);
+  background: var(--status-success-bg);
+  color: var(--primary);
   cursor: pointer;
 }
 
 .wb-hist-match-btn:hover {
-  background: rgba(57, 255, 20, 0.16);
+  background: var(--s-800);
 }
 
 .wb-sidebar-scroll {
@@ -939,24 +940,25 @@ function openFullTeamPage(teamNumber: number) {
 .wb-team-card {
   border-radius: 10px;
   padding: 9px 10px;
-  background: #181917;
-  border: 1px solid #282926;
+  background: var(--surface-elevated);
+  border: 1px solid var(--border);
   border-left-width: 4px;
   cursor: pointer;
-  transition: border-color 0.15s ease, transform 0.12s ease;
+  transition: border-color var(--motion-duration-fast) var(--motion-ease-out),
+              transform var(--motion-duration-fast) var(--motion-ease-out);
 }
 
 .wb-team-card.red {
-  border-left-color: #ef4444;
+  border-left-color: var(--alliance-red);
 }
 
 .wb-team-card.blue {
-  border-left-color: #3b82f6;
+  border-left-color: var(--alliance-blue);
 }
 
 .wb-team-card.selected {
-  border-color: var(--primary, #39ff14);
-  background: #1c1e1a;
+  border-color: var(--primary);
+  background: var(--status-success-bg);
 }
 
 .wb-card-hdr {
@@ -977,26 +979,29 @@ function openFullTeamPage(teamNumber: number) {
   font-weight: 800;
   padding: 2px 6px;
   border-radius: 5px;
-  color: #fff;
+  color: var(--g-50);
 }
 
 .wb-st-badge.red1 {
-  background: #dc2626;
+  background: var(--alliance-red-fill);
 }
 .wb-st-badge.red2 {
-  background: #ea580c;
+  background: var(--red-700);
+  color: var(--red-300);
 }
 .wb-st-badge.blue1 {
-  background: #2563eb;
+  background: var(--alliance-blue-fill);
 }
 .wb-st-badge.blue2 {
-  background: #0891b2;
+  background: var(--status-info-border);
+  color: var(--status-info);
 }
 
 .wb-team-num {
   font-size: 15px;
   font-weight: 800;
-  color: var(--foreground, #f0efe9);
+  color: var(--foreground);
+  font-family: var(--font-numeric);
   font-variant-numeric: tabular-nums;
 }
 
@@ -1005,8 +1010,8 @@ function openFullTeamPage(teamNumber: number) {
   font-weight: 700;
   padding: 1px 6px;
   border-radius: 999px;
-  background: rgba(57, 255, 20, 0.14);
-  color: var(--primary, #39ff14);
+  background: var(--status-success-bg);
+  color: var(--primary);
 }
 
 .wb-card-actions {
@@ -1019,9 +1024,9 @@ function openFullTeamPage(teamNumber: number) {
   min-inline-size: 26px;
   min-block-size: 26px;
   border-radius: 6px;
-  border: 1px solid #2e302c;
-  background: #121311;
-  color: #b5b4ae;
+  border: 1px solid var(--border-strong);
+  background: var(--card);
+  color: var(--g-200);
   display: inline-flex;
   align-items: center;
   justify-content: center;
@@ -1029,8 +1034,8 @@ function openFullTeamPage(teamNumber: number) {
 }
 
 .wb-mini-icon-btn:hover {
-  color: var(--primary, #39ff14);
-  border-color: var(--primary, #39ff14);
+  color: var(--primary);
+  border-color: var(--primary);
 }
 
 .wb-mini-icon-btn .material-icons {
@@ -1039,7 +1044,7 @@ function openFullTeamPage(teamNumber: number) {
 
 .wb-team-subname {
   font-size: 11px;
-  color: var(--muted-foreground, #8e8d87);
+  color: var(--muted-foreground);
   margin: 2px 0 6px;
 }
 
@@ -1047,7 +1052,7 @@ function openFullTeamPage(teamNumber: number) {
   display: grid;
   grid-template-columns: repeat(4, 1fr);
   gap: 5px;
-  background: #111210;
+  background: var(--surface-recessed);
   padding: 6px;
   border-radius: 7px;
 }
@@ -1064,18 +1069,19 @@ function openFullTeamPage(teamNumber: number) {
 
 .k-lbl {
   font-size: 10px;
-  color: var(--muted-foreground, #8e8d87);
+  color: var(--muted-foreground);
 }
 
 .k-val {
   font-size: 13px;
   font-weight: 800;
-  color: var(--foreground, #f0efe9);
+  color: var(--foreground);
+  font-family: var(--font-numeric);
   font-variant-numeric: tabular-nums;
 }
 
 .k-val.primary {
-  color: var(--primary, #39ff14);
+  color: var(--primary);
 }
 
 .wb-meta-chips {
@@ -1089,23 +1095,23 @@ function openFullTeamPage(teamNumber: number) {
   font-size: 11px;
   padding: 2px 6px;
   border-radius: 5px;
-  background: #222420;
-  color: #c8c7c0;
+  background: var(--surface-hover);
+  color: var(--g-200);
 }
 
 .wb-chip.hardware {
-  background: rgba(59, 130, 246, 0.15);
-  color: #93c5fd;
+  background: var(--alliance-blue-bg);
+  color: var(--blue-300);
 }
 
 .wb-chip.danger {
-  background: rgba(239, 68, 68, 0.18);
-  color: #fca5a5;
+  background: var(--status-error-bg);
+  color: var(--status-error-text);
 }
 
 .wb-chip.brag {
-  background: rgba(234, 179, 8, 0.16);
-  color: #fde047;
+  background: var(--status-warning-bg);
+  color: var(--status-warning);
 }
 
 .wb-role-row {
@@ -1118,14 +1124,14 @@ function openFullTeamPage(teamNumber: number) {
 
 .wb-role-lbl {
   font-size: 11px;
-  color: var(--muted-foreground, #8e8d87);
+  color: var(--muted-foreground);
 }
 
 .wb-role-select {
   flex: 1;
-  background: #111210;
-  color: var(--foreground, #f0efe9);
-  border: 1px solid #2c2e2a;
+  background: var(--surface-recessed);
+  color: var(--foreground);
+  border: 1px solid var(--border);
   border-radius: 6px;
   padding: 3px 6px;
   font-size: 11px;
@@ -1133,8 +1139,8 @@ function openFullTeamPage(teamNumber: number) {
 
 .wb-notes-box {
   margin-top: 4px;
-  background: #181917;
-  border: 1px solid #282926;
+  background: var(--surface-elevated);
+  border: 1px solid var(--border);
   border-radius: 10px;
   padding: 8px 10px;
   display: flex;
@@ -1145,7 +1151,7 @@ function openFullTeamPage(teamNumber: number) {
 .wb-notes-hdr {
   font-size: 12px;
   font-weight: 700;
-  color: var(--foreground, #f0efe9);
+  color: var(--foreground);
   display: flex;
   align-items: center;
   gap: 5px;
@@ -1154,9 +1160,9 @@ function openFullTeamPage(teamNumber: number) {
 .wb-notes-textarea {
   width: 100%;
   resize: vertical;
-  background: #101110;
-  color: var(--foreground, #f0efe9);
-  border: 1px solid #2a2b28;
+  background: var(--surface-recessed);
+  color: var(--foreground);
+  border: 1px solid var(--border);
   border-radius: 7px;
   padding: 7px 8px;
   font-size: 12px;
@@ -1172,9 +1178,9 @@ function openFullTeamPage(teamNumber: number) {
 .wb-st-pill {
   padding: 5px 4px;
   border-radius: 7px;
-  border: 1px solid #2b2c29;
-  background: #161715;
-  color: var(--foreground, #f0efe9);
+  border: 1px solid var(--border);
+  background: var(--surface-elevated);
+  color: var(--foreground);
   display: flex;
   flex-direction: column;
   align-items: center;
@@ -1182,19 +1188,21 @@ function openFullTeamPage(teamNumber: number) {
 }
 
 .wb-st-pill.active {
-  border-color: var(--primary, #39ff14);
-  background: rgba(57, 255, 20, 0.1);
+  border-color: var(--primary);
+  background: var(--status-success-bg);
 }
 
 .wb-st-pill .st-code {
   font-size: 10px;
   font-weight: 800;
-  color: var(--muted-foreground, #8e8d87);
+  color: var(--muted-foreground);
 }
 
 .wb-st-pill .st-num {
   font-size: 12px;
   font-weight: 800;
+  font-family: var(--font-numeric);
+  font-variant-numeric: tabular-nums;
 }
 
 .wb-detail-hero {
@@ -1203,8 +1211,8 @@ function openFullTeamPage(teamNumber: number) {
   justify-content: space-between;
   padding: 10px;
   border-radius: 10px;
-  background: #181917;
-  border: 1px solid #282926;
+  background: var(--surface-elevated);
+  border: 1px solid var(--border);
 }
 
 .wb-detail-title-row {
@@ -1217,11 +1225,13 @@ function openFullTeamPage(teamNumber: number) {
   margin: 0;
   font-size: 18px;
   font-weight: 800;
+  font-family: var(--font-numeric);
+  font-variant-numeric: tabular-nums;
 }
 
 .wb-detail-team-name {
   font-size: 12px;
-  color: var(--muted-foreground, #8e8d87);
+  color: var(--muted-foreground);
   margin-top: 2px;
 }
 
@@ -1231,8 +1241,8 @@ function openFullTeamPage(teamNumber: number) {
 }
 
 .wb-detail-section {
-  background: #181917;
-  border: 1px solid #282926;
+  background: var(--surface-elevated);
+  border: 1px solid var(--border);
   border-radius: 10px;
   padding: 9px 10px;
 }
@@ -1241,7 +1251,7 @@ function openFullTeamPage(teamNumber: number) {
   margin: 0 0 7px 0;
   font-size: 12px;
   font-weight: 700;
-  color: var(--muted-foreground, #8e8d87);
+  color: var(--muted-foreground);
 }
 
 .wb-pit-box {
@@ -1260,8 +1270,8 @@ function openFullTeamPage(teamNumber: number) {
   display: flex;
   justify-content: space-between;
   font-size: 11px;
-  color: #c8c7c0;
-  background: #111210;
+  color: var(--g-200);
+  background: var(--surface-recessed);
   padding: 5px 8px;
   border-radius: 6px;
 }
@@ -1269,7 +1279,7 @@ function openFullTeamPage(teamNumber: number) {
 .wb-pit-auto-note {
   margin: 0;
   font-size: 11px;
-  color: #a8a7a0;
+  color: var(--g-300);
   line-height: 1.4;
 }
 
@@ -1282,14 +1292,14 @@ function openFullTeamPage(teamNumber: number) {
 }
 
 .wb-history-item {
-  background: #111210;
-  border: 1px solid #252623;
+  background: var(--surface-recessed);
+  border: 1px solid var(--border);
   border-radius: 7px;
   padding: 6px 8px;
 }
 
 .wb-history-item.broken {
-  border-color: rgba(239, 68, 68, 0.5);
+  border-color: var(--status-error-border);
 }
 
 .wb-hist-top {
@@ -1301,22 +1311,27 @@ function openFullTeamPage(teamNumber: number) {
 
 .wb-hist-match {
   font-weight: 800;
-  color: var(--primary, #39ff14);
+  color: var(--primary);
+  font-family: var(--font-numeric);
+  font-variant-numeric: tabular-nums;
 }
 
 .wb-hist-scores {
   font-size: 11px;
-  color: var(--muted-foreground, #8e8d87);
+  color: var(--muted-foreground);
+  font-variant-numeric: tabular-nums;
 }
 
 .wb-hist-total {
-  color: var(--foreground, #f0efe9);
+  color: var(--foreground);
+  font-family: var(--font-numeric);
+  font-variant-numeric: tabular-nums;
 }
 
 .wb-hist-notes {
   margin-top: 4px;
   font-size: 11px;
-  color: #b5b4ae;
+  color: var(--g-200);
   display: flex;
   align-items: center;
   gap: 5px;
@@ -1327,13 +1342,13 @@ function openFullTeamPage(teamNumber: number) {
   font-weight: 800;
   padding: 1px 5px;
   border-radius: 4px;
-  background: rgba(239, 68, 68, 0.2);
-  color: #f87171;
+  background: var(--status-error-bg);
+  color: var(--status-error);
 }
 
 .wb-empty-hint {
   font-size: 12px;
-  color: var(--muted-foreground, #8e8d87);
+  color: var(--muted-foreground);
   text-align: center;
   padding: 10px 4px;
 }
@@ -1341,7 +1356,7 @@ function openFullTeamPage(teamNumber: number) {
 .wb-rp-strip {
   margin-top: 8px;
   padding-top: 8px;
-  border-top: 1px dashed rgba(255, 255, 255, 0.08);
+  border-top: 1px dashed var(--border);
   display: flex;
   flex-direction: column;
   gap: 4px;
@@ -1358,18 +1373,18 @@ function openFullTeamPage(teamNumber: number) {
   font-weight: 700;
   padding: 2px 7px;
   border-radius: 6px;
-  background: rgba(255, 255, 255, 0.04);
-  color: #b7b6af;
+  background: var(--surface-elevated);
+  color: var(--g-200);
 }
 
 .wb-rp-pill.red.met {
-  background: rgba(239, 68, 68, 0.16);
-  color: #fca5a5;
+  background: var(--alliance-red-bg);
+  color: var(--red-300);
 }
 
 .wb-rp-pill.blue.met {
-  background: rgba(59, 130, 246, 0.16);
-  color: #93c5fd;
+  background: var(--alliance-blue-bg);
+  color: var(--blue-300);
 }
 
 .wb-nectar-budget {
@@ -1377,11 +1392,11 @@ function openFullTeamPage(teamNumber: number) {
   flex-wrap: wrap;
   gap: 6px;
   font-size: 10px;
-  color: #8e8d87;
+  color: var(--muted-foreground);
 }
 
 .wb-nectar-budget .over {
-  color: #facc15;
+  color: var(--status-warning);
   font-weight: 700;
 }
 
@@ -1393,12 +1408,12 @@ function openFullTeamPage(teamNumber: number) {
 }
 
 .wb-kpi-cell .k-val.warn {
-  color: #facc15;
+  color: var(--status-warning);
 }
 
 .wb-hist-biobuzz {
   font-size: 10.5px;
-  color: #9ae6b4;
+  color: var(--s-200);
   margin-top: 3px;
 }
 </style>

@@ -258,7 +258,7 @@ function closeModal() {
 .cf-modal-backdrop {
   position: fixed;
   inset: 0;
-  background: rgba(8, 8, 7, 0.82);
+  background: color-mix(in srgb, var(--g-950) 82%, transparent);
   z-index: 1050;
   display: flex;
   align-items: center;
@@ -270,10 +270,10 @@ function closeModal() {
   width: 100%;
   max-width: 760px;
   max-height: 90vh;
-  background: var(--card, #0a0a0a);
-  border: 1px solid var(--border, #262626);
+  background: var(--card);
+  border: 1px solid var(--border);
   border-radius: 16px;
-  box-shadow: 0 16px 40px rgba(0, 0, 0, 0.9), 0 0 24px rgba(57, 255, 20, 0.08);
+  box-shadow: var(--shadow-3);
   display: flex;
   flex-direction: column;
   overflow: hidden;
@@ -285,7 +285,7 @@ function closeModal() {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  border-bottom: 1px solid var(--border, #262626);
+  border-bottom: 1px solid var(--border);
 }
 
 .header-left {
@@ -295,7 +295,7 @@ function closeModal() {
 }
 
 .header-icon {
-  color: var(--primary, #39ff14);
+  color: var(--primary);
   font-size: 22px;
 }
 
@@ -303,28 +303,28 @@ function closeModal() {
   margin: 0;
   font-size: 16px;
   font-weight: 700;
-  color: var(--foreground, #f1f5f9);
+  color: var(--foreground);
 }
 
 .btn-close {
   background: transparent;
   border: none;
-  color: var(--muted-foreground, #a3a3a3);
+  color: var(--muted-foreground);
   cursor: pointer;
   padding: 4px;
   border-radius: 6px;
 }
 
 .btn-close:hover {
-  color: var(--foreground, #f1f5f9);
-  background: rgba(255, 255, 255, 0.05);
+  color: var(--foreground);
+  background: var(--surface-hover);
 }
 
 /* Tabs */
 .cf-tabs {
   display: flex;
-  border-bottom: 1px solid var(--border, #262626);
-  background: rgba(255, 255, 255, 0.01);
+  border-bottom: 1px solid var(--border);
+  background: var(--surface-recessed);
 }
 
 .cf-tab-btn {
@@ -333,7 +333,7 @@ function closeModal() {
   background: transparent;
   border: none;
   border-bottom: 2px solid transparent;
-  color: var(--muted-foreground, #a3a3a3);
+  color: var(--muted-foreground);
   font-size: 13px;
   font-weight: 600;
   display: flex;
@@ -341,13 +341,15 @@ function closeModal() {
   justify-content: center;
   gap: 8px;
   cursor: pointer;
-  transition: all 0.2s;
+  transition: background-color var(--motion-duration-fast) var(--motion-ease-out),
+              border-color var(--motion-duration-fast) var(--motion-ease-out),
+              color var(--motion-duration-fast) var(--motion-ease-out);
 }
 
 .cf-tab-btn.is-active {
-  color: var(--primary, #39ff14);
-  border-bottom-color: var(--primary, #39ff14);
-  background: rgba(57, 255, 20, 0.05);
+  color: var(--primary);
+  border-bottom-color: var(--primary);
+  background: color-mix(in srgb, var(--primary) 6%, transparent);
 }
 
 .cf-modal-body {
@@ -366,22 +368,22 @@ function closeModal() {
 
 .list-summary {
   font-size: 13px;
-  color: var(--muted-foreground, #a3a3a3);
+  color: var(--muted-foreground);
 }
 
 .btn-create-field {
   display: inline-flex;
   align-items: center;
   gap: 6px;
-  background: var(--primary, #39ff14);
-  color: #000;
+  background: var(--primary);
+  color: var(--on-primary);
   border: none;
   border-radius: 8px;
   padding: 8px 16px;
   font-size: 13px;
   font-weight: 700;
   cursor: pointer;
-  transition: opacity 0.2s;
+  transition: opacity var(--motion-duration-fast) var(--motion-ease-out);
 }
 
 .btn-create-field:hover {
@@ -391,7 +393,7 @@ function closeModal() {
 .cf-empty-state {
   text-align: center;
   padding: 40px 10px;
-  color: var(--muted-foreground, #a3a3a3);
+  color: var(--muted-foreground);
 }
 
 .empty-icon {
@@ -413,8 +415,8 @@ function closeModal() {
 }
 
 .cf-card {
-  background: rgba(255, 255, 255, 0.02);
-  border: 1px solid var(--border, #262626);
+  background: color-mix(in srgb, var(--g-50) 2%, transparent);
+  border: 1px solid var(--border);
   border-radius: 10px;
   padding: 12px 14px;
   display: flex;
@@ -443,7 +445,7 @@ function closeModal() {
 .cf-card-title {
   font-size: 14px;
   font-weight: 700;
-  color: var(--foreground, #f1f5f9);
+  color: var(--foreground);
 }
 
 .cf-badge-phase, .cf-badge-type, .cf-badge-unit {
@@ -454,18 +456,18 @@ function closeModal() {
 }
 
 .cf-badge-phase {
-  background: rgba(59, 130, 246, 0.15);
-  color: #60a5fa;
+  background: var(--status-info-bg);
+  color: var(--status-info);
 }
 
 .cf-badge-type {
-  background: rgba(57, 255, 20, 0.15);
-  color: var(--primary, #39ff14);
+  background: var(--status-success-bg);
+  color: var(--primary);
 }
 
 .cf-badge-unit {
-  background: rgba(255, 255, 255, 0.08);
-  color: var(--muted-foreground, #a3a3a3);
+  background: var(--surface-hover);
+  color: var(--muted-foreground);
 }
 
 .cf-card-sub {
@@ -473,15 +475,15 @@ function closeModal() {
   align-items: center;
   gap: 10px;
   font-size: 11px;
-  color: var(--muted-foreground, #a3a3a3);
+  color: var(--muted-foreground);
 }
 
 .cf-card-sub code {
-  font-family: monospace;
+  font-family: var(--font-mono);
 }
 
 .required-text {
-  color: var(--destructive, #ef4444);
+  color: var(--destructive);
 }
 
 .cf-card-actions {
@@ -504,7 +506,7 @@ function closeModal() {
 .btn-icon {
   background: transparent;
   border: none;
-  color: var(--muted-foreground, #a3a3a3);
+  color: var(--muted-foreground);
   cursor: pointer;
   padding: 6px;
   border-radius: 6px;
@@ -514,12 +516,12 @@ function closeModal() {
 }
 
 .btn-icon:hover {
-  color: var(--foreground, #f1f5f9);
-  background: rgba(255, 255, 255, 0.06);
+  color: var(--foreground);
+  background: var(--surface-hover);
 }
 
 .del-btn:hover {
-  color: var(--destructive, #ef4444);
+  color: var(--destructive);
 }
 
 /* Switch Toggle */
@@ -540,8 +542,8 @@ function closeModal() {
   position: absolute;
   cursor: pointer;
   inset: 0;
-  background-color: #262626;
-  transition: 0.3s;
+  background-color: var(--g-700);
+  transition: background-color var(--motion-duration-moderate) var(--motion-ease-out);
   border-radius: 20px;
 }
 
@@ -552,17 +554,18 @@ function closeModal() {
   width: 14px;
   left: 3px;
   bottom: 3px;
-  background-color: white;
-  transition: 0.3s;
+  background-color: var(--g-100);
+  transition: transform var(--motion-duration-moderate) var(--motion-ease-out),
+              background-color var(--motion-duration-moderate) var(--motion-ease-out);
   border-radius: 50%;
 }
 
 input:checked + .slider {
-  background-color: var(--primary, #39ff14);
+  background-color: var(--primary);
 }
 
 input:checked + .slider:before {
   transform: translateX(18px);
-  background-color: #000;
+  background-color: var(--on-primary);
 }
 </style>

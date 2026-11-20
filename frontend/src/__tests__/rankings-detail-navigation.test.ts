@@ -1,4 +1,4 @@
-import { ref } from 'vue'
+import { ref, nextTick } from 'vue'
 import { setActivePinia, createPinia } from 'pinia'
 import { describe, it, expect, vi, beforeEach } from 'vitest'
 import { mount } from '@vue/test-utils'
@@ -6,6 +6,7 @@ import RankingsTable from '../components/rankings/RankingsTable.vue'
 import TeamDetailDrawer from '../components/common/TeamDetailDrawer.vue'
 import TeamDetailView from '../views/TeamDetailView.vue'
 import RenameModal from '../components/common/RenameModal.vue'
+import { useUserProfileTransition } from '../composables/useUserProfileTransition'
 import { useNavigationStore } from '../stores/navigation'
 import { useEventStore } from '../stores/events'
 import { useRecordStore } from '../stores/records'
@@ -207,13 +208,28 @@ describe('Rankings & Detail Navigation Integration', () => {
     expect(mockRouterBack.mock.calls.length + mockRouterPush.mock.calls.length).toBeGreaterThanOrEqual(1)
   })
 
-  it('RenameModal renders modal-card and preserves input-wrapper viewTransitionName', () => {
+  it('RenameModal exposes panel, backdrop, and unstretched text viewTransitionNames while active', async () => {
     const userStore = useUserStore()
     userStore.user = { id: 'u1', username: 'Tester', token: 'tok' }
 
+    const docAny = document as Document & { startViewTransition?: any }
+    const origStartVT = docAny.startViewTransition
+    let resolveFinished!: () => void
+    docAny.startViewTransition = vi.fn((cb: () => Promise<void> | void) => {
+      void Promise.resolve(cb())
+      return {
+        ready: Promise.resolve(),
+        updateCallbackDone: Promise.resolve(),
+        finished: new Promise<void>((resolve) => {
+          resolveFinished = resolve
+        })
+      }
+    })
+
+    const { openProfileModal, resetProfileTransition } = useUserProfileTransition()
     const wrapper = mount(RenameModal, {
       props: {
-        visible: true,
+        visible: false,
         eventId: 'evt_1'
       },
       global: {
@@ -221,14 +237,37 @@ describe('Rankings & Detail Navigation Integration', () => {
       }
     })
 
-    // Verify modal-card exists for centered modal layout
-    expect(wrapper.find('.modal-card').exists()).toBe(true)
+    try {
+      openProfileModal((val) => {
+        void wrapper.setProps({ visible: val })
+      })
+      await nextTick()
+      await nextTick()
 
-    // Verify username input wrapper retains viewTransitionName
-    const inputWrapper = wrapper.find('.input-wrapper')
-    expect(inputWrapper.exists()).toBe(true)
-    const el = inputWrapper.element as HTMLElement
-    expect(el.style.viewTransitionName || el.getAttribute('style')).toBeTruthy()
+      const overlay = wrapper.find('.modal-overlay')
+      const card = wrapper.find('.modal-card')
+      const textMorph = wrapper.find('.input-text-morph')
+      const inputWrapper = wrapper.find('.username-input-wrapper')
+
+      expect(overlay.exists()).toBe(true)
+      expect(card.exists()).toBe(true)
+      expect(textMorph.exists()).toBe(true)
+      expect((overlay.element as HTMLElement).style.viewTransitionName).toBe('user-profile-backdrop')
+      expect((card.element as HTMLElement).style.viewTransitionName).toBe('user-profile-panel')
+      expect((textMorph.element as HTMLElement).style.viewTransitionName).toBe('user-profile-text')
+      expect((inputWrapper.element as HTMLElement).style.viewTransitionName || '').toBe('')
+
+      resolveFinished()
+      await nextTick()
+    } finally {
+      wrapper.unmount()
+      resetProfileTransition()
+      if (origStartVT === undefined) {
+        delete docAny.startViewTransition
+      } else {
+        docAny.startViewTransition = origStartVT
+      }
+    }
   })
 
   it('useEventWebRtcBridge preserves waiting/host_online status without flashing connecting when returning from details', async () => {

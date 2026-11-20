@@ -302,7 +302,7 @@ onUnmounted(() => {
                 <span v-if="getMatchBiobuzzMeta(match).endgame.gardenBalls > 0">G:{{ getMatchBiobuzzMeta(match).endgame.gardenBalls }}</span>
                 <span v-if="getMatchBiobuzzMeta(match).endgame.teleopPark">Park +5</span>
                 <span v-if="getMatchBiobuzzMeta(match).endgame.flowerDescore">Descore</span>
-                <span v-if="getMatchBiobuzzMeta(match).endgame.g410EarlyFlowerFoul" style="color: #fbbf24;">G410</span>
+                <span v-if="getMatchBiobuzzMeta(match).endgame.g410EarlyFlowerFoul" class="foul-tag">G410</span>
               </div>
               <p v-if="match.notes" class="match-notes">{{ match.notes }}</p>
             </div>

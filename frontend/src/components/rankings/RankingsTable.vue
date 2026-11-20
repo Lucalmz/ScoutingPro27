@@ -620,10 +620,10 @@ function enter(el: Element, done: () => void) {
   position: absolute;
   left: 0;
   right: 0;
-  background: rgba(255, 255, 255, 0.04);
-  border: 1px solid rgba(255, 255, 255, 0.08);
+  background: color-mix(in srgb, var(--g-50) 4%, transparent);
+  border: 1px solid color-mix(in srgb, var(--g-50) 8%, transparent);
   pointer-events: none;
-  transition: top var(--motion-duration-moderate) var(--motion-ease-out), height var(--motion-duration-moderate) var(--motion-ease-out), opacity var(--motion-duration-fast) ease;
+  transition: top var(--motion-duration-moderate) var(--motion-ease-out), height var(--motion-duration-moderate) var(--motion-ease-out), opacity var(--motion-duration-fast) var(--motion-ease-out);
   z-index: 5;
   border-radius: 6px;
 }
@@ -697,7 +697,7 @@ tbody td.team-cell {
   left: 136px;
   min-width: 130px;
   background: var(--card);
-  box-shadow: 2px 0 6px -2px rgba(0, 0, 0, 0.4);
+  box-shadow: 2px 0 6px -2px color-mix(in srgb, var(--g-950) 65%, transparent);
   box-sizing: border-box;
 }
 
@@ -723,7 +723,9 @@ th.sortable:hover {
   vertical-align: middle;
   display: inline-block;
   opacity: 0.25;
-  transition: transform 0.22s cubic-bezier(0.16, 1, 0.3, 1), opacity 0.2s ease, color 0.2s ease;
+  transition: transform var(--motion-duration-moderate) var(--motion-ease-out),
+              opacity var(--motion-duration-fast) var(--motion-ease-out),
+              color var(--motion-duration-fast) var(--motion-ease-out);
 }
 
 .sort-icon.is-active {
@@ -740,7 +742,7 @@ tbody td {
   border-bottom: 1px solid var(--border);
   color: var(--muted-foreground);
   background: var(--card);
-  transition: background-color 0.15s ease;
+  transition: background-color var(--motion-duration-fast) var(--motion-ease-out);
 }
 
 
@@ -757,11 +759,11 @@ tbody td {
 }
 
 .advancement-score-val {
-  font-family: 'Orbitron', monospace;
+  font-family: var(--font-numeric);
+  font-variant-numeric: tabular-nums;
   font-size: 15px;
   font-weight: 700;
-  color: var(--primary, #39ff14);
-  text-shadow: 0 0 8px rgba(57, 255, 20, 0.25);
+  color: var(--primary);
   min-width: 28px;
   text-align: right;
 }
@@ -780,39 +782,39 @@ tbody td {
 }
 
 .advancement-status-badge.status-advancing {
-  background: rgba(57, 255, 20, 0.15);
-  border: 1px solid rgba(57, 255, 20, 0.4);
-  color: #39ff14;
+  background: var(--status-success-bg);
+  border: 1px solid var(--status-success-border);
+  color: var(--status-success);
 }
 
 .advancement-status-badge.status-advancing.is-rolled-down {
-  background: rgba(16, 185, 129, 0.2);
-  border: 1px solid rgba(52, 211, 153, 0.55);
-  color: #6ee7b7;
+  background: color-mix(in srgb, var(--status-success-bg) 60%, var(--status-info-bg));
+  border: 1px solid color-mix(in srgb, var(--status-success) 45%, var(--status-info));
+  color: var(--s-200);
 }
 
 .advancement-status-badge.status-already_advancing {
-  background: rgba(56, 189, 248, 0.14);
-  border: 1px solid rgba(56, 189, 248, 0.45);
-  color: #38bdf8;
+  background: var(--status-info-bg);
+  border: 1px solid var(--status-info-border);
+  color: var(--status-info);
 }
 
 .advancement-status-badge.status-declined,
 .advancement-status-badge.status-ineligible {
-  background: rgba(244, 63, 94, 0.12);
-  border: 1px solid rgba(244, 63, 94, 0.35);
-  color: #fda4af;
+  background: var(--status-error-bg);
+  border: 1px solid var(--status-error-border);
+  color: var(--status-error-text);
 }
 
 .advancement-status-badge.status-bubble {
-  background: rgba(245, 158, 11, 0.15);
-  border: 1px solid rgba(245, 158, 11, 0.4);
-  color: #f59e0b;
+  background: var(--status-warning-bg);
+  border: 1px solid var(--status-warning-border);
+  color: var(--status-warning);
 }
 
 .advancement-status-badge.status-competing {
-  background: rgba(148, 163, 184, 0.1);
-  border: 1px solid rgba(148, 163, 184, 0.25);
+  background: var(--surface-elevated);
+  border: 1px solid var(--border);
   color: var(--muted-foreground);
 }
 
@@ -824,31 +826,31 @@ tbody td {
   height: 20px;
   padding: 0 5px;
   border-radius: 5px;
-  font-family: 'Orbitron', sans-serif;
+  font-family: var(--font-numeric);
+  font-variant-numeric: tabular-nums;
   font-size: 11px;
   font-weight: 800;
-  background: var(--surface-recessed, #080807);
-  border: 1px solid var(--border, #262624);
+  background: var(--surface-recessed);
+  border: 1px solid var(--border);
   color: var(--muted-foreground);
 }
 
 .rank-index-badge.rank-gold {
-  background: #231c07;
-  border-color: #eab308;
-  color: #facc15;
-  box-shadow: 0 0 10px rgba(234, 179, 8, 0.28);
+  background: var(--status-warning-bg);
+  border-color: var(--status-warning);
+  color: var(--status-warning);
 }
 
 .rank-index-badge.rank-silver {
-  background: #181b20;
-  border-color: #94a3b8;
-  color: #e2e8f0;
+  background: var(--surface-elevated);
+  border-color: var(--g-400);
+  color: var(--g-100);
 }
 
 .rank-index-badge.rank-bronze {
-  background: #221409;
-  border-color: #f97316;
-  color: #fb923c;
+  background: color-mix(in srgb, var(--status-warning-bg) 75%, var(--status-error-bg));
+  border-color: color-mix(in srgb, var(--status-warning) 60%, var(--red-500));
+  color: color-mix(in srgb, var(--status-warning) 65%, var(--red-400));
 }
 
 .telemetry-cell {
@@ -856,13 +858,15 @@ tbody td {
   flex-direction: column;
   gap: 4px;
   min-width: 58px;
+  font-family: var(--font-numeric);
+  font-variant-numeric: tabular-nums;
 }
 
 .telemetry-bar-track {
   width: 100%;
   max-width: 68px;
   height: 3px;
-  background: var(--surface-recessed, #080807);
+  background: var(--surface-recessed);
   border-radius: 2px;
   overflow: hidden;
 }
@@ -870,13 +874,13 @@ tbody td {
 .telemetry-bar-fill {
   height: 100%;
   border-radius: 2px;
-  transition: width 0.45s var(--motion-ease-out);
+  transition: width var(--motion-duration-slow) var(--motion-ease-out);
 }
 
-.telemetry-bar-fill.bar-cyan { background: #38bdf8; }
-.telemetry-bar-fill.bar-green { background: #22c55e; }
-.telemetry-bar-fill.bar-amber { background: #f59e0b; }
-.telemetry-bar-fill.bar-primary { background: var(--primary, #39ff14); box-shadow: 0 0 6px rgba(57, 255, 20, 0.6); }
+.telemetry-bar-fill.bar-cyan { background: var(--phase-auto); }
+.telemetry-bar-fill.bar-green { background: var(--phase-teleop); }
+.telemetry-bar-fill.bar-amber { background: var(--phase-endgame); }
+.telemetry-bar-fill.bar-primary { background: var(--primary); }
 
 .team-cell {
   font-weight: 700;
@@ -884,7 +888,14 @@ tbody td {
   min-width: 145px;
 }
 
+.team-num {
+  font-family: var(--font-numeric);
+  font-variant-numeric: tabular-nums;
+}
+
 .total-cell {
+  font-family: var(--font-numeric);
+  font-variant-numeric: tabular-nums;
   font-weight: 700;
   color: var(--primary);
 }
@@ -936,7 +947,9 @@ td.custom-col-td {
   align-items: center;
   justify-content: center;
   cursor: pointer;
-  transition: all 0.2s;
+  transition: background-color var(--motion-duration-fast) var(--motion-ease-out),
+              border-color var(--motion-duration-fast) var(--motion-ease-out),
+              color var(--motion-duration-fast) var(--motion-ease-out);
 }
 
 .details-btn:hover {
@@ -946,7 +959,7 @@ td.custom-col-td {
 
 .banned-badge {
   background: var(--status-error);
-  color: white;
+  color: var(--destructive-foreground);
   font-size: 10px;
   padding: 2px 4px;
   border-radius: 4px;
@@ -955,7 +968,7 @@ td.custom-col-td {
 }
 
 .ban-btn {
-  background: rgba(239, 68, 68, 0.12);
+  background: var(--status-error-bg);
   color: var(--status-error);
   border: 1px solid var(--status-error);
   border-radius: 4px;
@@ -963,16 +976,17 @@ td.custom-col-td {
   font-size: 11px;
   font-weight: 500;
   cursor: pointer;
-  transition: all 0.2s;
+  transition: background-color var(--motion-duration-fast) var(--motion-ease-out),
+              color var(--motion-duration-fast) var(--motion-ease-out);
 }
 
 .ban-btn:hover {
   background: var(--status-error);
-  color: white;
+  color: var(--destructive-foreground);
 }
 
 .unban-btn {
-  background: rgba(57, 255, 20, 0.12);
+  background: var(--status-success-bg);
   color: var(--primary);
   border: 1px solid var(--primary);
   border-radius: 4px;
@@ -980,7 +994,8 @@ td.custom-col-td {
   font-size: 11px;
   font-weight: 500;
   cursor: pointer;
-  transition: all 0.2s;
+  transition: background-color var(--motion-duration-fast) var(--motion-ease-out),
+              color var(--motion-duration-fast) var(--motion-ease-out);
 }
 
 .unban-btn:hover {
@@ -1026,9 +1041,9 @@ td.custom-col-td {
   font-weight: 700;
   padding: 1px 5px;
   border-radius: 4px;
-  background: rgba(245, 158, 11, 0.16);
-  color: #fbbf24;
-  border: 1px solid rgba(245, 158, 11, 0.4);
+  background: var(--status-warning-bg);
+  color: var(--status-warning);
+  border: 1px solid var(--status-warning-border);
 }
 
 .brag-tier-pill {
@@ -1040,31 +1055,45 @@ td.custom-col-td {
   font-weight: 600;
   white-space: nowrap;
   border: 1px solid var(--border);
-  background: rgba(255, 255, 255, 0.04);
+  background: var(--surface-elevated);
   color: var(--foreground);
 }
 
+.brag-tier-pill.tier-realistic,
 .brag-tier-pill.tier-elite {
-  border-color: rgba(57, 255, 20, 0.45);
-  background: rgba(57, 255, 20, 0.1);
-  color: #39ff14;
+  border-color: var(--status-success-border);
+  background: var(--status-success-bg);
+  color: var(--status-success);
 }
 
 .brag-tier-pill.tier-honest {
-  border-color: rgba(56, 189, 248, 0.45);
-  background: rgba(56, 189, 248, 0.1);
-  color: #38bdf8;
+  border-color: var(--status-info-border);
+  background: var(--status-info-bg);
+  color: var(--status-info);
 }
 
+.brag-tier-pill.tier-optimistic,
 .brag-tier-pill.tier-optimist {
-  border-color: rgba(245, 158, 11, 0.45);
-  background: rgba(245, 158, 11, 0.12);
-  color: #fbbf24;
+  border-color: var(--status-warning-border);
+  background: var(--status-warning-bg);
+  color: var(--status-warning);
 }
 
 .brag-tier-pill.tier-overclaimed {
-  border-color: rgba(239, 68, 68, 0.45);
-  background: rgba(239, 68, 68, 0.12);
-  color: #f87171;
+  border-color: color-mix(in srgb, var(--status-warning-border) 50%, var(--status-error-border));
+  background: color-mix(in srgb, var(--status-warning-bg) 50%, var(--status-error-bg));
+  color: color-mix(in srgb, var(--status-warning) 55%, var(--status-error));
+}
+
+.brag-tier-pill.tier-mythical {
+  border-color: var(--status-error-border);
+  background: var(--status-error-bg);
+  color: var(--status-error);
+}
+
+.brag-tier-pill.tier-pending {
+  border-color: var(--border);
+  background: var(--surface-elevated);
+  color: var(--muted-foreground);
 }
 </style>

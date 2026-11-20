@@ -11,9 +11,9 @@ const { t } = useI18n()
 
 <template>
   <div v-if="metrics.length > 0" class="team-tags-card custom-metrics-card">
-    <div style="display: flex; align-items: center; justify-content: space-between; margin-bottom: 12px;">
+    <div style="display: flex; align-items: center; justify-content: space-between; gap: 8px; margin-bottom: 12px;">
       <h3 style="margin: 0; display: flex; align-items: center; gap: 6px;">
-        <span class="material-icons" style="font-size: 18px; color: var(--primary, #39ff14);">tune</span>
+        <span class="material-icons" style="font-size: 18px; color: var(--primary);">tune</span>
         {{ t('custom_fields.team_metrics_title') }}
       </h3>
       <span class="metrics-count-badge">{{ t('custom_fields.renderer.metric_count', { count: metrics.length }) }}</span>
@@ -105,17 +105,20 @@ const { t } = useI18n()
 }
 
 .custom-metrics-card {
-  border-color: rgba(57, 255, 20, 0.2);
-  background: linear-gradient(180deg, rgba(57, 255, 20, 0.02) 0%, var(--card) 100%);
+  border-color: var(--border);
+  background: var(--card);
 }
 
 .metrics-count-badge {
   font-size: 11px;
   padding: 2px 8px;
   border-radius: 10px;
-  background: rgba(255, 255, 255, 0.06);
+  background: var(--g-750);
   color: var(--muted-foreground);
   border: 1px solid var(--border);
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+  flex-shrink: 0;
 }
 
 .custom-metrics-grid {
@@ -125,7 +128,7 @@ const { t } = useI18n()
 }
 
 .metric-box {
-  background: rgba(255, 255, 255, 0.02);
+  background: var(--surface-recessed);
   border: 1px solid var(--border);
   border-radius: 8px;
   padding: 10px 12px;
@@ -155,7 +158,7 @@ const { t } = useI18n()
   text-transform: uppercase;
   padding: 1px 6px;
   border-radius: 4px;
-  background: rgba(255, 255, 255, 0.06);
+  background: var(--g-750);
   color: var(--muted-foreground);
 }
 
@@ -168,10 +171,10 @@ const { t } = useI18n()
   flex: 1;
   display: flex;
   flex-direction: column;
-  background: rgba(0, 0, 0, 0.2);
+  background: var(--g-900);
   padding: 6px 8px;
   border-radius: 6px;
-  border: 1px solid rgba(255, 255, 255, 0.04);
+  border: 1px solid var(--border-subtle);
 }
 
 .stat-col.full {
@@ -184,13 +187,15 @@ const { t } = useI18n()
 }
 
 .stat-value {
+  font-family: var(--font-numeric);
+  font-variant-numeric: tabular-nums;
   font-size: 15px;
   font-weight: 700;
   color: var(--foreground);
 }
 
 .stat-value.highlight {
-  color: var(--primary, #39ff14);
+  color: var(--primary);
 }
 
 .stat-value.count {
@@ -217,22 +222,24 @@ const { t } = useI18n()
 }
 
 .bool-rate-label .rate-num {
+  font-family: var(--font-numeric);
   font-weight: 700;
-  color: var(--primary, #39ff14);
+  font-variant-numeric: tabular-nums;
+  color: var(--primary);
 }
 
 .rate-progress-track {
   height: 6px;
-  background: rgba(255, 255, 255, 0.08);
+  background: var(--g-750);
   border-radius: 3px;
   overflow: hidden;
 }
 
 .rate-progress-fill {
   height: 100%;
-  background: linear-gradient(90deg, #38bdf8, #39ff14);
+  background: linear-gradient(90deg, var(--status-info), var(--primary));
   border-radius: 3px;
-  transition: width 0.3s ease;
+  transition: width var(--motion-duration-normal) var(--motion-ease-out);
 }
 
 .stat-detail {
@@ -262,16 +269,17 @@ const { t } = useI18n()
   border: 1px solid transparent;
 }
 
-.dist-label-badge.color-blue { background: rgba(56, 189, 248, 0.15); color: #38bdf8; border-color: rgba(56, 189, 248, 0.3); }
-.dist-label-badge.color-green { background: rgba(57, 255, 20, 0.15); color: #39ff14; border-color: rgba(57, 255, 20, 0.3); }
-.dist-label-badge.color-orange { background: rgba(251, 146, 60, 0.15); color: #fb923c; border-color: rgba(251, 146, 60, 0.3); }
-.dist-label-badge.color-red { background: rgba(248, 113, 113, 0.15); color: #f87171; border-color: rgba(248, 113, 113, 0.3); }
-.dist-label-badge.color-purple { background: rgba(192, 132, 252, 0.15); color: #c084fc; border-color: rgba(192, 132, 252, 0.3); }
-.dist-label-badge.color-gray { background: rgba(148, 163, 184, 0.15); color: #94a3b8; border-color: rgba(148, 163, 184, 0.3); }
+.dist-label-badge.color-blue { background: var(--status-info-bg); color: var(--status-info); border-color: var(--status-info-border); }
+.dist-label-badge.color-green { background: var(--status-success-bg); color: var(--status-success); border-color: var(--status-success-border); }
+.dist-label-badge.color-orange { background: var(--status-warning-bg); color: var(--status-warning); border-color: var(--status-warning-border); }
+.dist-label-badge.color-red { background: var(--status-error-bg); color: var(--status-error); border-color: var(--status-error-border); }
+.dist-label-badge.color-purple { background: var(--status-ai-bg); color: var(--status-ai); border-color: var(--status-ai-border); }
+.dist-label-badge.color-gray { background: var(--g-850); color: var(--g-300); border-color: var(--g-700); }
 
 .dist-count {
   color: var(--muted-foreground);
   font-size: 11px;
+  font-variant-numeric: tabular-nums;
 }
 
 .metric-text-list {
@@ -284,7 +292,7 @@ const { t } = useI18n()
   display: flex;
   align-items: flex-start;
   gap: 6px;
-  background: rgba(255, 255, 255, 0.02);
+  background: var(--surface-recessed);
   border: 1px solid var(--border);
   border-radius: 6px;
   padding: 4px 8px;
@@ -293,7 +301,8 @@ const { t } = useI18n()
 
 .metric-text-bubble .match-badge {
   font-weight: 700;
-  color: var(--primary, #39ff14);
+  font-variant-numeric: tabular-nums;
+  color: var(--primary);
   font-size: 10px;
 }
 

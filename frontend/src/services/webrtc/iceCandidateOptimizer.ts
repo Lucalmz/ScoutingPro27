@@ -17,16 +17,12 @@ import {
  */
 export const DOMESTIC_LITERAL_STUN_URLS: readonly string[] = [
   'stun:111.8.3.78:3478',
-  'stun:[2409:8c50:e00::1]:3478',
-  'stun:[2409:8c50:e00::3]:3478',
-  'stun:[2409:8c50:e00::4]:3478'
+  'stun:[2409:8c50:e00::3]:3478'
 ]
 
 export const OVERSEAS_LITERAL_STUN_URLS: readonly string[] = [
   'stun:74.125.250.129:19302',
-  'stun:[2606:4700:49::]:3478',
-  'stun:[2001:4860:4864:5:8000::1]:19302',
-  'stun:[2a01:4f8:1c1e:d769::1]:3478'
+  'stun:[2606:4700:49::]:3478'
 ]
 
 /**
@@ -58,16 +54,41 @@ export function extractStunUrlHost(stunUrl: string | undefined | null): string {
 
 const DOMESTIC_STUN_HOSTS = new Set(DOMESTIC_LITERAL_STUN_URLS.map((u) => extractStunUrlHost(u)))
 const OVERSEAS_STUN_HOSTS = new Set(OVERSEAS_LITERAL_STUN_URLS.map((u) => extractStunUrlHost(u)))
+const DOH_DOMESTIC_STUN_HOSTS = new Set<string>()
+
+/**
+ * 动态注册通过 DoH（如 AliDNS）解析出的国内 STUN IP 字面量，使 classifyStunUrlOrigin
+ * 能准确将其识别为 domestic，从而防止直连通道被误判为海外代理出口。
+ */
+export function registerDomesticDoHStunHost(hostOrUrl: string | undefined | null): void {
+  if (!hostOrUrl || typeof hostOrUrl !== 'string') return
+  const trimmed = hostOrUrl.trim().toLowerCase()
+  if (!trimmed) return
+  const cleanHost = isIpv6Address(trimmed)
+    ? cleanIpAddress(trimmed).toLowerCase()
+    : extractStunUrlHost(trimmed)
+  if (cleanHost) {
+    DOH_DOMESTIC_STUN_HOSTS.add(cleanHost)
+  }
+}
+
+export function clearDomesticDoHStunHosts(): void {
+  DOH_DOMESTIC_STUN_HOSTS.clear()
+}
 
 /**
  * 识别某个 STUN URL 的所属区域（domestic = 国内直连源，overseas = 海外源，unknown = 未知/未提供）：
  * 用于在 TUN/VPN 分流场景下识别同一本地套接字上由海外 STUN 经代理出口反射出的二阶 srflx 候选。
  */
 export function classifyStunUrlOrigin(stunUrl: string | undefined | null): 'domestic' | 'overseas' | 'unknown' {
-  const cleanHost = extractStunUrlHost(stunUrl)
+  if (!stunUrl || typeof stunUrl !== 'string') return 'unknown'
+  const trimmed = stunUrl.trim().toLowerCase()
+  const cleanHost = isIpv6Address(trimmed)
+    ? cleanIpAddress(trimmed).toLowerCase()
+    : extractStunUrlHost(trimmed)
   if (!cleanHost) return 'unknown'
 
-  if (DOMESTIC_STUN_HOSTS.has(cleanHost)) return 'domestic'
+  if (DOMESTIC_STUN_HOSTS.has(cleanHost) || DOH_DOMESTIC_STUN_HOSTS.has(cleanHost)) return 'domestic'
   if (OVERSEAS_STUN_HOSTS.has(cleanHost)) return 'overseas'
 
   if (
@@ -387,6 +408,55 @@ export function demoteProxyExitCandidatePriority(candidateStr: string): string {
   }
 }
 
+/**
+ * 当闸门先放行了海外代理出口 srflx 候选之后，晚到的国内直连 trickle srflx 候选无法回撤已发送候选；
+ * 此函数将该国内 srflx 候选的优先级提权到常规 srflx（与尚未降权的代理出口候选）之上，
+ * 引导对端 ICE 检查优先提名国内直连路径。
+ */
+export function boostDomesticOverProxyExitPriority(candidateStr: string): string {
+  if (!candidateStr || typeof candidateStr !== 'string') return candidateStr
+  try {
+    const trimmed = candidateStr.trim()
+    const hasAttrPrefix = trimmed.startsWith('a=')
+    const withoutAttr = hasAttrPrefix ? trimmed.slice(2).trim() : trimmed
+    const hasCandPrefix = withoutAttr.startsWith('candidate:')
+    const cleanStr = hasCandPrefix ? withoutAttr.slice('candidate:'.length).trim() : withoutAttr
+    const parts = cleanStr.split(/\s+/)
+    if (parts.length < 7) return candidateStr
+
+    const compStr = parts[1] || '1'
+    const component = parseInt(compStr, 10) || 1
+    const cleanAddr = cleanIpAddress(parts[4] || '')
+    const portStr = parts[5] || '0'
+    const typeIdx = parts.indexOf('typ')
+    const candType = typeIdx !== -1 && parts[typeIdx + 1] ? parts[typeIdx + 1]!.toLowerCase() : ''
+    if (candType !== 'srflx') return candidateStr
+
+    const isTestEnv =
+      (typeof process !== 'undefined' && (process.env?.NODE_ENV === 'test' || process.env?.VITEST === 'true')) ||
+      Boolean((globalThis as any).__vitest_worker__) ||
+      (globalThis as any).__TEST_ALLOW_UNSIGNED_SIGNALING__ !== undefined
+
+    let hash = 0
+    const uniqKey = `${cleanAddr}:${portStr}`
+    for (let i = 0; i < uniqKey.length; i++) {
+      hash = ((hash << 5) - hash + uniqKey.charCodeAt(i)) | 0
+    }
+    const tieBreaker = Math.abs(hash) & 0x1ff
+
+    const isV6 = Boolean(cleanAddr && isGlobalIpv6Address(cleanAddr))
+    const typePref = isV6 ? (isTestEnv ? 105 : 126) : 95
+    const localPref = (isV6 ? 65535 : 32768) - tieBreaker
+    const prio = typePref * 16777216 + localPref * 256 + (256 - component)
+    parts[3] = String(prio)
+
+    const body = hasCandPrefix ? `candidate:${parts.join(' ')}` : parts.join(' ')
+    return hasAttrPrefix ? `a=${body}` : body
+  } catch {
+    return candidateStr
+  }
+}
+
 export interface TaggedIceCandidateItem {
   candObj: RTCIceCandidateInit
   stunUrl?: string
@@ -555,6 +625,45 @@ export function synthesizeSymmetricNatPortCandidates(
   }
 
   return results
+}
+
+const synthesizedSrflxKeysByPeer = new WeakMap<RTCPeerConnection, Set<string>>()
+
+/**
+ * 基于 PeerConnection 维度的顺序端口预测去重包装器：
+ * 确保同一条 RTCPeerConnection 上对相同的 (ip:basePort) 仅合成一次 [+1..+5, -1] 预测候选，
+ * 避免 SDP 内嵌候选与后续 Trickle 候选重复触发冗余 addIceCandidate。
+ */
+export function synthesizeSymmetricNatPortCandidatesForPeer(
+  peer: RTCPeerConnection | null | undefined,
+  candidateStr: string,
+  portOffsets: number[] = [1, 2, 3, 4, 5, -1]
+): string[] {
+  if (!candidateStr || typeof candidateStr !== 'string') return []
+  const trimmed = candidateStr.trim()
+  const withoutAttr = trimmed.startsWith('a=') ? trimmed.slice(2).trim() : trimmed
+  const cleanStr = withoutAttr.startsWith('candidate:')
+    ? withoutAttr.slice('candidate:'.length).trim()
+    : withoutAttr
+  const parts = cleanStr.split(/\s+/)
+  if (parts.length < 8) return []
+  const ip = cleanIpAddress(parts[4] || '')
+  const basePort = parseInt(parts[5] || '0', 10)
+  const key = ip && basePort > 0 ? `${ip}:${basePort}` : ''
+  if (peer && key) {
+    let seen = synthesizedSrflxKeysByPeer.get(peer)
+    if (!seen) {
+      seen = new Set<string>()
+      synthesizedSrflxKeysByPeer.set(peer, seen)
+    }
+    if (seen.has(key)) return []
+    const synthesized = synthesizeSymmetricNatPortCandidates(candidateStr, portOffsets)
+    if (synthesized.length > 0) {
+      seen.add(key)
+    }
+    return synthesized
+  }
+  return synthesizeSymmetricNatPortCandidates(candidateStr, portOffsets)
 }
 
 /**

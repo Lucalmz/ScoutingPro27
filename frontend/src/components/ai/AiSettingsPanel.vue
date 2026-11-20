@@ -346,40 +346,32 @@ async function testConnection() {
 }
 .form-group input, .form-group textarea {
   padding: 10px;
-  border: 1px solid var(--border, #262624);
+  border: 1px solid var(--border);
   border-radius: 6px;
-  background: var(--input, #090908);
-  color: var(--foreground, #f0efe9);
+  background: var(--input);
+  color: var(--foreground);
   font-family: inherit;
 }
 .form-group select {
   padding: 9px 30px 9px 12px;
-  border: 1px solid var(--border, #262624);
+  border: 1px solid var(--border);
   border-radius: 6px;
-  background: var(--input, #090908);
-  color: var(--foreground, #f0efe9);
+  background-color: var(--input);
+  color: var(--foreground);
   font-family: inherit;
   font-size: 13px;
   cursor: pointer;
   outline: none;
-  color-scheme: dark;
-  -webkit-appearance: none;
-  -moz-appearance: none;
-  appearance: none;
-  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='14' height='14' viewBox='0 0 24 24' fill='none' stroke='%238e8d87' stroke-width='2.2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='m6 9 6 6 6-6'/%3E%3C/svg%3E");
-  background-repeat: no-repeat;
-  background-position: right 10px center;
-  background-size: 13px 13px;
-  transition: border-color 0.15s ease, box-shadow 0.15s ease;
+  transition: border-color var(--motion-duration-fast) var(--motion-ease-out),
+              box-shadow var(--motion-duration-fast) var(--motion-ease-out);
 }
 .form-group select:focus {
-  border-color: var(--primary, #39ff14);
-  box-shadow: 0 0 0 1px var(--primary, #39ff14), 0 0 8px rgba(57, 255, 20, 0.2);
-  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='14' height='14' viewBox='0 0 24 24' fill='none' stroke='%2339ff14' stroke-width='2.2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='m6 9 6 6 6-6'/%3E%3C/svg%3E");
+  border-color: var(--primary);
+  box-shadow: var(--focus-ring-sm);
 }
 .form-group select option {
-  background-color: #141413;
-  color: #f0efe9;
+  background-color: var(--g-800);
+  color: var(--foreground);
   padding: 8px 12px;
 }
 .hint {
@@ -408,12 +400,12 @@ async function testConnection() {
   border-radius: 6px;
   font-size: 14px;
 }
-.test-result.success { background: rgba(46, 204, 113, 0.1); border: 1px solid #2ecc71; color: #27ae60; }
-.test-result.error { background: rgba(231, 76, 60, 0.1); border: 1px solid #e74c3c; color: #c0392b; }
+.test-result.success { background: var(--status-success-bg); border: 1px solid var(--status-success-border); color: var(--status-success); }
+.test-result.error { background: var(--status-error-bg); border: 1px solid var(--status-error-border); color: var(--status-error); }
 .alert-error {
-  background: rgba(231, 76, 60, 0.1);
-  border: 1px solid #e74c3c;
-  color: #c0392b;
+  background: var(--status-error-bg);
+  border: 1px solid var(--status-error-border);
+  color: var(--status-error);
   padding: 12px;
   border-radius: 6px;
   display: flex;

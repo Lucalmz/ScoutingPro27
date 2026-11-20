@@ -312,10 +312,27 @@ defineExpose({
 
 <style scoped>
 .phase-cycle-tracker {
+  --phase-color: var(--primary);
   display: flex;
   flex-direction: column;
   gap: 12px;
   width: 100%;
+  border-left: 3px solid var(--phase-color);
+  padding-left: 12px;
+}
+
+.phase-cycle-tracker.phase-auto {
+  --phase-color: var(--phase-auto);
+}
+
+.phase-cycle-tracker.phase-teleop {
+  --phase-color: var(--phase-teleop);
+}
+
+.form-section.phase-auto > .phase-cycle-tracker,
+.form-section.phase-teleop > .phase-cycle-tracker {
+  border-left: none;
+  padding-left: 0;
 }
 
 /* 头部 */
@@ -335,30 +352,31 @@ defineExpose({
 
 .tracker-icon {
   font-size: 20px;
-  color: var(--primary, #38bdf8);
+  color: var(--phase-color);
 }
 
 .tracker-title {
   margin: 0;
   font-size: 15px;
   font-weight: 700;
-  color: var(--foreground, #f8fafc);
+  color: var(--foreground);
 }
 
 .rate-capsule {
   font-size: 11px;
   font-weight: 700;
+  font-variant-numeric: tabular-nums;
   padding: 2px 8px;
   border-radius: 12px;
-  background: rgba(56, 189, 248, 0.15);
-  color: var(--primary, #38bdf8);
-  border: 1px solid rgba(56, 189, 248, 0.3);
+  background: color-mix(in srgb, var(--phase-color) 12%, transparent);
+  color: var(--phase-color);
+  border: 1px solid color-mix(in srgb, var(--phase-color) 35%, transparent);
 }
 
 .btn-toggle-expand {
   background: transparent;
-  border: 1px solid var(--border, rgba(255, 255, 255, 0.1));
-  color: var(--muted-foreground, #94a3b8);
+  border: 1px solid var(--border);
+  color: var(--muted-foreground);
   border-radius: 8px;
   padding: 4px 10px;
   font-size: 12px;
@@ -366,12 +384,12 @@ defineExpose({
   display: inline-flex;
   align-items: center;
   gap: 4px;
-  transition: all 0.15s ease;
+  transition: color var(--motion-duration-fast) var(--motion-ease-out), border-color var(--motion-duration-fast) var(--motion-ease-out);
 }
 
 .btn-toggle-expand:hover {
-  color: var(--foreground, #f8fafc);
-  border-color: var(--primary, #38bdf8);
+  color: var(--foreground);
+  border-color: var(--phase-color);
 }
 
 .icon-toggle {
@@ -398,49 +416,49 @@ defineExpose({
   justify-content: center;
   padding: 10px 6px;
   border-radius: 10px;
-  background: var(--surface-recessed, #080807);
-  border: 1px solid var(--border, #262624);
+  background: var(--surface-recessed);
+  border: 1px solid var(--border);
   text-align: center;
 }
 
 .kpi-num {
+  font-family: var(--font-numeric);
   font-size: 18px;
   font-weight: 800;
-  color: var(--foreground, #f0efe9);
+  color: var(--foreground);
   font-variant-numeric: tabular-nums;
 }
 
 .highlight-balls .kpi-num {
-  color: var(--primary, #39ff14);
+  color: var(--primary);
 }
 
 .highlight-misses .kpi-num {
-  color: #ef4444;
+  color: var(--status-error);
 }
 
 .accuracy-high .kpi-num {
-  color: var(--primary, #39ff14);
-  text-shadow: 0 0 8px rgba(57, 255, 20, 0.35);
+  color: var(--primary);
 }
 
 .accuracy-medium .kpi-num {
-  color: #f59e0b;
+  color: var(--status-warning);
 }
 
 .accuracy-low .kpi-num {
-  color: #ef4444;
+  color: var(--status-error);
 }
 
 .kpi-label {
   font-size: 11px;
-  color: var(--muted-foreground, #8e8d87);
+  color: var(--muted-foreground);
   margin-top: 2px;
 }
 
-/* 当前操作卡片 — Claude Matte Flat Dark Tactical Deck */
+/* 当前操作卡片 — Pit Wall Flat Dark Tactical Deck */
 .active-cycle-card {
-  background: var(--surface-recessed, #080807);
-  border: 1px solid var(--border, #262624);
+  background: var(--surface-recessed);
+  border: 1px solid var(--border);
   border-radius: 12px;
   padding: 14px;
   display: flex;
@@ -455,7 +473,7 @@ defineExpose({
   flex-wrap: wrap;
   gap: 10px;
   padding-bottom: 10px;
-  border-bottom: 1px solid var(--border-subtle, #1e1e1c);
+  border-bottom: 1px solid var(--border-subtle);
 }
 
 .active-cycle-title-wrap {
@@ -466,12 +484,13 @@ defineExpose({
 }
 
 .active-cycle-badge {
-  font-family: 'Orbitron', sans-serif;
+  font-family: var(--font-numeric);
+  font-variant-numeric: tabular-nums;
   font-size: 12px;
   font-weight: 800;
-  color: var(--foreground, #f0efe9);
-  background: #141413;
-  border: 1px solid #353532;
+  color: var(--foreground);
+  background: var(--card);
+  border: 1px solid var(--border-strong);
   padding: 4px 10px;
   border-radius: 6px;
   letter-spacing: 0.04em;
@@ -483,8 +502,8 @@ defineExpose({
   align-items: center;
   gap: 5px;
   padding: 4px 8px;
-  background: #141413;
-  border: 1px solid #262624;
+  background: var(--card);
+  border: 1px solid var(--border);
   border-radius: 999px;
 }
 
@@ -492,31 +511,30 @@ defineExpose({
   width: 9px;
   height: 9px;
   border-radius: 50%;
-  background: #262624;
-  border: 1px solid #353532;
-  transition: all 0.15s ease;
+  background: var(--g-750);
+  border: 1px solid var(--border-strong);
+  transition: background-color var(--motion-duration-fast) var(--motion-ease-out), border-color var(--motion-duration-fast) var(--motion-ease-out);
 }
 
 .chamber-dot.is-hit {
-  background: var(--primary, #39ff14);
-  border-color: var(--primary, #39ff14);
-  box-shadow: 0 0 8px rgba(57, 255, 20, 0.65);
+  background: var(--primary);
+  border-color: var(--primary);
 }
 
 .chamber-dot.is-miss {
-  background: #ef4444;
-  border-color: #ef4444;
-  box-shadow: 0 0 8px rgba(239, 68, 68, 0.55);
+  background: var(--status-error);
+  border-color: var(--status-error);
 }
 
 .active-cycle-attempts-hint {
   font-size: 12px;
   font-weight: 600;
-  color: var(--muted-foreground, #8e8d87);
+  color: var(--muted-foreground);
   font-variant-numeric: tabular-nums;
 }
 
 .cycle-acc-pill {
+  font-family: var(--font-numeric);
   font-size: 11px;
   font-weight: 700;
   padding: 2px 8px;
@@ -525,30 +543,30 @@ defineExpose({
 }
 
 .acc-high {
-  background: rgba(57, 255, 20, 0.12);
-  color: #39ff14;
-  border: 1px solid rgba(57, 255, 20, 0.3);
+  background: var(--status-success-bg);
+  color: var(--status-success);
+  border: 1px solid var(--status-success-border);
 }
 
 .acc-med {
-  background: rgba(245, 158, 11, 0.12);
-  color: #f59e0b;
-  border: 1px solid rgba(245, 158, 11, 0.3);
+  background: var(--status-warning-bg);
+  color: var(--status-warning);
+  border: 1px solid var(--status-warning-border);
 }
 
 .acc-low {
-  background: rgba(239, 68, 68, 0.12);
-  color: #ef4444;
-  border: 1px solid rgba(239, 68, 68, 0.3);
+  background: var(--status-error-bg);
+  color: var(--status-error);
+  border: 1px solid var(--status-error-border);
 }
 
 .acc-none {
-  background: #141413;
-  color: var(--muted-foreground, #8e8d87);
-  border: 1px solid #262624;
+  background: var(--card);
+  color: var(--muted-foreground);
+  border: 1px solid var(--border);
 }
 
-/* 🎮 主副双靶区战术触发器 (左 HIT 1.35fr / 右 MISS 1fr) */
+/* 主副双靶区战术触发器 (左 HIT 1.35fr / 右 MISS 1fr) */
 .blind-touchpad-container {
   display: grid;
   grid-template-columns: 1.35fr 1fr;
@@ -570,7 +588,7 @@ defineExpose({
   touch-action: manipulation;
   -webkit-tap-highlight-color: transparent;
   overflow: hidden;
-  transition: all 0.15s cubic-bezier(0.34, 1.56, 0.64, 1);
+  transition: transform var(--motion-duration-fast) var(--motion-ease-spring), background-color var(--motion-duration-fast) var(--motion-ease-out), border-color var(--motion-duration-fast) var(--motion-ease-out), color var(--motion-duration-fast) var(--motion-ease-out), box-shadow var(--motion-duration-fast) var(--motion-ease-out);
 }
 
 .pad-action-btn::before {
@@ -593,51 +611,49 @@ defineExpose({
   filter: grayscale(0.5);
 }
 
-/* 🎯 进球键 (HIT) - Claude Matte Elevated + Tactical Neon/Alliance Rail */
+/* 进球键 (HIT) */
 .pad-hit-btn {
-  background: #141413;
-  border: 1.5px solid rgba(57, 255, 20, 0.55);
-  color: var(--primary, #39ff14);
-  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.5), 0 0 14px rgba(57, 255, 20, 0.12);
+  background: var(--status-success-bg);
+  border: 1.5px solid var(--status-success-border);
+  color: var(--primary);
+  box-shadow: var(--shadow-1);
 }
 
 .pad-hit-btn::before {
-  background: var(--primary, #39ff14);
-  box-shadow: 0 0 10px var(--primary, #39ff14);
+  background: var(--primary);
 }
 
 .pad-hit-btn:hover:not(:disabled) {
-  background: #191d17;
-  border-color: var(--primary, #39ff14);
-  box-shadow: 0 6px 20px rgba(0, 0, 0, 0.65), 0 0 20px rgba(57, 255, 20, 0.28);
+  background: color-mix(in srgb, var(--s-800) 65%, var(--s-900));
+  border-color: var(--primary);
+  box-shadow: var(--shadow-2);
 }
 
 .pad-hit-btn:active:not(:disabled) {
-  background: #1f281b;
+  background: var(--s-800);
 }
 
-/* ❌ 未进键 (MISS) - Claude Matte Elevated + Crimson Rail */
+/* 未进键 (MISS) */
 .pad-miss-btn {
-  background: #161111;
-  border: 1.5px solid rgba(239, 68, 68, 0.45);
-  color: #f87171;
-  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.5);
+  background: var(--status-error-bg);
+  border: 1.5px solid var(--status-error-border);
+  color: var(--status-error-text);
+  box-shadow: var(--shadow-1);
 }
 
 .pad-miss-btn::before {
-  background: #ef4444;
-  box-shadow: 0 0 10px #ef4444;
+  background: var(--status-error);
 }
 
 .pad-miss-btn:hover:not(:disabled) {
-  background: #1f1414;
-  border-color: #ef4444;
-  color: #ef4444;
-  box-shadow: 0 6px 20px rgba(0, 0, 0, 0.65), 0 0 16px rgba(239, 68, 68, 0.25);
+  background: color-mix(in srgb, var(--status-error) 14%, var(--status-error-bg));
+  border-color: var(--status-error);
+  color: var(--status-error);
+  box-shadow: var(--shadow-2);
 }
 
 .pad-miss-btn:active:not(:disabled) {
-  background: #281616;
+  background: color-mix(in srgb, var(--status-error) 22%, var(--status-error-bg));
 }
 
 .pad-main-info {
@@ -661,44 +677,54 @@ defineExpose({
   font-size: 15px;
   font-weight: 800;
   letter-spacing: 0.04em;
-  color: var(--foreground, #f0efe9);
+  color: var(--foreground);
 }
 
 .pad-hit-btn .pad-title {
-  color: var(--primary, #39ff14);
+  color: var(--s-200);
 }
 
 .pad-miss-btn .pad-title {
-  color: #f87171;
+  color: var(--status-error-text);
 }
 
 .pad-step-badge {
-  font-family: 'Orbitron', monospace;
+  font-family: var(--font-numeric);
+  font-variant-numeric: tabular-nums;
   font-size: 10px;
   font-weight: 800;
   padding: 2px 6px;
   border-radius: 4px;
-  background: #080807;
+  background: var(--surface-recessed);
   border: 1px solid currentColor;
 }
 
 .pad-current-count {
   font-size: 12px;
   font-weight: 600;
-  color: var(--muted-foreground, #8e8d87);
+  color: var(--muted-foreground);
 }
 
 .pad-big-readout {
-  font-family: 'Orbitron', monospace;
+  font-family: var(--font-numeric);
+  font-variant-numeric: tabular-nums;
   font-size: 26px;
   font-weight: 900;
   line-height: 1;
   padding: 8px 12px;
   border-radius: 8px;
-  background: #080807;
-  border: 1px solid #262624;
+  background: var(--surface-recessed);
+  border: 1px solid var(--border);
   min-width: 46px;
   text-align: center;
+}
+
+.pad-hit-btn .pad-big-readout {
+  color: var(--primary);
+}
+
+.pad-miss-btn .pad-big-readout {
+  color: var(--status-error);
 }
 
 .cap-badge {
@@ -706,9 +732,9 @@ defineExpose({
   font-weight: 700;
   padding: 3px 8px;
   border-radius: 6px;
-  background: rgba(239, 68, 68, 0.14);
-  color: #f87171;
-  border: 1px solid rgba(239, 68, 68, 0.35);
+  background: var(--status-error-bg);
+  color: var(--status-error-text);
+  border: 1px solid var(--status-error-border);
   display: inline-flex;
   align-items: center;
   gap: 4px;
@@ -726,15 +752,15 @@ defineExpose({
   flex-wrap: wrap;
   gap: 10px;
   padding-top: 10px;
-  border-top: 1px solid var(--border-subtle, #1e1e1c);
+  border-top: 1px solid var(--border-subtle);
 }
 
 .active-counter-group {
   display: flex;
   align-items: center;
   gap: 8px;
-  background: #141413;
-  border: 1px solid #262624;
+  background: var(--card);
+  border: 1px solid var(--border);
   border-radius: 8px;
   padding: 4px 8px;
 }
@@ -742,7 +768,7 @@ defineExpose({
 .active-counter-label {
   font-size: 12px;
   font-weight: 700;
-  color: var(--muted-foreground, #8e8d87);
+  color: var(--muted-foreground);
 }
 
 .counter-controls {
@@ -757,25 +783,25 @@ defineExpose({
   width: 32px;
   height: 32px;
   border-radius: 6px;
-  border: 1px solid #353532;
-  background: #1c1c1a;
-  color: var(--foreground, #f0efe9);
+  border: 1px solid var(--border-strong);
+  background: var(--surface-hover);
+  color: var(--foreground);
   font-size: 16px;
   font-weight: 700;
   cursor: pointer;
   display: flex;
   align-items: center;
   justify-content: center;
-  transition: all 0.15s ease;
+  transition: background-color var(--motion-duration-fast) var(--motion-ease-out), border-color var(--motion-duration-fast) var(--motion-ease-out), color var(--motion-duration-fast) var(--motion-ease-out), transform var(--motion-duration-fast) var(--motion-ease-out);
   user-select: none;
   touch-action: manipulation;
   -webkit-tap-highlight-color: transparent;
 }
 
 .counter-btn:hover:not(:disabled) {
-  background: #262624;
-  border-color: var(--primary, #39ff14);
-  color: var(--primary, #39ff14);
+  background: var(--g-700);
+  border-color: var(--primary);
+  color: var(--primary);
 }
 
 .counter-btn:active:not(:disabled) {
@@ -788,6 +814,7 @@ defineExpose({
 }
 
 .counter-val {
+  font-family: var(--font-numeric);
   font-size: 16px;
   font-weight: 800;
   min-width: 26px;
@@ -795,49 +822,49 @@ defineExpose({
   user-select: none;
   font-variant-numeric: tabular-nums;
   display: inline-block;
-  color: var(--foreground, #f0efe9);
-  transition: transform 0.15s cubic-bezier(0.34, 1.56, 0.64, 1), color 0.15s ease;
+  color: var(--foreground);
+  transition: transform var(--motion-duration-fast) var(--motion-ease-spring), color var(--motion-duration-fast) var(--motion-ease-out);
 }
 
 .counter-val.bump-up,
 .counter-val.bump-up-a {
-  animation: val-bump-up-a 0.22s cubic-bezier(0.34, 1.56, 0.64, 1);
+  animation: val-bump-up-a var(--motion-duration-moderate) var(--motion-ease-spring);
 }
 
 .counter-val.bump-up-b {
-  animation: val-bump-up-b 0.22s cubic-bezier(0.34, 1.56, 0.64, 1);
+  animation: val-bump-up-b var(--motion-duration-moderate) var(--motion-ease-spring);
 }
 
 .counter-val.bump-down,
 .counter-val.bump-down-a {
-  animation: val-bump-down-a 0.22s cubic-bezier(0.34, 1.56, 0.64, 1);
+  animation: val-bump-down-a var(--motion-duration-moderate) var(--motion-ease-spring);
 }
 
 .counter-val.bump-down-b {
-  animation: val-bump-down-b 0.22s cubic-bezier(0.34, 1.56, 0.64, 1);
+  animation: val-bump-down-b var(--motion-duration-moderate) var(--motion-ease-spring);
 }
 
 @keyframes val-bump-up-a {
   0% { transform: translateY(0) scale(1); }
-  50% { transform: translateY(-3px) scale(1.15); color: var(--primary, #39ff14); }
+  50% { transform: translateY(-3px) scale(1.15); color: var(--primary); }
   100% { transform: translateY(0) scale(1); }
 }
 
 @keyframes val-bump-up-b {
   0% { transform: translateY(0) scale(1); }
-  50% { transform: translateY(-3px) scale(1.15); color: var(--primary, #39ff14); }
+  50% { transform: translateY(-3px) scale(1.15); color: var(--primary); }
   100% { transform: translateY(0) scale(1); }
 }
 
 @keyframes val-bump-down-a {
   0% { transform: translateY(0) scale(1); }
-  50% { transform: translateY(2px) scale(0.92); color: var(--status-error, #ef4444); }
+  50% { transform: translateY(2px) scale(0.92); color: var(--status-error); }
   100% { transform: translateY(0) scale(1); }
 }
 
 @keyframes val-bump-down-b {
   0% { transform: translateY(0) scale(1); }
-  50% { transform: translateY(2px) scale(0.92); color: var(--status-error, #ef4444); }
+  50% { transform: translateY(2px) scale(0.92); color: var(--status-error); }
   100% { transform: translateY(0) scale(1); }
 }
 
@@ -851,30 +878,31 @@ defineExpose({
   min-width: 32px;
   height: 30px;
   border-radius: 6px;
-  border: 1px solid #262624;
-  background: #141413;
-  color: var(--muted-foreground, #8e8d87);
-  font-family: 'Orbitron', monospace;
+  border: 1px solid var(--border);
+  background: var(--card);
+  color: var(--muted-foreground);
+  font-family: var(--font-numeric);
+  font-variant-numeric: tabular-nums;
   font-size: 13px;
   font-weight: 700;
   cursor: pointer;
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  transition: all 0.15s ease;
+  transition: background-color var(--motion-duration-fast) var(--motion-ease-out), border-color var(--motion-duration-fast) var(--motion-ease-out), color var(--motion-duration-fast) var(--motion-ease-out);
   user-select: none;
 }
 
 .chip-ball-btn:hover {
-  border-color: var(--primary, #39ff14);
-  color: var(--foreground, #f0efe9);
+  border-color: var(--primary);
+  color: var(--foreground);
 }
 
 .chip-ball-btn.is-selected {
-  background: var(--primary, #39ff14);
-  color: #080807;
-  border-color: var(--primary, #39ff14);
-  box-shadow: 0 0 10px rgba(57, 255, 20, 0.35);
+  background: var(--primary);
+  color: var(--on-primary);
+  border-color: var(--primary);
+  box-shadow: none;
 }
 
 /* 开启新轮次按钮区 */
@@ -890,26 +918,26 @@ defineExpose({
   align-items: center;
   justify-content: center;
   gap: 6px;
-  background: #141413;
-  color: var(--primary, #39ff14);
+  background: var(--card);
+  color: var(--primary);
   font-weight: 800;
   font-size: 13px;
   min-height: 40px;
   padding: 8px 16px;
   border-radius: 8px;
-  border: 1.5px solid var(--primary, #39ff14);
+  border: 1.5px solid var(--primary);
   cursor: pointer;
   user-select: none;
-  box-shadow: 0 2px 10px rgba(0, 0, 0, 0.45);
-  transition: transform 0.15s cubic-bezier(0.34, 1.56, 0.64, 1), box-shadow 0.18s ease, background-color 0.18s ease, color 0.18s ease;
+  box-shadow: var(--shadow-1);
+  transition: transform var(--motion-duration-fast) var(--motion-ease-spring), box-shadow var(--motion-duration-fast) var(--motion-ease-out), background-color var(--motion-duration-fast) var(--motion-ease-out), color var(--motion-duration-fast) var(--motion-ease-out);
   touch-action: manipulation;
   -webkit-tap-highlight-color: transparent;
 }
 
 .btn-new-cycle:hover:not(:disabled) {
-  background: var(--primary, #39ff14);
-  color: #080807;
-  box-shadow: 0 0 16px rgba(57, 255, 20, 0.4);
+  background: var(--primary);
+  color: var(--on-primary);
+  box-shadow: var(--shadow-2);
   transform: translateY(-1px);
 }
 
@@ -920,30 +948,33 @@ defineExpose({
 .btn-new-cycle:disabled {
   opacity: 0.35;
   cursor: not-allowed;
-  border-color: #353532;
-  color: var(--muted-foreground, #8e8d87);
+  border-color: var(--border-strong);
+  color: var(--muted-foreground);
   box-shadow: none;
   transform: none;
 }
 
 .btn-new-cycle.btn-tapping {
-  animation: cycle-btn-bloom 0.45s cubic-bezier(0.2, 0.9, 0.3, 1) forwards;
+  animation: cycle-btn-bloom var(--motion-duration-slow) var(--motion-ease-out) forwards;
 }
 
 .btn-new-cycle.is-suggested {
-  background: var(--primary, #39ff14);
-  color: #080807;
-  border-color: var(--primary, #39ff14);
-  animation: pulse-cycle-suggest 1.4s ease-in-out infinite;
+  background: var(--primary);
+  color: var(--on-primary);
+  border-color: var(--primary);
+  animation: pulse-cycle-suggest 1.4s var(--motion-ease-in-out) infinite;
 }
 
 @keyframes pulse-cycle-suggest {
   0%, 100% {
-    box-shadow: 0 0 14px rgba(57, 255, 20, 0.4);
+    background: var(--primary);
+    box-shadow: var(--shadow-1);
     transform: scale(1);
   }
   50% {
-    box-shadow: 0 0 24px rgba(57, 255, 20, 0.8), 0 0 36px rgba(57, 255, 20, 0.4);
+    background: var(--s-300);
+    border-color: var(--s-200);
+    box-shadow: var(--shadow-2);
     transform: scale(1.02);
   }
 }
@@ -952,23 +983,23 @@ defineExpose({
   0% {
     transform: scale(0.96);
     filter: brightness(1);
-    box-shadow: 0 0 14px rgba(57, 255, 20, 0.4);
+    box-shadow: var(--shadow-1);
   }
   30% {
     transform: scale(1.03);
-    filter: brightness(1.35) saturate(1.2);
-    box-shadow: 0 0 26px rgba(57, 255, 20, 0.85), 0 0 45px rgba(57, 255, 20, 0.45);
+    filter: brightness(1.15);
+    box-shadow: var(--shadow-2);
   }
   100% {
     transform: scale(1);
     filter: brightness(1);
-    box-shadow: 0 0 14px rgba(57, 255, 20, 0.4);
+    box-shadow: var(--shadow-1);
   }
 }
 
 .empty-block-hint {
   font-size: 11px;
-  color: #f59e0b;
+  color: var(--status-warning);
   font-weight: 600;
 }
 
@@ -979,13 +1010,13 @@ defineExpose({
   min-height: 40px;
   padding: 6px 14px;
   border-radius: 8px;
-  border: 1px solid #353532;
-  background: #141413;
-  color: var(--foreground, #f0efe9);
+  border: 1px solid var(--border-strong);
+  background: var(--card);
+  color: var(--foreground);
   font-size: 12px;
   font-weight: 700;
   cursor: pointer;
-  transition: all 0.15s ease;
+  transition: background-color var(--motion-duration-fast) var(--motion-ease-out), border-color var(--motion-duration-fast) var(--motion-ease-out), color var(--motion-duration-fast) var(--motion-ease-out);
 }
 
 .btn-undo-cycle .material-icons {
@@ -993,9 +1024,9 @@ defineExpose({
 }
 
 .btn-undo-cycle:not(:disabled):hover {
-  background: #201912;
-  color: #fbbf24;
-  border-color: #f59e0b;
+  background: var(--status-warning-bg);
+  color: var(--status-warning);
+  border-color: var(--status-warning-border);
 }
 
 .btn-undo-cycle:disabled {

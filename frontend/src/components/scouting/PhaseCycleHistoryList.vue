@@ -114,6 +114,7 @@ defineExpose({
 }
 
 .cycles-scroll-container {
+  --history-phase-accent: var(--phase-teleop);
   display: flex;
   flex-direction: column;
   gap: 8px;
@@ -121,7 +122,11 @@ defineExpose({
   overflow-y: auto;
   padding-right: 4px;
   scroll-behavior: smooth;
-  transition: max-height 0.25s ease;
+  transition: max-height var(--motion-duration-moderate) var(--motion-ease-out);
+}
+
+.cycles-scroll-container.auto-cycle-list {
+  --history-phase-accent: var(--phase-auto);
 }
 
 .cycles-scroll-container.is-expanded {
@@ -134,15 +139,15 @@ defineExpose({
   align-items: center;
   justify-content: space-between;
   padding: 8px 12px;
-  background: #080807;
-  border: 1px solid #262624;
+  background: var(--surface-recessed);
+  border: 1px solid var(--border);
   border-radius: 8px;
   gap: 8px;
 }
 
 .cycle-row-item.is-active-row {
-  border-color: rgba(57, 255, 20, 0.45);
-  background: #11160f;
+  border-color: color-mix(in srgb, var(--history-phase-accent) 45%, var(--border));
+  background: color-mix(in srgb, var(--history-phase-accent) 9%, var(--surface-recessed));
 }
 
 .cycle-row-left {
@@ -153,20 +158,24 @@ defineExpose({
 }
 
 .cycle-row-badge {
-  font-family: 'Orbitron', monospace;
+  font-family: var(--font-numeric);
+  font-variant-numeric: tabular-nums;
   font-size: 11px;
   font-weight: 700;
-  color: var(--muted-foreground, #8e8d87);
+  color: var(--muted-foreground);
   min-width: 50px;
 }
 
 .cycle-row-stat-text {
   font-size: 12px;
   font-weight: 700;
-  color: var(--foreground, #f0efe9);
+  color: var(--foreground);
+  font-variant-numeric: tabular-nums;
 }
 
 .cycle-row-acc-pill {
+  font-family: var(--font-numeric);
+  font-variant-numeric: tabular-nums;
   font-size: 11px;
   font-weight: 700;
   padding: 1px 6px;
@@ -174,27 +183,27 @@ defineExpose({
 }
 
 .acc-high {
-  background: rgba(57, 255, 20, 0.12);
-  color: #39ff14;
-  border: 1px solid rgba(57, 255, 20, 0.3);
+  background: var(--status-success-bg);
+  color: var(--status-success);
+  border: 1px solid var(--status-success-border);
 }
 
 .acc-med {
-  background: rgba(245, 158, 11, 0.12);
-  color: #f59e0b;
-  border: 1px solid rgba(245, 158, 11, 0.3);
+  background: var(--status-warning-bg);
+  color: var(--status-warning);
+  border: 1px solid var(--status-warning-border);
 }
 
 .acc-low {
-  background: rgba(239, 68, 68, 0.12);
-  color: #ef4444;
-  border: 1px solid rgba(239, 68, 68, 0.3);
+  background: var(--status-error-bg);
+  color: var(--status-error);
+  border: 1px solid var(--status-error-border);
 }
 
 .acc-none {
-  background: #141413;
-  color: var(--muted-foreground, #8e8d87);
-  border: 1px solid #262624;
+  background: var(--card);
+  color: var(--muted-foreground);
+  border: 1px solid var(--border);
 }
 
 .cycle-row-counter {
@@ -207,22 +216,22 @@ defineExpose({
   width: 30px;
   height: 30px;
   border-radius: 6px;
-  border: 1px solid #353532;
-  background: #141413;
-  color: var(--foreground, #f0efe9);
+  border: 1px solid var(--border-strong);
+  background: var(--card);
+  color: var(--foreground);
   font-size: 16px;
   font-weight: 700;
   cursor: pointer;
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  transition: all 0.12s ease;
+  transition: background-color var(--motion-duration-fast) var(--motion-ease-out), border-color var(--motion-duration-fast) var(--motion-ease-out), color var(--motion-duration-fast) var(--motion-ease-out);
 }
 
 .mini-counter-btn:not(:disabled):hover {
-  background: #1c1c1a;
-  border-color: var(--primary, #39ff14);
-  color: var(--primary, #39ff14);
+  background: var(--surface-hover);
+  border-color: var(--primary);
+  color: var(--primary);
 }
 
 .mini-counter-btn:disabled {
@@ -233,52 +242,53 @@ defineExpose({
 .mini-counter-val {
   min-width: 26px;
   text-align: center;
+  font-family: var(--font-numeric);
   font-size: 15px;
   font-weight: 800;
-  color: var(--foreground, #f0efe9);
+  color: var(--foreground);
   font-variant-numeric: tabular-nums;
   display: inline-block;
 }
 
 .mini-counter-val.bump-up,
 .mini-counter-val.bump-up-a {
-  animation: val-bump-up-a 0.22s cubic-bezier(0.34, 1.56, 0.64, 1);
+  animation: val-bump-up-a var(--motion-duration-moderate) var(--motion-ease-spring);
 }
 
 .mini-counter-val.bump-up-b {
-  animation: val-bump-up-b 0.22s cubic-bezier(0.34, 1.56, 0.64, 1);
+  animation: val-bump-up-b var(--motion-duration-moderate) var(--motion-ease-spring);
 }
 
 .mini-counter-val.bump-down,
 .mini-counter-val.bump-down-a {
-  animation: val-bump-down-a 0.22s cubic-bezier(0.34, 1.56, 0.64, 1);
+  animation: val-bump-down-a var(--motion-duration-moderate) var(--motion-ease-spring);
 }
 
 .mini-counter-val.bump-down-b {
-  animation: val-bump-down-b 0.22s cubic-bezier(0.34, 1.56, 0.64, 1);
+  animation: val-bump-down-b var(--motion-duration-moderate) var(--motion-ease-spring);
 }
 
 @keyframes val-bump-up-a {
   0% { transform: translateY(0) scale(1); }
-  50% { transform: translateY(-3px) scale(1.15); color: var(--primary, #39ff14); }
+  50% { transform: translateY(-3px) scale(1.15); color: var(--primary); }
   100% { transform: translateY(0) scale(1); }
 }
 
 @keyframes val-bump-up-b {
   0% { transform: translateY(0) scale(1); }
-  50% { transform: translateY(-3px) scale(1.15); color: var(--primary, #39ff14); }
+  50% { transform: translateY(-3px) scale(1.15); color: var(--primary); }
   100% { transform: translateY(0) scale(1); }
 }
 
 @keyframes val-bump-down-a {
   0% { transform: translateY(0) scale(1); }
-  50% { transform: translateY(2px) scale(0.92); color: var(--status-error, #ef4444); }
+  50% { transform: translateY(2px) scale(0.92); color: var(--status-error); }
   100% { transform: translateY(0) scale(1); }
 }
 
 @keyframes val-bump-down-b {
   0% { transform: translateY(0) scale(1); }
-  50% { transform: translateY(2px) scale(0.92); color: var(--status-error, #ef4444); }
+  50% { transform: translateY(2px) scale(0.92); color: var(--status-error); }
   100% { transform: translateY(0) scale(1); }
 }
 
@@ -288,10 +298,10 @@ defineExpose({
   justify-content: center;
   gap: 8px;
   padding: 16px;
-  background: #080807;
-  border: 1px dashed #262624;
+  background: var(--surface-recessed);
+  border: 1px dashed var(--border);
   border-radius: 10px;
-  color: var(--muted-foreground, #8e8d87);
+  color: var(--muted-foreground);
   font-size: 13px;
 }
 

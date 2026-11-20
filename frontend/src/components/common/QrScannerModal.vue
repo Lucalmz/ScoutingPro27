@@ -367,7 +367,7 @@ onUnmounted(() => {
   position: fixed;
   inset: 0;
   z-index: 1000;
-  background: rgba(8, 8, 7, 0.88);
+  background: color-mix(in srgb, var(--g-950) 88%, transparent);
   display: flex;
   align-items: center;
   justify-content: center;
@@ -376,17 +376,17 @@ onUnmounted(() => {
 }
 
 .scanner-modal-dialog {
-  background: var(--card, #0a0a0a);
-  border: 1px solid var(--border, #262626);
-  border-radius: 20px;
+  background: var(--popover);
+  border: 1px solid var(--border-strong);
+  border-radius: 18px;
   width: 100%;
   max-width: 400px;
   overflow: hidden;
   display: flex;
   flex-direction: column;
-  box-shadow: 0 24px 60px rgba(0, 0, 0, 0.9), 0 0 0 1px rgba(255, 255, 255, 0.05);
-  animation: scannerPop 0.25s cubic-bezier(0.16, 1, 0.3, 1);
-  color: var(--foreground, #f1f5f9);
+  box-shadow: var(--shadow-3);
+  animation: scannerPop var(--motion-duration-moderate) var(--motion-ease-out);
+  color: var(--foreground);
 }
 
 @keyframes scannerPop {
@@ -405,8 +405,8 @@ onUnmounted(() => {
   align-items: center;
   justify-content: space-between;
   padding: 14px 18px;
-  background: rgba(255, 255, 255, 0.02);
-  border-bottom: 1px solid var(--border, #262626);
+  background: var(--surface-recessed);
+  border-bottom: 1px solid var(--border);
 }
 
 .scanner-title-group {
@@ -417,17 +417,16 @@ onUnmounted(() => {
 
 .scanner-header-icon {
   font-size: 22px;
-  color: var(--primary, #39ff14);
-  text-shadow: 0 0 8px rgba(57, 255, 20, 0.5);
+  color: var(--primary);
 }
 
 .scanner-header h3 {
   margin: 0;
-  font-family: 'Orbitron', 'ZCOOLQingKeHuangYou', sans-serif;
+  font-family: var(--font-sans);
   font-size: 16px;
   font-weight: 700;
-  color: var(--foreground, #f1f5f9);
-  letter-spacing: 0.04em;
+  color: var(--foreground);
+  letter-spacing: -0.01em;
 }
 
 .scanner-header-actions {
@@ -437,24 +436,23 @@ onUnmounted(() => {
 }
 
 .btn-torch {
-  background: var(--muted, #1a1a1a);
-  border: 1px solid var(--border, #262626);
+  background: var(--surface-hover);
+  border: 1px solid var(--border);
   border-radius: 8px;
   width: 32px;
   height: 32px;
   display: flex;
   align-items: center;
   justify-content: center;
-  color: var(--muted-foreground, #a3a3a3);
+  color: var(--muted-foreground);
   cursor: pointer;
-  transition: all 0.15s ease;
+  transition: background-color var(--motion-duration-fast) var(--motion-ease-out), border-color var(--motion-duration-fast) var(--motion-ease-out), color var(--motion-duration-fast) var(--motion-ease-out);
 }
 
 .btn-torch.is-active {
-  background: var(--status-warning, #fcd34d);
-  color: #000000;
-  border-color: var(--status-warning, #fcd34d);
-  box-shadow: 0 0 10px rgba(252, 211, 77, 0.4);
+  background: var(--status-warning);
+  color: var(--on-primary);
+  border-color: var(--status-warning);
 }
 
 .btn-torch .material-icons {
@@ -464,19 +462,19 @@ onUnmounted(() => {
 .close-btn {
   background: transparent;
   border: none;
-  color: var(--muted-foreground, #a3a3a3);
+  color: var(--muted-foreground);
   cursor: pointer;
   padding: 4px;
   border-radius: 6px;
   display: flex;
   align-items: center;
   justify-content: center;
-  transition: all 0.15s ease;
+  transition: background-color var(--motion-duration-fast) var(--motion-ease-out), color var(--motion-duration-fast) var(--motion-ease-out);
 }
 
 .close-btn:hover {
-  background: var(--muted, #1a1a1a);
-  color: var(--foreground, #f1f5f9);
+  background: var(--surface-hover);
+  color: var(--foreground);
 }
 
 .scanner-body {
@@ -484,7 +482,7 @@ onUnmounted(() => {
   width: 100%;
   aspect-ratio: 1 / 1;
   max-height: 380px;
-  background: #000000;
+  background: var(--g-950);
   overflow: hidden;
   display: flex;
   align-items: center;
@@ -513,7 +511,7 @@ onUnmounted(() => {
   transform: translate(-50%, -50%);
   width: 220px;
   height: 220px;
-  box-shadow: 0 0 0 9999px rgba(0, 0, 0, 0.65);
+  box-shadow: 0 0 0 9999px color-mix(in srgb, var(--g-950) 65%, transparent);
   border-radius: 16px;
   pointer-events: none;
 }
@@ -522,7 +520,7 @@ onUnmounted(() => {
   position: absolute;
   width: 20px;
   height: 20px;
-  border-color: var(--primary, #39ff14);
+  border-color: var(--primary);
   border-style: solid;
 }
 
@@ -560,9 +558,8 @@ onUnmounted(() => {
   left: 4px;
   right: 4px;
   height: 2px;
-  background: linear-gradient(90deg, transparent, var(--primary, #39ff14), transparent);
-  box-shadow: 0 0 8px var(--primary, #39ff14);
-  animation: laserScan 2.4s cubic-bezier(0.4, 0, 0.2, 1) infinite alternate;
+  background: linear-gradient(90deg, transparent, var(--primary), transparent);
+  animation: laserScan 2.4s var(--motion-ease-in-out) infinite alternate;
 }
 
 @keyframes laserScan {
@@ -584,16 +581,16 @@ onUnmounted(() => {
   bottom: 16px;
   left: 50%;
   transform: translateX(-50%);
-  background: #141413;
-  border: 1px solid var(--border, #262624);
-  color: var(--foreground, #f0efe9);
+  background: var(--card);
+  border: 1px solid var(--border);
+  color: var(--foreground);
   padding: 6px 14px;
   border-radius: 20px;
   font-size: 12px;
   font-weight: 600;
   white-space: nowrap;
   pointer-events: none;
-  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.7);
+  box-shadow: var(--shadow-2);
 }
 
 /* 摄像头不可用卡片 */
@@ -608,21 +605,21 @@ onUnmounted(() => {
 
 .error-camera-icon {
   font-size: 48px;
-  color: var(--status-warning, #fcd34d);
+  color: var(--status-warning);
 }
 
 .camera-denied-box h4 {
   margin: 0;
-  font-family: 'Orbitron', 'ZCOOLQingKeHuangYou', sans-serif;
+  font-family: var(--font-sans);
   font-size: 16px;
   font-weight: 700;
-  color: var(--foreground, #f1f5f9);
+  color: var(--foreground);
 }
 
 .camera-denied-box p {
   margin: 0;
   font-size: 13px;
-  color: var(--muted-foreground, #a3a3a3);
+  color: var(--muted-foreground);
   line-height: 1.5;
 }
 
@@ -631,26 +628,25 @@ onUnmounted(() => {
   display: flex;
   align-items: center;
   gap: 6px;
-  background: var(--primary, #39ff14);
-  color: var(--primary-foreground, #000000);
+  background: var(--primary);
+  color: var(--on-primary);
   border: none;
   border-radius: 10px;
   padding: 10px 18px;
   font-size: 13px;
   font-weight: 700;
   cursor: pointer;
-  transition: all 0.15s ease;
+  transition: background-color var(--motion-duration-fast) var(--motion-ease-out), transform var(--motion-duration-fast) var(--motion-ease-out);
 }
 
 .btn-primary-album:hover {
-  background: #2cd40e;
-  box-shadow: var(--glow-primary);
+  background: var(--s-300);
 }
 
 .scanner-footer {
   padding: 12px 18px;
-  background: rgba(255, 255, 255, 0.02);
-  border-top: 1px solid var(--border, #262626);
+  background: var(--surface-recessed);
+  border-top: 1px solid var(--border);
   display: flex;
   justify-content: center;
 }
@@ -659,26 +655,25 @@ onUnmounted(() => {
   display: flex;
   align-items: center;
   gap: 6px;
-  background: var(--muted, #1a1a1a);
-  border: 1px solid var(--border, #262626);
+  background: var(--surface-hover);
+  border: 1px solid var(--border);
   border-radius: 10px;
   padding: 8px 16px;
-  color: var(--foreground, #f1f5f9);
+  color: var(--foreground);
   font-size: 13px;
   font-weight: 600;
   cursor: pointer;
-  transition: all 0.15s ease;
+  transition: background-color var(--motion-duration-fast) var(--motion-ease-out), border-color var(--motion-duration-fast) var(--motion-ease-out), color var(--motion-duration-fast) var(--motion-ease-out);
 }
 
 .btn-upload-album:hover {
-  background: rgba(57, 255, 20, 0.12);
-  color: var(--primary, #39ff14);
-  border-color: var(--primary, #39ff14);
-  box-shadow: 0 0 10px rgba(57, 255, 20, 0.2);
+  background: var(--status-success-bg);
+  color: var(--primary);
+  border-color: var(--primary);
 }
 
 .btn-upload-album .material-icons {
   font-size: 17px;
-  color: var(--primary, #39ff14);
+  color: var(--primary);
 }
 </style>

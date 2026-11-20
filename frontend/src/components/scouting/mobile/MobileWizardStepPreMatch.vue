@@ -85,7 +85,7 @@ function selectLevel(level: string) {
     <!-- Assigned Task Card (if available) -->
     <div v-if="nextPendingAssignment" class="assigned-task-card" @click="emit('applyTask', nextPendingAssignment)">
       <div class="task-card-icon">
-        <span class="material-icons" style="color: #39ff14;">assignment_ind</span>
+        <span class="material-icons" style="color: var(--primary);">assignment_ind</span>
       </div>
       <div class="task-card-content">
         <div class="task-card-badge">{{ t('wizard.assigned_task') }}</div>
@@ -199,13 +199,13 @@ function selectLevel(level: string) {
 
     <!-- Banned Team Warning (Weak Team) -->
     <div v-if="bannedTeams.includes(parseInt(team.teamNumber))" class="banned-warning-card">
-      <span class="material-icons" style="font-size: 16px; color: #ef4444;">warning</span>
+      <span class="material-icons" style="font-size: 16px; color: var(--status-error);">warning</span>
       <span>{{ t('scouting.banned_warning') }}</span>
     </div>
 
     <!-- Pit Scout Preview Pill (if available) -->
     <div v-if="pitSummary" class="pit-scout-pill">
-      <span class="material-icons" style="font-size: 16px; color: #39ff14;">inventory_2</span>
+      <span class="material-icons" style="font-size: 16px; color: var(--primary);">inventory_2</span>
       <span>
         {{ t('wizard.pit_preview') }}:
         {{ t('wizard.drivetrain') }} <strong>{{ pitSummary.drivetrain }}</strong>
@@ -224,7 +224,7 @@ function selectLevel(level: string) {
   display: flex;
   flex-direction: column;
   gap: 12px;
-  animation: pane-fade 0.22s ease-out;
+  animation: pane-fade var(--motion-duration-moderate) var(--motion-ease-out);
 }
 
 @keyframes pane-fade {
@@ -239,13 +239,13 @@ function selectLevel(level: string) {
 .pane-title {
   font-size: 1.1rem;
   font-weight: 800;
-  color: var(--foreground, #f0efe9);
+  color: var(--foreground);
   margin: 0;
 }
 
 .pane-subtitle {
   font-size: 11px;
-  color: var(--muted-foreground, #8e8d87);
+  color: var(--muted-foreground);
 }
 
 /* Draft Restored Banner */
@@ -254,11 +254,11 @@ function selectLevel(level: string) {
   align-items: center;
   justify-content: space-between;
   padding: 8px 12px;
-  background: #0f1622;
-  border: 1px solid rgba(56, 189, 248, 0.4);
+  background: var(--status-info-bg);
+  border: 1px solid var(--status-info-border);
   border-radius: 10px;
   margin-bottom: 12px;
-  color: #38bdf8;
+  color: var(--status-info);
   font-size: 12px;
   font-weight: 600;
 }
@@ -270,9 +270,9 @@ function selectLevel(level: string) {
 }
 
 .btn-clear-draft {
-  background: #141413;
-  border: 1px solid #262624;
-  color: #38bdf8;
+  background: var(--surface-elevated);
+  border: 1px solid var(--status-info-border);
+  color: var(--status-info);
   cursor: pointer;
   display: inline-flex;
   align-items: center;
@@ -287,9 +287,9 @@ function selectLevel(level: string) {
   display: flex;
   align-items: center;
   gap: 10px;
-  background: #11170e;
-  border: 1px solid rgba(57, 255, 20, 0.35);
-  border-left: 3px solid #39ff14;
+  background: var(--status-success-bg);
+  border: 1px solid var(--status-success-border);
+  border-left: 3px solid var(--primary);
   border-radius: 12px;
   padding: 10px 12px;
   cursor: pointer;
@@ -302,20 +302,21 @@ function selectLevel(level: string) {
 .task-card-badge {
   font-size: 10px;
   font-weight: 700;
-  color: #39ff14;
+  color: var(--primary);
   letter-spacing: 0.5px;
 }
 
 .task-card-title {
   font-size: 13px;
   font-weight: 600;
-  color: var(--foreground, #f0efe9);
+  color: var(--foreground);
+  font-variant-numeric: tabular-nums;
 }
 
 .btn-task-apply {
-  background: #141413;
-  border: 1px solid #39ff14;
-  color: #39ff14;
+  background: var(--card);
+  border: 1px solid var(--primary);
+  color: var(--primary);
   padding: 6px 10px;
   border-radius: 8px;
   font-size: 12px;
@@ -328,7 +329,7 @@ function selectLevel(level: string) {
   display: block;
   font-size: 12px;
   font-weight: 600;
-  color: var(--muted-foreground, #8e8d87);
+  color: var(--muted-foreground);
   margin-bottom: 6px;
 }
 
@@ -345,15 +346,15 @@ function selectLevel(level: string) {
   justify-content: center;
   align-items: center;
   border-radius: 12px;
-  border: 1.5px solid #262624;
-  background: #141413;
+  border: 1.5px solid var(--border);
+  background: var(--card);
   cursor: pointer;
   position: relative;
-  transition: all 0.22s ease;
+  transition: background-color var(--motion-duration-moderate) var(--motion-ease-out), border-color var(--motion-duration-moderate) var(--motion-ease-out), color var(--motion-duration-moderate) var(--motion-ease-out);
 }
 
 .alliance-tag {
-  font-family: 'Orbitron', sans-serif;
+  font-family: var(--font-sans);
   font-size: 9px;
   font-weight: 800;
   letter-spacing: 1px;
@@ -376,13 +377,13 @@ function selectLevel(level: string) {
 }
 
 .alliance-dot.red {
-  background: #ef4444;
-  box-shadow: 0 0 8px #ef4444;
+  background: var(--alliance-red);
+  box-shadow: none;
 }
 
 .alliance-dot.blue {
-  background: #38bdf8;
-  box-shadow: 0 0 8px #38bdf8;
+  background: var(--alliance-blue);
+  box-shadow: none;
 }
 
 .alliance-name {
@@ -391,25 +392,27 @@ function selectLevel(level: string) {
 }
 
 .alliance-btn.red-btn {
-  color: #f87171;
+  color: var(--red-300);
 }
 
 .alliance-btn.blue-btn {
-  color: #38bdf8;
+  color: var(--alliance-blue);
 }
 
 .alliance-btn.red-btn.is-selected {
-  background: #1b1111;
-  border-color: #ef4444;
-  color: #ffffff;
-  box-shadow: 0 0 18px rgba(239, 68, 68, 0.35), inset 0 2px 0 #f97316;
+  background: var(--alliance-red-bg);
+  border-color: var(--alliance-red);
+  border-top: 3px solid var(--alliance-red);
+  color: var(--g-50);
+  box-shadow: var(--shadow-1);
 }
 
 .alliance-btn.blue-btn.is-selected {
-  background: #0f1622;
-  border-color: #38bdf8;
-  color: #ffffff;
-  box-shadow: 0 0 18px rgba(56, 189, 248, 0.35), inset 0 2px 0 #3b82f6;
+  background: var(--alliance-blue-bg);
+  border-color: var(--alliance-blue);
+  border-top: 3px solid var(--alliance-blue);
+  color: var(--g-50);
+  box-shadow: var(--shadow-1);
 }
 
 .check-mark {
@@ -429,19 +432,19 @@ function selectLevel(level: string) {
 .btn-level-seg {
   height: 40px;
   border-radius: 10px;
-  background: #141413;
-  border: 1px solid #262624;
-  color: var(--muted-foreground, #8e8d87);
+  background: var(--card);
+  border: 1px solid var(--border);
+  color: var(--muted-foreground);
   font-size: 13px;
   font-weight: 600;
   cursor: pointer;
-  transition: all 0.2s ease;
+  transition: background-color var(--motion-duration-fast) var(--motion-ease-out), border-color var(--motion-duration-fast) var(--motion-ease-out), color var(--motion-duration-fast) var(--motion-ease-out);
 }
 
 .btn-level-seg.is-active {
-  background: #161d13;
-  border-color: #39ff14;
-  color: #39ff14;
+  background: var(--status-success-bg);
+  border-color: var(--primary);
+  color: var(--primary);
   font-weight: 700;
 }
 
@@ -456,9 +459,9 @@ function selectLevel(level: string) {
   width: 40px;
   height: 52px;
   border-radius: 10px;
-  background: #141413;
-  border: 1px solid #262624;
-  color: var(--foreground, #f0efe9);
+  background: var(--card);
+  border: 1px solid var(--border);
+  color: var(--foreground);
   font-size: 1.2rem;
   font-weight: 700;
   cursor: pointer;
@@ -469,9 +472,9 @@ function selectLevel(level: string) {
 }
 
 .btn-stepper:active {
-  background: #1c1c1a;
-  border-color: #39ff14;
-  color: #39ff14;
+  background: var(--surface-hover);
+  border-color: var(--primary);
+  color: var(--primary);
 }
 
 .btn-stepper:disabled {
@@ -493,21 +496,21 @@ function selectLevel(level: string) {
   width: 100%;
   box-sizing: border-box;
   height: 52px;
-  background: #080807;
-  border: 1.5px solid #262624;
+  background: var(--surface-recessed);
+  border: 1.5px solid var(--border);
   border-radius: 10px;
-  color: var(--foreground, #f0efe9);
+  color: var(--foreground);
   font-size: 1.3rem;
   font-weight: 800;
   text-align: center;
-  font-family: 'Orbitron', monospace;
+  font-family: var(--font-numeric);
   font-variant-numeric: tabular-nums;
 }
 
 .giant-num-input:focus {
   outline: none;
-  border-color: var(--primary, #39ff14);
-  box-shadow: 0 0 12px rgba(57, 255, 20, 0.25);
+  border-color: var(--primary);
+  box-shadow: var(--focus-ring-sm);
 }
 
 .banned-warning-card {
@@ -515,10 +518,10 @@ function selectLevel(level: string) {
   align-items: center;
   gap: 8px;
   padding: 8px 12px;
-  background: #1b1111;
-  border: 1px solid rgba(239, 68, 68, 0.45);
+  background: var(--status-error-bg);
+  border: 1px solid var(--status-error-border);
   border-radius: 10px;
-  color: #f87171;
+  color: var(--status-error-text);
   font-size: 12px;
   font-weight: 600;
 }
@@ -527,14 +530,18 @@ function selectLevel(level: string) {
   display: flex;
   align-items: center;
   gap: 6px;
-  background: #141413;
-  border: 1px solid #262624;
+  background: var(--card);
+  border: 1px solid var(--border);
   border-radius: 10px;
   padding: 8px 12px;
   font-size: 12px;
-  color: var(--muted-foreground, #8e8d87);
+  color: var(--muted-foreground);
 }
 
-.text-red { color: #f87171; }
-.text-blue { color: #38bdf8; }
+.pit-scout-pill strong {
+  font-variant-numeric: tabular-nums;
+}
+
+.text-red { color: var(--alliance-red); }
+.text-blue { color: var(--alliance-blue); }
 </style>

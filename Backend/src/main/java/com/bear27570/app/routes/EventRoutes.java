@@ -5,7 +5,10 @@ import com.bear27570.app.dao.EventDao;
 import com.bear27570.app.dao.UserDao;
 import com.bear27570.app.model.EventMember;
 import com.bear27570.app.model.ScoutingEvent;
+import com.bear27570.app.model.TurnServerConfig;
 import com.bear27570.app.model.User;
+import com.bear27570.app.util.AESUtil;
+import com.bear27570.app.util.KeyDecryptionException;
 import com.google.gson.Gson;
 import io.javalin.config.RoutesConfig;
 import org.jdbi.v3.core.Jdbi;
@@ -20,7 +23,9 @@ import java.io.File;
 import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.StandardCopyOption;
+import java.util.ArrayList;
 import java.util.List;
+import java.util.Locale;
 import java.util.Map;
 import java.util.UUID;
 import java.util.concurrent.ThreadLocalRandom;
@@ -48,6 +53,7 @@ public class EventRoutes {
         routes.get("/api/events", ctx -> {
             String userId = ctx.attribute("userId");
             List<ScoutingEvent> events = jdbi.withExtension(EventDao.class, dao -> dao.findForUser(userId));
+            events.forEach(this::hydrateTurnConfig);
             ctx.result(gson.toJson(events)).contentType("application/json");
         });
 
@@ -115,7 +121,8 @@ public class EventRoutes {
                 dao.joinEvent(extEventId, userId);
                 return dao.findById(extEventId);
             });
-            
+
+            hydrateTurnConfig(evt);
             ctx.status(200).result(gson.toJson(evt)).contentType("application/json");
         });
 
@@ -176,15 +183,35 @@ public class EventRoutes {
                     handle.execute("UPDATE events SET invite_code = NULL WHERE id = ?", existingByCode.getId());
                 }
 
+                String encryptedTurnConfig = null;
+                boolean shouldClearTurnConfig = false;
+                if (incoming.getCustomTurnConfig() != null
+                        && incoming.getCustomTurnConfig().getUrls() != null
+                        && !incoming.getCustomTurnConfig().getUrls().isEmpty()) {
+                    encryptedTurnConfig = AESUtil.encrypt(gson.toJson(incoming.getCustomTurnConfig()));
+                } else if (incoming.getCustomTurnConfig() == null && Boolean.FALSE.equals(incoming.getHasCustomTurn())) {
+                    shouldClearTurnConfig = true;
+                }
+
                 ScoutingEvent existing = eventDao.findById(incoming.getId());
                 if (existing == null) {
                     incoming.setInviteCode(normalizedCode);
                     incoming.setHostId(hostId);
+                    if (encryptedTurnConfig != null) {
+                        incoming.setTurnConfigEncrypted(encryptedTurnConfig);
+                    } else if (shouldClearTurnConfig) {
+                        incoming.setTurnConfigEncrypted(null);
+                    }
                     eventDao.insert(incoming);
                 } else {
                     eventDao.updateFtcConfig(incoming.getId(), incoming.getFtcYear(), incoming.getFtcEventCode());
                     handle.execute("UPDATE events SET invite_code = ?, name = ?, host_id = ? WHERE id = ?",
                             normalizedCode, incoming.getName(), hostId, incoming.getId());
+                    if (encryptedTurnConfig != null) {
+                        eventDao.updateTurnConfig(incoming.getId(), encryptedTurnConfig);
+                    } else if (shouldClearTurnConfig) {
+                        eventDao.updateTurnConfig(incoming.getId(), null);
+                    }
                 }
 
                 // Migrate any records and cleanup stub if existingByCode was a different event/stub
@@ -207,6 +234,7 @@ public class EventRoutes {
                 return eventDao.findById(incoming.getId());
             });
 
+            hydrateTurnConfig(synced);
             ctx.status(200).result(gson.toJson(synced)).contentType("application/json");
         });
 
@@ -268,6 +296,98 @@ public class EventRoutes {
                 dao.updateFtcConfig(eventId, code != null ? year : null, code);
             });
             ctx.status(200).result("OK");
+        });
+
+        routes.put("/api/events/{id}/turn-config", ctx -> {
+            String userId = ctx.attribute("userId");
+            if (userId == null || userId.isBlank()) {
+                throw new io.javalin.http.UnauthorizedResponse("Unauthorized");
+            }
+            String eventId = ctx.pathParam("id");
+            ScoutingEvent e = jdbi.withExtension(EventDao.class, dao -> dao.findById(eventId));
+            if (e == null) {
+                throw new io.javalin.http.NotFoundResponse("Event not found");
+            }
+            if (!userId.equals(e.getHostId())) {
+                throw new io.javalin.http.ForbiddenResponse("Only the host can configure the event");
+            }
+
+            @SuppressWarnings("unchecked")
+            Map<String, Object> body = gson.fromJson(ctx.body(), Map.class);
+            if (body == null) {
+                ctx.status(400).result("Invalid JSON body");
+                return;
+            }
+
+            boolean clear = Boolean.TRUE.equals(body.get("clear"));
+            Object rawUrls = body.get("urls");
+            if (clear || rawUrls == null || (rawUrls instanceof List<?> rawList && rawList.isEmpty())) {
+                jdbi.useExtension(EventDao.class, dao -> dao.updateTurnConfig(eventId, null));
+                ctx.status(200)
+                        .result("{\"hasCustomTurn\":false,\"customTurnConfig\":null}")
+                        .contentType("application/json");
+                return;
+            }
+
+            if (!(rawUrls instanceof List<?> rawUrlsList)) {
+                ctx.status(400).result("urls must be a list of strings");
+                return;
+            }
+            if (rawUrlsList.size() > 10) {
+                ctx.status(400).result("Too many TURN URLs (max 10)");
+                return;
+            }
+
+            List<String> cleanUrls = new ArrayList<>();
+            for (Object item : rawUrlsList) {
+                String trimmed = item == null ? "" : String.valueOf(item).trim();
+                String lower = trimmed.toLowerCase(Locale.ROOT);
+                if (trimmed.isEmpty() || (!lower.startsWith("turn:") && !lower.startsWith("turns:"))) {
+                    ctx.status(400).result("Invalid TURN URL: must start with turn: or turns:");
+                    return;
+                }
+                cleanUrls.add(trimmed);
+            }
+
+            String rawUsername = asString(body.get("username"));
+            if (rawUsername == null || rawUsername.isBlank()) {
+                ctx.status(400).result("TURN username is required");
+                return;
+            }
+
+            String rawCredential = asString(body.get("credential"));
+            String resolvedCredential = null;
+            boolean isMaskedOrBlank = rawCredential == null
+                    || rawCredential.isBlank()
+                    || "****".equals(rawCredential.trim())
+                    || rawCredential.contains("***");
+            if (isMaskedOrBlank) {
+                String existingEncrypted = e.getTurnConfigEncrypted();
+                if (existingEncrypted != null && !existingEncrypted.isBlank()) {
+                    try {
+                        TurnServerConfig existingCfg = gson.fromJson(AESUtil.decrypt(existingEncrypted), TurnServerConfig.class);
+                        if (existingCfg != null && existingCfg.getCredential() != null && !existingCfg.getCredential().isBlank()) {
+                            resolvedCredential = existingCfg.getCredential();
+                        }
+                    } catch (Exception ex) {
+                        logger.warn("Failed to decrypt existing TURN config while resolving masked credential for event {}: {}", eventId, ex.getMessage());
+                    }
+                }
+                if (resolvedCredential == null) {
+                    ctx.status(400).result("TURN credential is required");
+                    return;
+                }
+            } else {
+                resolvedCredential = rawCredential;
+            }
+
+            TurnServerConfig config = new TurnServerConfig(cleanUrls, rawUsername.trim(), resolvedCredential);
+            String encrypted = AESUtil.encrypt(gson.toJson(config));
+            jdbi.useExtension(EventDao.class, dao -> dao.updateTurnConfig(eventId, encrypted));
+
+            ctx.status(200)
+                    .result(gson.toJson(Map.of("hasCustomTurn", true, "customTurnConfig", config)))
+                    .contentType("application/json");
         });
 
         routes.get("/api/events/{id}/banned-teams", ctx -> {
@@ -570,6 +690,39 @@ public class EventRoutes {
             }
         } catch (Exception e) {
             logger.error("Error migrating pit photos from {} to {}: {}", oldEventId, newEventId, e.getMessage());
+        }
+    }
+
+    private void hydrateTurnConfig(ScoutingEvent event) {
+        if (event == null) {
+            return;
+        }
+        String encrypted = event.getTurnConfigEncrypted();
+        // Always clear encrypted ciphertext before serializing response
+        event.setTurnConfigEncrypted(null);
+        if (encrypted == null || encrypted.isBlank()) {
+            event.setCustomTurnConfig(null);
+            event.setHasCustomTurn(false);
+            return;
+        }
+        try {
+            String decrypted = AESUtil.decrypt(encrypted);
+            TurnServerConfig cfg = gson.fromJson(decrypted, TurnServerConfig.class);
+            if (cfg != null && cfg.getUrls() != null && !cfg.getUrls().isEmpty()) {
+                event.setCustomTurnConfig(cfg);
+                event.setHasCustomTurn(true);
+            } else {
+                event.setCustomTurnConfig(null);
+                event.setHasCustomTurn(false);
+            }
+        } catch (KeyDecryptionException e) {
+            logger.warn("Failed to decrypt custom TURN config for event {}: {}", event.getId(), e.getMessage());
+            event.setCustomTurnConfig(null);
+            event.setHasCustomTurn(false);
+        } catch (Exception e) {
+            logger.warn("Failed to parse custom TURN config for event {}: {}", event.getId(), e.getMessage());
+            event.setCustomTurnConfig(null);
+            event.setHasCustomTurn(false);
         }
     }
 

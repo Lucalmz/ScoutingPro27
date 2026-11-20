@@ -1,4 +1,4 @@
-import type { ScoutingEvent, WebRtcMessage } from '@/types'
+import type { ConnectionTransportInfo, ScoutingEvent, WebRtcMessage } from '@/types'
 import { DataChannelSender } from '@/services/dataChannelSender'
 import {
   encryptSignalingData,
@@ -9,7 +9,7 @@ import type { ClientEntry, WebRtcCallbacks } from './types'
 import {
   buildIceConfiguration,
   optimizeCandidatePriority,
-  synthesizeSymmetricNatPortCandidates,
+  synthesizeSymmetricNatPortCandidatesForPeer,
   sortCandidatesPreferIpv6,
   probeLocalInterfaceIpv6,
   warmUpDoHStunIpv6,
@@ -64,6 +64,7 @@ export interface HostSessionContext {
   clientIdToScoutId?: Map<string, string>
   clientIdToScoutName?: Map<string, string>
   scoutIdToClientIds?: Map<string, Set<string>>
+  onPeerDisconnected?: (sender: string) => void
 }
 
 /** 每个 sender 最多缓存的“尚无匹配 PeerConnection”的候选数，防止异常对端撑爆内存 */
@@ -159,7 +160,7 @@ export function createHostSignalingHandler(ctx: HostSessionContext) {
             if (ip && isGlobalIpv6Address(ip)) cachedHostIpv6 = cleanIpAddress(ip)
           } catch {}
         }
-        await waitForDoHStunIpv6Bounded(300)
+        await waitForDoHStunIpv6Bounded(0)
 
         const existing = clients.get(sender)
         let clientData: ClientEntry
@@ -168,12 +169,14 @@ export function createHostSignalingHandler(ctx: HostSessionContext) {
           targetPc.ondatachannel = (ev) => {
             const dc = ev.channel
             log.info(`Host DataChannel received from ${sender} (label: ${dc.label}, state: ${dc.readyState})`)
-            const targetHolder = stagedClients.get(sender) || clients.get(sender)
+            const stagedMatch = stagedClients.get(sender)
+            const targetHolder = stagedMatch?.pc === targetPc ? stagedMatch : clients.get(sender)
             const senderObj = new DataChannelSender(dc)
             dc.onmessage = (e) => ctx.handleChannelMessage(e, sender)
 
             const promoteNativeDc = () => {
-              const holder = stagedClients.get(sender) || clients.get(sender)
+              const staged = stagedClients.get(sender)
+              const holder = staged?.pc === targetPc ? staged : clients.get(sender)
               if (holder) {
                 const prevDc = holder.dc
                 if (prevDc && prevDc !== dc && (prevDc as any)?.isVirtual) {
@@ -189,8 +192,34 @@ export function createHostSignalingHandler(ctx: HostSessionContext) {
                     }
                   })
                 }
+                ctx.peerMgr.unmarkVirtualChannelActive?.(holder.pc)
+                ctx.peerMgr.unmarkVirtualChannelActive?.(targetPc)
                 holder.dc = dc
                 holder.sender = senderObj
+
+                if (staged?.pc === targetPc) {
+                  const prevActive = clients.get(sender)
+                  stagedClients.delete(sender)
+                  clients.set(sender, holder)
+                  if (prevActive && prevActive.pc !== targetPc) {
+                    log.info(`Host promoted non-destructive probe PC for ${sender}; closing superseded TURN PC.`)
+                    if (prevActive.sender) {
+                      try { prevActive.sender.abort('Superseded by direct probe upgrade') } catch {}
+                    }
+                    if (prevActive.dc && prevActive.dc !== dc) {
+                      prevActive.dc.onmessage = null
+                      prevActive.dc.onopen = null
+                      prevActive.dc.onclose = null
+                      prevActive.dc.onerror = null
+                      try { prevActive.dc.close() } catch {}
+                    }
+                    prevActive.pc.onicecandidate = null
+                    prevActive.pc.onconnectionstatechange = null
+                    prevActive.pc.oniceconnectionstatechange = null
+                    try { prevActive.pc.ondatachannel = () => {} } catch {}
+                    try { prevActive.pc.close() } catch {}
+                  }
+                }
               }
             }
 
@@ -206,6 +235,7 @@ export function createHostSignalingHandler(ctx: HostSessionContext) {
                 targetHolder && (targetHolder.dc as any)?.isVirtual && targetHolder.dc?.readyState === 'open'
               )
               promoteNativeDc()
+              void ctx.peerMgr.updateTransportInfo(targetPc, sender)
               ctx.updateHostStatus()
               if (!hadOpenVirtual) {
                 const currentEventMetadata = ctx.getCurrentEventMetadata()
@@ -234,6 +264,7 @@ export function createHostSignalingHandler(ctx: HostSessionContext) {
         }
 
         const isIceRestart = Boolean(
+          (data.iceRestart || data.offer?.iceRestart) &&
           existing &&
           existing.pc &&
           !['closed', 'failed'].includes(existing.pc.connectionState) &&
@@ -270,6 +301,8 @@ export function createHostSignalingHandler(ctx: HostSessionContext) {
             try { curActive.pc.ondatachannel = () => {} } catch {}
             try { curActive.pc.close() } catch {}
             clients.delete(sender)
+            ctx.peerMgr.clearPeerTransportInfo?.(sender)
+            ctx.onPeerDisconnected?.(sender)
           }
           const curStaged = stagedClients.get(sender)
           if (curStaged && curStaged.pc === targetPc) {
@@ -298,15 +331,74 @@ export function createHostSignalingHandler(ctx: HostSessionContext) {
           ctx.updateHostStatus()
         }
 
+        const isSilentUpgradeProbe = Boolean(
+          (data.silentUpgradeProbe || data.offer?.silentUpgradeProbe) &&
+          existing &&
+          existing.dc &&
+          existing.dc.readyState === 'open' &&
+          !(existing.dc as any)?.isVirtual
+        )
+
         if (isIceRestart && existing) {
           log.info(`Performing in-place ICE restart renegotiation for existing peer ${sender}`)
           const allowTurnOnRestart = Boolean(data.allowTurn || data.offer?.allowTurn || data.forceRelay)
+          const primaryTurnOnlyOnRestart = Boolean(data.primaryTurnOnly || data.offer?.primaryTurnOnly)
+          ctx.peerMgr.holdLocalCandidates(existing.pc)
           try {
             if (typeof existing.pc.setConfiguration === 'function') {
-              existing.pc.setConfiguration(buildIceConfiguration(allowTurnOnRestart, false))
+              existing.pc.setConfiguration(
+                buildIceConfiguration(allowTurnOnRestart, false, { primaryTurnOnly: primaryTurnOnlyOnRestart })
+              )
             }
           } catch {}
           clientData = existing
+        } else if (isSilentUpgradeProbe) {
+          log.info(`Staging non-destructive direct probe PC for ${sender} while keeping active connection alive`)
+          const existingStaged = stagedClients.get(sender)
+          if (existingStaged) {
+            if (existingStaged.drainingVirtualDc) {
+              try { existingStaged.drainingVirtualDc.close() } catch {}
+              existingStaged.drainingVirtualDc = undefined
+            }
+            if (existingStaged.sender) {
+              try { existingStaged.sender.abort('Superseded staged probe') } catch {}
+              existingStaged.sender = undefined
+            }
+            if (existingStaged.dc) {
+              existingStaged.dc.onmessage = null
+              existingStaged.dc.onopen = null
+              existingStaged.dc.onclose = null
+              existingStaged.dc.onerror = null
+              try { existingStaged.dc.close() } catch {}
+            }
+            if (existingStaged.pc) {
+              existingStaged.pc.onicecandidate = null
+              existingStaged.pc.onconnectionstatechange = null
+              existingStaged.pc.oniceconnectionstatechange = null
+              try { existingStaged.pc.ondatachannel = () => {} } catch {}
+              try { existingStaged.pc.close() } catch {}
+            }
+            stagedClients.delete(sender)
+          }
+          let pcRef: RTCPeerConnection
+          const onDisconnect = () => {
+            if (pcRef) makeOnDisconnect(pcRef)()
+          }
+          const pc = ctx.peerMgr.createPeerConnection(sender, onDisconnect, false, undefined, {
+            sessionTag: data.clientSessionId,
+            holdLocalCandidates: true,
+            allowTurn: false
+          })
+          pcRef = pc
+          setupDcHandler(pc)
+          clientData = {
+            pc,
+            dc: undefined,
+            sender: undefined,
+            sessionId: data.clientSessionId,
+            pendingCandidates: []
+          }
+          stagedClients.set(sender, clientData)
         } else {
           // 若当前存在活跃的 VirtualDataChannel，在新的原生 DataChannel 真正 open 之前保留虚拟通道，支持无缝后台热升级
           const preservedVirtualDc =
@@ -376,10 +468,12 @@ export function createHostSignalingHandler(ctx: HostSessionContext) {
             if (pcRef) makeOnDisconnect(pcRef)()
           }
           const allowTurn = Boolean(data.allowTurn || data.offer?.allowTurn || data.forceRelay)
+          const primaryTurnOnly = Boolean(data.primaryTurnOnly || data.offer?.primaryTurnOnly)
           const pc = ctx.peerMgr.createPeerConnection(sender, onDisconnect, false, undefined, {
             sessionTag: data.clientSessionId,
             holdLocalCandidates: true,
-            allowTurn
+            allowTurn,
+            primaryTurnOnly
           })
           pcRef = pc
           if (preservedVirtualDc) {
@@ -407,6 +501,9 @@ export function createHostSignalingHandler(ctx: HostSessionContext) {
             offerData = JSON.parse(decryptedStr)
           } catch (err) {
             console.warn('[WebRTC Host] Failed to decrypt offer SDP:', err)
+            if (stagedClients.get(sender) === clientData) {
+              makeOnDisconnect(clientData.pc)()
+            }
             return
           }
         }
@@ -414,6 +511,9 @@ export function createHostSignalingHandler(ctx: HostSessionContext) {
         // Verify ticket & evaluate TOFU peer trust
         const trustPassed = await verifyAndEvaluateHostPeerTrust(ctx, sender, data, offerData)
         if (!trustPassed) {
+          if (stagedClients.get(sender) === clientData) {
+            makeOnDisconnect(clientData.pc)()
+          }
           return
         }
 
@@ -463,7 +563,8 @@ export function createHostSignalingHandler(ctx: HostSessionContext) {
         )
         const optimizedAnswer = {
           type: answer.type,
-          sdp: finalizedAnswerSdp
+          sdp: finalizedAnswerSdp,
+          customTurnConfig: ctx.getCurrentEventMetadata()?.customTurnConfig ?? null
         }
 
         let answerPayload: any = optimizedAnswer
@@ -507,7 +608,7 @@ export function createHostSignalingHandler(ctx: HostSessionContext) {
         if (offerData?.sdp && typeof offerData.sdp === 'string') {
           for (const line of offerData.sdp.split(/\r?\n/)) {
             if (line.startsWith('a=candidate:') && /\btyp\s+srflx\b/i.test(line)) {
-              const predictedList = synthesizeSymmetricNatPortCandidates(line.slice(2))
+              const predictedList = synthesizeSymmetricNatPortCandidatesForPeer(pc, line.slice(2))
               for (const predCandStr of predictedList) {
                 try {
                   await pc.addIceCandidate(
@@ -542,7 +643,7 @@ export function createHostSignalingHandler(ctx: HostSessionContext) {
             }
             await pc.addIceCandidate(toIceCandidate(candidateObj))
             if (candidateObj?.candidate) {
-              const predictedList = synthesizeSymmetricNatPortCandidates(candidateObj.candidate)
+              const predictedList = synthesizeSymmetricNatPortCandidatesForPeer(pc, candidateObj.candidate)
               for (const predCandStr of predictedList) {
                 try {
                   await pc.addIceCandidate(
@@ -564,50 +665,69 @@ export function createHostSignalingHandler(ctx: HostSessionContext) {
         const sharedKey = sas.clientSharedKeys.get(sender)
         const frame = await tryDecryptVirtualFrame(sharedKey, data.encrypted)
         if (!frame) return
-        const targetHolder = stagedClients.get(sender) || clients.get(sender)
+        const targetHolder = clients.get(sender)
         if (!targetHolder) return
 
-        // 标记该客户端的后台原生 PC 已由虚拟通道兜底，防止 15s ICE 超时误杀会话与密钥
-        ctx.peerMgr.markVirtualChannelActive(targetHolder.pc)
-        if (stagedClients.has(sender)) {
-          clients.set(sender, targetHolder)
-          stagedClients.delete(sender)
-        }
+        const hasOpenNativeDc = Boolean(
+          targetHolder.dc &&
+          targetHolder.dc.readyState === 'open' &&
+          !(targetHolder.dc as any)?.isVirtual
+        )
 
-        // 若该客户端尚未打开原生 DataChannel，为其挂载 VirtualDataChannel
-        if (!targetHolder.dc || targetHolder.dc.readyState !== 'open') {
-          const vdc = new VirtualDataChannel({
-            label: 'scoutingpro-data-virtual',
-            sessionId: frame.sessionId,
-            getSignaling: ctx.getSignaling,
-            getSharedAesKey: () => sas.clientSharedKeys.get(sender) || null,
-            getTargetPeerId: () => sender
-          })
-          const senderObj = new DataChannelSender(vdc as unknown as RTCDataChannel)
-          targetHolder.dc = vdc as unknown as RTCDataChannel
-          targetHolder.sender = senderObj
-          vdc.onmessage = (e) => ctx.handleChannelMessage(e, sender)
-          vdc.onopen = () => {
-            log.info(`Host VirtualDataChannel state is now OPEN with ${sender}`)
-            ctx.updateHostStatus()
-            const currentEventMetadata = ctx.getCurrentEventMetadata()
-            if (currentEventMetadata) {
-              ctx.sendMessage(
-                {
-                  type: 'EVENT_METADATA',
-                  event: currentEventMetadata,
-                  authCode: currentInviteCode || undefined,
-                  hostSessionId: hostSessionId || undefined
-                },
-                sender
-              )
+        if (!hasOpenNativeDc) {
+          // 标记该客户端的后台原生 PC 已由虚拟通道兜底，防止 15s ICE 超时误杀会话与密钥
+          ctx.peerMgr.markVirtualChannelActive(targetHolder.pc)
+
+          // 若该客户端尚未打开虚拟通道，为其挂载 VirtualDataChannel
+          if (!targetHolder.dc || targetHolder.dc.readyState !== 'open') {
+            const vdc = new VirtualDataChannel({
+              label: 'scoutingpro-data-virtual',
+              sessionId: frame.sessionId,
+              getSignaling: ctx.getSignaling,
+              getSharedAesKey: () => sas.clientSharedKeys.get(sender) || null,
+              getTargetPeerId: () => sender
+            })
+            const senderObj = new DataChannelSender(vdc as unknown as RTCDataChannel)
+            targetHolder.dc = vdc as unknown as RTCDataChannel
+            targetHolder.sender = senderObj
+            vdc.onmessage = (e) => ctx.handleChannelMessage(e, sender)
+            vdc.onopen = () => {
+              log.info(`Host VirtualDataChannel state is now OPEN with ${sender}`)
+              const vdcTransportInfo: ConnectionTransportInfo = {
+                type: 'relay',
+                label: 'ECDH Tunnel (TLS)',
+                isVirtualTunnel: true,
+                localAddress: 'virtual-e2ee',
+                remoteAddress: 'wss-broker:8084',
+                localCandidateType: 'virtual',
+                remoteCandidateType: 'virtual',
+                protocol: 'wss/tls',
+                rttMs: null,
+                securityFingerprint: sas.clientFingerprints.get(sender) || undefined
+              }
+              ctx.peerMgr.setPeerTransportInfo?.(sender, vdcTransportInfo)
+              ctx.updateHostStatus()
+              const currentEventMetadata = ctx.getCurrentEventMetadata()
+              if (currentEventMetadata) {
+                ctx.sendMessage(
+                  {
+                    type: 'EVENT_METADATA',
+                    event: currentEventMetadata,
+                    authCode: currentInviteCode || undefined,
+                    hostSessionId: hostSessionId || undefined
+                  },
+                  sender
+                )
+              }
             }
+            vdc.onclose = () => {
+              log.warn(`Host VirtualDataChannel closed with ${sender}`)
+              ctx.updateHostStatus()
+            }
+            vdc.open()
           }
-          vdc.onclose = () => {
-            log.warn(`Host VirtualDataChannel closed with ${sender}`)
-            ctx.updateHostStatus()
-          }
-          vdc.open()
+        } else if (frame.vdc === 'open') {
+          return
         }
 
         const recipientDc = (targetHolder.dc as any)?.isVirtual
@@ -639,7 +759,15 @@ export function createHostSignalingHandler(ctx: HostSessionContext) {
           candidateData.candidate = optimizeCandidatePriority(candidateData.candidate)
         }
 
-        const targetHolder = stagedClients.get(sender) || clients.get(sender)
+        const staged = stagedClients.get(sender)
+        const active = clients.get(sender)
+        const targetHolder = candidateSessionTag
+          ? (staged?.sessionId === candidateSessionTag
+              ? staged
+              : active?.sessionId === candidateSessionTag
+                ? active
+                : (staged || active))
+          : (staged || active)
         const isSessionMismatch = Boolean(
           targetHolder &&
           candidateSessionTag &&
@@ -663,7 +791,10 @@ export function createHostSignalingHandler(ctx: HostSessionContext) {
             }
             await targetHolder.pc.addIceCandidate(toIceCandidate(candidateData))
             if (candidateData?.candidate) {
-              const predictedList = synthesizeSymmetricNatPortCandidates(candidateData.candidate)
+              const predictedList = synthesizeSymmetricNatPortCandidatesForPeer(
+                targetHolder.pc,
+                candidateData.candidate
+              )
               for (const predCandStr of predictedList) {
                 try {
                   await targetHolder.pc.addIceCandidate(

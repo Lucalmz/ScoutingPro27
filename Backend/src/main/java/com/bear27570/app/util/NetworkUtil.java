@@ -15,6 +15,8 @@ import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Locale;
 import java.util.Set;
+import java.util.function.Function;
+import java.util.function.IntConsumer;
 
 /**
  * 局域网与公网双栈网络探测工具类。
@@ -271,7 +273,62 @@ public class NetworkUtil {
         return "";
     }
 
+    public static boolean hasHeadlessArg(String[] args) {
+        if (args == null) {
+            return false;
+        }
+        for (String arg : args) {
+            if (arg != null && "--headless".equals(arg.replace("\"", "").trim())) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    public static boolean shouldSkipFirewallCheck() {
+        return shouldSkipFirewallCheck(null);
+    }
+
+    public static boolean shouldSkipFirewallCheck(String[] args) {
+        return shouldSkipFirewallCheck(args, System::getenv, System::getProperty);
+    }
+
+    static boolean shouldSkipFirewallCheck(
+            String[] args,
+            Function<String, String> envLookup,
+            Function<String, String> propLookup) {
+        // Do NOT skip on --headless alone so normal headless launches preserve
+        // standard Windows firewall setup; skip only on explicit test/automation flags.
+        return isTrueFlag("ENABLE_TEST_CLEANUP", envLookup, propLookup)
+                || isTrueFlag("SKIP_FIREWALL_CHECK", envLookup, propLookup);
+    }
+
+    private static boolean isTrueFlag(
+            String key,
+            Function<String, String> envLookup,
+            Function<String, String> propLookup) {
+        String envVal = envLookup != null ? envLookup.apply(key) : null;
+        if (envVal != null && "true".equalsIgnoreCase(envVal.trim())) {
+            return true;
+        }
+        String propVal = propLookup != null ? propLookup.apply(key) : null;
+        return propVal != null && "true".equalsIgnoreCase(propVal.trim());
+    }
+
     public static void ensureWindowsFirewallPort(int port) {
+        ensureWindowsFirewallPort(port, NetworkUtil::applyWindowsFirewallPort);
+    }
+
+    static boolean ensureWindowsFirewallPort(int port, IntConsumer applyAction) {
+        if (shouldSkipFirewallCheck()) {
+            System.out.println("[Firewall] Skip guard active (ENABLE_TEST_CLEANUP / SKIP_FIREWALL_CHECK); skipping Windows firewall check for port " + port);
+            return false;
+        }
+        applyAction.accept(port);
+        return true;
+    }
+
+    private static void applyWindowsFirewallPort(int port) {
         String os = System.getProperty("os.name", "").toLowerCase();
         if (!os.contains("win")) {
             return;
@@ -372,6 +429,10 @@ public class NetworkUtil {
     }
 
     public static boolean openWindowsFirewallPrompt(int port) {
+        if (shouldSkipFirewallCheck()) {
+            System.out.println("[Firewall] Skip guard active (ENABLE_TEST_CLEANUP / SKIP_FIREWALL_CHECK); skipping Windows firewall UAC prompt for port " + port);
+            return false;
+        }
         String psScript = buildWindowsNetworkAndFirewallSetupScript(port);
         String encodedCommand = java.util.Base64.getEncoder().encodeToString(
                 psScript.getBytes(java.nio.charset.StandardCharsets.UTF_16LE)

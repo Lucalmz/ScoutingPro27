@@ -284,18 +284,18 @@ function onTextInput(field: CustomFieldDefinition, event: Event) {
 }
 
 .dynamic-field-item {
-  background: rgba(255, 255, 255, 0.02);
-  border: 1px solid var(--border, #262626);
+  background: color-mix(in srgb, var(--g-50) 2%, transparent);
+  border: 1px solid var(--border);
   border-radius: 12px;
   padding: 12px 14px;
   display: flex;
   flex-direction: column;
   gap: 8px;
-  transition: border-color var(--motion-duration-fast, 150ms) ease;
+  transition: border-color var(--motion-duration-fast) var(--motion-ease-out);
 }
 
 .dynamic-field-item:focus-within {
-  border-color: rgba(57, 255, 20, 0.4);
+  border-color: color-mix(in srgb, var(--primary) 40%, transparent);
 }
 
 .field-meta {
@@ -307,14 +307,14 @@ function onTextInput(field: CustomFieldDefinition, event: Event) {
 .field-title {
   font-size: 13px;
   font-weight: 600;
-  color: var(--foreground, #f1f5f9);
+  color: var(--foreground);
   display: flex;
   align-items: center;
   gap: 4px;
 }
 
 .required-star {
-  color: var(--destructive, #ef4444);
+  color: var(--destructive);
   font-size: 14px;
 }
 
@@ -322,21 +322,23 @@ function onTextInput(field: CustomFieldDefinition, event: Event) {
   font-size: 11px;
   padding: 2px 6px;
   border-radius: 4px;
-  background: rgba(255, 255, 255, 0.06);
-  color: var(--muted-foreground, #a3a3a3);
+  background: var(--surface-hover);
+  color: var(--muted-foreground);
 }
 
 /* BOOLEAN */
 .boolean-toggle-card {
   padding: 12px;
   border-radius: 10px;
-  background: rgba(255, 255, 255, 0.03);
-  border: 1px solid var(--border, #262626);
+  background: color-mix(in srgb, var(--g-50) 3%, transparent);
+  border: 1px solid var(--border);
   cursor: pointer;
   user-select: none;
   display: flex;
   align-items: center;
-  transition: all 0.2s ease;
+  transition: background-color var(--motion-duration-fast) var(--motion-ease-out),
+              border-color var(--motion-duration-fast) var(--motion-ease-out),
+              transform var(--motion-duration-fast) var(--motion-ease-out);
 }
 
 .boolean-toggle-card:active {
@@ -344,9 +346,8 @@ function onTextInput(field: CustomFieldDefinition, event: Event) {
 }
 
 .boolean-toggle-card.is-active {
-  background: rgba(57, 255, 20, 0.1);
-  border-color: var(--primary, #39ff14);
-  box-shadow: 0 0 12px rgba(57, 255, 20, 0.15);
+  background: var(--status-success-bg);
+  border-color: var(--primary);
 }
 
 .toggle-indicator {
@@ -357,17 +358,17 @@ function onTextInput(field: CustomFieldDefinition, event: Event) {
 
 .indicator-icon {
   font-size: 20px;
-  color: var(--muted-foreground, #a3a3a3);
+  color: var(--muted-foreground);
 }
 
 .boolean-toggle-card.is-active .indicator-icon {
-  color: var(--primary, #39ff14);
+  color: var(--primary);
 }
 
 .indicator-label {
   font-size: 13px;
   font-weight: 600;
-  color: var(--foreground, #f1f5f9);
+  color: var(--foreground);
 }
 
 /* NUMBER STEPPER */
@@ -375,8 +376,8 @@ function onTextInput(field: CustomFieldDefinition, event: Event) {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  background: rgba(0, 0, 0, 0.4);
-  border: 1px solid var(--border, #262626);
+  background: var(--surface-recessed);
+  border: 1px solid var(--border);
   border-radius: 10px;
   overflow: hidden;
   height: 48px;
@@ -385,19 +386,20 @@ function onTextInput(field: CustomFieldDefinition, event: Event) {
 .stepper-btn {
   width: 54px;
   height: 100%;
-  background: rgba(255, 255, 255, 0.05);
+  background: var(--surface-elevated);
   border: none;
-  color: var(--foreground, #f1f5f9);
+  color: var(--foreground);
   display: flex;
   align-items: center;
   justify-content: center;
   cursor: pointer;
-  transition: background-color 0.15s;
+  transition: background-color var(--motion-duration-fast) var(--motion-ease-out),
+              color var(--motion-duration-fast) var(--motion-ease-out);
 }
 
 .stepper-btn:active {
-  background: rgba(57, 255, 20, 0.2);
-  color: var(--primary, #39ff14);
+  background: color-mix(in srgb, var(--primary) 20%, transparent);
+  color: var(--primary);
 }
 
 .stepper-display {
@@ -414,15 +416,16 @@ function onTextInput(field: CustomFieldDefinition, event: Event) {
   border: none;
   font-size: 18px;
   font-weight: 700;
-  color: var(--primary, #39ff14);
+  color: var(--primary);
   text-align: center;
   outline: none;
-  font-family: monospace;
+  font-family: var(--font-numeric);
+  font-variant-numeric: tabular-nums;
 }
 
 .display-unit {
   font-size: 12px;
-  color: var(--muted-foreground, #a3a3a3);
+  color: var(--muted-foreground);
 }
 
 /* LEVEL RATING */
@@ -437,8 +440,8 @@ function onTextInput(field: CustomFieldDefinition, event: Event) {
 }
 
 .level-tick-btn {
-  background: rgba(255, 255, 255, 0.03);
-  border: 1px solid var(--border, #262626);
+  background: color-mix(in srgb, var(--g-50) 3%, transparent);
+  border: 1px solid var(--border);
   border-radius: 8px;
   padding: 8px 4px;
   display: flex;
@@ -446,8 +449,11 @@ function onTextInput(field: CustomFieldDefinition, event: Event) {
   align-items: center;
   gap: 2px;
   cursor: pointer;
-  color: var(--muted-foreground, #a3a3a3);
-  transition: all 0.2s ease;
+  color: var(--muted-foreground);
+  transition: background-color var(--motion-duration-fast) var(--motion-ease-out),
+              border-color var(--motion-duration-fast) var(--motion-ease-out),
+              color var(--motion-duration-fast) var(--motion-ease-out),
+              transform var(--motion-duration-fast) var(--motion-ease-out);
 }
 
 .level-tick-btn:active {
@@ -457,7 +463,8 @@ function onTextInput(field: CustomFieldDefinition, event: Event) {
 .tick-num {
   font-size: 16px;
   font-weight: 700;
-  font-family: monospace;
+  font-family: var(--font-numeric);
+  font-variant-numeric: tabular-nums;
 }
 
 .tick-label {
@@ -466,15 +473,14 @@ function onTextInput(field: CustomFieldDefinition, event: Event) {
 }
 
 .level-tick-btn.is-below {
-  border-color: rgba(57, 255, 20, 0.3);
-  color: var(--foreground, #f1f5f9);
+  border-color: var(--status-success-border);
+  color: var(--foreground);
 }
 
 .level-tick-btn.is-active {
-  background: rgba(57, 255, 20, 0.15);
-  border-color: var(--primary, #39ff14);
-  color: var(--primary, #39ff14);
-  box-shadow: 0 0 10px rgba(57, 255, 20, 0.2);
+  background: var(--status-success-bg);
+  border-color: var(--primary);
+  color: var(--primary);
 }
 
 /* SELECT CAPSULES */
@@ -490,13 +496,16 @@ function onTextInput(field: CustomFieldDefinition, event: Event) {
   gap: 6px;
   padding: 6px 14px;
   border-radius: 20px;
-  background: rgba(255, 255, 255, 0.04);
-  border: 1px solid var(--border, #262626);
-  color: var(--muted-foreground, #a3a3a3);
+  background: color-mix(in srgb, var(--g-50) 4%, transparent);
+  border: 1px solid var(--border);
+  color: var(--muted-foreground);
   font-size: 13px;
   font-weight: 500;
   cursor: pointer;
-  transition: all 0.2s;
+  transition: background-color var(--motion-duration-fast) var(--motion-ease-out),
+              border-color var(--motion-duration-fast) var(--motion-ease-out),
+              color var(--motion-duration-fast) var(--motion-ease-out),
+              transform var(--motion-duration-fast) var(--motion-ease-out);
 }
 
 .capsule-chip:active {
@@ -507,21 +516,20 @@ function onTextInput(field: CustomFieldDefinition, event: Event) {
   width: 8px;
   height: 8px;
   border-radius: 50%;
-  background: currentColor;
+  background: var(--chip-accent, currentColor);
 }
 
-.chip-green { --chip-glow: rgba(57, 255, 20, 0.8); }
-.chip-blue  { --chip-glow: rgba(59, 130, 246, 0.8); }
-.chip-red   { --chip-glow: rgba(239, 68, 68, 0.8); }
-.chip-orange{ --chip-glow: rgba(249, 115, 22, 0.8); }
-.chip-purple{ --chip-glow: rgba(168, 85, 247, 0.8); }
-.chip-gray  { --chip-glow: rgba(156, 163, 175, 0.8); }
+.chip-green { --chip-accent: var(--status-success); --chip-bg: var(--status-success-bg); --chip-border: var(--status-success-border); }
+.chip-blue  { --chip-accent: var(--status-info);    --chip-bg: var(--status-info-bg);    --chip-border: var(--status-info-border); }
+.chip-red   { --chip-accent: var(--status-error);   --chip-bg: var(--status-error-bg);   --chip-border: var(--status-error-border); }
+.chip-orange{ --chip-accent: var(--status-warning); --chip-bg: var(--status-warning-bg); --chip-border: var(--status-warning-border); }
+.chip-purple{ --chip-accent: var(--status-ai);      --chip-bg: var(--status-ai-bg);      --chip-border: var(--status-ai-border); }
+.chip-gray  { --chip-accent: var(--g-300);          --chip-bg: var(--g-800);             --chip-border: var(--g-600); }
 
 .capsule-chip.is-selected {
-  background: rgba(255, 255, 255, 0.1);
-  color: var(--foreground, #f1f5f9);
-  border-color: var(--chip-glow, var(--primary, #39ff14));
-  box-shadow: 0 0 10px var(--chip-glow, rgba(57, 255, 20, 0.3));
+  background: var(--chip-bg, var(--surface-hover));
+  color: var(--chip-accent, var(--foreground));
+  border-color: var(--chip-accent, var(--primary));
 }
 
 /* MULTI SELECT */
@@ -537,12 +545,15 @@ function onTextInput(field: CustomFieldDefinition, event: Event) {
   gap: 4px;
   padding: 6px 12px;
   border-radius: 8px;
-  background: rgba(255, 255, 255, 0.03);
-  border: 1px solid var(--border, #262626);
-  color: var(--muted-foreground, #a3a3a3);
+  background: color-mix(in srgb, var(--g-50) 3%, transparent);
+  border: 1px solid var(--border);
+  color: var(--muted-foreground);
   font-size: 13px;
   cursor: pointer;
-  transition: all 0.2s;
+  transition: background-color var(--motion-duration-fast) var(--motion-ease-out),
+              border-color var(--motion-duration-fast) var(--motion-ease-out),
+              color var(--motion-duration-fast) var(--motion-ease-out),
+              transform var(--motion-duration-fast) var(--motion-ease-out);
 }
 
 .tag-flow-badge:active {
@@ -554,9 +565,9 @@ function onTextInput(field: CustomFieldDefinition, event: Event) {
 }
 
 .tag-flow-badge.is-selected {
-  background: rgba(57, 255, 20, 0.1);
-  border-color: var(--primary, #39ff14);
-  color: var(--primary, #39ff14);
+  background: var(--status-success-bg);
+  border-color: var(--primary);
+  color: var(--primary);
 }
 
 /* TEXTAREA */
@@ -566,11 +577,11 @@ function onTextInput(field: CustomFieldDefinition, event: Event) {
 
 .dynamic-textarea {
   width: 100%;
-  background: rgba(0, 0, 0, 0.3);
-  border: 1px solid var(--border, #262626);
+  background: var(--input);
+  border: 1px solid var(--border);
   border-radius: 8px;
   padding: 8px 10px;
-  color: var(--foreground, #f1f5f9);
+  color: var(--foreground);
   font-size: 13px;
   resize: vertical;
   outline: none;
@@ -578,6 +589,7 @@ function onTextInput(field: CustomFieldDefinition, event: Event) {
 }
 
 .dynamic-textarea:focus {
-  border-color: var(--primary, #39ff14);
+  border-color: var(--primary);
+  box-shadow: var(--focus-ring-sm);
 }
 </style>

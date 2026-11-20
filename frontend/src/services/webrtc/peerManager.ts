@@ -6,6 +6,7 @@ import {
   optimizeSdpCandidates,
   applyProxyExitDemotionToBatch,
   demoteProxyExitCandidatePriority,
+  boostDomesticOverProxyExitPriority,
   classifyStunUrlOrigin,
   type TaggedIceCandidateItem,
   classifyCandidatePair,
@@ -22,6 +23,27 @@ import type { WebRtcCallbacks } from './types'
 import { createLogger } from '@/utils/logger'
 
 const log = createLogger('WebRTC:Peer')
+const iceStatsLog = createLogger('WebRTC:IceStats')
+
+interface CandidatePairDiagnosticSummary {
+  id: string
+  state: string
+  nominated: boolean
+  requestsSent: number
+  requestsReceived: number
+  responsesReceived: number
+  responsesSent: number
+  local?: string
+  remote?: string
+}
+
+interface RemoteCandidateDiagnosticSummary {
+  id: string
+  candidateType: string
+  address: string
+  port: number | string
+  protocol: string
+}
 
 export interface PeerConnectionFactoryOptions {
   getSignaling: () => SignalingChannel | null
@@ -40,9 +62,11 @@ export interface PeerConnectionFactoryOptions {
   getClientHostSenderId?: () => string | undefined
   /** Host 侧：某个 Client 的 PeerConnection 已终止。附带 peer 用于身份校验，防止误删已被替换的新连接 */
   onHostClientClosed?: (targetSender: string, peer?: RTCPeerConnection) => void
+  onPeerTransportInfoChanged?: (targetSender: string, info: ConnectionTransportInfo) => void
   updateHostStatus?: () => void
   getClientDcState?: () => RTCDataChannelState | undefined
   isExplicitlyClosed?: () => boolean
+  onClientPeerConnected?: (peer: RTCPeerConnection) => void
 }
 
 /**
@@ -61,9 +85,13 @@ export interface CreatePeerConnectionExtras {
   holdLocalCandidates?: boolean
   /**
    * 是否允许在 ICE 配置中携带 TURN。默认 false（纯 STUN / 纯 P2P，绝不产生 relay 候选）；
-   * 仅当多次重试确认无法直连时由 Client 会话层置 true，Host 依据 Offer 中的 allowTurn 对称配置。
+   * 多次重试仍无法直连（attempt >= 3 或 forceRelay）时由 Client 会话层置 true，Host 依据 Offer 中的 allowTurn 对称配置。
    */
   allowTurn?: boolean
+  /**
+   * 首次启用 TURN 时仅携带主节点（turns:443/tcp），避免同时向全部 4 个 TURN 端点并发 Allocate 浪费配额。
+   */
+  primaryTurnOnly?: boolean
 }
 
 interface CandidateGate {
@@ -105,10 +133,104 @@ export class PeerConnectionManager {
   private readonly candidateGates = new WeakMap<RTCPeerConnection, CandidateGate>()
   private readonly silentUpgradePeers = new WeakSet<RTCPeerConnection>()
   private readonly virtualFallbackPeers = new WeakSet<RTCPeerConnection>()
+  private readonly iceStatsDumpedPeers = new WeakSet<RTCPeerConnection>()
+  private readonly pendingIceStatsDumps = new WeakMap<RTCPeerConnection, Promise<void>>()
+  private readonly peerTargetSenders = new WeakMap<RTCPeerConnection, string>()
   private readonly candidateOrigins = new WeakMap<RTCPeerConnection, Map<string, CandidateOriginMeta>>()
+  private readonly peerTransportInfos = new Map<string, ConnectionTransportInfo>()
 
   constructor(options: PeerConnectionFactoryOptions) {
     this.options = options
+  }
+
+  setPeerTransportInfo(targetSender: string, info: ConnectionTransportInfo): void {
+    if (!targetSender) return
+    this.peerTransportInfos.set(targetSender, info)
+    this.options.onPeerTransportInfoChanged?.(targetSender, info)
+  }
+
+  getPeerTransportInfo(targetSender: string): ConnectionTransportInfo | null {
+    if (!targetSender) return null
+    return this.peerTransportInfos.get(targetSender) || null
+  }
+
+  clearPeerTransportInfo(targetSender: string): void {
+    if (!targetSender) return
+    this.peerTransportInfos.delete(targetSender)
+  }
+
+  /**
+   * 采集并输出未连通 PeerConnection 的全部 candidate-pair 与 remote-candidate（含 prflx）统计，
+   * 写入桌面 Host 日志及手机可导出诊断报告，用于区分包被中间链路丢弃还是被路由器过滤。
+   */
+  dumpIceDiagnosticStats(
+    peer: RTCPeerConnection | null | undefined,
+    triggerReason: string,
+    targetSender?: string
+  ): Promise<void> {
+    if (!peer || this.iceStatsDumpedPeers.has(peer) || typeof peer.getStats !== 'function') {
+      return this.pendingIceStatsDumps.get(peer as RTCPeerConnection) ?? Promise.resolve()
+    }
+    this.iceStatsDumpedPeers.add(peer)
+    const label = targetSender ?? this.peerTargetSenders.get(peer) ?? 'host'
+    const task = (async () => {
+      try {
+        const stats = await peer.getStats()
+        this.logIceStatsReport(stats, triggerReason, label)
+      } catch (err) {
+        iceStatsLog.warn(`[ICE Stats] getStats() failed (${triggerReason}, target: ${label}):`, err)
+      } finally {
+        this.pendingIceStatsDumps.delete(peer)
+      }
+    })()
+    this.pendingIceStatsDumps.set(peer, task)
+    return task
+  }
+
+  private logIceStatsReport(stats: RTCStatsReport, triggerReason: string, targetLabel: string): void {
+    const candidatePairs: CandidatePairDiagnosticSummary[] = []
+    const remoteCandidates: RemoteCandidateDiagnosticSummary[] = []
+
+    const formatCandBrief = (candId: string | undefined): string | undefined => {
+      if (!candId) return undefined
+      const cand = stats.get(candId) as Record<string, unknown> | undefined
+      if (!cand) return candId
+      const addr = String(cand.address ?? cand.ip ?? '?')
+      const port = String(cand.port ?? '?')
+      const typ = String(cand.candidateType ?? '?')
+      const proto = String(cand.protocol ?? '?')
+      return `${addr}:${port} (${typ}/${proto})`
+    }
+
+    stats.forEach((rawReport) => {
+      const report = rawReport as unknown as Record<string, unknown>
+      if (report.type === 'candidate-pair') {
+        candidatePairs.push({
+          id: String(report.id ?? ''),
+          state: String(report.state ?? 'unknown'),
+          nominated: Boolean(report.nominated),
+          requestsSent: Number(report.requestsSent ?? 0),
+          requestsReceived: Number(report.requestsReceived ?? 0),
+          responsesReceived: Number(report.responsesReceived ?? 0),
+          responsesSent: Number(report.responsesSent ?? 0),
+          local: formatCandBrief(typeof report.localCandidateId === 'string' ? report.localCandidateId : undefined),
+          remote: formatCandBrief(typeof report.remoteCandidateId === 'string' ? report.remoteCandidateId : undefined)
+        })
+      } else if (report.type === 'remote-candidate') {
+        remoteCandidates.push({
+          id: String(report.id ?? ''),
+          candidateType: String(report.candidateType ?? 'unknown'),
+          address: String(report.address ?? report.ip ?? ''),
+          port: typeof report.port === 'number' || typeof report.port === 'string' ? report.port : '',
+          protocol: String(report.protocol ?? '')
+        })
+      }
+    })
+
+    const hasPrflx = remoteCandidates.some((c) => c.candidateType === 'prflx')
+    iceStatsLog.warn(
+      `[ICE Stats] trigger=${triggerReason}, target=${targetLabel}, pairs=${candidatePairs.length}, remoteCandidates=${remoteCandidates.length}, hasPrflx=${hasPrflx}, stats=${JSON.stringify({ candidatePairs, remoteCandidates })}`
+    )
   }
 
   /**
@@ -118,8 +240,24 @@ export class PeerConnectionManager {
    */
   markVirtualChannelActive(peer: RTCPeerConnection | null | undefined): void {
     if (peer) {
+      const state = peer.iceConnectionState
+      const connState = peer.connectionState
+      if (
+        state !== 'new' &&
+        state !== 'connected' &&
+        state !== 'completed' &&
+        connState !== 'connected'
+      ) {
+        void this.dumpIceDiagnosticStats(peer, 'virtual_dc_takeover')
+      }
       this.virtualFallbackPeers.add(peer)
       this.options.callbacks.onIceStalled?.(false)
+    }
+  }
+
+  unmarkVirtualChannelActive(peer: RTCPeerConnection | null | undefined): void {
+    if (peer) {
+      this.virtualFallbackPeers.delete(peer)
     }
   }
 
@@ -204,6 +342,9 @@ export class PeerConnectionManager {
           selectedCandidatePair: `${localIp || 'unknown'} (${localType || 'unknown'}) <-> ${remoteIp || 'unknown'} (${remoteType || 'unknown'}) [${protocol}]`
         }
         this.currentTransportInfo = info
+        if (targetSender) {
+          this.setPeerTransportInfo(targetSender, info)
+        }
         log.info(
           `Active Transport: ${info.type} (${info.protocol}, RTT: ${info.rttMs}ms, SAS: ${info.securityFingerprint}) ${info.localAddress}(${info.localCandidateType}) <-> ${info.remoteAddress}(${info.remoteCandidateType})`,
           info
@@ -399,7 +540,9 @@ export class PeerConnectionManager {
     const callbacks = this.options.callbacks
     const sessionTag = extras.sessionTag
     const allowTurn = Boolean(extras.allowTurn) || forceRelay
-    const config = buildIceConfiguration(allowTurn, forceRelay)
+    const config = buildIceConfiguration(allowTurn, forceRelay, {
+      primaryTurnOnly: extras.primaryTurnOnly
+    })
     const hasTurn = (config.iceServers || []).some((s) =>
       (Array.isArray(s.urls) ? s.urls : [s.urls]).some((u) => /^turns?:/i.test(u))
     )
@@ -407,8 +550,10 @@ export class PeerConnectionManager {
       `Creating RTCPeerConnection (isHost: ${isHost}, targetSender: ${targetSender || 'default'}, allowTurn: ${allowTurn}, turnConfigured: ${hasTurn}, forceRelay: ${forceRelay}, icePolicy: ${config.iceTransportPolicy}, sessionTag: ${sessionTag || 'none'})`
     )
     const peer = new RTCPeerConnection(config)
+    this.peerTargetSenders.set(peer, targetSender || 'host')
     const emittedCandidateKeys = new Set<string>()
     const originMeta = this.ensureOriginMeta(peer)
+    const releasedSrflxList: Array<{ addr: string; isV6: boolean; origin: 'domestic' | 'overseas' | 'unknown' }> = []
 
     // ---------------- 本地候选发送（顺序化 + 会话标签 + 可选暂存闸门） ----------------
     let sendChain: Promise<void> = Promise.resolve()
@@ -446,8 +591,13 @@ export class PeerConnectionManager {
         const queuedItems = gate.queue.splice(0).map((it) => this.withOriginMeta(peer, it))
         // 先基于来源 (RTCIceCandidate.url / getStats local-candidate.url) 识别分流代理出口 srflx 候选并降权（直连优先、VPN 出口兜底）
         const evaluated = applyProxyExitDemotionToBatch(queuedItems)
+        // 保留每条候选与原始 queuedItem 的配对关系后再排序，确保后续 releasedSrflxList 的 stunUrl 来源元数据不因重排错位
+        const paired = evaluated.map((cand, idx) => ({
+          cand,
+          rawItem: queuedItems[idx]
+        }))
         // 将全球公网单播 IPv6 (2000::/3) UDP 候选排在最前发送，避免 tcp 端口 9 (tcptype active) 抢占前排
-        evaluated.sort((a, b) => {
+        paired.sort((a, b) => {
           const score = (c: RTCIceCandidateInit): number => {
             const s = c.candidate || ''
             if (s.includes('tcptype active') || s.includes(' tcp ')) return 5
@@ -461,12 +611,27 @@ export class PeerConnectionManager {
             if (typ === 'srflx') return 3
             return 4
           }
-          return score(a) - score(b)
+          return score(a.cand) - score(b.cand)
         })
-        if (evaluated.length > 0) {
-          log.info(`Releasing ${evaluated.length} held local ICE candidates after offer dispatch (target: ${targetSender || 'host'})`)
+        if (paired.length > 0) {
+          log.info(`Releasing ${paired.length} held local ICE candidates after offer dispatch (target: ${targetSender || 'host'})`)
         }
-        for (const c of evaluated) sendLocalCandidate(c)
+        for (const { cand: c, rawItem } of paired) {
+          const cStr = c.candidate || ''
+          const parts = cStr.trim().split(/\s+/)
+          const typIdx = parts.indexOf('typ')
+          const cType = typIdx !== -1 && parts[typIdx + 1] ? parts[typIdx + 1]!.toLowerCase() : ''
+          const cAddr = cleanIpAddress(parts[4] || '').toLowerCase()
+          if (cType === 'srflx' && cAddr) {
+            const fallbackStunUrl = originMeta.get(candidateKeyOf(cStr))?.stunUrl
+            releasedSrflxList.push({
+              addr: cAddr,
+              isV6: cAddr.includes(':'),
+              origin: classifyStunUrlOrigin(rawItem?.stunUrl || fallbackStunUrl)
+            })
+          }
+          sendLocalCandidate(c)
+        }
       }
     }
     this.candidateGates.set(peer, gate)
@@ -487,14 +652,25 @@ export class PeerConnectionManager {
         emittedCandidateKeys.add(dedupKey)
       }
 
+      const tagged = this.withOriginMeta(peer, item)
+      const candOrigin = classifyStunUrlOrigin(tagged.stunUrl)
       if (gate.open && cType === 'srflx' && cAddr && candObj.candidate) {
-        // 闸门已打开后才到达的 srflx：与已知的国内来源反射地址比对，命中分流代理出口则降权后再发送
-        const tagged = this.withOriginMeta(peer, item)
+        const lowerAddr = cAddr.toLowerCase()
+        const isV6 = lowerAddr.includes(':')
+        // 闸门已打开后才到达的 srflx：
+        // 1) 海外源且已知国内源有不同公网 IP -> 降权代理出口；
+        // 2) 国内源但此前闸门已先放行了不同 IP 的海外代理出口 -> 提权压过已发送的代理出口候选。
         if (
-          classifyStunUrlOrigin(tagged.stunUrl) === 'overseas' &&
-          this.isProxyExitAgainstKnownDomestic(originMeta, cAddr)
+          candOrigin === 'overseas' &&
+          this.isProxyExitAgainstKnownDomestic(originMeta, lowerAddr)
         ) {
           candObj.candidate = demoteProxyExitCandidatePriority(candObj.candidate)
+        } else if (
+          candOrigin === 'domestic' &&
+          releasedSrflxList.some((r) => r.origin === 'overseas' && r.isV6 === isV6 && r.addr !== lowerAddr)
+        ) {
+          candObj.candidate = boostDomesticOverProxyExitPriority(candObj.candidate)
+          log.info(`Boosted late domestic trickle srflx (${lowerAddr}) above previously released proxy-exit srflx`)
         }
       }
 
@@ -502,6 +678,10 @@ export class PeerConnectionManager {
         `Local ICE Candidate generated${item.stunUrl ? ` [via ${item.stunUrl}]` : ''}: ${candObj.candidate ? candObj.candidate.trim() : 'null'} (target: ${targetSender || 'host'}, held: ${!gate.open})`
       )
       if (gate.open) {
+        if (cType === 'srflx' && cAddr) {
+          const lowerAddr = cAddr.toLowerCase()
+          releasedSrflxList.push({ addr: lowerAddr, isV6: lowerAddr.includes(':'), origin: candOrigin })
+        }
         sendLocalCandidate(candObj)
       } else {
         gate.queue.push(item)
@@ -621,7 +801,23 @@ export class PeerConnectionManager {
     }
 
     const origClose = peer.close.bind(peer)
+    let origClosed = false
+    const finalizeOrigClose = () => {
+      if (origClosed) return
+      origClosed = true
+      try {
+        origClose()
+      } catch {}
+    }
     peer.close = () => {
+      const isCurrentlyConnected =
+        hasConnected ||
+        peer.connectionState === 'connected' ||
+        peer.iceConnectionState === 'connected' ||
+        peer.iceConnectionState === 'completed'
+      if (!isCurrentlyConnected && !this.iceStatsDumpedPeers.has(peer) && typeof peer.getStats === 'function') {
+        void this.dumpIceDiagnosticStats(peer, 'before_close', targetSender)
+      }
       clearTimers()
       gate.open = true
       gate.queue.length = 0
@@ -631,7 +827,8 @@ export class PeerConnectionManager {
         peer.onconnectionstatechange = null
         peer.ondatachannel = () => {}
       } catch {}
-      origClose()
+      // 立即释放底层 UDP 套接字，杜绝 150ms 延迟导致 hardResetChannels() 新旧连接抢占端口
+      finalizeOrigClose()
     }
 
     /**
@@ -642,6 +839,9 @@ export class PeerConnectionManager {
       if (failureReported) return
       failureReported = true
       clearTimers()
+      if (!hasConnected) {
+        void this.dumpIceDiagnosticStats(peer, reason, targetSender)
+      }
       if (this.virtualFallbackPeers.has(peer)) {
         log.info(
           `Background native PeerConnection (${reason}) closed while VirtualDataChannel is active (target: ${targetSender || 'host'}); keeping virtual session alive.`
@@ -654,13 +854,23 @@ export class PeerConnectionManager {
         }
         return
       }
+      if (!isHost && this.silentUpgradePeers.has(peer)) {
+        log.info(
+          `Background silent-upgrade probe PeerConnection (${reason}) failed without disrupting active connection.`
+        )
+        try {
+          peer.close()
+        } catch {}
+        onDisconnect?.(reason)
+        return
+      }
       log.warn(`PeerConnection failure reported (reason: ${reason}, target: ${targetSender || 'host'}, connectedBefore: ${hasConnected})`)
       if (isHost) {
         try { peer.close() } catch {}
+        if (onDisconnect) onDisconnect(reason)
         if (targetSender) {
           this.options.onHostClientClosed?.(targetSender, peer)
         }
-        if (onDisconnect) onDisconnect(reason)
         this.options.updateHostStatus?.()
       } else {
         this.options.setStatus('unstable')
@@ -710,8 +920,15 @@ export class PeerConnectionManager {
 
       switch (state) {
         case 'connected':
-          if (this.options.getClientDcState?.() === 'open') {
+          if (!this.silentUpgradePeers.has(peer) && this.options.getClientDcState?.() === 'open') {
             this.options.setStatus('connected')
+          }
+          if (!this.silentUpgradePeers.has(peer)) {
+            void this.updateTransportInfo(peer, targetSender).then(() => {
+              if (peer.connectionState === 'connected') {
+                this.options.onClientPeerConnected?.(peer)
+              }
+            })
           }
           break
         case 'disconnected':
@@ -719,7 +936,9 @@ export class PeerConnectionManager {
             break
           }
           // 给 ICE 一个短暂自愈窗口（如 Wi-Fi 漫游），超时仍未恢复再判定失败
-          this.options.setStatus('unstable')
+          if (!this.silentUpgradePeers.has(peer)) {
+            this.options.setStatus('unstable')
+          }
           if (!disconnectGraceTimer) {
             disconnectGraceTimer = setTimeout(() => {
               disconnectGraceTimer = null
@@ -782,24 +1001,26 @@ export class PeerConnectionManager {
       }
 
       if (iceState === 'connected' || iceState === 'completed') {
-        callbacks.onIceStalled?.(false)
-        if (isHost) {
-          this.options.updateHostStatus?.()
-        } else if (this.options.getClientDcState?.() === 'open') {
-          this.options.setStatus('connected')
-        }
-        this.updateTransportInfo(peer, targetSender)
-        for (const delayMs of [1200, 3000]) {
-          const timer = setTimeout(() => {
-            transportInfoTimers.delete(timer)
-            if (failureReported || peer.connectionState === 'closed') return
-            this.updateTransportInfo(peer, targetSender)
-          }, delayMs)
-          transportInfoTimers.add(timer)
+        if (!this.silentUpgradePeers.has(peer)) {
+          callbacks.onIceStalled?.(false)
+          if (isHost) {
+            this.options.updateHostStatus?.()
+          } else if (this.options.getClientDcState?.() === 'open') {
+            this.options.setStatus('connected')
+          }
+          this.updateTransportInfo(peer, targetSender)
+          for (const delayMs of [1200, 3000]) {
+            const timer = setTimeout(() => {
+              transportInfoTimers.delete(timer)
+              if (failureReported || peer.connectionState === 'closed' || this.silentUpgradePeers.has(peer)) return
+              this.updateTransportInfo(peer, targetSender)
+            }, delayMs)
+            transportInfoTimers.add(timer)
+          }
         }
       } else if (iceState === 'disconnected') {
         callbacks.onIceStalled?.(false)
-        if (!this.virtualFallbackPeers.has(peer)) {
+        if (!this.virtualFallbackPeers.has(peer) && !this.silentUpgradePeers.has(peer)) {
           this.options.setStatus('unstable')
         }
       } else if (iceState === 'failed') {

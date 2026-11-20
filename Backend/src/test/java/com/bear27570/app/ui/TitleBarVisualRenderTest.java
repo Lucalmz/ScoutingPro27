@@ -19,7 +19,7 @@ public class TitleBarVisualRenderTest {
             frame.setUndecorated(true);
             frame.setSize(1024, 768);
 
-            Color windowBg = new Color(10, 10, 10);
+            Color windowBg = new Color(0x0B, 0x0E, 0x10);
             frame.setBackground(windowBg);
             if (frame.getRootPane() != null) {
                 frame.getRootPane().setBackground(windowBg);
@@ -34,7 +34,7 @@ public class TitleBarVisualRenderTest {
             frame.getContentPane().add(titleBar, BorderLayout.NORTH);
 
             JPanel mockContent = new JPanel();
-            mockContent.setBackground(new Color(10, 10, 10));
+            mockContent.setBackground(new Color(0x0B, 0x0E, 0x10));
             frame.getContentPane().add(mockContent, BorderLayout.CENTER);
 
             // Lay out the full component tree
@@ -69,14 +69,14 @@ public class TitleBarVisualRenderTest {
                 assertThat(brightness).as("Brightness at right edge (1023, " + y + ")").isLessThan(60);
             }
 
-            // Verify pure black background in center of title bar
+            // Verify Pit Wall Cold Graphite (#0B0E10) background in center of title bar
             int centerRgb = image.getRGB(500, 19);
             int cr = (centerRgb >> 16) & 0xFF;
             int cg = (centerRgb >> 8) & 0xFF;
             int cb = centerRgb & 0xFF;
-            assertThat(cr).as("Center red").isEqualTo(0);
-            assertThat(cg).as("Center green").isEqualTo(0);
-            assertThat(cb).as("Center blue").isEqualTo(0);
+            assertThat(cr).as("Center red").isEqualTo(0x0B);
+            assertThat(cg).as("Center green").isEqualTo(0x0E);
+            assertThat(cb).as("Center blue").isEqualTo(0x10);
 
             frame.dispose();
         });
@@ -117,13 +117,13 @@ public class TitleBarVisualRenderTest {
                 ImageIO.write(closeHoverImg, "png", new File(outDir, "close_btn_hover.png"));
             } catch (Exception ignored) {}
 
-            // Center of close button should have bright Windows red (R > 200, G < 30, B < 50)
+            // Center of close button should have Pit Wall Status Error rose-red (#FF5577: R > 200, G < 100)
             int closePixel = closeHoverImg.getRGB(5, 5); // background corner
             int closeR = (closePixel >> 16) & 0xFF;
             int closeG = (closePixel >> 8) & 0xFF;
             int closeB = closePixel & 0xFF;
             assertThat(closeR).as("Close hover red background").isGreaterThan(200);
-            assertThat(closeG).as("Close hover green background").isLessThan(30);
+            assertThat(closeG).as("Close hover green background").isLessThan(100);
 
             // 2. Verify Minimize button hover animation
             triggerMouseEnter(minBtn);

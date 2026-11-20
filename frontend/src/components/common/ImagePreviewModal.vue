@@ -221,7 +221,7 @@ onUnmounted(() => {
   left: 0;
   right: 0;
   bottom: 0;
-  background: rgba(8, 8, 7, 0.94);
+  background: color-mix(in srgb, var(--g-950) 94%, transparent);
   z-index: 9999;
   display: flex;
   flex-direction: column;
@@ -234,8 +234,8 @@ onUnmounted(() => {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  background: linear-gradient(to bottom, rgba(0, 0, 0, 0.7), transparent);
-  color: #fff;
+  background: linear-gradient(to bottom, color-mix(in srgb, var(--g-950) 75%, transparent), transparent);
+  color: var(--g-50);
   z-index: 10;
 }
 
@@ -249,7 +249,7 @@ onUnmounted(() => {
   font-size: 15px;
   font-weight: 600;
   letter-spacing: -0.2px;
-  color: #f3f4f6;
+  color: var(--g-100);
   max-width: 60vw;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -259,9 +259,10 @@ onUnmounted(() => {
 .preview-counter {
   font-size: 13px;
   padding: 2px 8px;
-  background: rgba(255, 255, 255, 0.15);
+  background: color-mix(in srgb, var(--g-100) 14%, transparent);
   border-radius: 12px;
-  color: #d1d5db;
+  color: var(--g-200);
+  font-variant-numeric: tabular-nums;
 }
 
 .header-actions {
@@ -271,9 +272,9 @@ onUnmounted(() => {
 }
 
 .icon-btn {
-  background: rgba(255, 255, 255, 0.1);
-  border: 1px solid rgba(255, 255, 255, 0.15);
-  color: #fff;
+  background: color-mix(in srgb, var(--g-100) 10%, transparent);
+  border: 1px solid color-mix(in srgb, var(--g-100) 16%, transparent);
+  color: var(--g-50);
   width: 36px;
   height: 36px;
   border-radius: 50%;
@@ -281,11 +282,13 @@ onUnmounted(() => {
   align-items: center;
   justify-content: center;
   cursor: pointer;
-  transition: all 0.2s ease;
+  transition: background-color var(--motion-duration-fast) var(--motion-ease-out),
+              border-color var(--motion-duration-fast) var(--motion-ease-out),
+              transform var(--motion-duration-fast) var(--motion-ease-out);
 }
 
 .icon-btn:hover {
-  background: rgba(255, 255, 255, 0.25);
+  background: color-mix(in srgb, var(--g-100) 22%, transparent);
   transform: scale(1.05);
 }
 
@@ -294,7 +297,7 @@ onUnmounted(() => {
 }
 
 .close-btn:hover {
-  background: rgba(239, 68, 68, 0.8);
+  background: color-mix(in srgb, var(--status-error) 85%, transparent);
   border-color: transparent;
 }
 
@@ -321,7 +324,7 @@ onUnmounted(() => {
   max-height: 86vh;
   object-fit: contain;
   border-radius: 8px;
-  box-shadow: 0 12px 32px rgba(0, 0, 0, 0.6);
+  box-shadow: var(--shadow-3);
   pointer-events: auto;
 }
 
@@ -329,9 +332,9 @@ onUnmounted(() => {
   position: absolute;
   top: 50%;
   transform: translateY(-50%);
-  background: rgba(0, 0, 0, 0.5);
-  border: 1px solid rgba(255, 255, 255, 0.2);
-  color: #fff;
+  background: color-mix(in srgb, var(--g-950) 60%, transparent);
+  border: 1px solid color-mix(in srgb, var(--g-100) 20%, transparent);
+  color: var(--g-50);
   width: 44px;
   height: 44px;
   border-radius: 50%;
@@ -339,12 +342,13 @@ onUnmounted(() => {
   align-items: center;
   justify-content: center;
   cursor: pointer;
-  transition: all 0.2s ease;
+  transition: background-color var(--motion-duration-fast) var(--motion-ease-out),
+              transform var(--motion-duration-fast) var(--motion-ease-out);
   z-index: 10;
 }
 
 .nav-btn:hover {
-  background: rgba(255, 255, 255, 0.2);
+  background: color-mix(in srgb, var(--g-100) 20%, transparent);
   transform: translateY(-50%) scale(1.1);
 }
 
@@ -359,7 +363,7 @@ onUnmounted(() => {
 /* 动效过渡 */
 .preview-fade-enter-active,
 .preview-fade-leave-active {
-  transition: opacity 0.25s ease;
+  transition: opacity var(--motion-duration-moderate) var(--motion-ease-out);
 }
 
 .preview-fade-enter-from,

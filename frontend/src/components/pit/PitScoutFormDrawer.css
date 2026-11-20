@@ -1,7 +1,7 @@
 .drawer-overlay {
   position: fixed;
   inset: 0;
-  background: rgba(8, 8, 7, 0.82);
+  background: color-mix(in srgb, var(--g-950) 82%, transparent);
   z-index: 1100;
   display: flex;
   justify-content: flex-end;
@@ -12,17 +12,17 @@
   width: 100%;
   max-width: 540px;
   height: 100%;
-  background: var(--card, #141413);
-  border-left: 1px solid var(--border, #262624);
+  background: var(--card);
+  border-left: 1px solid var(--border);
   display: flex;
   flex-direction: column;
-  box-shadow: -12px 0 32px rgba(0, 0, 0, 0.75);
+  box-shadow: var(--shadow-3);
   box-sizing: border-box;
 }
 
 .drawer-header {
   padding: 16px 20px;
-  border-bottom: 1px solid var(--border, #262626);
+  border-bottom: 1px solid var(--border);
   display: flex;
   align-items: center;
   justify-content: space-between;
@@ -39,27 +39,27 @@
   margin: 0;
   font-size: 18px;
   font-weight: 700;
-  color: var(--foreground, #ededed);
+  color: var(--foreground);
 }
 
 .team-name-badge {
   font-size: 13px;
-  color: var(--muted-foreground, #888888);
+  color: var(--muted-foreground);
 }
 
 .close-btn {
   background: transparent;
   border: none;
   font-size: 24px;
-  color: var(--muted-foreground, #888888);
+  color: var(--muted-foreground);
   cursor: pointer;
   padding: 4px 8px;
   line-height: 1;
-  transition: color 0.2s;
+  transition: color var(--motion-duration-fast) var(--motion-ease-out);
 }
 
 .close-btn:hover {
-  color: var(--foreground, #ededed);
+  color: var(--foreground);
 }
 
 .drawer-body {
@@ -83,8 +83,8 @@
   margin: 0;
   font-size: 14px;
   font-weight: 700;
-  color: var(--primary, #39ff14);
-  border-bottom: 1px solid rgba(57, 255, 20, 0.2);
+  color: var(--primary);
+  border-bottom: 1px solid var(--status-success-border);
   padding-bottom: 6px;
   letter-spacing: -0.01em;
 }
@@ -98,7 +98,7 @@
 .form-group label {
   font-size: 13px;
   font-weight: 500;
-  color: var(--muted-foreground, #888888);
+  color: var(--muted-foreground);
 }
 
 .radio-group {
@@ -113,23 +113,25 @@
   gap: 6px;
   padding: 6px 14px;
   border-radius: 9999px;
-  background: rgba(255, 255, 255, 0.04);
-  border: 1px solid var(--border, #262626);
+  background: var(--surface-elevated);
+  border: 1px solid var(--border);
   font-size: 12px;
-  color: var(--muted-foreground, #888888);
+  color: var(--muted-foreground);
   cursor: pointer;
-  transition: all 0.2s ease;
+  transition: background-color var(--motion-duration-fast) var(--motion-ease-out),
+              border-color var(--motion-duration-fast) var(--motion-ease-out),
+              color var(--motion-duration-fast) var(--motion-ease-out);
 }
 
 .radio-btn:hover {
-  border-color: rgba(57, 255, 20, 0.4);
-  color: var(--foreground, #ededed);
+  border-color: color-mix(in srgb, var(--primary) 40%, transparent);
+  color: var(--foreground);
 }
 
 .radio-btn.is-active {
-  background: rgba(57, 255, 20, 0.12);
-  border-color: var(--primary, #39ff14);
-  color: var(--primary, #39ff14);
+  background: var(--status-success-bg);
+  border-color: var(--primary);
+  color: var(--primary);
   font-weight: 600;
 }
 
@@ -143,23 +145,25 @@
   width: 36px;
   height: 36px;
   border-radius: 8px;
-  background: rgba(255, 255, 255, 0.04);
-  border: 1px solid var(--border, #262626);
-  color: var(--foreground, #ededed);
+  background: var(--surface-elevated);
+  border: 1px solid var(--border);
+  color: var(--foreground);
   font-size: 18px;
   cursor: pointer;
   display: flex;
   align-items: center;
   justify-content: center;
-  transition: all 0.15s ease;
+  transition: border-color var(--motion-duration-fast) var(--motion-ease-out),
+              color var(--motion-duration-fast) var(--motion-ease-out),
+              transform var(--motion-duration-fast) var(--motion-ease-out);
   user-select: none;
   touch-action: manipulation;
   -webkit-tap-highlight-color: transparent;
 }
 
 .step-btn:hover:not(:disabled) {
-  border-color: var(--primary, #39ff14);
-  color: var(--primary, #39ff14);
+  border-color: var(--primary);
+  color: var(--primary);
 }
 
 .step-btn:active:not(:disabled) {
@@ -169,86 +173,94 @@
 .step-btn:disabled {
   opacity: 0.35;
   cursor: not-allowed;
-  border-color: var(--border, #262626);
-  color: var(--muted-foreground, #888888);
+  border-color: var(--border);
+  color: var(--muted-foreground);
 }
 
 .stepper-val {
   min-width: 48px;
   text-align: center;
+  font-family: var(--font-numeric);
   font-size: 16px;
   font-weight: 700;
-  color: var(--foreground, #ededed);
+  color: var(--foreground);
   font-variant-numeric: tabular-nums;
   user-select: none;
   display: inline-block;
-  transition: transform 0.15s cubic-bezier(0.34, 1.56, 0.64, 1), color 0.15s ease;
+  transition: transform var(--motion-duration-fast) var(--motion-ease-spring),
+              color var(--motion-duration-fast) var(--motion-ease-out);
 }
 
 .stepper-val.bump-up,
 .stepper-val.bump-up-a {
-  animation: val-bump-up-a 0.22s cubic-bezier(0.34, 1.56, 0.64, 1);
+  animation: val-bump-up-a var(--motion-duration-moderate) var(--motion-ease-spring);
 }
 
 .stepper-val.bump-up-b {
-  animation: val-bump-up-b 0.22s cubic-bezier(0.34, 1.56, 0.64, 1);
+  animation: val-bump-up-b var(--motion-duration-moderate) var(--motion-ease-spring);
 }
 
 .stepper-val.bump-down,
 .stepper-val.bump-down-a {
-  animation: val-bump-down-a 0.22s cubic-bezier(0.34, 1.56, 0.64, 1);
+  animation: val-bump-down-a var(--motion-duration-moderate) var(--motion-ease-spring);
 }
 
 .stepper-val.bump-down-b {
-  animation: val-bump-down-b 0.22s cubic-bezier(0.34, 1.56, 0.64, 1);
+  animation: val-bump-down-b var(--motion-duration-moderate) var(--motion-ease-spring);
 }
 
 @keyframes val-bump-up-a {
   0% { transform: translateY(0) scale(1); }
-  50% { transform: translateY(-3px) scale(1.15); color: var(--primary, #39ff14); }
+  50% { transform: translateY(-3px) scale(1.15); color: var(--primary); }
   100% { transform: translateY(0) scale(1); }
 }
 
 @keyframes val-bump-up-b {
   0% { transform: translateY(0) scale(1); }
-  50% { transform: translateY(-3px) scale(1.15); color: var(--primary, #39ff14); }
+  50% { transform: translateY(-3px) scale(1.15); color: var(--primary); }
   100% { transform: translateY(0) scale(1); }
 }
 
 @keyframes val-bump-down-a {
   0% { transform: translateY(0) scale(1); }
-  50% { transform: translateY(2px) scale(0.92); color: var(--status-error, #ef4444); }
+  50% { transform: translateY(2px) scale(0.92); color: var(--status-error); }
   100% { transform: translateY(0) scale(1); }
 }
 
 @keyframes val-bump-down-b {
   0% { transform: translateY(0) scale(1); }
-  50% { transform: translateY(2px) scale(0.92); color: var(--status-error, #ef4444); }
+  50% { transform: translateY(2px) scale(0.92); color: var(--status-error); }
   100% { transform: translateY(0) scale(1); }
 }
 
 .stepper-unit {
   font-size: 13px;
-  color: var(--muted-foreground, #888888);
+  color: var(--muted-foreground);
 }
 
 .input-field {
   padding: 8px 12px;
-  background: rgba(255, 255, 255, 0.04);
-  border: 1px solid var(--border, #262626);
+  background: var(--input);
+  border: 1px solid var(--border);
   border-radius: 8px;
-  color: var(--foreground, #ededed);
+  color: var(--foreground);
   font-size: 14px;
+}
+
+.input-field[readonly] {
+  font-family: var(--font-numeric);
+  font-variant-numeric: tabular-nums;
 }
 
 .input-field:focus {
   outline: none;
-  border-color: var(--primary, #39ff14);
+  border-color: var(--primary);
+  box-shadow: var(--focus-ring-sm);
 }
 
 .field-hint {
   font-size: 11px;
-  color: var(--muted-foreground, #888888);
+  color: var(--muted-foreground);
   line-height: 1.4;
 }
 
@@ -257,8 +269,8 @@
   grid-template-columns: repeat(2, minmax(0, 1fr));
   gap: 12px;
   padding: 12px;
-  background: rgba(255, 255, 255, 0.02);
-  border: 1px solid var(--border, #262626);
+  background: var(--surface-recessed);
+  border: 1px solid var(--border);
   border-radius: 10px;
 }
 
@@ -278,23 +290,25 @@
 .quick-chip-btn {
   padding: 4px 10px;
   border-radius: 6px;
-  background: rgba(255, 255, 255, 0.04);
-  border: 1px solid var(--border, #262626);
+  background: var(--surface-elevated);
+  border: 1px solid var(--border);
   font-size: 11px;
-  color: var(--muted-foreground, #888888);
+  color: var(--muted-foreground);
   cursor: pointer;
-  transition: all 0.15s ease;
+  transition: background-color var(--motion-duration-fast) var(--motion-ease-out),
+              border-color var(--motion-duration-fast) var(--motion-ease-out),
+              color var(--motion-duration-fast) var(--motion-ease-out);
 }
 
 .quick-chip-btn:hover {
-  border-color: var(--primary, #39ff14);
-  color: var(--foreground, #ededed);
+  border-color: var(--primary);
+  color: var(--foreground);
 }
 
 .quick-chip-btn.is-active {
-  background: rgba(57, 255, 20, 0.12);
-  border-color: var(--primary, #39ff14);
-  color: var(--primary, #39ff14);
+  background: var(--status-success-bg);
+  border-color: var(--primary);
+  color: var(--primary);
 }
 
 .photos-grid {
@@ -309,15 +323,16 @@
   border-radius: 8px;
   overflow: hidden;
   position: relative;
-  background: #000;
-  border: 1px solid var(--border, #262626);
+  background: var(--surface-recessed);
+  border: 1px solid var(--border);
   cursor: pointer;
-  transition: transform 0.18s ease, border-color 0.18s ease;
+  transition: transform var(--motion-duration-fast) var(--motion-ease-out),
+              border-color var(--motion-duration-fast) var(--motion-ease-out);
 }
 
 .photo-item:hover {
   transform: translateY(-2px);
-  border-color: var(--primary, #39ff14);
+  border-color: var(--primary);
 }
 
 .photo-item img {
@@ -330,8 +345,8 @@
   position: absolute;
   top: 4px;
   right: 4px;
-  background: rgba(0, 0, 0, 0.75);
-  color: #fff;
+  background: color-mix(in srgb, var(--g-950) 75%, transparent);
+  color: var(--g-50);
   border: none;
   border-radius: 50%;
   width: 20px;
@@ -344,7 +359,7 @@
 .photo-upload-box {
   width: 90px;
   height: 90px;
-  border: 1px dashed var(--border, #262626);
+  border: 1px dashed var(--border);
   border-radius: 8px;
   display: flex;
   flex-direction: column;
@@ -352,13 +367,14 @@
   justify-content: center;
   cursor: pointer;
   font-size: 12px;
-  color: var(--muted-foreground, #888888);
-  transition: all 0.2s ease;
+  color: var(--muted-foreground);
+  transition: border-color var(--motion-duration-fast) var(--motion-ease-out),
+              color var(--motion-duration-fast) var(--motion-ease-out);
 }
 
 .photo-upload-box:hover {
-  border-color: var(--primary, #39ff14);
-  color: var(--primary, #39ff14);
+  border-color: var(--primary);
+  color: var(--primary);
 }
 
 .file-hidden {
@@ -367,8 +383,8 @@
 
 .drawer-footer {
   padding: 16px 20px;
-  border-top: 1px solid var(--border, #262626);
-  background: var(--card, #0a0a0a);
+  border-top: 1px solid var(--border);
+  background: var(--card);
   display: flex;
   justify-content: flex-end;
   gap: 12px;
@@ -379,30 +395,31 @@
   padding: 8px 16px;
   border-radius: 8px;
   background: transparent;
-  border: 1px solid var(--border, #262626);
-  color: var(--muted-foreground, #888888);
+  border: 1px solid var(--border);
+  color: var(--muted-foreground);
   cursor: pointer;
-  transition: all 0.2s ease;
+  transition: border-color var(--motion-duration-fast) var(--motion-ease-out),
+              color var(--motion-duration-fast) var(--motion-ease-out);
 }
 
 .btn-cancel:hover {
-  color: var(--foreground, #ededed);
-  border-color: var(--muted-foreground, #888888);
+  color: var(--foreground);
+  border-color: var(--border-strong);
 }
 
 .btn-primary {
   padding: 8px 20px;
   border-radius: 8px;
-  background: var(--primary, #39ff14);
+  background: var(--primary);
   border: none;
-  color: var(--primary-foreground, #000000);
+  color: var(--primary-foreground);
   font-weight: 600;
   cursor: pointer;
-  transition: filter 0.2s ease;
+  transition: background-color var(--motion-duration-fast) var(--motion-ease-out);
 }
 
 .btn-primary:hover {
-  filter: brightness(1.1);
+  background: var(--s-300);
 }
 
 @keyframes fadeIn {
@@ -413,11 +430,11 @@
 /* Pit Drawer Universal Transition */
 .pit-drawer-enter-active,
 .pit-drawer-leave-active {
-  transition: opacity 0.3s cubic-bezier(0.16, 1, 0.3, 1);
+  transition: opacity var(--motion-duration-normal) var(--motion-ease-out);
 }
 .pit-drawer-enter-active .drawer-panel,
 .pit-drawer-leave-active .drawer-panel {
-  transition: transform 0.34s cubic-bezier(0.16, 1, 0.3, 1);
+  transition: transform var(--motion-duration-normal) var(--motion-ease-out);
 }
 .pit-drawer-enter-from,
 .pit-drawer-leave-to {
@@ -440,10 +457,10 @@
     height: 90dvh;
     max-height: 90dvh;
     border-left: none;
-    border-top: 1px solid var(--border, #262626);
+    border-top: 1px solid var(--border);
     border-top-left-radius: 20px;
     border-top-right-radius: 20px;
-    box-shadow: 0 -8px 30px rgba(0, 0, 0, 0.8), 0 -1px 10px rgba(57, 255, 20, 0.05);
+    box-shadow: var(--shadow-3);
   }
   .pit-drawer-enter-from .drawer-panel,
   .pit-drawer-leave-to .drawer-panel {
@@ -460,8 +477,8 @@
   }
   .drawer-footer {
     padding: 12px 16px calc(12px + var(--sab, env(safe-area-inset-bottom, 0px)));
-    background: var(--card, #0a0a0a);
-    border-top: 1px solid var(--border, #262626);
+    background: var(--card);
+    border-top: 1px solid var(--border);
     display: flex;
     align-items: center;
     gap: 12px;
@@ -482,7 +499,6 @@
     justify-content: center;
     font-size: 15px;
     font-weight: 700;
-    box-shadow: var(--glow-primary, 0 0 10px rgba(57, 255, 20, 0.4));
   }
 }
 

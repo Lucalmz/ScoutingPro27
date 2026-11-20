@@ -54,10 +54,13 @@ function adjustCounter(field: EndgameCounterField, delta: number) {
 
 <template>
   <section class="step-pane step-endgame">
-    <div class="pane-header">
+    <div class="pane-header phase-endgame">
       <div class="pane-header-row">
         <div>
-          <h2 class="pane-title">{{ t('scouting.endgame') }}</h2>
+          <h2 class="pane-title">
+            <span class="material-icons phase-title-icon">flag</span>
+            <span>{{ t('scouting.endgame') }}</span>
+          </h2>
           <span class="pane-subtitle">{{ t('wizard.endgame_header_tag') }}</span>
         </div>
         <div class="phase-score-badge">
@@ -73,7 +76,7 @@ function adjustCounter(field: EndgameCounterField, delta: number) {
       <div class="mobile-stepper-card">
         <div class="stepper-header">
           <div class="stepper-title-wrap">
-            <span class="material-icons toggle-icon" style="color: #ec4899;">local_florist</span>
+            <span class="material-icons toggle-icon icon-nectar">local_florist</span>
             <div>
               <div class="toggle-title">{{ t('scouting.flower_nectars') }}</div>
               <div class="toggle-pts">{{ t('wizard.nectar_pts') }}</div>
@@ -101,7 +104,7 @@ function adjustCounter(field: EndgameCounterField, delta: number) {
       <div class="mobile-stepper-card">
         <div class="stepper-header">
           <div class="stepper-title-wrap">
-            <span class="material-icons toggle-icon" style="color: #10b981;">spa</span>
+            <span class="material-icons toggle-icon icon-bonus">spa</span>
             <div>
               <div class="toggle-title">{{ t('scouting.flower_bottom_bonus_count') }}</div>
               <div class="toggle-pts">{{ t('wizard.bottom_bonus_pts') }}</div>
@@ -130,7 +133,7 @@ function adjustCounter(field: EndgameCounterField, delta: number) {
       <div class="mobile-stepper-card">
         <div class="stepper-header">
           <div class="stepper-title-wrap">
-            <span class="material-icons toggle-icon" style="color: #f59e0b;">grain</span>
+            <span class="material-icons toggle-icon icon-pollen">grain</span>
             <div>
               <div class="toggle-title">{{ t('scouting.flower_pollens') }}</div>
               <div class="toggle-pts">{{ t('wizard.pollen_pts') }}</div>
@@ -162,7 +165,7 @@ function adjustCounter(field: EndgameCounterField, delta: number) {
       <div class="mobile-stepper-card">
         <div class="stepper-header">
           <div class="stepper-title-wrap">
-            <span class="material-icons toggle-icon" style="color: #22c55e;">yard</span>
+            <span class="material-icons toggle-icon icon-garden">yard</span>
             <div>
               <div class="toggle-title">{{ t('scouting.garden_balls') }}</div>
               <div class="toggle-pts">{{ t('wizard.garden_pts') }}</div>
@@ -196,7 +199,7 @@ function adjustCounter(field: EndgameCounterField, delta: number) {
         @click="team.teleopPark = !team.teleopPark; hapticSelection()"
       >
         <div class="toggle-card-left">
-          <span class="material-icons toggle-icon" style="color: #3b82f6;">local_parking</span>
+          <span class="material-icons toggle-icon icon-park">local_parking</span>
           <div class="toggle-text-wrap">
             <span class="toggle-title">{{ t('scouting.teleop_park') }}</span>
             <span class="toggle-pts">{{ t('wizard.park_pts') }}</span>
@@ -214,7 +217,7 @@ function adjustCounter(field: EndgameCounterField, delta: number) {
         @click="team.flowerDescore = !team.flowerDescore; hapticSelection()"
       >
         <div class="toggle-card-left">
-          <span class="material-icons toggle-icon" style="color: #a855f7;">cleaning_services</span>
+          <span class="material-icons toggle-icon icon-descore">cleaning_services</span>
           <div class="toggle-text-wrap">
             <span class="toggle-title">{{ t('scouting.flower_descore') }}</span>
             <span class="toggle-pts">{{ t('scouting.flower_descore_desc') }}</span>
@@ -232,10 +235,10 @@ function adjustCounter(field: EndgameCounterField, delta: number) {
         @click="team.g410EarlyFlowerFoul = !team.g410EarlyFlowerFoul; hapticWarning()"
       >
         <div class="toggle-card-left">
-          <span class="material-icons toggle-icon" style="color: #f59e0b;">gavel</span>
+          <span class="material-icons toggle-icon">gavel</span>
           <div class="toggle-text-wrap">
             <span class="toggle-title">{{ t('scouting.g410_early_flower_foul') }}</span>
-            <span class="toggle-pts" style="color: #fbbf24;">{{ t('scouting.g410_early_flower_foul_desc') }}</span>
+            <span class="toggle-pts">{{ t('scouting.g410_early_flower_foul_desc') }}</span>
           </div>
         </div>
         <div class="toggle-check-box g410-check">
@@ -251,10 +254,10 @@ function adjustCounter(field: EndgameCounterField, delta: number) {
         @click="team.isBroken = !team.isBroken; hapticWarning()"
       >
         <div class="toggle-card-left">
-          <span class="material-icons toggle-icon" style="color: #ef4444;">healing</span>
+          <span class="material-icons toggle-icon">healing</span>
           <div class="toggle-text-wrap">
             <span class="toggle-title">{{ t('scouting.is_broken') }}</span>
-            <span class="toggle-pts" style="color: #ef4444;">{{ t('wizard.broken_sub') }}</span>
+            <span class="toggle-pts">{{ t('wizard.broken_sub') }}</span>
           </div>
         </div>
         <div class="toggle-check-box broken-check">
@@ -310,7 +313,11 @@ function adjustCounter(field: EndgameCounterField, delta: number) {
   display: flex;
   flex-direction: column;
   gap: 12px;
-  animation: pane-fade 0.22s ease-out;
+  animation: pane-fade var(--motion-duration-moderate) var(--motion-ease-out);
+}
+
+.step-endgame {
+  --phase-color: var(--phase-endgame);
 }
 
 @keyframes pane-fade {
@@ -320,6 +327,11 @@ function adjustCounter(field: EndgameCounterField, delta: number) {
 
 .pane-header {
   margin-bottom: 2px;
+  background: var(--card);
+  border: 1px solid var(--border);
+  border-left: 3px solid var(--phase-color);
+  border-radius: 12px;
+  padding: 10px 12px;
 }
 
 .pane-header-row {
@@ -331,21 +343,29 @@ function adjustCounter(field: EndgameCounterField, delta: number) {
 .pane-title {
   font-size: 1.1rem;
   font-weight: 800;
-  color: var(--foreground, #f0efe9);
+  color: var(--foreground);
   margin: 0;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.phase-title-icon {
+  font-size: 18px;
+  color: var(--phase-color);
 }
 
 .pane-subtitle {
   font-size: 11px;
-  color: var(--muted-foreground, #8e8d87);
+  color: var(--muted-foreground);
 }
 
 .phase-score-badge {
   display: flex;
   align-items: baseline;
   gap: 3px;
-  background: #141413;
-  border: 1px solid rgba(57, 255, 20, 0.4);
+  background: var(--surface-recessed);
+  border: 1px solid color-mix(in srgb, var(--phase-color) 35%, var(--border));
   padding: 4px 12px;
   border-radius: 10px;
 }
@@ -353,21 +373,21 @@ function adjustCounter(field: EndgameCounterField, delta: number) {
 .score-val {
   font-size: 1.25rem;
   font-weight: 800;
-  color: #39ff14;
-  font-family: 'Orbitron', monospace;
+  color: var(--phase-color);
+  font-family: var(--font-numeric);
   font-variant-numeric: tabular-nums;
 }
 
 .score-unit {
   font-size: 11px;
-  color: var(--muted-foreground, #8e8d87);
+  color: var(--muted-foreground);
 }
 
 .field-label {
   display: block;
   font-size: 12px;
   font-weight: 600;
-  color: var(--muted-foreground, #8e8d87);
+  color: var(--muted-foreground);
   margin-bottom: 6px;
 }
 
@@ -385,11 +405,11 @@ function adjustCounter(field: EndgameCounterField, delta: number) {
   align-items: center;
   justify-content: space-between;
   padding: 0 14px;
-  background: #141413;
-  border: 1px solid #262624;
+  background: var(--card);
+  border: 1px solid var(--border);
   border-radius: 12px;
   cursor: pointer;
-  transition: all 0.2s ease;
+  transition: background-color var(--motion-duration-fast) var(--motion-ease-out), border-color var(--motion-duration-fast) var(--motion-ease-out);
   box-sizing: border-box;
 }
 
@@ -401,8 +421,15 @@ function adjustCounter(field: EndgameCounterField, delta: number) {
 
 .toggle-icon {
   font-size: 24px;
-  color: var(--muted-foreground, #8e8d87);
+  color: var(--muted-foreground);
 }
+
+.icon-nectar { color: var(--phase-endgame); }
+.icon-bonus { color: var(--s-400); }
+.icon-pollen { color: var(--status-warning); }
+.icon-garden { color: var(--s-300); }
+.icon-park { color: var(--status-info); }
+.icon-descore { color: var(--status-ai); }
 
 .toggle-text-wrap {
   display: flex;
@@ -413,58 +440,66 @@ function adjustCounter(field: EndgameCounterField, delta: number) {
 .toggle-title {
   font-size: 13px;
   font-weight: 700;
-  color: var(--foreground, #f0efe9);
+  color: var(--foreground);
 }
 
 .toggle-pts {
   font-size: 11px;
-  color: var(--muted-foreground, #8e8d87);
+  color: var(--muted-foreground);
 }
 
 .toggle-check-box {
   width: 24px;
   height: 24px;
   border-radius: 6px;
-  border: 1.5px solid #353532;
-  background: #080807;
+  border: 1.5px solid var(--border-strong);
+  background: var(--surface-recessed);
   display: flex;
   align-items: center;
   justify-content: center;
-  color: #080807;
-  transition: all 0.2s ease;
+  color: var(--on-primary);
+  transition: background-color var(--motion-duration-fast) var(--motion-ease-out), border-color var(--motion-duration-fast) var(--motion-ease-out), color var(--motion-duration-fast) var(--motion-ease-out);
 }
 
 .toggle-card.is-checked {
-  background: #121a10;
-  border-color: #39ff14;
+  background: var(--status-success-bg);
+  border-color: var(--primary);
 }
 
 .toggle-card.is-checked .toggle-icon {
-  color: #39ff14;
+  color: var(--primary);
 }
 
 .toggle-card.is-checked .toggle-pts {
-  color: #39ff14;
+  color: var(--primary);
 }
 
 .toggle-card.is-checked .toggle-check-box {
-  background: #39ff14;
-  border-color: #39ff14;
+  background: var(--primary);
+  border-color: var(--primary);
+}
+
+.broken-toggle-card .toggle-icon {
+  color: var(--status-error);
+}
+
+.broken-toggle-card .toggle-pts {
+  color: var(--status-error-text);
 }
 
 .broken-toggle-card.is-broken-checked {
-  background: #1b1111;
-  border-color: #ef4444;
+  background: var(--status-error-bg);
+  border-color: var(--status-error);
 }
 
 .broken-check {
-  border-color: rgba(239, 68, 68, 0.4);
-  color: #ef4444;
+  border-color: var(--status-error-border);
+  color: var(--status-error);
 }
 
 .broken-toggle-card.is-broken-checked .broken-check {
-  background: #ef4444;
-  color: #ffffff;
+  background: var(--status-error);
+  color: var(--destructive-foreground);
 }
 
 /* Notes & TagPicker */
@@ -475,45 +510,47 @@ function adjustCounter(field: EndgameCounterField, delta: number) {
 }
 
 .quick-note-chip {
-  background: #141413;
-  border: 1px solid #262624;
+  background: var(--card);
+  border: 1px solid var(--border);
   border-radius: 16px;
   padding: 5px 12px;
   font-size: 12px;
-  color: var(--foreground, #f0efe9);
+  color: var(--foreground);
   cursor: pointer;
-  transition: all 0.2s ease;
+  transition: background-color var(--motion-duration-fast) var(--motion-ease-out), border-color var(--motion-duration-fast) var(--motion-ease-out), color var(--motion-duration-fast) var(--motion-ease-out);
 }
 
 .quick-note-chip.is-active {
-  background: #141d12;
-  border-color: #39ff14;
-  color: #39ff14;
+  background: var(--status-success-bg);
+  border-color: var(--primary);
+  color: var(--primary);
   font-weight: 700;
 }
 
 .notes-textarea {
   width: 100%;
   box-sizing: border-box;
-  background: #080807;
-  border: 1px solid #262624;
+  background: var(--surface-recessed);
+  border: 1px solid var(--border);
   border-radius: 12px;
-  color: var(--foreground, #f0efe9);
+  color: var(--foreground);
   padding: 10px 12px;
   font-size: 13px;
   resize: vertical;
+  transition: border-color var(--motion-duration-fast) var(--motion-ease-out), box-shadow var(--motion-duration-fast) var(--motion-ease-out);
 }
 
 .notes-textarea:focus {
   outline: none;
-  border-color: #39ff14;
+  border-color: var(--primary);
+  box-shadow: var(--focus-ring-sm);
 }
 
 .team-tags-container {
   margin-top: 6px;
   padding: 12px;
-  background: #141413;
-  border: 1px solid #262624;
+  background: var(--card);
+  border: 1px solid var(--border);
   border-radius: 12px;
 }
 
@@ -524,8 +561,8 @@ function adjustCounter(field: EndgameCounterField, delta: number) {
 }
 
 .mobile-stepper-card {
-  background: #141413;
-  border: 1px solid #262624;
+  background: var(--card);
+  border: 1px solid var(--border);
   border-radius: 12px;
   padding: 10px 12px;
   display: flex;
@@ -558,9 +595,9 @@ function adjustCounter(field: EndgameCounterField, delta: number) {
   width: 34px;
   height: 34px;
   border-radius: 8px;
-  border: 1px solid #353532;
-  background: #1d1d1a;
-  color: var(--foreground, #f0efe9);
+  border: 1px solid var(--border-strong);
+  background: var(--surface-hover);
+  color: var(--foreground);
   font-size: 18px;
   font-weight: 700;
   cursor: pointer;
@@ -576,7 +613,9 @@ function adjustCounter(field: EndgameCounterField, delta: number) {
   text-align: center;
   font-size: 16px;
   font-weight: 800;
-  color: var(--foreground, #f0efe9);
+  color: var(--foreground);
+  font-family: var(--font-numeric);
+  font-variant-numeric: tabular-nums;
 }
 
 .chip-row {
@@ -590,18 +629,20 @@ function adjustCounter(field: EndgameCounterField, delta: number) {
   min-width: 38px;
   padding: 5px 8px;
   border-radius: 8px;
-  border: 1px solid #262624;
-  background: #0d0d0c;
-  color: var(--muted-foreground, #8e8d87);
+  border: 1px solid var(--border);
+  background: var(--surface-recessed);
+  color: var(--muted-foreground);
+  font-family: var(--font-numeric);
+  font-variant-numeric: tabular-nums;
   font-size: 12px;
   font-weight: 700;
   cursor: pointer;
 }
 
 .chip-btn.is-active {
-  background: #121a10;
-  border-color: #39ff14;
-  color: #39ff14;
+  background: var(--status-success-bg);
+  border-color: var(--primary);
+  color: var(--primary);
 }
 
 .chip-btn:disabled {
@@ -615,25 +656,30 @@ function adjustCounter(field: EndgameCounterField, delta: number) {
   gap: 6px;
   padding: 6px 8px;
   border-radius: 8px;
-  background: rgba(245, 158, 11, 0.12);
-  border: 1px solid rgba(245, 158, 11, 0.35);
-  color: #fbbf24;
+  background: var(--status-warning-bg);
+  border: 1px solid var(--status-warning-border);
+  color: var(--status-warning);
   font-size: 11px;
   line-height: 1.35;
 }
 
+.g410-toggle-card .toggle-icon,
+.g410-toggle-card .toggle-pts {
+  color: var(--status-warning);
+}
+
 .g410-toggle-card.is-g410-checked {
-  background: rgba(245, 158, 11, 0.12);
-  border-color: #f59e0b;
+  background: var(--status-warning-bg);
+  border-color: var(--status-warning);
 }
 
 .g410-check {
-  border-color: rgba(245, 158, 11, 0.4);
-  color: #f59e0b;
+  border-color: var(--status-warning-border);
+  color: var(--status-warning);
 }
 
 .g410-toggle-card.is-g410-checked .g410-check {
-  background: #f59e0b;
-  color: #141413;
+  background: var(--status-warning);
+  color: var(--on-primary);
 }
 </style>

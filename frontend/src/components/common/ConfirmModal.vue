@@ -102,31 +102,31 @@ onUnmounted(() => {
   display: flex;
   align-items: center;
   justify-content: center;
-  background: rgba(8, 8, 7, 0.82);
+  background: color-mix(in srgb, var(--g-950) 82%, transparent);
   padding: 16px;
 }
 
 .confirm-modal-card {
   width: 100%;
   max-width: 440px;
-  background: var(--card, #141413);
-  border: 1px solid var(--border, #262624);
-  border-top: 3px solid #f59e0b;
+  background: var(--card);
+  border: 1px solid var(--border);
+  border-top: 3px solid var(--status-warning);
   border-radius: 14px;
   padding: 24px;
-  box-shadow: 0 24px 60px rgba(0, 0, 0, 0.82);
+  box-shadow: var(--shadow-3);
   display: flex;
   flex-direction: column;
   gap: 16px;
-  animation: card-pop 0.2s cubic-bezier(0.34, 1.56, 0.64, 1);
+  animation: card-pop var(--motion-duration-moderate) var(--motion-ease-out);
 }
 
 .confirm-modal-card.danger {
-  border-top-color: #ef4444;
+  border-top-color: var(--status-error);
 }
 
 .confirm-modal-card.info {
-  border-top-color: #38bdf8;
+  border-top-color: var(--status-info);
 }
 
 @keyframes card-pop {
@@ -157,21 +157,21 @@ onUnmounted(() => {
 }
 
 .confirm-icon-box.warning {
-  background: rgba(245, 158, 11, 0.18);
-  color: #f59e0b;
-  border: 1px solid rgba(245, 158, 11, 0.3);
+  background: var(--status-warning-bg);
+  color: var(--status-warning);
+  border: 1px solid var(--status-warning-border);
 }
 
 .confirm-icon-box.danger {
-  background: rgba(239, 68, 68, 0.18);
-  color: #ef4444;
-  border: 1px solid rgba(239, 68, 68, 0.3);
+  background: var(--status-error-bg);
+  color: var(--status-error);
+  border: 1px solid var(--status-error-border);
 }
 
 .confirm-icon-box.info {
-  background: rgba(56, 189, 248, 0.18);
-  color: #38bdf8;
-  border: 1px solid rgba(56, 189, 248, 0.3);
+  background: var(--status-info-bg);
+  color: var(--status-info);
+  border: 1px solid var(--status-info-border);
 }
 
 .confirm-icon-box .material-icons {
@@ -182,13 +182,13 @@ onUnmounted(() => {
   margin: 0;
   font-size: 18px;
   font-weight: 700;
-  color: var(--foreground, #f8fafc);
+  color: var(--foreground);
 }
 
 .confirm-body {
   font-size: 14px;
   line-height: 1.6;
-  color: var(--muted-foreground, #94a3b8);
+  color: var(--muted-foreground);
 }
 
 .confirm-message {
@@ -212,7 +212,11 @@ onUnmounted(() => {
   font-weight: 600;
   cursor: pointer;
   border: none;
-  transition: all 0.15s ease;
+  transition: background-color var(--motion-duration-fast) var(--motion-ease-out),
+              border-color var(--motion-duration-fast) var(--motion-ease-out),
+              color var(--motion-duration-fast) var(--motion-ease-out),
+              transform var(--motion-duration-fast) var(--motion-ease-out),
+              opacity var(--motion-duration-fast) var(--motion-ease-out);
   user-select: none;
 }
 
@@ -221,39 +225,39 @@ onUnmounted(() => {
 }
 
 .btn-secondary {
-  background: #1c1c1a;
-  color: var(--foreground, #f0efe9);
-  border: 1px solid #353532;
+  background: var(--surface-elevated);
+  color: var(--foreground);
+  border: 1px solid var(--border);
 }
 
 .btn-secondary:hover {
-  background: #262624;
-  border-color: #4a4a46;
+  background: var(--surface-hover);
+  border-color: var(--border-strong);
 }
 
 .btn-primary {
-  background: var(--primary, #39ff14);
-  color: #080807;
+  background: var(--primary);
+  color: var(--on-primary);
   font-weight: 700;
 }
 
 .btn-primary:hover {
-  filter: brightness(1.1);
+  background: var(--s-300);
 }
 
 .btn-danger {
-  background: #ef4444;
-  color: #fff;
+  background: var(--status-error);
+  color: var(--destructive-foreground);
   font-weight: 700;
 }
 
 .btn-danger:hover {
-  background: #dc2626;
+  background: color-mix(in srgb, var(--status-error) 85%, var(--g-950));
 }
 
 .confirm-fade-enter-active,
 .confirm-fade-leave-active {
-  transition: opacity 0.2s ease;
+  transition: opacity var(--motion-duration-fast) var(--motion-ease-out);
 }
 
 .confirm-fade-enter-from,

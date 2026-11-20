@@ -165,4 +165,11 @@ describe('SignalingChannel Multi-Broker & LAN WebSocket', () => {
       vi.useRealTimers()
     }
   })
+
+  it('BUILTIN_BROKERS contains unique broker URLs without duplicate EMQX failover', () => {
+    const urls = BUILTIN_BROKERS.map((b) => b.url)
+    expect(new Set(urls).size).toBe(BUILTIN_BROKERS.length)
+    expect(BUILTIN_BROKERS[0]?.id).toBe('emqx')
+    expect(BUILTIN_BROKERS[1]?.id).toBe('hivemq')
+  })
 })

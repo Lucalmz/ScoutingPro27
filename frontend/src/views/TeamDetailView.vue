@@ -205,16 +205,16 @@ async function saveComment(match: ScoutingRecord) {
     <div class="team-detail-view">
       <div class="sheet-drag-handle" @click="handleBack" :title="t('team_drawer.close')"></div>
       <header class="app-header">
-        <button class="btn-back" @click="handleBack">
+        <button class="btn-back" @click="handleBack" :aria-label="t('team_detail.back')" :title="t('team_detail.back')">
           <span class="material-icons">arrow_back</span>
-          {{ t('team_detail.back') }}
+          <span class="btn-back-text">{{ t('team_detail.back') }}</span>
         </button>
         <div class="header-title">
           <h1>{{ t('team_detail.title', { team: teamNumber }) }}</h1>
         </div>
         <div class="header-right">
           <ConnectionStatus />
-          <button class="btn-close" @click="handleBack" :title="t('team_drawer.close')">
+          <button class="btn-close" @click="handleBack" :aria-label="t('team_drawer.close')" :title="t('team_drawer.close')">
             <span class="material-icons">close</span>
           </button>
         </div>
@@ -248,7 +248,7 @@ async function saveComment(match: ScoutingRecord) {
         <div v-else class="matches-list">
           <div class="team-predict-banner">
             <span class="predict-banner-label">
-              <span class="material-icons" style="font-size: 16px; color: #38bdf8;">speed</span>
+              <span class="material-icons" style="font-size: 16px; color: var(--status-info);">speed</span>
               {{ t('rankings.predict_cycle_time') }}:
             </span>
             <strong v-if="teamPredictStats.predictCycleTime !== null" class="predict-banner-val">
@@ -393,7 +393,8 @@ async function saveComment(match: ScoutingRecord) {
 .team-detail-backdrop {
   position: fixed;
   inset: 0;
-  background: rgba(0, 0, 0, 0.65);
+  background: color-mix(in srgb, var(--g-950) 65%, transparent);
+  backdrop-filter: blur(4px);
   z-index: 1000;
   display: flex;
   justify-content: center;
@@ -406,53 +407,57 @@ async function saveComment(match: ScoutingRecord) {
   max-width: 840px;
   border-radius: 20px 20px 0 0;
   overflow: hidden;
-  background: var(--card, #141413);
-  border: 1px solid var(--border, #262624);
-  border-top: 2px solid var(--primary, #39ff14);
+  background: var(--popover);
+  border: 1px solid var(--border-strong);
   border-bottom: none;
   display: flex;
   flex-direction: column;
   view-transition-name: modal-sheet;
-  box-shadow: 0 -16px 48px rgba(0, 0, 0, 0.85);
+  box-shadow: var(--shadow-3);
 }
 
 .sheet-drag-handle {
   width: 40px;
   height: 4px;
   border-radius: 2px;
-  background: rgba(255, 255, 255, 0.25);
+  background: var(--g-600);
   margin: 10px auto 4px;
   cursor: pointer;
+  flex-shrink: 0;
   transition: background-color var(--motion-duration-fast) var(--motion-ease-out);
 }
 
 .sheet-drag-handle:hover {
-  background: var(--primary, #39ff14);
+  background: var(--primary);
 }
 
 .app-header {
-  height: 56px;
-  background: var(--card, #0a0a0a);
-  border-bottom: 1px solid var(--border, #262626);
+  min-height: 56px;
+  height: auto;
+  background: var(--g-900);
+  border-bottom: 1px solid var(--g-750);
   display: flex;
   align-items: center;
   justify-content: space-between;
-  padding: 0 16px;
+  gap: 12px;
+  padding: 8px 16px;
   position: sticky;
   top: 0;
   z-index: 100;
+  flex-shrink: 0;
 }
 
 .header-right {
   display: flex;
   align-items: center;
   gap: 8px;
+  flex-shrink: 0;
 }
 
 .btn-close {
   background: transparent;
   border: none;
-  color: var(--muted-foreground, #a3a3a3);
+  color: var(--muted-foreground);
   width: 36px;
   height: 36px;
   border-radius: 8px;
@@ -460,12 +465,14 @@ async function saveComment(match: ScoutingRecord) {
   display: flex;
   align-items: center;
   justify-content: center;
-  transition: all var(--motion-duration-fast) var(--motion-ease-out);
+  flex-shrink: 0;
+  transition: background-color var(--motion-duration-fast) var(--motion-ease-out),
+              color var(--motion-duration-fast) var(--motion-ease-out);
 }
 
 .btn-close:hover {
-  background: var(--input, #1a1a1a);
-  color: var(--foreground, #f1f5f9);
+  background: var(--surface-hover);
+  color: var(--foreground);
 }
 
 .btn-back {
@@ -480,16 +487,20 @@ async function saveComment(match: ScoutingRecord) {
   gap: 4px;
   padding: 8px;
   border-radius: 8px;
-  transition: all var(--motion-duration-fast) var(--motion-ease-out);
+  flex-shrink: 0;
+  transition: background-color var(--motion-duration-fast) var(--motion-ease-out),
+              color var(--motion-duration-fast) var(--motion-ease-out);
 }
 
 .btn-back:hover {
-  background: var(--input);
+  background: var(--surface-hover);
   color: var(--foreground);
 }
 
 .header-title {
   flex: 1;
+  min-width: 0;
+  overflow: hidden;
   text-align: center;
 }
 
@@ -497,7 +508,8 @@ async function saveComment(match: ScoutingRecord) {
   margin: 0;
   font-size: 18px;
   font-weight: 700;
-  color: var(--primary);
+  font-variant-numeric: tabular-nums;
+  color: var(--g-50);
 }
 
 .content-area {
@@ -521,12 +533,12 @@ async function saveComment(match: ScoutingRecord) {
 }
 
 .content-area::-webkit-scrollbar-thumb {
-  background: var(--border, #333);
+  background: var(--border);
   border-radius: 3px;
 }
 
 .content-area::-webkit-scrollbar-thumb:hover {
-  background: var(--muted-foreground, #666);
+  background: var(--g-500);
 }
 
 .team-tags-card {
@@ -561,12 +573,12 @@ async function saveComment(match: ScoutingRecord) {
   border: 1px solid var(--border);
   border-radius: 12px;
   padding: 16px;
-  transition: box-shadow 0.2s;
+  transition: border-color var(--motion-duration-fast) var(--motion-ease-out);
 }
 
 .match-card.is-broken {
-  border-color: rgba(239, 68, 68, 0.3);
-  background: rgba(239, 68, 68, 0.02);
+  border-color: var(--status-error-border);
+  background: color-mix(in srgb, var(--status-error-bg) 35%, var(--card));
 }
 
 .match-header {
@@ -581,6 +593,7 @@ async function saveComment(match: ScoutingRecord) {
 .match-header h3 {
   margin: 0;
   font-size: 16px;
+  font-variant-numeric: tabular-nums;
   color: var(--foreground);
 }
 
@@ -588,8 +601,9 @@ async function saveComment(match: ScoutingRecord) {
   display: flex;
   align-items: center;
   gap: 4px;
-  background: var(--status-error);
-  color: white;
+  background: var(--status-error-bg);
+  border: 1px solid var(--status-error-border);
+  color: var(--status-error);
   padding: 4px 8px;
   border-radius: 12px;
   font-size: 12px;
@@ -620,6 +634,8 @@ async function saveComment(match: ScoutingRecord) {
 }
 
 .score-item .value {
+  font-family: var(--font-numeric);
+  font-variant-numeric: tabular-nums;
   font-size: 18px;
   font-weight: 700;
   color: var(--foreground);
@@ -717,7 +733,7 @@ async function saveComment(match: ScoutingRecord) {
 }
 
 .btn-save:hover:not(:disabled) {
-  filter: brightness(1.1);
+  background: var(--s-300);
 }
 
 .btn-cancel {
@@ -736,6 +752,53 @@ async function saveComment(match: ScoutingRecord) {
 }
 
 @media (max-width: 600px) {
+  .app-header {
+    min-height: 52px;
+    height: auto;
+    gap: 6px;
+    padding: 8px 10px;
+  }
+  .btn-back {
+    padding: 6px;
+    width: 32px;
+    height: 32px;
+    justify-content: center;
+  }
+  .btn-back-text {
+    display: none;
+  }
+  .btn-close {
+    width: 32px;
+    height: 32px;
+  }
+  .header-title {
+    text-align: left;
+  }
+  .header-title h1 {
+    font-size: 14px;
+    line-height: 1.25;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+  .header-right {
+    gap: 6px;
+  }
+  .header-right :deep(.status-container) {
+    gap: 4px;
+  }
+  .header-right :deep(.connection-status) {
+    padding: 4px 7px;
+    gap: 4px;
+    font-size: 11px;
+  }
+  .header-right :deep(.status-icon) {
+    font-size: 14px;
+  }
+  .header-right :deep(.reconnect-btn) {
+    padding: 4px 7px;
+    font-size: 11px;
+  }
   .score-grid {
     grid-template-columns: repeat(2, 1fr);
   }
@@ -758,7 +821,7 @@ async function saveComment(match: ScoutingRecord) {
   font-size: 11px;
   padding: 2px 8px;
   border-radius: 6px;
-  background: rgba(255, 255, 255, 0.03);
+  background: var(--surface-recessed);
   border: 1px solid var(--border);
 }
 
@@ -772,20 +835,20 @@ async function saveComment(match: ScoutingRecord) {
   color: var(--foreground);
 }
 
-.match-cf-badge.cf-color-green { border-color: rgba(57, 255, 20, 0.3); background: rgba(57, 255, 20, 0.08); }
-.match-cf-badge.cf-color-green .cf-val { color: #39ff14; }
+.match-cf-badge.cf-color-green { border-color: var(--status-success-border); background: var(--status-success-bg); }
+.match-cf-badge.cf-color-green .cf-val { color: var(--status-success); }
 
-.match-cf-badge.cf-color-blue { border-color: rgba(56, 189, 248, 0.3); background: rgba(56, 189, 248, 0.08); }
-.match-cf-badge.cf-color-blue .cf-val { color: #38bdf8; }
+.match-cf-badge.cf-color-blue { border-color: var(--status-info-border); background: var(--status-info-bg); }
+.match-cf-badge.cf-color-blue .cf-val { color: var(--status-info); }
 
-.match-cf-badge.cf-color-purple { border-color: rgba(192, 132, 252, 0.3); background: rgba(192, 132, 252, 0.08); }
-.match-cf-badge.cf-color-purple .cf-val { color: #c084fc; }
+.match-cf-badge.cf-color-purple { border-color: var(--status-ai-border); background: var(--status-ai-bg); }
+.match-cf-badge.cf-color-purple .cf-val { color: var(--status-ai); }
 
-.match-cf-badge.cf-color-orange { border-color: rgba(251, 146, 60, 0.3); background: rgba(251, 146, 60, 0.08); }
-.match-cf-badge.cf-color-orange .cf-val { color: #fb923c; }
+.match-cf-badge.cf-color-orange { border-color: var(--status-warning-border); background: var(--status-warning-bg); }
+.match-cf-badge.cf-color-orange .cf-val { color: var(--status-warning); }
 
-.match-cf-badge.cf-color-red { border-color: rgba(248, 113, 113, 0.3); background: rgba(248, 113, 113, 0.08); }
-.match-cf-badge.cf-color-red .cf-val { color: #f87171; }
+.match-cf-badge.cf-color-red { border-color: var(--status-error-border); background: var(--status-error-bg); }
+.match-cf-badge.cf-color-red .cf-val { color: var(--status-error); }
 
 .team-predict-banner {
   display: flex;
@@ -796,8 +859,8 @@ async function saveComment(match: ScoutingRecord) {
   padding: 10px 14px;
   margin-bottom: 12px;
   border-radius: 10px;
-  background: rgba(56, 189, 248, 0.08);
-  border: 1px solid rgba(56, 189, 248, 0.25);
+  background: var(--status-info-bg);
+  border: 1px solid var(--status-info-border);
   font-size: 13px;
 }
 
@@ -810,7 +873,8 @@ async function saveComment(match: ScoutingRecord) {
 }
 
 .predict-banner-val {
-  color: #38bdf8;
+  color: var(--status-info);
+  font-variant-numeric: tabular-nums;
 }
 
 .predict-banner-sub {

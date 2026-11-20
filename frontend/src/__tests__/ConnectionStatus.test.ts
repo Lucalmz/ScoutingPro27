@@ -83,4 +83,34 @@ describe('ConnectionStatus.vue Badges Visibility', () => {
     expect(wrapper.find('.fingerprint-badge').exists()).toBe(true)
     expect(wrapper.find('.fingerprint-text').text()).toBe('A1B2-C3D4')
   })
+
+  it('distinguishes zero-quota ECDH Tunnel (TLS) from Metered TURN Relay in transport badge', () => {
+    const connStore = useConnectionStore()
+    const mockRtc = { isHostMode: () => false } as any
+    connStore.setRtcService(mockRtc)
+    connStore.setStandbyHost(false)
+    connStore.status = 'connected'
+
+    connStore.transportInfo = {
+      type: 'relay',
+      localCandidateType: 'virtual-e2ee',
+      remoteCandidateType: 'wss-broker:8084',
+      protocol: 'wss/tls',
+      label: 'ECDH Tunnel (TLS)',
+      isVirtualTunnel: true,
+      rttMs: 42
+    }
+    const vdcWrapper = mount(ConnectionStatus)
+    expect(vdcWrapper.find('.transport-text').text()).toBe('connection.transport_virtual_tunnel')
+
+    connStore.transportInfo = {
+      type: 'relay',
+      localCandidateType: 'relay',
+      remoteCandidateType: 'relay',
+      protocol: 'TCP',
+      rttMs: 110
+    }
+    const turnWrapper = mount(ConnectionStatus)
+    expect(turnWrapper.find('.transport-text').text()).toBe('connection.transport_relay')
+  })
 })

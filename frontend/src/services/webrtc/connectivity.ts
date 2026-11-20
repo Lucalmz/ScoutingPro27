@@ -1,4 +1,4 @@
-import type { TransportType } from '@/types'
+import type { CustomTurnConfig, TransportType } from '@/types'
 import {
   cleanIpAddress,
   isGlobalIpv6Address,
@@ -19,9 +19,13 @@ import {
   isBogusOrTunCandidate,
   optimizeCandidatePriority,
   demoteProxyExitCandidatePriority,
+  boostDomesticOverProxyExitPriority,
+  registerDomesticDoHStunHost,
+  clearDomesticDoHStunHosts,
   type TaggedIceCandidateItem,
   applyProxyExitDemotionToBatch,
   synthesizeSymmetricNatPortCandidates,
+  synthesizeSymmetricNatPortCandidatesForPeer,
   optimizeSdpCandidates,
   sortCandidatesPreferIpv6,
   classifyCandidatePair
@@ -45,9 +49,11 @@ export {
   isBogusOrTunCandidate,
   optimizeCandidatePriority,
   demoteProxyExitCandidatePriority,
+  boostDomesticOverProxyExitPriority,
   type TaggedIceCandidateItem,
   applyProxyExitDemotionToBatch,
   synthesizeSymmetricNatPortCandidates,
+  synthesizeSymmetricNatPortCandidatesForPeer,
   optimizeSdpCandidates,
   sortCandidatesPreferIpv6,
   classifyCandidatePair
@@ -171,12 +177,25 @@ export function resetDoHStunCache(): void {
   dohResolvedStunV6Urls = []
   dohResolvePromise = null
   lastDohFailTime = 0
+  clearDomesticDoHStunHosts()
+}
+
+function isPublicIpv4StunAddress(ip: string): boolean {
+  const clean = cleanIpAddress(ip)
+  if (!/^\d{1,3}(?:\.\d{1,3}){3}$/.test(clean)) return false
+  const octets = clean.split('.').map((n) => parseInt(n, 10))
+  if (octets.some((o) => Number.isNaN(o) || o < 0 || o > 255)) return false
+  const first = octets[0]!
+  if (first === 0 || first >= 224) return false
+  if (isPrivateIpv4Address(clean) || isTunVirtualAddress(clean)) return false
+  return true
 }
 
 /**
  * 使用真正免鉴权且支持浏览器 CORS 的阿里 DoH (国内直连毫秒级可达) 与 Cloudflare DoH (海外/VPN 隧道可达) 双源 JSON API，
- * 并发解析境内外双栈 STUN 的真实公网 AAAA (type=28) 记录，100% 绕过 TUN/VPN 的 dns-hijack: any:53 与 dns.ipv6: false 拦截。
- * 若全部请求失败则清除 Promise 引用并在冷却期后允许重试，避免一次性断网导致整个进程生命周期内永久返回空数组。
+ * 并发解析境内外双栈 STUN 的真实公网 AAAA (type=28) 与国内 STUN 的 A (type=1) 记录：
+ * - 100% 绕过 TUN/VPN 的 dns-hijack: any:53 与 dns.ipv6: false 拦截；
+ * - 为单一字面量 111.8.3.78 提供动态国内 IPv4 STUN 冗余，消除单点故障。
  */
 export function warmUpDoHStunIpv6(): Promise<string[]> {
   if (dohResolvedStunV6Urls.length > 0) return Promise.resolve(dohResolvedStunV6Urls)
@@ -194,19 +213,21 @@ export function warmUpDoHStunIpv6(): Promise<string[]> {
     return Promise.resolve([])
   }
 
-  const targets: Array<{ domain: string; port: number }> = [
-    { domain: 'stun.hitv.com', port: 3478 },
-    { domain: 'stun.cloudflare.com', port: 3478 },
-    { domain: 'stun.l.google.com', port: 19302 },
-    { domain: 'stun.nextcloud.com', port: 3478 }
+  const v6Targets: Array<{ domain: string; port: number; domestic: boolean }> = [
+    { domain: 'stun.hitv.com', port: 3478, domestic: true },
+    { domain: 'stun.cloudflare.com', port: 3478, domestic: false }
+  ]
+  const v4DomesticTargets: Array<{ domain: string; port: number }> = [
+    { domain: 'stun.miwifi.com', port: 3478 },
+    { domain: 'stun.qq.com', port: 3478 }
   ]
   const dohEndpoints = [
     'https://dns.alidns.com/resolve',
     'https://cloudflare-dns.com/dns-query'
   ]
 
-  const tasks: Array<Promise<string[]>> = []
-  for (const { domain, port } of targets) {
+  const tasks: Array<Promise<{ urls: string[]; isV4Domestic: boolean }>> = []
+  for (const { domain, port, domestic } of v6Targets) {
     for (const endpoint of dohEndpoints) {
       tasks.push(
         (async () => {
@@ -217,14 +238,19 @@ export function warmUpDoHStunIpv6(): Promise<string[]> {
               headers: { accept: 'application/dns-json' },
               signal: controller.signal
             })
-            if (!res.ok) return []
+            if (!res.ok) return { urls: [], isV4Domestic: false }
             const data = await res.json()
             const answers: Array<{ type: number; data: string }> = Array.isArray(data?.Answer) ? data.Answer : []
-            return answers
+            const urls = answers
               .filter((a) => a.type === 28 && isGlobalIpv6Address(a.data))
-              .map((a) => `stun:[${cleanIpAddress(a.data)}]:${port}`)
+              .map((a) => {
+                const clean = cleanIpAddress(a.data)
+                if (domestic) registerDomesticDoHStunHost(clean)
+                return `stun:[${clean}]:${port}`
+              })
+            return { urls, isV4Domestic: false }
           } catch {
-            return []
+            return { urls: [], isV4Domestic: false }
           } finally {
             clearTimeout(timer)
           }
@@ -233,16 +259,60 @@ export function warmUpDoHStunIpv6(): Promise<string[]> {
     }
   }
 
+  for (const { domain, port } of v4DomesticTargets) {
+    tasks.push(
+      (async () => {
+        const controller = new AbortController()
+        const timer = setTimeout(() => controller.abort(), 1500)
+        try {
+          const res = await fetch(`https://dns.alidns.com/resolve?name=${domain}&type=A`, {
+            headers: { accept: 'application/dns-json' },
+            signal: controller.signal
+          })
+          if (!res.ok) return { urls: [], isV4Domestic: true }
+          const data = await res.json()
+          const answers: Array<{ type: number; data: string }> = Array.isArray(data?.Answer) ? data.Answer : []
+          const urls = answers
+            .filter((a) => (a.type === 1 && isPublicIpv4StunAddress(a.data)) || (a.type === 28 && isGlobalIpv6Address(a.data)))
+            .map((a) => {
+              const clean = cleanIpAddress(a.data)
+              registerDomesticDoHStunHost(clean)
+              return a.type === 28 ? `stun:[${clean}]:${port}` : `stun:${clean}:${port}`
+            })
+          return { urls, isV4Domestic: true }
+        } catch {
+          return { urls: [], isV4Domestic: true }
+        } finally {
+          clearTimeout(timer)
+        }
+      })()
+    )
+  }
+
   dohResolvePromise = Promise.allSettled(tasks).then((results) => {
-    const urls = new Set<string>()
+    const v6Set = new Set<string>()
+    const v4Set = new Set<string>()
     for (const r of results) {
       if (r.status === 'fulfilled') {
-        for (const u of r.value) urls.add(u)
+        for (const u of r.value.urls) {
+          if (r.value.isV4Domestic && !u.includes('[')) {
+            v4Set.add(u)
+          } else {
+            v6Set.add(u)
+          }
+        }
       }
     }
-    const resolved = Array.from(urls)
-    if (resolved.length > 0) {
-      dohResolvedStunV6Urls = resolved
+    const v6Arr = Array.from(v6Set)
+    const v4Arr = Array.from(v4Set)
+    const merged: string[] = []
+    const maxLen = Math.max(v6Arr.length, v4Arr.length)
+    for (let i = 0; i < maxLen; i++) {
+      if (i < v6Arr.length) merged.push(v6Arr[i]!)
+      if (i < v4Arr.length) merged.push(v4Arr[i]!)
+    }
+    if (merged.length > 0) {
+      dohResolvedStunV6Urls = merged
       lastDohFailTime = 0
     } else {
       dohResolvePromise = null
@@ -285,16 +355,23 @@ export async function waitForDoHStunIpv6Bounded(maxWaitMs = 300): Promise<string
 }
 
 /**
- * 生成生产环境免 DNS 字面量 STUN URL 列表（纯函数，兼顾全球直连与国内 VPN/TUN 环境，去重保序）
+ * 生成生产环境免 DNS 字面量 STUN URL 列表（纯函数，精简保留国内+海外 IPv4/IPv6 双栈覆盖，去重保序并限制 DoH 补充数量，避免过多 STUN 事务拖慢 ICE 收集）
  */
 export function selectStunUrls(opts?: { dohUrls?: string[] }): string[] {
-  const dohUrls = opts?.dohUrls ?? dohResolvedStunV6Urls
-  const combined = [
+  const baseUrls = [
     ...DOMESTIC_LITERAL_STUN_URLS,
-    ...OVERSEAS_LITERAL_STUN_URLS,
-    ...dohUrls
+    ...OVERSEAS_LITERAL_STUN_URLS
   ]
-  return Array.from(new Set(combined))
+  const seen = new Set<string>(baseUrls)
+  const extraDoh: string[] = []
+  const dohUrls = opts?.dohUrls ?? dohResolvedStunV6Urls
+  for (const url of dohUrls) {
+    if (!url || seen.has(url)) continue
+    seen.add(url)
+    extraDoh.push(url)
+    if (extraDoh.length >= 2) break
+  }
+  return [...baseUrls, ...extraDoh]
 }
 
 /**
@@ -303,16 +380,11 @@ export function selectStunUrls(opts?: { dohUrls?: string[] }): string[] {
 export const STUN_SERVERS: RTCConfiguration = PURE_STUN_SERVERS
 
 /**
- * TURN 备用中继（仅在多次重试后确认无法 P2P 直连——典型为双端对称型 NAT 且无 IPv6——才会启用）。
+ * TURN 备用中继（优先使用 turns:443/tcp 以穿透封禁 UDP/IPv6 的严格移动 VPN，其次按 443 / 80 TCP/UDP 兜底）。
  */
 export const TURN_SERVERS: RTCIceServer[] = [
   {
-    urls: 'turn:global.relay.metered.ca:80',
-    username: 'ac2f17ce5be760e70209a1da',
-    credential: 'hnCbsBr54qxItqgo'
-  },
-  {
-    urls: 'turn:global.relay.metered.ca:80?transport=tcp',
+    urls: 'turns:global.relay.metered.ca:443?transport=tcp',
     username: 'ac2f17ce5be760e70209a1da',
     credential: 'hnCbsBr54qxItqgo'
   },
@@ -322,11 +394,55 @@ export const TURN_SERVERS: RTCIceServer[] = [
     credential: 'hnCbsBr54qxItqgo'
   },
   {
-    urls: 'turns:global.relay.metered.ca:443?transport=tcp',
+    urls: 'turn:global.relay.metered.ca:80?transport=tcp',
+    username: 'ac2f17ce5be760e70209a1da',
+    credential: 'hnCbsBr54qxItqgo'
+  },
+  {
+    urls: 'turn:global.relay.metered.ca:80',
     username: 'ac2f17ce5be760e70209a1da',
     credential: 'hnCbsBr54qxItqgo'
   }
 ]
+
+let activeCustomTurnConfig: CustomTurnConfig | null = null
+
+export function setCustomTurnConfig(config: CustomTurnConfig | null | undefined): void {
+  if (!config || !Array.isArray(config.urls)) {
+    activeCustomTurnConfig = null
+    return
+  }
+  const cleanUrls = config.urls
+    .map((u) => (typeof u === 'string' ? u.trim() : ''))
+    .filter((u) => /^turns?:/i.test(u))
+  const username = typeof config.username === 'string' ? config.username.trim() : ''
+  if (cleanUrls.length === 0 || !username) {
+    activeCustomTurnConfig = null
+    return
+  }
+  activeCustomTurnConfig = {
+    urls: cleanUrls,
+    username,
+    credential: typeof config.credential === 'string' ? config.credential : ''
+  }
+}
+
+export function getCustomTurnConfig(): CustomTurnConfig | null {
+  return activeCustomTurnConfig
+    ? { ...activeCustomTurnConfig, urls: [...activeCustomTurnConfig.urls] }
+    : null
+}
+
+export function getEffectiveTurnServers(): RTCIceServer[] {
+  if (activeCustomTurnConfig && activeCustomTurnConfig.urls.length > 0) {
+    return activeCustomTurnConfig.urls.map((u) => ({
+      urls: u,
+      username: activeCustomTurnConfig!.username,
+      credential: activeCustomTurnConfig!.credential || ''
+    }))
+  }
+  return TURN_SERVERS
+}
 
 /**
  * 统一 ICE 配置构造器（单 PeerConnection 并行打洞策略）：
@@ -338,7 +454,11 @@ export const TURN_SERVERS: RTCIceServer[] = [
  * 注意：浏览器默认对 host 候选做 mDNS 混淆（xxx.local），跨网段 IPv6 直连必须依赖 STUN 反射出的
  * 真实 IPv6 srflx / 对端 prflx 候选，因此 IPv6 场景同样不能省略 STUN。
  */
-export function buildIceConfiguration(allowTurn = false, forceRelay = false): RTCConfiguration {
+export function buildIceConfiguration(
+  allowTurn = false,
+  forceRelay = false,
+  opts?: { primaryTurnOnly?: boolean }
+): RTCConfiguration {
   const useTurn = allowTurn || forceRelay || Boolean((globalThis as any).__TEST_FORCE_ALLOW_TURN__)
   const isTestEnv =
     (typeof process !== 'undefined' && (process.env?.NODE_ENV === 'test' || process.env?.VITEST === 'true')) ||
@@ -350,7 +470,7 @@ export function buildIceConfiguration(allowTurn = false, forceRelay = false): RT
     stunServers = [...(PURE_STUN_SERVERS.iceServers ?? [])]
   } else {
     // 真实运行环境下（全球通用 + 国内 VPN/TUN 兼容）：
-    // 1. 全部采用免 DNS 解析的境内外双栈 IPv4/IPv6 字面量 STUN 与 DoH 预解析出的 AAAA 字面量 STUN，
+    // 1. 全部采用免 DNS 解析的境内外双栈 IPv4/IPv6 字面量 STUN 与 DoH 预解析出的 AAAA/A 字面量 STUN，
     //    彻底杜绝域名 STUN 被 TUN/VPN 的 Fake-IP (198.18.0.x) 或 dns.ipv6:false 劫持；
     // 2. 同时提供国内直连字面量与海外高可用字面量（多源收集）：
     //    - 海外用户或全局 VPN 环境下可通过海外节点稳定反射公网地址；
@@ -359,8 +479,14 @@ export function buildIceConfiguration(allowTurn = false, forceRelay = false): RT
     stunServers = [{ urls: selectStunUrls() }]
   }
 
+  const effectiveTurnServers = getEffectiveTurnServers()
+  const turnPool =
+    opts?.primaryTurnOnly && effectiveTurnServers.length > 0
+      ? [effectiveTurnServers[0]!]
+      : effectiveTurnServers
+
   return {
-    iceServers: useTurn ? [...stunServers, ...TURN_SERVERS] : stunServers,
+    iceServers: useTurn ? [...stunServers, ...turnPool] : stunServers,
     iceTransportPolicy: forceRelay ? 'relay' : 'all',
     iceCandidatePoolSize: PURE_STUN_SERVERS.iceCandidatePoolSize
   }
@@ -378,6 +504,8 @@ export const TURN_FALLBACK_ATTEMPT = 3
 export const CONNECTION_TIMING = {
   /** Client：从 Offer 发出到 DataChannel open 的最长等待时间，超时即判定本次尝试失败 */
   CLIENT_CONNECT_TIMEOUT_MS: 15000,
+  /** Client：原生 P2P 未连通时启用 ECDH VirtualDataChannel 兜底的窗口 */
+  VIRTUAL_FALLBACK_DELAY_MS: 3800,
   /** Client：connectionState=disconnected 后等待 ICE 自愈的宽限期 */
   CLIENT_DISCONNECT_GRACE_MS: 3000,
   /** Host：从未连通的 PeerConnection 的回收时限（必须大于 CLIENT_CONNECT_TIMEOUT_MS） */
@@ -390,8 +518,7 @@ export const CONNECTION_TIMING = {
 
 /**
  * 根据重试序号（0 = 首次连接，1 起为重试）决定该次尝试是否允许携带 TURN：
- * - 0 / 1 / 2：纯 P2P（STUN only），绝不生成 relay 候选；
- * - ≥ 3：确认多次纯 P2P 均失败（典型为双端对称型 NAT 且无 IPv6），才带上 TURN 作为终极兜底。
+ * 0 / 1 / 2 全部纯 P2P（STUN only），不产生 relay 候选；第 3 次起才允许携带 TURN。
  */
 export function shouldAllowTurnForAttempt(attemptNumber: number): boolean {
   return attemptNumber >= TURN_FALLBACK_ATTEMPT

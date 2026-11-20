@@ -247,6 +247,10 @@ export async function verifyAndEvaluateHostPeerTrust(
       sas.clientSasStates.set(sender, 'VERIFIED')
       if (effectiveUserId) {
         ctx.callbacks.onClientConnected?.(effectiveUserId, effectiveUsername)
+        const info = ctx.peerMgr?.getPeerTransportInfo?.(sender)
+        if (info) {
+          ctx.callbacks.onScoutTransportInfoChanged?.(effectiveUserId, info)
+        }
       }
     }
 

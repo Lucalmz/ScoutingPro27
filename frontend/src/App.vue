@@ -1,21 +1,99 @@
-﻿<script setup lang="ts">
-import { ref, onMounted, watch } from 'vue'
+<script setup lang="ts">
+import { ref, onMounted, onBeforeUnmount, watch } from 'vue'
+import { useRouter } from 'vue-router'
 import ToastProvider from '@/components/ToastProvider.vue'
 import ConfirmModal from '@/components/common/ConfirmModal.vue'
 import InboxWidget from '@/components/common/InboxWidget.vue'
 import { useInboxStore } from '@/stores/inbox'
 import { useToastStore } from '@/stores/toast'
+import { useScoutAllianceHalo } from '@/composables/useScoutAllianceHalo'
 
 const inboxStore = useInboxStore()
 const toastStore = useToastStore()
+const router = useRouter()
+const { scoutAllianceHalo } = useScoutAllianceHalo()
 
 const isViewTransitionSupported = typeof document !== 'undefined' && 'startViewTransition' in document
 const bootActive = ref(true)
 
+let isUnmounted = false
+let bootOverlayTimer: ReturnType<typeof setTimeout> | null = null
+let splashCleanupTimer: ReturnType<typeof setTimeout> | null = null
+let splashRafId: number | null = null
+
+async function dismissWebBootSplash() {
+  if (typeof document === 'undefined') return
+  const splash = document.getElementById('web-boot-splash')
+  if (!splash) return
+
+  if (router && typeof router.isReady === 'function') {
+    await router.isReady().catch(() => {})
+  }
+  if (isUnmounted) return
+
+  const startFade = () => {
+    if (isUnmounted || !splash.isConnected) return
+
+    const prefersReducedMotion =
+      typeof window !== 'undefined' &&
+      typeof window.matchMedia === 'function' &&
+      window.matchMedia('(prefers-reduced-motion: reduce)').matches
+
+    if (prefersReducedMotion) {
+      splash.remove()
+      return
+    }
+
+    let cleaned = false
+    const finalizeRemoval = (e?: Event) => {
+      if (e && e.target !== splash) return
+      if (cleaned) return
+      cleaned = true
+      if (splashCleanupTimer !== null) {
+        clearTimeout(splashCleanupTimer)
+        splashCleanupTimer = null
+      }
+      splash.removeEventListener('transitionend', finalizeRemoval)
+      splash.remove()
+    }
+
+    splash.addEventListener('transitionend', finalizeRemoval)
+    splash.classList.add('is-fading')
+    splashCleanupTimer = setTimeout(finalizeRemoval, 280)
+  }
+
+  if (typeof window !== 'undefined' && typeof window.requestAnimationFrame === 'function') {
+    splashRafId = window.requestAnimationFrame(() => {
+      splashRafId = null
+      startFade()
+    })
+  } else {
+    startFade()
+  }
+}
+
 onMounted(() => {
-  setTimeout(() => {
+  void dismissWebBootSplash()
+  bootOverlayTimer = setTimeout(() => {
     bootActive.value = false
-  }, 1100)
+    bootOverlayTimer = null
+  }, 480)
+})
+
+onBeforeUnmount(() => {
+  isUnmounted = true
+  if (bootOverlayTimer !== null) {
+    clearTimeout(bootOverlayTimer)
+    bootOverlayTimer = null
+  }
+  if (splashCleanupTimer !== null) {
+    clearTimeout(splashCleanupTimer)
+    splashCleanupTimer = null
+  }
+  if (splashRafId !== null && typeof window !== 'undefined' && typeof window.cancelAnimationFrame === 'function') {
+    window.cancelAnimationFrame(splashRafId)
+    splashRafId = null
+  }
 })
 
 watch(() => inboxStore.messages.length, (newLen, oldLen) => {
@@ -29,6 +107,11 @@ watch(() => inboxStore.messages.length, (newLen, oldLen) => {
 </script>
 
 <template>
+  <div class="ambient-halo-stage" aria-hidden="true">
+    <div class="ambient-halo-layer is-default" :class="{ active: scoutAllianceHalo === 'none' }"></div>
+    <div class="ambient-halo-layer is-red" :class="{ active: scoutAllianceHalo === 'red' }"></div>
+    <div class="ambient-halo-layer is-blue" :class="{ active: scoutAllianceHalo === 'blue' }"></div>
+  </div>
   <ToastProvider />
   <ConfirmModal />
   <!-- Minimal non-blocking boot line (no text) -->
@@ -55,7 +138,8 @@ watch(() => inboxStore.messages.length, (newLen, oldLen) => {
 
 .page-enter-active,
 .page-leave-active {
-  transition: opacity 0.85s cubic-bezier(0.25, 1, 0.5, 1), transform 0.85s cubic-bezier(0.25, 1, 0.5, 1);
+  transition: opacity var(--motion-duration-page) var(--motion-ease-page),
+              transform var(--motion-duration-page) var(--motion-ease-page);
 }
 
 .page-enter-from {
@@ -96,8 +180,8 @@ watch(() => inboxStore.messages.length, (newLen, oldLen) => {
 ::view-transition-group(*),
 ::view-transition-old(*),
 ::view-transition-new(*) {
-  animation-duration: var(--motion-duration-slow);
-  animation-timing-function: var(--motion-ease-out);
+  animation-duration: var(--motion-duration-page);
+  animation-timing-function: var(--motion-ease-page);
 }
 
 [data-direction='forward']::view-transition-new(page-view) {
@@ -122,11 +206,11 @@ watch(() => inboxStore.messages.length, (newLen, oldLen) => {
 /* If a shared element is transitioning, tone down the page-view transition */
 [data-transition-type='shared']::view-transition-old(page-view) {
   animation-name: fade-out;
-  animation-duration: var(--motion-duration-normal);
+  animation-duration: var(--motion-duration-shared);
 }
 [data-transition-type='shared']::view-transition-new(page-view) {
   animation-name: fade-in;
-  animation-duration: var(--motion-duration-normal);
+  animation-duration: var(--motion-duration-shared);
 }
 
 @keyframes slide-from-right {
@@ -184,49 +268,86 @@ watch(() => inboxStore.messages.length, (newLen, oldLen) => {
 ::view-transition-old(event-tabs),
 ::view-transition-old(event-content),
 ::view-transition-old(event-status) {
-  animation-duration: var(--motion-duration-slow);
-  animation-timing-function: var(--motion-ease-out);
+  animation-duration: var(--motion-duration-page);
+  animation-timing-function: var(--motion-ease-page);
   animation-fill-mode: both;
 }
 
 ::view-transition-group(event-card-title) {
   z-index: 9999;
-  animation-duration: var(--motion-duration-slow);
-  animation-timing-function: var(--motion-ease-out);
+  animation-duration: var(--motion-duration-shared);
+  animation-timing-function: var(--motion-ease-page);
+}
+
+/* The title snapshot keeps its aspect ratio, stays anchored to the text's left edge,
+   and cross-fades on the exact same duration/easing as the group travel so the two
+   text boxes always line up smoothly in both directions. */
+::view-transition-old(event-card-title),
+::view-transition-new(event-card-title) {
+  width: 100%;
+  height: 100%;
+  object-fit: contain;
+  object-position: left center;
+  overflow: clip;
+  mix-blend-mode: plus-lighter;
+  animation-duration: var(--motion-duration-shared);
+  animation-timing-function: var(--motion-ease-page);
+}
+
+/* Prevent router container, Inbox FAB, and EventView sections from participating in or overlapping
+   user-profile modal or team-detail sheet transitions. */
+html[data-transition-type='user-profile'] .router-view-container,
+html[data-transition-type='user-profile'] .inbox-widget,
+html[data-transition-type='user-profile'] .event-view .topbar,
+html[data-transition-type='user-profile'] .event-view .event-name,
+html[data-transition-type='user-profile'] .event-view .topbar-right,
+html[data-transition-type='user-profile'] .event-view .tab-bar,
+html[data-transition-type='user-profile'] .event-view .tab-content,
+html[data-to-type='team-detail'] .event-view .topbar,
+html[data-to-type='team-detail'] .event-view .event-name,
+html[data-to-type='team-detail'] .event-view .topbar-right,
+html[data-to-type='team-detail'] .event-view .tab-bar,
+html[data-to-type='team-detail'] .event-view .tab-content,
+html[data-from-type='team-detail'] .event-view .topbar,
+html[data-from-type='team-detail'] .event-view .event-name,
+html[data-from-type='team-detail'] .event-view .topbar-right,
+html[data-from-type='team-detail'] .event-view .tab-bar,
+html[data-from-type='team-detail'] .event-view .tab-content {
+  view-transition-name: none !important;
 }
 
 [data-direction='forward']::view-transition-new(event-topbar) {
   animation-name: slide-down-fade-in;
-  animation-delay: 0.136s;
+  animation-delay: var(--motion-page-stagger);
 }
 [data-direction='forward']::view-transition-new(event-status) {
   animation-name: slide-from-left-fade-in;
-  animation-delay: 0.238s;
+  animation-delay: calc(var(--motion-page-stagger) * 2);
 }
 [data-direction='forward']::view-transition-new(event-tabs) {
   animation-name: slide-from-right-fade-in;
-  animation-delay: 0.34s;
+  animation-delay: calc(var(--motion-page-stagger) * 3);
 }
 [data-direction='forward']::view-transition-new(event-content) {
   animation-name: slide-up-fade-in;
-  animation-delay: 0.442s;
+  animation-delay: calc(var(--motion-page-stagger) * 4);
 }
 
 [data-direction='back']::view-transition-old(event-topbar) {
   animation-name: slide-up-fade-out;
-  animation-delay: 0s;
+  animation-delay: 0ms;
 }
 [data-direction='back']::view-transition-old(event-status) {
   animation-name: slide-to-left-fade-out;
-  animation-delay: 0.102s;
+  animation-delay: var(--motion-page-stagger);
 }
 [data-direction='back']::view-transition-old(event-tabs) {
   animation-name: slide-to-right-fade-out;
-  animation-delay: 0.204s;
+  animation-delay: calc(var(--motion-page-stagger) * 2);
 }
 [data-direction='back']::view-transition-old(event-content) {
   animation-name: slide-down-fade-out;
-  animation-delay: 0.306s;
+  animation-delay: calc(var(--motion-page-stagger) * 3);
 }
 
 @keyframes slide-down-fade-in {
@@ -373,7 +494,7 @@ watch(() => inboxStore.messages.length, (newLen, oldLen) => {
 [data-from-type='team-detail']::view-transition-new(page-view) {
   z-index: 1;
   mix-blend-mode: normal;
-  background: black;
+  background: var(--g-950);
 }
 
 /* Hide the page-view of the new page when entering (we only want the modal-sheet to animate) */
@@ -390,18 +511,18 @@ watch(() => inboxStore.messages.length, (newLen, oldLen) => {
 
 /* Entering TeamDetailView */
 [data-to-type='team-detail']::view-transition-new(modal-sheet) {
-  animation: modal-slide-up 0.765s var(--motion-ease-out) both;
+  animation: modal-slide-up var(--motion-duration-page) var(--motion-ease-page) both;
 }
 [data-to-type='team-detail']::view-transition-old(page-view) {
-  animation: modal-push-back 0.765s var(--motion-ease-out) both;
+  animation: modal-push-back var(--motion-duration-page) var(--motion-ease-page) both;
 }
 
 /* Leaving TeamDetailView */
 [data-from-type='team-detail']::view-transition-old(modal-sheet) {
-  animation: modal-slide-down 0.765s var(--motion-ease-out) both;
+  animation: modal-slide-down var(--motion-duration-page) var(--motion-ease-page) both;
 }
 [data-from-type='team-detail']::view-transition-new(page-view) {
-  animation: modal-pull-forward 0.765s var(--motion-ease-out) both;
+  animation: modal-pull-forward var(--motion-duration-page) var(--motion-ease-page) both;
 }
 
 @keyframes modal-slide-up {
@@ -433,7 +554,7 @@ watch(() => inboxStore.messages.length, (newLen, oldLen) => {
   z-index: 99990;
   pointer-events: none;
   overflow: hidden;
-  animation: boot-overlay-fade 0.9s var(--motion-ease-out) forwards;
+  animation: boot-overlay-fade var(--motion-duration-slow) var(--motion-ease-out) forwards;
 }
 
 .tactical-boot-scanline {
@@ -441,8 +562,8 @@ watch(() => inboxStore.messages.length, (newLen, oldLen) => {
   left: 0;
   right: 0;
   height: 1px;
-  background: linear-gradient(90deg, transparent 0%, #39ff14 50%, transparent 100%);
-  animation: tactical-scanline-sweep 0.85s var(--motion-ease-out) forwards;
+  background: linear-gradient(90deg, transparent 0%, color-mix(in srgb, var(--primary) 40%, transparent) 50%, transparent 100%);
+  animation: tactical-scanline-sweep var(--motion-duration-slow) var(--motion-ease-out) forwards;
 }
 
 @keyframes boot-overlay-fade {

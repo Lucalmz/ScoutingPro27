@@ -1,7 +1,8 @@
 .dashboard {
   min-height: 100vh;
-  background-color: var(--background);
-  background-image: radial-gradient(#1e1e1c 1px, transparent 1px);
+  /* transparent so the ambient halo (body::before) shows through behind the whole panel */
+  background-color: transparent;
+  background-image: radial-gradient(var(--border-subtle) 1px, transparent 1px);
   background-size: 24px 24px;
   color: var(--foreground);
 }
@@ -10,14 +11,73 @@
   display: flex;
   align-items: center;
   justify-content: space-between;
+  gap: 12px;
   padding: max(14px, var(--sat)) max(24px, var(--sar)) 14px max(24px, var(--sal));
-  background: var(--card);
-  border-bottom: 1px solid var(--border);
+  background: color-mix(in srgb, var(--g-900) 80%, transparent);
+  border-bottom: 1px solid var(--g-750);
+}
+
+.topbar.is-desktop-shell {
+  padding-top: max(10px, var(--sat));
+  padding-bottom: 10px;
+}
+
+.topbar-left {
+  display: flex;
+  align-items: center;
+  min-width: 0;
+  flex-shrink: 0;
 }
 
 .brand {
+  display: flex;
+  align-items: center;
+  gap: 10px;
   font-weight: 700;
   font-size: 18px;
+  white-space: nowrap;
+  flex-shrink: 0;
+}
+
+.page-heading {
+  display: inline-flex;
+  align-items: center;
+  gap: 9px;
+  min-width: 0;
+  white-space: nowrap;
+  flex-shrink: 0;
+}
+
+.page-heading-icon {
+  width: 16px;
+  height: 16px;
+  color: var(--primary);
+  flex-shrink: 0;
+}
+
+.page-heading-title {
+  font-size: 15px;
+  font-weight: 700;
+  letter-spacing: 0.01em;
+  color: var(--foreground);
+}
+
+.page-heading-count {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 22px;
+  height: 20px;
+  padding: 0 7px;
+  border-radius: 9999px;
+  background: var(--surface-recessed);
+  border: 1px solid var(--border);
+  color: var(--muted-foreground);
+  font-family: var(--font-numeric);
+  font-variant-numeric: tabular-nums;
+  font-size: 11px;
+  font-weight: 700;
+  line-height: 1;
 }
 
 .brand-logo {
@@ -25,7 +85,14 @@
   height: 26px;
   object-fit: contain;
   image-rendering: -webkit-optimize-contrast;
-  filter: drop-shadow(0 0 4px rgba(57, 255, 20, 0.4));
+  flex-shrink: 0;
+}
+
+.topbar-right {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-shrink: 0;
 }
 
 .user-tag-btn,
@@ -41,16 +108,16 @@
   font-size: 13px;
   font-weight: 600;
   cursor: pointer;
-  margin-right: 12px;
-  transition: all 0.25s ease;
+  transition: background-color var(--motion-duration-fast) var(--motion-ease-out),
+              border-color var(--motion-duration-fast) var(--motion-ease-out),
+              color var(--motion-duration-fast) var(--motion-ease-out);
 }
 
 .user-tag-btn:hover,
 .topbar-btn:hover {
   background: var(--surface-elevated);
-  border-color: var(--primary, #39ff14);
-  color: var(--primary, #39ff14);
-  box-shadow: var(--glow-primary, 0 0 10px rgba(57, 255, 20, 0.35));
+  border-color: var(--primary);
+  color: var(--primary);
 }
 
 /* Desktop: hide topbar Inbox button (since bottom-right floating Inbox FAB is present) */
@@ -62,18 +129,32 @@
 
 .user-tag-btn .edit-icon {
   opacity: 0.6;
-  transition: opacity 0.34s;
+  transition: opacity var(--motion-duration-fast) var(--motion-ease-out);
 }
 
 .user-tag-btn:hover .edit-icon {
   opacity: 1;
 }
 
+.user-tag-btn .username-text {
+  display: inline-block;
+  width: fit-content;
+  line-height: 1.25;
+  white-space: nowrap;
+}
+
+.user-tag-btn.is-profile-open {
+  opacity: 0;
+  pointer-events: none;
+}
+
 .topbar-unread-badge {
-  background: #ef4444;
-  color: #ffffff;
+  background: var(--status-error-bg);
+  color: var(--status-error);
+  border: 1px solid var(--status-error-border);
   font-size: 10px;
   font-weight: 700;
+  font-variant-numeric: tabular-nums;
   border-radius: 9999px;
   padding: 1px 6px;
   margin-left: 4px;
@@ -89,7 +170,11 @@
   cursor: pointer;
   font-size: 13px;
   font-weight: 600;
-  transition: all 0.2s ease;
+  white-space: nowrap;
+  flex-shrink: 0;
+  transition: background-color var(--motion-duration-fast) var(--motion-ease-out),
+              border-color var(--motion-duration-fast) var(--motion-ease-out),
+              color var(--motion-duration-fast) var(--motion-ease-out);
 }
 
 .btn-logout:hover {
@@ -107,27 +192,30 @@
 h2 {
   font-size: 24px;
   margin: 0 0 22px;
-  animation: tactical-stagger-rise 0.55s var(--motion-ease-out) 0.04s both;
+  animation: tactical-stagger-rise var(--motion-duration-normal) var(--motion-ease-out) 40ms both;
 }
 
 .action-buttons {
   display: flex;
   gap: 12px;
   margin-bottom: 28px;
-  animation: tactical-stagger-rise 0.55s var(--motion-ease-out) 0.12s both;
+  animation: tactical-stagger-rise var(--motion-duration-normal) var(--motion-ease-out) 120ms both;
 }
 
 .action-btn {
   flex: 1;
   padding: 14px 18px;
   border-radius: 10px;
-  font-family: 'Orbitron', 'Manrope', sans-serif;
+  font-family: inherit;
   font-size: 14px;
   font-weight: 700;
   letter-spacing: 0.03em;
   cursor: pointer;
   border: 1px solid transparent;
-  transition: all 0.25s var(--motion-ease-out);
+  transition: background-color var(--motion-duration-fast) var(--motion-ease-out),
+              border-color var(--motion-duration-fast) var(--motion-ease-out),
+              color var(--motion-duration-fast) var(--motion-ease-out),
+              transform var(--motion-duration-fast) var(--motion-ease-out);
 }
 
 .action-btn.primary {
@@ -136,8 +224,7 @@ h2 {
 }
 
 .action-btn.primary:hover {
-  background: var(--primary);
-  box-shadow: var(--glow-primary);
+  background: var(--s-300);
 }
 
 .action-btn.secondary {
@@ -179,7 +266,7 @@ h2 {
   background: var(--surface-elevated);
   border-color: var(--border-strong);
   border-left-color: var(--primary);
-  box-shadow: 0 12px 28px rgba(0, 0, 0, 0.55);
+  box-shadow: var(--shadow-2);
 }
 
 .event-card::before {
@@ -190,27 +277,34 @@ h2 {
   padding: 1px;
   background: radial-gradient(
     160px circle at var(--mouse-x, -999px) var(--mouse-y, -999px),
-    #ffffff 0%,
-    rgba(255, 255, 255, 0.7) 20%,
-    rgba(57, 255, 20, 0.5) 50%,
+    color-mix(in srgb, var(--g-50) 85%, transparent) 0%,
+    color-mix(in srgb, var(--g-50) 55%, transparent) 20%,
+    color-mix(in srgb, var(--primary) 45%, transparent) 50%,
     transparent 80%
   );
-  -webkit-mask: linear-gradient(#fff 0 0) content-box, linear-gradient(#fff 0 0);
+  -webkit-mask: linear-gradient(var(--g-50) 0 0) content-box, linear-gradient(var(--g-50) 0 0);
   -webkit-mask-composite: xor;
-  mask: linear-gradient(#fff 0 0) content-box, linear-gradient(#fff 0 0);
+  mask: linear-gradient(var(--g-50) 0 0) content-box, linear-gradient(var(--g-50) 0 0);
   mask-composite: exclude;
   pointer-events: none;
   opacity: 0;
-  transition: opacity 0.3s ease;
+  transition: opacity var(--motion-duration-moderate) var(--motion-ease-out);
 }
 
 .event-card:hover::before {
   opacity: 1;
 }
 
-.event-card.slide-out-right {
-  transform: translateX(150px) !important;
-  opacity: 0 !important;
+/* Card the user just clicked: it is the source of the shared "event-card-title" morph.
+   The view-transition snapshot must be taken from a perfectly settled card, otherwise the
+   title is captured mid-slide / mid-press-scale and lands misaligned. So: no translate,
+   no :active scale and no running transform/opacity transitions while entering. */
+.event-card.slide-out-right,
+.event-card.slide-out-right:active,
+.event-card.slide-out-right:hover {
+  transform: none !important;
+  transition: none !important;
+  pointer-events: none;
 }
 
 .event-info {
@@ -219,24 +313,21 @@ h2 {
   gap: 4px;
 }
 
-.event-name {
-  font-weight: 600;
-  font-size: 16px;
-}
-
 .event-info h3 {
   margin: 0 0 4px 0;
   font-size: 1.1rem;
-  color: var(--color-text-primary, #333);
+  color: var(--foreground);
 }
 
 .event-name {
   display: inline-block;
   font-size: 1.1rem;
-  font-weight: bold;
+  font-weight: 700;
+  line-height: 1.3;
   color: var(--foreground);
   margin-bottom: 4px;
   width: fit-content;
+  max-width: 100%;
 }
 
 .event-meta {
@@ -248,24 +339,32 @@ h2 {
   gap: 2px;
 }
 
+.event-meta strong {
+  font-family: var(--font-numeric);
+  font-variant-numeric: tabular-nums;
+  letter-spacing: 0.04em;
+}
+
 .btn-card-qr {
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  background: rgba(255, 255, 255, 0.08);
-  border: 1px solid rgba(255, 255, 255, 0.15);
+  background: var(--g-750);
+  border: 1px solid var(--border-strong);
   border-radius: 4px;
-  color: var(--primary, #39ff14);
+  color: var(--primary);
   padding: 1px 4px;
   margin: 0 4px;
   cursor: pointer;
-  transition: all 0.2s ease;
+  transition: background-color var(--motion-duration-fast) var(--motion-ease-out),
+              border-color var(--motion-duration-fast) var(--motion-ease-out),
+              transform var(--motion-duration-fast) var(--motion-ease-out);
   line-height: 1;
 }
 
 .btn-card-qr:hover {
-  background: rgba(57, 255, 20, 0.2);
-  border-color: var(--primary, #39ff14);
+  background: var(--status-success-bg);
+  border-color: var(--primary);
   transform: scale(1.08);
 }
 
@@ -273,21 +372,24 @@ h2 {
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  background: rgba(255, 255, 255, 0.08);
-  border: 1px solid rgba(255, 255, 255, 0.15);
+  background: var(--g-750);
+  border: 1px solid var(--border-strong);
   border-radius: 4px;
   color: var(--muted-foreground);
   padding: 1px 4px;
   margin: 0 4px;
   cursor: pointer;
-  transition: all 0.2s ease;
+  transition: background-color var(--motion-duration-fast) var(--motion-ease-out),
+              border-color var(--motion-duration-fast) var(--motion-ease-out),
+              color var(--motion-duration-fast) var(--motion-ease-out),
+              transform var(--motion-duration-fast) var(--motion-ease-out);
   line-height: 1;
 }
 
 .btn-card-delete:hover {
-  background: rgba(239, 68, 68, 0.2);
-  border-color: #ef4444;
-  color: #ef4444;
+  background: var(--status-error-bg);
+  border-color: var(--status-error-border);
+  color: var(--status-error);
   transform: scale(1.08);
 }
 
@@ -318,7 +420,7 @@ h2 {
 .modal-overlay {
   position: fixed;
   inset: 0;
-  background: rgba(8, 8, 7, 0.84);
+  background: color-mix(in srgb, var(--g-950) 80%, transparent);
   display: flex;
   align-items: center;
   justify-content: center;
@@ -326,14 +428,13 @@ h2 {
 }
 
 .modal-card {
-  background: var(--card);
-  border: 1px solid var(--border);
-  border-top: 2px solid var(--primary);
-  border-radius: 14px;
+  background: var(--popover);
+  border: 1px solid var(--border-strong);
+  border-radius: 18px;
   padding: 28px;
   width: 100%;
   max-width: 400px;
-  box-shadow: 0 24px 60px rgba(0, 0, 0, 0.75);
+  box-shadow: var(--shadow-3);
 }
 
 .modal-card h3 {
@@ -386,12 +487,13 @@ h2 {
   border-radius: 10px;
   color: var(--primary);
   cursor: pointer;
-  transition: all 0.2s ease;
+  transition: background-color var(--motion-duration-fast) var(--motion-ease-out),
+              border-color var(--motion-duration-fast) var(--motion-ease-out);
   flex-shrink: 0;
 }
 
 .btn-scan-input:hover {
-  background: rgba(57, 255, 20, 0.12);
+  background: var(--status-success-bg);
   border-color: var(--primary);
 }
 
@@ -439,7 +541,7 @@ h2 {
 }
 
 .btn-confirm:hover:not(:disabled) {
-  background: var(--primary);
+  background: var(--s-300);
 }
 
 .btn-confirm:disabled {
@@ -450,16 +552,78 @@ h2 {
 @media (max-width: 768px) {
   .topbar {
     padding: max(10px, var(--sat)) max(14px, var(--sar)) 10px max(14px, var(--sal));
+    gap: 8px;
+  }
+  .topbar-right {
+    gap: 6px;
   }
   .topbar-btn .topbar-btn-text {
     display: none;
+  }
+  .topbar-btn .material-icons {
+    margin-right: 0 !important;
+  }
+  .user-tag-btn .username-text {
+    max-width: 110px;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
   }
   .main-content {
     padding: 20px 14px max(24px, var(--sab));
   }
 }
 
+@media (max-width: 600px) {
+  .topbar {
+    padding: max(10px, var(--sat)) max(12px, var(--sar)) 10px max(12px, var(--sal));
+    gap: 8px;
+  }
+  .brand {
+    font-size: 15px;
+    gap: 6px !important;
+  }
+  .page-heading {
+    gap: 7px;
+  }
+  .page-heading-title {
+    font-size: 14px;
+  }
+  .brand-logo {
+    width: 22px;
+    height: 22px;
+  }
+  .topbar-right {
+    gap: 5px;
+  }
+  .topbar-btn {
+    padding: 6px 8px;
+  }
+  .btn-logout {
+    padding: 6px 10px;
+    font-size: 12px;
+  }
+}
+
 @media (max-width: 480px) {
+  .topbar {
+    padding: max(10px, var(--sat)) max(10px, var(--sar)) 10px max(10px, var(--sal));
+    gap: 6px;
+  }
+  .brand {
+    font-size: 14px;
+    gap: 5px !important;
+  }
+  .topbar-right {
+    gap: 4px;
+  }
+  .topbar-btn {
+    padding: 5px 7px;
+    border-radius: 16px;
+  }
+  .topbar-btn .material-icons {
+    font-size: 16px !important;
+  }
   .btn-card-qr,
   .btn-card-delete {
     padding: 3px 6px;
@@ -467,11 +631,20 @@ h2 {
     min-width: 26px;
   }
   .user-tag-btn {
-    margin-right: 6px;
-    padding: 6px 8px;
+    padding: 5px 7px;
+    gap: 2px;
+    border-radius: 16px;
+  }
+  .user-tag-btn .material-icons {
+    margin-left: 0 !important;
+    margin-right: 0 !important;
   }
   .user-tag-btn .username-text {
     display: none;
+  }
+  .btn-logout {
+    padding: 5px 8px;
+    font-size: 12px;
   }
   .action-buttons {
     flex-direction: column;
@@ -487,15 +660,15 @@ h2 {
 @media (max-width: 360px) {
   .topbar {
     padding: max(8px, var(--sat)) max(8px, var(--sar)) 8px max(8px, var(--sal));
+    gap: 4px;
   }
   .topbar-btn,
   .btn-logout {
-    padding: 6px 8px;
-    font-size: 12px;
-    margin-right: 4px;
+    padding: 5px 6px;
+    font-size: 11px;
   }
-  .brand span {
-    font-size: 16px;
+  .brand {
+    font-size: 13px;
   }
 }
 
@@ -514,7 +687,7 @@ h2 {
 }
 
 .error-msg {
-  color: #ef4444;
+  color: var(--status-error);
   text-align: center;
   margin: 20px 0;
   font-size: 14px;

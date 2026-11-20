@@ -366,20 +366,20 @@ function submitForm() {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  border-bottom: 1px solid var(--border, #262626);
+  border-bottom: 1px solid var(--border);
   padding-bottom: 10px;
 }
 
 .builder-header h4 {
   margin: 0;
   font-size: 15px;
-  color: var(--foreground, #f1f5f9);
+  color: var(--foreground);
 }
 
 .btn-back {
   background: transparent;
   border: none;
-  color: var(--primary, #39ff14);
+  color: var(--primary);
   cursor: pointer;
   display: flex;
   align-items: center;
@@ -406,56 +406,49 @@ function submitForm() {
 .form-group label {
   font-size: 12px;
   font-weight: 600;
-  color: var(--muted-foreground, #a3a3a3);
+  color: var(--muted-foreground);
 }
 
 .form-group label .required {
-  color: var(--destructive, #ef4444);
+  color: var(--destructive);
 }
 
 .form-group input {
-  background: var(--input, #090908);
-  border: 1px solid var(--border, #262624);
+  background: var(--input);
+  border: 1px solid var(--border);
   border-radius: 8px;
   padding: 8px 12px;
-  color: var(--foreground, #f0efe9);
+  color: var(--foreground);
   font-size: 13px;
   outline: none;
 }
 
 .form-group select {
-  background: var(--input, #090908);
-  border: 1px solid var(--border, #262624);
+  background-color: var(--input);
+  border: 1px solid var(--border);
   border-radius: 8px;
   padding: 8px 30px 8px 12px;
-  color: var(--foreground, #f0efe9);
+  color: var(--foreground);
   font-size: 13px;
   outline: none;
   cursor: pointer;
-  color-scheme: dark;
-  -webkit-appearance: none;
-  -moz-appearance: none;
-  appearance: none;
-  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='14' height='14' viewBox='0 0 24 24' fill='none' stroke='%238e8d87' stroke-width='2.2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='m6 9 6 6 6-6'/%3E%3C/svg%3E");
-  background-repeat: no-repeat;
-  background-position: right 10px center;
-  background-size: 13px 13px;
-  transition: border-color 0.15s ease, box-shadow 0.15s ease;
+  transition: border-color var(--motion-duration-fast) var(--motion-ease-out),
+              box-shadow var(--motion-duration-fast) var(--motion-ease-out);
 }
 
 .form-group input:focus {
-  border-color: var(--primary, #39ff14);
+  border-color: var(--primary);
+  box-shadow: var(--focus-ring-sm);
 }
 
 .form-group select:focus {
-  border-color: var(--primary, #39ff14);
-  box-shadow: 0 0 0 1px var(--primary, #39ff14), 0 0 8px rgba(57, 255, 20, 0.2);
-  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='14' height='14' viewBox='0 0 24 24' fill='none' stroke='%2339ff14' stroke-width='2.2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='m6 9 6 6 6-6'/%3E%3C/svg%3E");
+  border-color: var(--primary);
+  box-shadow: var(--focus-ring-sm);
 }
 
 .form-group select option {
-  background-color: #141413;
-  color: #f0efe9;
+  background-color: var(--g-800);
+  color: var(--foreground);
   padding: 8px 12px;
 }
 
@@ -466,8 +459,8 @@ function submitForm() {
 }
 
 .type-choice-btn {
-  background: rgba(255, 255, 255, 0.02);
-  border: 1px solid var(--border, #262626);
+  background: color-mix(in srgb, var(--g-50) 2%, transparent);
+  border: 1px solid var(--border);
   border-radius: 8px;
   padding: 10px;
   display: flex;
@@ -475,14 +468,16 @@ function submitForm() {
   align-items: flex-start;
   gap: 4px;
   cursor: pointer;
-  color: var(--muted-foreground, #a3a3a3);
-  transition: all 0.2s;
+  color: var(--muted-foreground);
+  transition: background-color var(--motion-duration-fast) var(--motion-ease-out),
+              border-color var(--motion-duration-fast) var(--motion-ease-out),
+              color var(--motion-duration-fast) var(--motion-ease-out);
 }
 
 .type-choice-btn.is-active {
-  background: rgba(57, 255, 20, 0.08);
-  border-color: var(--primary, #39ff14);
-  color: var(--primary, #39ff14);
+  background: var(--status-success-bg);
+  border-color: var(--primary);
+  color: var(--primary);
 }
 
 .choice-title {
@@ -492,7 +487,7 @@ function submitForm() {
 
 .choice-desc {
   font-size: 10px;
-  color: var(--muted-foreground, #a3a3a3);
+  color: var(--muted-foreground);
 }
 
 .option-add-row {
@@ -515,23 +510,23 @@ function submitForm() {
 }
 
 .color-dot.is-selected {
-  border-color: #fff;
+  border-color: var(--g-50);
 }
 
-.dot-blue   { background: #3b82f6; }
-.dot-green  { background: #39ff14; }
-.dot-orange { background: #f97316; }
-.dot-red    { background: #ef4444; }
-.dot-purple { background: #a855f7; }
-.dot-gray   { background: #9ca3af; }
+.dot-blue   { background: var(--status-info); }
+.dot-green  { background: var(--status-success); }
+.dot-orange { background: var(--status-warning); }
+.dot-red    { background: var(--status-error); }
+.dot-purple { background: var(--status-ai); }
+.dot-gray   { background: var(--g-300); }
 
 .btn-add-opt {
   display: flex;
   align-items: center;
   gap: 4px;
-  background: rgba(255, 255, 255, 0.08);
-  border: 1px solid var(--border, #262626);
-  color: var(--foreground, #f1f5f9);
+  background: var(--surface-hover);
+  border: 1px solid var(--border);
+  color: var(--foreground);
   padding: 6px 12px;
   border-radius: 6px;
   cursor: pointer;
@@ -551,15 +546,15 @@ function submitForm() {
   gap: 6px;
   padding: 4px 8px;
   border-radius: 12px;
-  background: rgba(255, 255, 255, 0.08);
-  border: 1px solid var(--border, #262626);
+  background: var(--surface-hover);
+  border: 1px solid var(--border);
   font-size: 12px;
 }
 
 .btn-opt-del {
   background: transparent;
   border: none;
-  color: var(--muted-foreground, #a3a3a3);
+  color: var(--muted-foreground);
   cursor: pointer;
   padding: 0;
   display: flex;
@@ -571,7 +566,7 @@ function submitForm() {
   gap: 8px;
   cursor: pointer;
   font-size: 13px;
-  color: var(--foreground, #f1f5f9);
+  color: var(--foreground);
 }
 
 .builder-actions {
@@ -583,16 +578,16 @@ function submitForm() {
 
 .btn-cancel {
   background: transparent;
-  border: 1px solid var(--border, #262626);
-  color: var(--foreground, #f1f5f9);
+  border: 1px solid var(--border);
+  color: var(--foreground);
   padding: 8px 16px;
   border-radius: 8px;
   cursor: pointer;
 }
 
 .btn-save {
-  background: var(--primary, #39ff14);
-  color: #000;
+  background: var(--primary);
+  color: var(--on-primary);
   border: none;
   padding: 8px 20px;
   border-radius: 8px;

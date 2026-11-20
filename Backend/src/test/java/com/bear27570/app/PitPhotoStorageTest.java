@@ -141,14 +141,24 @@ class PitPhotoStorageTest {
 
     @Test
     void testOpenFirewallCmdEndpoint() {
-        JavalinTest.test(app, (server, client) -> {
-            var res = client.post("/api/system/open-firewall-cmd");
-            assertThat(res.code()).isEqualTo(200);
-            String body = res.body().string();
-            assertThat(body).contains("command");
-            assertThat(body).contains("netsh advfirewall firewall add rule");
-            assertThat(body).contains("os");
-        });
+        String prev = System.getProperty("SKIP_FIREWALL_CHECK");
+        System.setProperty("SKIP_FIREWALL_CHECK", "true");
+        try {
+            JavalinTest.test(app, (server, client) -> {
+                var res = client.post("/api/system/open-firewall-cmd");
+                assertThat(res.code()).isEqualTo(200);
+                String body = res.body().string();
+                assertThat(body).contains("command");
+                assertThat(body).contains("netsh advfirewall firewall add rule");
+                assertThat(body).contains("os");
+            });
+        } finally {
+            if (prev == null) {
+                System.clearProperty("SKIP_FIREWALL_CHECK");
+            } else {
+                System.setProperty("SKIP_FIREWALL_CHECK", prev);
+            }
+        }
     }
 
     @Test

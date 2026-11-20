@@ -30,13 +30,6 @@ export const BUILTIN_BROKERS: SignalingEndpoint[] = [
     region: 'cn'
   },
   {
-    id: 'fallback',
-    name: 'Global Anycast Backup',
-    url: 'wss://broker.emqx.io:8084/mqtt',
-    protocol: 'mqtt',
-    region: 'global'
-  },
-  {
     id: 'hivemq',
     name: 'HiveMQ Public Backup',
     url: 'wss://broker.hivemq.com:8884/mqtt',
@@ -62,7 +55,10 @@ export function resolveBrokerUrl(targetOrId?: string | null): string {
     return customConfig || BUILTIN_BROKERS[0]?.url || 'wss://broker.emqx.io:8084/mqtt'
   }
   const clean = targetOrId.trim()
-  // 匹配内置 Broker ID（如 'emqx', 'fallback'）
+  if (clean.toLowerCase() === 'fallback') {
+    return BUILTIN_BROKERS[0]?.url || 'wss://broker.emqx.io:8084/mqtt'
+  }
+  // 匹配内置 Broker ID（如 'emqx', 'hivemq', 'mosquitto'）
   const matched = BUILTIN_BROKERS.find((b) => b.id.toLowerCase() === clean.toLowerCase())
   if (matched) {
     return matched.url

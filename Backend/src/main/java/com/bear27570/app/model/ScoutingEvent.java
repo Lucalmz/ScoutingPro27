@@ -9,6 +9,9 @@ public class ScoutingEvent {
 
     private Integer ftcYear;
     private String ftcEventCode;
+    private String turnConfigEncrypted;
+    private TurnServerConfig customTurnConfig;
+    private Boolean hasCustomTurn;
 
     public ScoutingEvent() {}
 
@@ -26,4 +29,10 @@ public class ScoutingEvent {
     public void setFtcYear(Integer ftcYear) { this.ftcYear = ftcYear; }
     public String getFtcEventCode() { return ftcEventCode; }
     public void setFtcEventCode(String ftcEventCode) { this.ftcEventCode = ftcEventCode; }
+    public String getTurnConfigEncrypted() { return turnConfigEncrypted; }
+    public void setTurnConfigEncrypted(String turnConfigEncrypted) { this.turnConfigEncrypted = turnConfigEncrypted; }
+    public TurnServerConfig getCustomTurnConfig() { return customTurnConfig; }
+    public void setCustomTurnConfig(TurnServerConfig customTurnConfig) { this.customTurnConfig = customTurnConfig; }
+    public Boolean getHasCustomTurn() { return hasCustomTurn; }
+    public void setHasCustomTurn(Boolean hasCustomTurn) { this.hasCustomTurn = hasCustomTurn; }
 }

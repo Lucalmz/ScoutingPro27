@@ -629,7 +629,7 @@ onUnmounted(() => {
     <!-- 可展开：快捷键与手势高阶指南浮层 -->
     <div v-if="showShortcutsHelp" class="wb-shortcuts-panel" data-testid="wb-shortcuts-panel">
       <div class="wb-shortcuts-hdr">
-        <span class="material-icons" aria-hidden="true" style="font-size: 16px; color: #39ff14;">bolt</span>
+        <span class="material-icons" aria-hidden="true" style="font-size: 16px; color: var(--primary);">bolt</span>
         <strong>{{ t('whiteboard.shortcuts_title') }}</strong>
         <button type="button" class="wb-clear-filter-btn" style="position: static; margin-left: auto;" @click="showShortcutsHelp = false">
           <span class="material-icons" aria-hidden="true" style="font-size: 16px;">close</span>
@@ -699,7 +699,7 @@ onUnmounted(() => {
   flex-direction: column;
   gap: 8px;
   min-height: calc(100vh - 150px);
-  color: var(--foreground, #f0efe9);
+  color: var(--foreground);
 }
 
 @media (pointer: coarse) {
@@ -712,7 +712,7 @@ onUnmounted(() => {
   position: fixed;
   inset: 0;
   z-index: 1500;
-  background: #0a0b0a;
+  background: var(--background);
   padding: 12px;
   padding-bottom: max(12px, env(safe-area-inset-bottom, 0px));
   min-height: 100vh;
@@ -732,8 +732,8 @@ onUnmounted(() => {
   align-items: center;
   justify-content: space-between;
   gap: 8px;
-  background: var(--card, #141413);
-  border: 1px solid var(--border, #262624);
+  background: var(--card);
+  border: 1px solid var(--border);
   border-radius: 12px;
   padding: 8px 10px;
 }
@@ -747,9 +747,9 @@ onUnmounted(() => {
 
 .wb-match-select {
   min-block-size: var(--target-size);
-  background: #0e0f0e;
-  color: var(--foreground, #f0efe9);
-  border: 1px solid #2b2c29;
+  background: var(--surface-recessed);
+  color: var(--foreground);
+  border: 1px solid var(--border);
   border-radius: 8px;
   padding: 4px 10px;
   font-size: 13px;
@@ -766,7 +766,7 @@ onUnmounted(() => {
   position: absolute;
   left: 7px;
   font-size: 15px;
-  color: var(--muted-foreground, #8e8d87);
+  color: var(--muted-foreground);
   pointer-events: none;
 }
 
@@ -774,9 +774,9 @@ onUnmounted(() => {
   min-block-size: var(--target-size);
   width: 155px;
   padding: 4px 24px 4px 26px;
-  background: #0e0f0e;
-  color: var(--foreground, #f0efe9);
-  border: 1px solid #2b2c29;
+  background: var(--surface-recessed);
+  color: var(--foreground);
+  border: 1px solid var(--border);
   border-radius: 8px;
   font-size: 12px;
 }
@@ -786,7 +786,7 @@ onUnmounted(() => {
   right: 4px;
   background: none;
   border: none;
-  color: var(--muted-foreground, #8e8d87);
+  color: var(--muted-foreground);
   cursor: pointer;
   display: inline-flex;
   align-items: center;
@@ -803,39 +803,40 @@ onUnmounted(() => {
   min-block-size: var(--target-size);
   padding: 4px 9px;
   border-radius: 8px;
-  border: 1px solid #2b2c29;
-  background: #161715;
-  color: var(--foreground, #f0efe9);
+  border: 1px solid var(--border);
+  background: var(--surface-elevated);
+  color: var(--foreground);
   display: inline-flex;
   align-items: center;
   gap: 5px;
   font-size: 12px;
   cursor: pointer;
-  transition: all 0.14s ease;
+  transition: all var(--motion-duration-fast) var(--motion-ease-out);
 }
 
 .wb-strip-pill.red1,
 .wb-strip-pill.red2 {
-  border-left: 3px solid #ef4444;
+  border-left: 3px solid var(--alliance-red);
 }
 
 .wb-strip-pill.blue1,
 .wb-strip-pill.blue2 {
-  border-left: 3px solid #3b82f6;
+  border-left: 3px solid var(--alliance-blue);
 }
 
 .wb-strip-pill.active {
-  border-color: var(--primary, #39ff14);
-  background: rgba(57, 255, 20, 0.12);
+  border-color: var(--primary);
+  background: var(--status-success-bg);
 }
 
 .strip-st {
   font-size: 10px;
   font-weight: 800;
-  color: var(--muted-foreground, #8e8d87);
+  color: var(--muted-foreground);
 }
 
 .strip-num {
+  font-family: var(--font-numeric);
   font-variant-numeric: tabular-nums;
 }
 
@@ -848,7 +849,7 @@ onUnmounted(() => {
 
 .wb-phase-tabs {
   display: inline-flex;
-  background: #0e0f0e;
+  background: var(--surface-recessed);
   padding: 3px;
   border-radius: 9px;
   gap: 3px;
@@ -860,7 +861,7 @@ onUnmounted(() => {
   border: none;
   border-radius: 6px;
   background: transparent;
-  color: var(--muted-foreground, #8e8d87);
+  color: var(--muted-foreground);
   font-size: 12px;
   font-weight: 700;
   display: inline-flex;
@@ -870,16 +871,16 @@ onUnmounted(() => {
 }
 
 .wb-phase-btn.active {
-  background: var(--card, #1d1e1c);
-  color: var(--primary, #39ff14);
+  background: var(--surface-elevated);
+  color: var(--primary);
 }
 
 .wb-phase-count {
   font-size: 10px;
   padding: 0 5px;
   border-radius: 999px;
-  background: rgba(57, 255, 20, 0.18);
-  color: var(--primary, #39ff14);
+  background: var(--status-success-bg);
+  color: var(--primary);
 }
 
 .wb-custom-teams-bar {
@@ -889,8 +890,8 @@ onUnmounted(() => {
   flex-wrap: wrap;
   gap: 8px;
   padding: 8px 12px;
-  background: #171816;
-  border: 1px solid var(--primary, #39ff14);
+  background: var(--surface-elevated);
+  border: 1px solid var(--primary);
   border-radius: 10px;
 }
 
@@ -915,29 +916,31 @@ onUnmounted(() => {
 }
 
 .wb-st-input.red span {
-  color: #f87171;
+  color: var(--red-300);
 }
 
 .wb-st-input.blue span {
-  color: #60a5fa;
+  color: var(--blue-300);
 }
 
 .wb-st-input input {
   width: 86px;
   padding: 4px 7px;
-  background: #0e0f0e;
-  color: var(--foreground, #f0efe9);
-  border: 1px solid #2b2c29;
+  background: var(--surface-recessed);
+  color: var(--foreground);
+  border: 1px solid var(--border);
   border-radius: 6px;
   font-size: 12px;
+  font-family: var(--font-numeric);
+  font-variant-numeric: tabular-nums;
 }
 
 .wb-drawing-toolbar {
   align-items: center;
   justify-content: space-between;
   gap: 8px;
-  background: var(--card, #141413);
-  border: 1px solid var(--border, #262624);
+  background: var(--card);
+  border: 1px solid var(--border);
   border-radius: 12px;
   padding: 6px 10px;
 }
@@ -954,15 +957,15 @@ onUnmounted(() => {
   padding: 4px 8px;
   border-radius: 7px;
   border: 1px solid transparent;
-  background: #1a1b19;
-  color: #b5b4ae;
+  background: var(--surface-elevated);
+  color: var(--g-200);
   font-size: 12px;
   font-weight: 600;
   display: inline-flex;
   align-items: center;
   gap: 4px;
   cursor: pointer;
-  transition: all 0.12s ease;
+  transition: all var(--motion-duration-fast) var(--motion-ease-out);
 }
 
 .wb-tool-btn .material-icons {
@@ -970,9 +973,9 @@ onUnmounted(() => {
 }
 
 .wb-tool-btn.active {
-  background: rgba(57, 255, 20, 0.14);
-  color: var(--primary, #39ff14);
-  border-color: rgba(57, 255, 20, 0.5);
+  background: var(--status-success-bg);
+  color: var(--primary);
+  border-color: var(--status-success-border);
 }
 
 .wb-color-group {
@@ -986,20 +989,20 @@ onUnmounted(() => {
   height: 22px;
   border-radius: 50%;
   background: var(--swatch-color);
-  border: 2px solid rgba(255, 255, 255, 0.2);
+  border: 2px solid var(--border-strong);
   cursor: pointer;
-  transition: transform 0.12s ease;
+  transition: transform var(--motion-duration-fast) var(--motion-ease-out);
 }
 
 .wb-color-swatch.active {
   transform: scale(1.22);
-  border-color: #ffffff;
+  border-color: var(--g-50);
   box-shadow: 0 0 0 2px var(--swatch-color);
 }
 
 .wb-width-group {
   display: inline-flex;
-  background: #0e0f0e;
+  background: var(--surface-recessed);
   padding: 2px;
   border-radius: 7px;
   gap: 2px;
@@ -1011,15 +1014,15 @@ onUnmounted(() => {
   border: none;
   border-radius: 5px;
   background: transparent;
-  color: var(--muted-foreground, #8e8d87);
+  color: var(--muted-foreground);
   font-size: 11px;
   font-weight: 700;
   cursor: pointer;
 }
 
 .wb-width-btn.active {
-  background: #232421;
-  color: var(--foreground, #f0efe9);
+  background: var(--surface-hover);
+  color: var(--foreground);
 }
 
 .wb-action-group {
@@ -1031,7 +1034,7 @@ onUnmounted(() => {
 .wb-divider {
   width: 1px;
   height: 20px;
-  background: #2a2b28;
+  background: var(--border);
   margin: 0 2px;
 }
 
@@ -1039,9 +1042,9 @@ onUnmounted(() => {
   min-inline-size: var(--target-size);
   min-block-size: var(--target-size);
   border-radius: 7px;
-  border: 1px solid #2a2b28;
-  background: #181917;
-  color: #c8c7c0;
+  border: 1px solid var(--border);
+  background: var(--surface-elevated);
+  color: var(--g-200);
   display: inline-flex;
   align-items: center;
   justify-content: center;
@@ -1054,17 +1057,17 @@ onUnmounted(() => {
 }
 
 .wb-icon-btn.active {
-  border-color: var(--primary, #39ff14);
-  color: var(--primary, #39ff14);
+  border-color: var(--primary);
+  color: var(--primary);
 }
 
 .wb-btn-secondary {
   min-block-size: var(--target-size);
   padding: 4px 9px;
   border-radius: 8px;
-  border: 1px solid #2e302c;
-  background: #1a1b19;
-  color: var(--foreground, #f0efe9);
+  border: 1px solid var(--border-strong);
+  background: var(--surface-elevated);
+  color: var(--foreground);
   font-size: 12px;
   font-weight: 700;
   display: inline-flex;
@@ -1078,8 +1081,8 @@ onUnmounted(() => {
   padding: 4px 12px;
   border-radius: 8px;
   border: none;
-  background: var(--primary, #39ff14);
-  color: #080807;
+  background: var(--primary);
+  color: var(--primary-foreground);
   font-size: 12px;
   font-weight: 800;
   cursor: pointer;
@@ -1087,14 +1090,14 @@ onUnmounted(() => {
 
 :where(.wb-root button) {
   transition:
-    box-shadow 150ms ease-out,
-    scale 150ms ease-out,
-    border-color 150ms ease-out,
-    background-color 150ms ease-out;
+    box-shadow var(--motion-duration-fast) var(--motion-ease-out),
+    scale var(--motion-duration-fast) var(--motion-ease-out),
+    border-color var(--motion-duration-fast) var(--motion-ease-out),
+    background-color var(--motion-duration-fast) var(--motion-ease-out);
 }
 
 :where(.wb-root button:not(:disabled)):hover {
-  box-shadow: 0 2px 10px rgba(0, 0, 0, 0.35);
+  box-shadow: var(--shadow-1);
 }
 
 :where(.wb-root button:not(:disabled)):active {
@@ -1102,28 +1105,28 @@ onUnmounted(() => {
 }
 
 :where(.wb-root button, .wb-root input, .wb-root select):focus-visible {
-  outline: 2px solid var(--primary, #39ff14);
+  outline: 2px solid var(--primary);
   outline-offset: 2px;
 }
 
 .wb-shortcuts-panel {
-  background: #141513;
-  border: 1px solid rgba(57, 255, 20, 0.45);
+  background: var(--card);
+  border: 1px solid var(--status-success-border);
   border-radius: 10px;
   padding: 10px 14px;
   display: flex;
   flex-direction: column;
   gap: 8px;
   transform-origin: top right;
-  animation: wb-panel-fade 150ms ease-out both;
+  animation: wb-panel-fade var(--motion-duration-fast) var(--motion-ease-out) both;
 }
 
 @media (prefers-reduced-motion: no-preference) {
   .wb-shortcuts-panel,
   .wb-custom-teams-bar {
     animation:
-      wb-panel-grow 320ms linear(0, 0.45 15%, 1.08 35%, 0.97 55%, 1.01 75%, 1) both,
-      wb-panel-fade 150ms ease-out both;
+      wb-panel-grow var(--motion-duration-normal) linear(0, 0.45 15%, 1.08 35%, 0.97 55%, 1.01 75%, 1) both,
+      wb-panel-fade var(--motion-duration-fast) var(--motion-ease-out) both;
   }
 }
 
@@ -1144,7 +1147,7 @@ onUnmounted(() => {
   align-items: center;
   gap: 6px;
   font-size: 12px;
-  color: var(--foreground, #f0efe9);
+  color: var(--foreground);
 }
 
 .wb-shortcuts-grid {
@@ -1155,10 +1158,10 @@ onUnmounted(() => {
 
 .wb-sc-item {
   font-size: 11.5px;
-  color: #b5b4ae;
+  color: var(--g-200);
   padding: 4px 8px;
-  background: #1b1c1a;
-  border: 1px solid #272825;
+  background: var(--surface-elevated);
+  border: 1px solid var(--border);
   border-radius: 6px;
 }
 

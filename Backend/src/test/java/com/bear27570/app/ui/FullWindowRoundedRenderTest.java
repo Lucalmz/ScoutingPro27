@@ -23,7 +23,7 @@ public class FullWindowRoundedRenderTest {
             frame.setUndecorated(true);
             frame.setSize(w, h);
 
-            Color windowBg = new Color(10, 10, 10);
+            Color windowBg = new Color(0x0B, 0x0E, 0x10);
             frame.setBackground(windowBg);
             if (frame.getRootPane() != null) {
                 frame.getRootPane().setBackground(windowBg);

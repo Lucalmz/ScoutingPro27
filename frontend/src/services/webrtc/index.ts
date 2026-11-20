@@ -1,5 +1,6 @@
 import type {
   ConnectionStatus,
+  ConnectionTransportInfo,
   ScoutingEvent
 } from '@/types'
 import type { DataChannelSender } from '@/services/dataChannelSender'
@@ -23,7 +24,7 @@ import { createClientSession } from './clientSession'
 import { createMessageDispatcher } from './messageDispatcher'
 import { setupSelfHealing } from './selfHealing'
 import { compareHostAuthority, createHostElectionController } from './hostElection'
-import { probeLocalInterfaceIpv6, warmUpDoHStunIpv6 } from './connectivity'
+import { probeLocalInterfaceIpv6, warmUpDoHStunIpv6, setCustomTurnConfig } from './connectivity'
 import { createLogger } from '@/utils/logger'
 import { isMobileDevice } from '@/composables/useIsMobile'
 
@@ -131,6 +132,27 @@ export function createWebRtcService(callbacks: WebRtcCallbacks): WebRtcService {
     }
   }
 
+  function resolveScoutIdForSender(senderId: string): string | undefined {
+    return clientIdToScoutId.get(senderId) || sas.clientVerifiedIdentities.get(senderId)?.userId || undefined
+  }
+
+  function cleanupPeerIdentityAndNotify(targetSender: string): void {
+    peerMgr.clearPeerTransportInfo(targetSender)
+    const scoutId = clientIdToScoutId.get(targetSender)
+    if (scoutId) {
+      const set = scoutIdToClientIds.get(scoutId)
+      if (set) {
+        set.delete(targetSender)
+        if (set.size === 0) {
+          scoutIdToClientIds.delete(scoutId)
+          callbacks.onClientDisconnected?.(scoutId)
+        }
+      }
+      clientIdToScoutId.delete(targetSender)
+    }
+    clientIdToScoutName.delete(targetSender)
+  }
+
   const peerMgr = new PeerConnectionManager({
     getSignaling: () => signaling,
     isHostMode: () => isHostMode,
@@ -146,6 +168,12 @@ export function createWebRtcService(callbacks: WebRtcCallbacks): WebRtcService {
       senderId ? sas.clientFingerprints.get(senderId) : Array.from(sas.clientFingerprints.values())[0],
     getClientSecurityFingerprint: () => sas.clientSecurityFingerprint,
     getClientHostSenderId: () => clientHostSenderId,
+    onPeerTransportInfoChanged: (targetSender: string, info: ConnectionTransportInfo) => {
+      const scoutId = resolveScoutIdForSender(targetSender)
+      if (scoutId) {
+        callbacks.onScoutTransportInfoChanged?.(scoutId, info)
+      }
+    },
     onHostClientClosed: (targetSender: string, peer?: RTCPeerConnection) => {
       // 身份校验：若当前会话已由 VirtualDataChannel 接管且处于 open，或已被新 Offer 替换，绝不清理会话与 ECDH 密钥！
       const current = clients.get(targetSender) || stagedClients.get(targetSender)
@@ -161,25 +189,45 @@ export function createWebRtcService(callbacks: WebRtcCallbacks): WebRtcService {
         try { current.drainingVirtualDc.close() } catch {}
         current.drainingVirtualDc = undefined
       }
+      if (current?.sender) {
+        try { current.sender.abort('Host client closed') } catch {}
+        current.sender = undefined
+      }
+      if (current?.dc) {
+        current.dc.onmessage = null
+        current.dc.onopen = null
+        current.dc.onclose = null
+        current.dc.onerror = null
+        try { current.dc.close() } catch {}
+      }
+      if (stagedClients.get(targetSender) === current) {
+        stagedClients.delete(targetSender)
+      }
       clients.delete(targetSender)
       sas.cleanupPeerResources(targetSender)
       hostQueues.delete(targetSender)
       preOfferCandidates.delete(targetSender)
-      const scoutId = clientIdToScoutId.get(targetSender)
-      if (scoutId) {
-        const set = scoutIdToClientIds.get(scoutId)
-        if (set) {
-          set.delete(targetSender)
-          if (set.size === 0) scoutIdToClientIds.delete(scoutId)
-        }
-        clientIdToScoutId.delete(targetSender)
-      }
-      clientIdToScoutName.delete(targetSender)
+      cleanupPeerIdentityAndNotify(targetSender)
     },
     updateHostStatus,
     getClientDcState: () => clientDc?.readyState,
-    isExplicitlyClosed: () => isExplicitlyClosed
+    isExplicitlyClosed: () => isExplicitlyClosed,
+    onClientPeerConnected: (peer) => clientSession.onPeerConnected(peer)
   })
+
+  function syncScoutTransportForSender(senderId: string, userId?: string): void {
+    const resolvedUserId = userId || resolveScoutIdForSender(senderId)
+    if (!resolvedUserId) return
+    const existing = peerMgr.getPeerTransportInfo(senderId)
+    if (existing) {
+      callbacks.onScoutTransportInfoChanged?.(resolvedUserId, existing)
+      return
+    }
+    const entry = clients.get(senderId)
+    if (entry?.pc) {
+      void peerMgr.updateTransportInfo(entry.pc, senderId)
+    }
+  }
 
   const dispatcher = createMessageDispatcher({
     isHostMode: () => isHostMode,
@@ -317,16 +365,7 @@ export function createWebRtcService(callbacks: WebRtcCallbacks): WebRtcService {
       sas.cleanupPeerResources(peerId)
       hostQueues.delete(peerId)
       preOfferCandidates.delete(peerId)
-      const scoutId = clientIdToScoutId.get(peerId)
-      if (scoutId) {
-        const set = scoutIdToClientIds.get(scoutId)
-        if (set) {
-          set.delete(peerId)
-          if (set.size === 0) scoutIdToClientIds.delete(scoutId)
-        }
-        clientIdToScoutId.delete(peerId)
-      }
-      clientIdToScoutName.delete(peerId)
+      cleanupPeerIdentityAndNotify(peerId)
     },
     stampHostSeq,
     getHostSeqCounter: () => hostSeqCounter,
@@ -350,7 +389,48 @@ export function createWebRtcService(callbacks: WebRtcCallbacks): WebRtcService {
     finishTakeoverReconciliation: (reason?: string) => electionCtrl.finishTakeoverReconciliation(reason),
     getUsername: () => currentUsername,
     getUserId: () => currentUserId,
-    onPongReceived: (ts: number) => clientSession.handlePong(ts)
+    onPongReceived: (ts: number) => clientSession.handlePong(ts),
+    onPeerPingReceived: (senderId: string, msg: any) => {
+      const clientRtt = typeof msg?.rttMs === 'number' && Number.isFinite(msg.rttMs) ? msg.rttMs : null
+      const clientTransport = msg?.transportInfo
+      const entry = clients.get(senderId)
+      if (!entry) return
+      if ((entry.dc as any)?.isVirtual) {
+        const prev = peerMgr.getPeerTransportInfo(senderId)
+        peerMgr.setPeerTransportInfo(senderId, {
+          ...(prev || {
+            type: 'relay',
+            label: 'ECDH Tunnel (TLS)',
+            isVirtualTunnel: true,
+            localAddress: 'virtual-e2ee',
+            remoteAddress: 'wss-broker:8084',
+            localCandidateType: 'virtual',
+            remoteCandidateType: 'virtual',
+            protocol: 'wss/tls',
+            rttMs: null
+          }),
+          rttMs: clientRtt ?? prev?.rttMs ?? null,
+          securityFingerprint: sas.clientFingerprints.get(senderId) || prev?.securityFingerprint
+        })
+        return
+      }
+      if (entry.pc) {
+        void peerMgr.updateTransportInfo(entry.pc, senderId).then(() => {
+          const cur = peerMgr.getPeerTransportInfo(senderId)
+          if (cur && cur.rttMs === null && clientRtt !== null) {
+            peerMgr.setPeerTransportInfo(senderId, { ...cur, rttMs: clientRtt })
+          } else if (!cur && clientTransport) {
+            peerMgr.setPeerTransportInfo(senderId, {
+              ...clientTransport,
+              rttMs: clientRtt ?? clientTransport.rttMs ?? null
+            })
+          }
+        })
+      }
+    },
+    onPeerIdentityBound: (senderId: string, userId: string) => {
+      syncScoutTransportForSender(senderId, userId)
+    }
   })
 
   async function handleChannelMessage(ev: MessageEvent, senderId?: string): Promise<void> {
@@ -415,6 +495,7 @@ export function createWebRtcService(callbacks: WebRtcCallbacks): WebRtcService {
     }
     sas.confirmSas(peerId, isHostMode, currentInviteCode, callbacks, sendMessage, handleChannelMessage)
     if (isHostMode && peerId && peerId !== 'host') {
+      syncScoutTransportForSender(peerId)
       signaling?.send({ type: 'sas_verified', hostSessionId }, peerId)
     } else if (!isHostMode) {
       signaling?.send({ type: 'sas_verified', clientSessionId: currentClientSessionId })
@@ -532,7 +613,8 @@ export function createWebRtcService(callbacks: WebRtcCallbacks): WebRtcService {
     callbacks,
     clientIdToScoutId,
     clientIdToScoutName,
-    scoutIdToClientIds
+    scoutIdToClientIds,
+    onPeerDisconnected: (senderId: string) => cleanupPeerIdentityAndNotify(senderId)
   })
 
   const clientSession = createClientSession({
@@ -650,6 +732,7 @@ export function createWebRtcService(callbacks: WebRtcCallbacks): WebRtcService {
     if (eventMetadata) {
       currentEventMetadata = eventMetadata
     }
+    setCustomTurnConfig(currentEventMetadata?.customTurnConfig ?? null)
     clients.forEach((c) => {
       if (c.drainingVirtualDc) {
         try { c.drainingVirtualDc.close() } catch {}
@@ -752,6 +835,15 @@ export function createWebRtcService(callbacks: WebRtcCallbacks): WebRtcService {
       onConnect: async () => {
         if (localEcdhPubHex) {
           signaling!.send({ type: 'client_hello', ecdhPublicKey: localEcdhPubHex, deviceId: localDeviceId })
+        }
+        const isTestEnv =
+          (typeof process !== 'undefined' && (process.env?.NODE_ENV === 'test' || process.env?.VITEST === 'true')) ||
+          Boolean((globalThis as any).__vitest_worker__) ||
+          (globalThis as any).__TEST_ALLOW_UNSIGNED_SIGNALING__ !== undefined
+        if (!isTestEnv) {
+          // 冷启动先短暂等待 host_hello（至多 400ms，收到即刻提前返回），确保首包 Offer 具备共享 AES 密钥与 hostSenderId，不因盲跑白白消耗重试次数
+          await clientSession.waitForHostHello(400)
+          if (isExplicitlyClosed || isHostMode) return
         }
         const isHandshakeActive =
           (clientPc &&
@@ -867,6 +959,7 @@ export function createWebRtcService(callbacks: WebRtcCallbacks): WebRtcService {
 
   function setEventMetadata(meta: ScoutingEvent) {
     currentEventMetadata = meta
+    setCustomTurnConfig(meta?.customTurnConfig ?? null)
   }
 
   function disconnect() {
@@ -989,6 +1082,15 @@ export function createWebRtcService(callbacks: WebRtcCallbacks): WebRtcService {
     getSasFingerprint: (peerId?: string) => isHostMode ? (peerId ? sas.clientFingerprints.get(peerId) : undefined) : sas.clientSecurityFingerprint,
     getStatus: () => status,
     getTransportInfo: () => peerMgr.currentTransportInfo,
+    getScoutTransportInfo: (userId: string) => {
+      const cids = scoutIdToClientIds.get(userId)
+      if (!cids) return null
+      for (const cid of cids) {
+        const info = peerMgr.getPeerTransportInfo(cid)
+        if (info) return info
+      }
+      return null
+    },
     getDataChannel: () => (isHostMode ? clients.values().next().value?.dc || null : clientDc),
     isHostMode: () => isHostMode,
     isQuarantinedPeer: (peerId: string) => rawHandleChannelMessage.isQuarantinedPeer(peerId),

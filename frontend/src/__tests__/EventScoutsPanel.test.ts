@@ -6,10 +6,12 @@ import SendMessageModal from '../components/scouting/SendMessageModal.vue'
 import { useConnectionStore } from '../stores/connection'
 import { useRecordStore } from '../stores/records'
 import { useEventStore } from '../stores/events'
+import { useUserStore } from '../stores/user'
+import { useToastStore } from '../stores/toast'
 import { useConfirm } from '../composables/useConfirm'
 import * as api from '../services/api'
 import { downloadCSV } from '../utils/csvExport'
-import type { ScoutingRecord } from '../types'
+import type { ScoutingRecord, ScoutingEvent } from '../types'
 
 vi.mock('../utils/csvExport', () => ({
   downloadCSV: vi.fn()
@@ -21,6 +23,7 @@ vi.mock('../services/api', async () => {
     ...actual,
     fetchEventMembers: vi.fn(),
     updateEventFtcConfig: vi.fn(),
+    updateEventTurnConfig: vi.fn(),
     removeEventMember: vi.fn()
   }
 })
@@ -40,7 +43,18 @@ vi.mock('vue-i18n', async (importOriginal) => {
           'event.send_message': 'Send Message',
           'event.status_online': 'Online',
           'event.status_offline': 'Offline',
-          'event.role_host': 'Host'
+          'event.role_host': 'Host',
+          'connection.transport_ipv6': 'IPv6 Direct',
+          'connection.transport_lan': 'LAN Direct',
+          'connection.transport_nat': 'IPv4 Hole-punch',
+          'connection.transport_virtual_tunnel': 'ECDH Tunnel (TLS)',
+          'connection.transport_relay': 'TURN Relay',
+          'connection.transport_unknown': 'P2P',
+          'connection.transport_tooltip_ipv6': 'IPv6 direct tooltip',
+          'connection.transport_tooltip_lan': 'LAN direct tooltip',
+          'connection.transport_tooltip_nat': 'IPv4 NAT tooltip',
+          'connection.transport_tooltip_virtual_tunnel': 'ECDH virtual tunnel tooltip',
+          'connection.transport_tooltip_relay': 'TURN relay tooltip'
         }
         return dict[key] || key
       }
@@ -331,5 +345,256 @@ describe('EventScoutsPanel.vue', () => {
     expect(recHeaders).toContain('Predict Cycle (s)')
     expect(recRows[0]).toContain(10)
     expect(recRows[0]).toContain('Yes')
+  })
+
+  it('displays live connection mode and latency pill for active online scouts and updates reactively', async () => {
+    const mockMembers = [
+      { id: 'u_alice', username: 'Alice', host: true },
+      { id: 'u_bob', username: 'Bob', host: false },
+      { id: 'u_offline', username: 'OfflineScout', host: false }
+    ]
+    vi.mocked(api.fetchEventMembers).mockResolvedValue(mockMembers)
+
+    const connStore = useConnectionStore()
+    connStore.addConnectedScout('u_bob', 'Bob', {
+      type: 'ipv6_p2p',
+      localCandidateType: 'host',
+      remoteCandidateType: 'host',
+      localAddress: '2409:8a00::1',
+      remoteAddress: '2409:8900::2',
+      protocol: 'UDP',
+      rttMs: 19
+    })
+
+    const wrapper = mount(EventScoutsPanel, {
+      props: {
+        event: {
+          id: 'event-test-1',
+          name: 'Test Regional',
+          inviteCode: 'TEST01',
+          creatorId: 'u_alice',
+          createdAt: '',
+          updatedAt: ''
+        }
+      }
+    })
+
+    await flushPromises()
+
+    const scoutItems = wrapper.findAll('.scout-item')
+    expect(scoutItems).toHaveLength(3)
+
+    // Host (Alice) and offline user do not render scout transport pill
+    expect(scoutItems[0]!.find('.scout-transport-pill').exists()).toBe(false)
+    expect(scoutItems[2]!.find('.scout-transport-pill').exists()).toBe(false)
+
+    // Active online scout (Bob) renders connection mode + latency pill
+    const bobPill = scoutItems[1]!.find('.scout-transport-pill')
+    expect(bobPill.exists()).toBe(true)
+    expect(bobPill.classes()).toContain('ipv6_p2p')
+    expect(bobPill.text()).toContain('IPv6 Direct')
+    expect(bobPill.text()).toContain('19ms')
+
+    // Reactive update when transport switches to zero-quota ECDH Tunnel (TLS)
+    connStore.setScoutTransportInfo('u_bob', {
+      type: 'relay',
+      label: 'ECDH Tunnel (TLS)',
+      isVirtualTunnel: true,
+      localCandidateType: 'virtual',
+      remoteCandidateType: 'virtual',
+      localAddress: 'virtual-e2ee',
+      remoteAddress: 'wss-broker:8084',
+      protocol: 'wss/tls',
+      rttMs: 45
+    })
+    await flushPromises()
+
+    const updatedPill = wrapper.findAll('.scout-item')[1]!.find('.scout-transport-pill')
+    expect(updatedPill.classes()).toContain('virtual-tunnel')
+    expect(updatedPill.text()).toContain('ECDH Tunnel (TLS)')
+    expect(updatedPill.text()).toContain('45ms')
+  })
+
+  it('renders Custom TURN configuration panel only for Host and hides it for non-host Scouts', async () => {
+    vi.mocked(api.fetchEventMembers).mockResolvedValue([])
+    const userStore = useUserStore()
+    const eventStore = useEventStore()
+
+    const baseEvent: ScoutingEvent = {
+      id: 'event-turn-1',
+      name: 'Turn Event',
+      inviteCode: 'TURN01',
+      hostId: 'u_host',
+      creatorId: 'u_host',
+      createdAt: '',
+      updatedAt: ''
+    }
+
+    // Non-host scout
+    userStore.user = { id: 'u_scout', username: 'Scout' } as any
+    eventStore.setCurrentEvent(baseEvent)
+    expect(eventStore.isHost).toBe(false)
+
+    const scoutWrapper = mount(EventScoutsPanel, {
+      props: { event: baseEvent }
+    })
+    await flushPromises()
+    expect(scoutWrapper.find('[data-testid="custom-turn-panel"]').exists()).toBe(false)
+
+    // Host
+    userStore.user = { id: 'u_host', username: 'Host' } as any
+    expect(eventStore.isHost).toBe(true)
+
+    const hostWrapper = mount(EventScoutsPanel, {
+      props: { event: baseEvent }
+    })
+    await flushPromises()
+    expect(hostWrapper.find('[data-testid="custom-turn-panel"]').exists()).toBe(true)
+    expect(hostWrapper.find('[data-testid="turn-status-banner"]').text()).toContain('event.turn_status_default')
+  })
+
+  it('saves valid custom TURN config, updates eventStore, broadcasts EVENT_METADATA, and updates status banner', async () => {
+    vi.mocked(api.fetchEventMembers).mockResolvedValue([])
+    const savedConfig = {
+      urls: ['turn:team.turn.example:3478', 'turns:team.turn.example:5349?transport=tcp'],
+      username: 'team27570',
+      credential: 'secret-password'
+    }
+    vi.mocked(api.updateEventTurnConfig).mockResolvedValue({
+      hasCustomTurn: true,
+      customTurnConfig: savedConfig
+    })
+
+    const userStore = useUserStore()
+    const eventStore = useEventStore()
+    const connStore = useConnectionStore()
+    const setEventMetadata = vi.fn()
+    const sendMessage = vi.fn()
+    connStore.setRtcService({
+      isHostMode: () => true,
+      setEventMetadata,
+      sendMessage
+    } as any)
+
+    const evt: ScoutingEvent = {
+      id: 'event-turn-2',
+      name: 'Turn Event 2',
+      inviteCode: 'TURN02',
+      hostId: 'u_host',
+      creatorId: 'u_host',
+      createdAt: '',
+      updatedAt: ''
+    }
+    userStore.user = { id: 'u_host', username: 'Host' } as any
+    eventStore.setCurrentEvent(evt)
+    eventStore.events = [evt]
+
+    const wrapper = mount(EventScoutsPanel, {
+      props: { event: eventStore.currentEvent }
+    })
+    await flushPromises()
+
+    await wrapper.find('[data-testid="turn-urls-input"]').setValue(
+      'turn:team.turn.example:3478\nturns:team.turn.example:5349?transport=tcp'
+    )
+    await wrapper.find('[data-testid="turn-username-input"]').setValue('team27570')
+    await wrapper.find('[data-testid="turn-credential-input"]').setValue('secret-password')
+
+    await wrapper.find('[data-testid="turn-save-btn"]').trigger('click')
+    await flushPromises()
+
+    expect(api.updateEventTurnConfig).toHaveBeenCalledWith('event-turn-2', savedConfig)
+    expect(eventStore.currentEvent?.hasCustomTurn).toBe(true)
+    expect(eventStore.currentEvent?.customTurnConfig).toEqual(savedConfig)
+    expect(setEventMetadata).toHaveBeenCalledWith(eventStore.currentEvent)
+    expect(sendMessage).toHaveBeenCalledWith({
+      type: 'EVENT_METADATA',
+      event: eventStore.currentEvent
+    })
+
+    await wrapper.setProps({ event: eventStore.currentEvent })
+    await flushPromises()
+    expect(wrapper.find('[data-testid="turn-status-banner"]').text()).toContain('event.turn_status_custom')
+  })
+
+  it('resets custom TURN config to default fallback', async () => {
+    vi.mocked(api.fetchEventMembers).mockResolvedValue([])
+    vi.mocked(api.updateEventTurnConfig).mockResolvedValue({
+      hasCustomTurn: false,
+      customTurnConfig: null
+    })
+
+    const userStore = useUserStore()
+    const eventStore = useEventStore()
+    const evt: ScoutingEvent = {
+      id: 'event-turn-3',
+      name: 'Turn Event 3',
+      inviteCode: 'TURN03',
+      hostId: 'u_host',
+      creatorId: 'u_host',
+      hasCustomTurn: true,
+      customTurnConfig: {
+        urls: ['turn:team.turn.example:3478'],
+        username: 'team27570',
+        credential: 'secret-password'
+      },
+      createdAt: '',
+      updatedAt: ''
+    }
+    userStore.user = { id: 'u_host', username: 'Host' } as any
+    eventStore.setCurrentEvent(evt)
+    eventStore.events = [evt]
+
+    const wrapper = mount(EventScoutsPanel, {
+      props: { event: eventStore.currentEvent }
+    })
+    await flushPromises()
+
+    expect(wrapper.find('[data-testid="turn-status-banner"]').text()).toContain('event.turn_status_custom')
+
+    await wrapper.find('[data-testid="turn-reset-btn"]').trigger('click')
+    await flushPromises()
+
+    expect(api.updateEventTurnConfig).toHaveBeenCalledWith('event-turn-3', null)
+    expect(eventStore.currentEvent?.hasCustomTurn).toBe(false)
+    expect(eventStore.currentEvent?.customTurnConfig).toBeNull()
+
+    await wrapper.setProps({ event: eventStore.currentEvent })
+    await flushPromises()
+    expect(wrapper.find('[data-testid="turn-status-banner"]').text()).toContain('event.turn_status_default')
+  })
+
+  it('shows error toast and does not call updateEventTurnConfig when TURN URL is invalid', async () => {
+    vi.mocked(api.fetchEventMembers).mockResolvedValue([])
+    const userStore = useUserStore()
+    const eventStore = useEventStore()
+    const toastStore = useToastStore()
+
+    const evt: ScoutingEvent = {
+      id: 'event-turn-4',
+      name: 'Turn Event 4',
+      inviteCode: 'TURN04',
+      hostId: 'u_host',
+      creatorId: 'u_host',
+      createdAt: '',
+      updatedAt: ''
+    }
+    userStore.user = { id: 'u_host', username: 'Host' } as any
+    eventStore.setCurrentEvent(evt)
+
+    const wrapper = mount(EventScoutsPanel, {
+      props: { event: evt }
+    })
+    await flushPromises()
+
+    await wrapper.find('[data-testid="turn-urls-input"]').setValue('https://not-a-turn-url.example.com')
+    await wrapper.find('[data-testid="turn-username-input"]').setValue('team27570')
+    await wrapper.find('[data-testid="turn-credential-input"]').setValue('secret-password')
+
+    await wrapper.find('[data-testid="turn-save-btn"]').trigger('click')
+    await flushPromises()
+
+    expect(api.updateEventTurnConfig).not.toHaveBeenCalled()
+    expect(toastStore.toasts.some(t => t.type === 'error' && t.message === 'event.turn_invalid_url')).toBe(true)
   })
 })

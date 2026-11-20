@@ -1,7 +1,8 @@
 .event-view {
   min-height: 100vh;
-  background-color: var(--background);
-  background-image: radial-gradient(#1e1e1c 1px, transparent 1px);
+  /* transparent so the ambient halo (body::before) shows through behind the whole panel */
+  background-color: transparent;
+  background-image: radial-gradient(var(--border-subtle) 1px, transparent 1px);
   background-size: 24px 24px;
   color: var(--foreground);
   display: flex;
@@ -13,8 +14,8 @@
   align-items: center;
   justify-content: space-between;
   padding: max(12px, var(--sat)) max(24px, var(--sar)) 12px max(24px, var(--sal));
-  background: var(--card);
-  border-bottom: 1px solid var(--border);
+  background: color-mix(in srgb, var(--g-900) 80%, transparent);
+  border-bottom: 1px solid var(--g-750);
   gap: 12px;
 }
 
@@ -38,15 +39,16 @@
   font-size: 13px;
   font-weight: 600;
   cursor: pointer;
-  transition: all 0.25s ease;
+  transition: background-color var(--motion-duration-fast) var(--motion-ease-out),
+              border-color var(--motion-duration-fast) var(--motion-ease-out),
+              color var(--motion-duration-fast) var(--motion-ease-out);
 }
 
 .user-tag-btn:hover,
 .topbar-btn:hover {
   background: var(--surface-elevated);
-  border-color: var(--primary, #39ff14);
-  color: var(--primary, #39ff14);
-  box-shadow: var(--glow-primary, 0 0 10px rgba(57, 255, 20, 0.35));
+  border-color: var(--primary);
+  color: var(--primary);
 }
 
 /* Desktop: hide topbar Inbox button (since bottom-right floating Inbox FAB is present) */
@@ -58,18 +60,32 @@
 
 .user-tag-btn .edit-icon {
   opacity: 0.6;
-  transition: opacity 0.34s;
+  transition: opacity var(--motion-duration-fast) var(--motion-ease-out);
 }
 
 .user-tag-btn:hover .edit-icon {
   opacity: 1;
 }
 
+.user-tag-btn .username-text {
+  display: inline-block;
+  width: fit-content;
+  line-height: 1.25;
+  white-space: nowrap;
+}
+
+.user-tag-btn.is-profile-open {
+  opacity: 0;
+  pointer-events: none;
+}
+
 .topbar-unread-badge {
-  background: #ef4444;
-  color: #ffffff;
+  background: var(--status-error-bg);
+  color: var(--status-error);
+  border: 1px solid var(--status-error-border);
   font-size: 10px;
   font-weight: 700;
+  font-variant-numeric: tabular-nums;
   border-radius: 9999px;
   padding: 1px 6px;
   margin-left: 4px;
@@ -94,7 +110,9 @@
   font-size: 13px;
   font-weight: 600;
   flex-shrink: 0;
-  transition: all 0.2s ease;
+  transition: background-color var(--motion-duration-fast) var(--motion-ease-out),
+              border-color var(--motion-duration-fast) var(--motion-ease-out),
+              color var(--motion-duration-fast) var(--motion-ease-out);
 }
 
 .btn-back:hover {
@@ -108,25 +126,31 @@
   height: 26px;
   object-fit: contain;
   image-rendering: -webkit-optimize-contrast;
-  filter: drop-shadow(0 0 3px rgba(57, 255, 20, 0.35));
   flex-shrink: 0;
 }
 
 .event-title {
   display: flex;
   flex-direction: column;
+  align-items: flex-start;
   min-width: 0;
   flex: 1;
 }
 
+/* Shared-element target of the dashboard card title ("event-card-title").
+   The box must hug the text exactly like the dashboard's inline-block title
+   (not stretch to the full row), otherwise the morph snapshot is squashed and
+   the title lands off-axis. Same weight as the dashboard title; size differs only by a clean uniform scale. */
 .event-name {
   display: block;
+  width: fit-content;
+  max-width: 100%;
   font-size: 1.2rem;
   font-weight: 700;
+  line-height: 1.3;
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
-  max-width: 100%;
 }
 
 .event-code {
@@ -140,31 +164,39 @@
   gap: 4px;
 }
 
+.event-code strong {
+  font-family: var(--font-numeric);
+  font-variant-numeric: tabular-nums;
+  letter-spacing: 0.04em;
+}
+
 .btn-inline-qr {
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  background: rgba(255, 255, 255, 0.08);
-  border: 1px solid rgba(255, 255, 255, 0.15);
+  background: var(--g-750);
+  border: 1px solid var(--border-strong);
   border-radius: 4px;
-  color: var(--primary, #39ff14);
+  color: var(--primary);
   padding: 1px 4px;
   cursor: pointer;
-  transition: all 0.2s ease;
+  transition: background-color var(--motion-duration-fast) var(--motion-ease-out),
+              border-color var(--motion-duration-fast) var(--motion-ease-out),
+              transform var(--motion-duration-fast) var(--motion-ease-out);
   line-height: 1;
 }
 
 .btn-inline-qr:hover {
-  background: rgba(57, 255, 20, 0.2);
-  border-color: var(--primary, #39ff14);
+  background: var(--status-success-bg);
+  border-color: var(--primary);
   transform: scale(1.05);
 }
 
 /* Tab Bar */
 .tab-bar {
   display: flex;
-  background: var(--card);
-  border-bottom: 1px solid var(--border);
+  background: color-mix(in srgb, var(--g-900) 80%, transparent);
+  border-bottom: 1px solid var(--g-750);
   position: relative;
 }
 
@@ -173,11 +205,13 @@
   bottom: -1px;
   left: 0;
   width: var(--indicator-width, 33.333%);
-  height: 3px;
+  height: 2px;
   background: var(--primary);
-  box-shadow: 0 0 12px rgba(57, 255, 20, 0.65);
   transition: transform var(--motion-duration-moderate) var(--motion-ease-out);
-  z-index: 1;
+  /* Must sit above .tab-btn (z-index: 2): otherwise the hovered tab's dark background paints
+     over the lower half of the highlight bar like a black box. */
+  z-index: 3;
+  pointer-events: none;
 }
 
 .tab-btn {
@@ -185,23 +219,24 @@
   padding: 14px 0;
   background: none;
   border: none;
+  border-radius: 0;
   color: var(--muted-foreground);
-  font-family: 'Orbitron', 'Manrope', sans-serif;
+  font-family: inherit;
   font-size: 13px;
   font-weight: 600;
   letter-spacing: 0.03em;
   cursor: pointer;
   z-index: 2;
-  transition: color var(--motion-duration-fast) var(--motion-ease-out), background-color 0.2s ease;
+  transition: color var(--motion-duration-fast) var(--motion-ease-out);
 }
 
 .tab-btn:hover {
   color: var(--foreground);
-  background: rgba(255, 255, 255, 0.02);
+  background: transparent;
 }
 
 .tab-btn.active {
-  color: var(--primary);
+  color: var(--g-50);
   font-weight: 700;
 }
 
@@ -245,7 +280,7 @@
 }
 
 .btn-msg:hover {
-  filter: brightness(1.1);
+  background: var(--s-300);
 }
 
 .settings-panel {
@@ -307,9 +342,14 @@
   font-weight: 600;
   padding: 2px 8px;
   border-radius: 9999px;
-  background: rgba(34, 197, 94, 0.15);
-  color: #22c55e;
-  border: 1px solid rgba(34, 197, 94, 0.3);
+  background: var(--status-success-bg);
+  color: var(--status-success);
+  border: 1px solid var(--status-success-border);
+}
+
+.badge-ftc-bound strong {
+  font-family: var(--font-numeric);
+  font-variant-numeric: tabular-nums;
 }
 
 .badge-ftc-unbound {
@@ -320,7 +360,7 @@
   font-weight: 500;
   padding: 2px 8px;
   border-radius: 9999px;
-  background: rgba(148, 163, 184, 0.1);
+  background: var(--g-850);
   color: var(--muted-foreground);
   border: 1px solid var(--border);
 }
@@ -335,15 +375,15 @@
   gap: 12px;
   padding: 14px 16px;
   border-radius: 8px;
-  background: rgba(34, 197, 94, 0.1);
-  border: 1px solid rgba(34, 197, 94, 0.3);
+  background: var(--status-success-bg);
+  border: 1px solid var(--status-success-border);
   margin-top: 10px;
   margin-bottom: 12px;
 }
 
 .status-icon {
   font-size: 22px;
-  color: #22c55e;
+  color: var(--status-success);
   flex-shrink: 0;
   margin-top: 1px;
 }
@@ -357,7 +397,7 @@
 .status-title {
   font-size: 14px;
   font-weight: 600;
-  color: #22c55e;
+  color: var(--status-success);
 }
 
 .status-subtitle {
@@ -378,9 +418,9 @@
   justify-content: center;
   gap: 8px;
   padding: 8px 16px;
-  background: rgba(234, 179, 8, 0.15);
-  color: #eab308;
-  border-bottom: 1px solid rgba(234, 179, 8, 0.3);
+  background: var(--status-warning-bg);
+  color: var(--status-warning);
+  border-bottom: 1px solid var(--status-warning-border);
   font-size: 13px;
   font-weight: 500;
 }
@@ -395,8 +435,8 @@
   justify-content: space-between;
   gap: 12px;
   padding: 8px 16px;
-  background: rgba(234, 179, 8, 0.15);
-  border-bottom: 1px solid rgba(234, 179, 8, 0.35);
+  background: var(--status-warning-bg);
+  border-bottom: 1px solid var(--status-warning-border);
   font-size: 13px;
   color: var(--foreground);
 }
@@ -409,7 +449,7 @@
 
 .standby-icon {
   font-size: 18px;
-  color: #eab308;
+  color: var(--status-warning);
   flex-shrink: 0;
 }
 
@@ -423,20 +463,21 @@
   gap: 4px;
   padding: 4px 12px;
   border-radius: 6px;
-  background: #eab308;
-  color: #000;
+  background: var(--status-warning);
+  color: var(--on-primary);
   font-weight: 600;
   font-size: 12px;
   border: none;
   cursor: pointer;
   white-space: nowrap;
-  transition: all 0.2s ease;
+  transition: background-color var(--motion-duration-fast) var(--motion-ease-out),
+              box-shadow var(--motion-duration-fast) var(--motion-ease-out);
   flex-shrink: 0;
 }
 
 .btn-takeover-host:hover {
-  background: #facc15;
-  box-shadow: 0 2px 8px rgba(234, 179, 8, 0.35);
+  background: color-mix(in srgb, var(--status-warning) 85%, var(--g-50));
+  box-shadow: var(--shadow-1);
 }
 
 @media (max-width: 768px) {
@@ -455,9 +496,35 @@
   }
 }
 
+@media (max-width: 600px) {
+  .topbar {
+    padding: max(8px, var(--sat)) max(10px, var(--sar)) 8px max(10px, var(--sal));
+    gap: 6px;
+  }
+  .topbar-left {
+    gap: 8px;
+  }
+  .topbar-right {
+    gap: 6px;
+  }
+  .topbar-btn .topbar-btn-text {
+    display: none;
+  }
+  .topbar-btn .material-icons {
+    margin-right: 0 !important;
+  }
+  .btn-back {
+    padding: 6px 8px;
+  }
+}
+
 @media (max-width: 480px) {
   .user-tag-btn {
     padding: 6px 8px;
+  }
+  .user-tag-btn .material-icons {
+    margin-left: 0 !important;
+    margin-right: 0 !important;
   }
   .user-tag-btn .username-text {
     display: none;
@@ -485,8 +552,8 @@
 /* Tab brush-in transition (smooth, coherent cascade like HistoryList) */
 .tab-brush-enter-active,
 .tab-brush-leave-active {
-  transition: opacity var(--motion-duration-fast, 0.24s) var(--motion-ease-out, ease-out),
-              transform var(--motion-duration-fast, 0.24s) var(--motion-ease-out, ease-out);
+  transition: opacity var(--motion-duration-fast) var(--motion-ease-out),
+              transform var(--motion-duration-fast) var(--motion-ease-out);
 }
 
 .tab-brush-enter-from {

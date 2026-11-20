@@ -79,6 +79,12 @@
             <artifactId>java-jwt</artifactId>
             <version>4.6.2</version>
         </dependency>
+        <!-- UPnP IGDv1/IGDv2 (含 IPv6 WANIPv6FirewallControl), NAT-PMP, PCP 端口开孔 -->
+        <dependency>
+            <groupId>com.offbynull.portmapper</groupId>
+            <artifactId>portmapper</artifactId>
+            <version>2.0.6</version>
+        </dependency>
         <!-- Test Dependencies -->
         <dependency>
             <groupId>org.junit.jupiter</groupId>

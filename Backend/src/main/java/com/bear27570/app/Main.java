@@ -57,17 +57,15 @@ public class Main {
         System.setProperty("swing.aatext", "true");
         System.setProperty("sun.java2d.uiScale.enabled", "true");
 
-        boolean headless = false;
-        for (String arg : args) {
-            if ("--jcef-prewarm".equals(arg)) {
-                prewarmJcef();
-                return;
-            }
-            if ("--headless".equals(arg)) {
-                headless = true;
-                break;
+        if (args != null) {
+            for (String arg : args) {
+                if ("--jcef-prewarm".equals(arg)) {
+                    prewarmJcef();
+                    return;
+                }
             }
         }
+        boolean headless = NetworkUtil.hasHeadlessArg(args);
 
         if (headless) {
             System.setProperty("java.awt.headless", "true");
@@ -264,6 +262,12 @@ public class Main {
         }
         return targetDir;
     }
+
+    static String buildLocalAppUrl(int port, boolean hasCustomTitleBar) {
+        String base = "http://localhost:" + port + "/index.html";
+        return hasCustomTitleBar ? base + "?shell=desktop" : base;
+    }
+
     private static void initAndRun(String[] args, SplashScreen splash) {
         try {
             if (System.getProperty("h2.bindAddress") == null) {
@@ -316,9 +320,21 @@ public class Main {
 
             // 异步确认并配置 Windows 防火墙（同时放行 TCP 服务端口与 WebRTC UDP 49152-65535 入站端口）
             final int activePort = app.port();
-            new Thread(() -> NetworkUtil.ensureWindowsFirewallPort(activePort), "firewall-check").start();
+            if (NetworkUtil.shouldSkipFirewallCheck(args)) {
+                logger.info("已跳过 Windows 防火墙检测与 UAC 提权配置 (ENABLE_TEST_CLEANUP / SKIP_FIREWALL_CHECK)");
+            } else {
+                new Thread(() -> NetworkUtil.ensureWindowsFirewallPort(activePort), "firewall-check").start();
+            }
+
+            // 异步探测物理网卡上的路由器 UPnP IGD / NAT-PMP / PCP（含 IPv6 Pinholes），仅开放 50000-50009/UDP 且带短租约与退出自动清理
+            final com.bear27570.app.util.PortForwardingService portForwardingService =
+                    new com.bear27570.app.util.PortForwardingService();
+            portForwardingService.startAsync();
 
             Runtime.getRuntime().addShutdownHook(new Thread(() -> {
+                try {
+                    portForwardingService.shutdown();
+                } catch (Throwable ignored) {}
                 try {
                     apiRoutes.shutdown();
                     app.stop();
@@ -330,13 +346,7 @@ public class Main {
             String localUrl = "http://localhost:" + app.port() + "/index.html";
             logger.info("Javalin 运行在: {} (监听 IPv4/IPv6 双栈端口 :{})", localUrl, app.port());
             
-            boolean headless = false;
-            for (String arg : args) {
-                if (arg != null && arg.replace("\"", "").trim().equals("--headless")) {
-                    headless = true;
-                    break;
-                }
-            }
+            boolean headless = NetworkUtil.hasHeadlessArg(args);
             
             if (headless) {
                 logger.info("运行在 Headless 模式，已跳过 JCEF UI 的启动。");
@@ -366,6 +376,15 @@ public class Main {
             // 智能分配 JCEF 缓存目录（主实例持久化保证公私钥与信任稳定，多开实例自动隔离防止 CEF lockfile 崩溃）
             File cacheDir = resolveJcefProfileDir();
             builder.getCefSettings().cache_path = cacheDir.getAbsolutePath();
+
+            // 将 libwebrtc UDP 端口分配在 50000-50099（100 个端口，支持 15+ 并发采集端而不耗尽），前 10 个端口与 PortForwardingService 可选映射重叠
+            builder.setAppHandler(new me.friwi.jcefmaven.MavenCefAppHandlerAdapter() {
+                @Override
+                public void onContextInitialized() {
+                    super.onContextInitialized();
+                    configureJcefWebRtcUdpPortRange();
+                }
+            });
 
             CefApp cefApp = builder.build();
             CefClient cefClient = cefApp.createClient();
@@ -404,7 +423,9 @@ public class Main {
             });
 
             if (splash != null) splash.updateProgress(88, "Loading interface...");
-            CefBrowser browser = cefClient.createBrowser(localUrl, false, false);
+            final boolean isWindows = System.getProperty("os.name", "").toLowerCase().contains("win");
+            String browserUrl = buildLocalAppUrl(app.port(), isWindows);
+            CefBrowser browser = cefClient.createBrowser(browserUrl, false, false);
             Component browserUI = browser.getUIComponent();
 
             if (splash != null) splash.updateProgress(100, "Ready");
@@ -414,10 +435,9 @@ public class Main {
             // ==========================================
             SwingUtilities.invokeLater(() -> {
                 JFrame frame = new JFrame("ScoutingPro27");
-                boolean isWindows = System.getProperty("os.name", "").toLowerCase().contains("win");
 
-                // 统一全窗口深色背景，消除任何边缘和子像素间隙闪白/泛灰
-                Color windowBg = new Color(10, 10, 10);
+                // 统一全窗口 Pit Wall 冷石墨背景 (#0B0E10)，消除任何边缘和子像素间隙闪白/泛灰
+                Color windowBg = new Color(0x0B, 0x0E, 0x10);
                 frame.setBackground(windowBg);
                 if (frame.getRootPane() != null) {
                     frame.getRootPane().setBackground(windowBg);
@@ -473,6 +493,9 @@ public class Main {
                                 Thread.sleep(150);
                             } catch (Exception ignored) {}
                             try {
+                                portForwardingService.shutdown();
+                            } catch (Exception ignored) {}
+                            try {
                                 cefApp.dispose();
                             } catch (Exception ignored) {}
                             SwingUtilities.invokeLater(frame::dispose);
@@ -503,12 +526,39 @@ public class Main {
         } catch (Exception e) {
             e.printStackTrace();
             if (splash != null) {
+                final String errMsg = e.getMessage() != null ? e.getMessage() : e.getClass().getSimpleName();
                 SwingUtilities.invokeLater(() -> {
-                    splash.dispose();
-                    JOptionPane.showMessageDialog(null, "Startup failed: " + e.getMessage());
+                    splash.showFailure(errMsg);
+                    splash.setVisible(true);
                 });
+            } else {
+                System.exit(1);
             }
-            System.exit(1);
+        }
+    }
+
+    private static void configureJcefWebRtcUdpPortRange() {
+        try {
+            org.cef.browser.CefRequestContext ctx = org.cef.browser.CefRequestContext.getGlobalContext();
+            if (ctx == null) {
+                logger.warn("[JCEF] CefRequestContext.getGlobalContext() is null; skipping webrtc.udp_port_range setup.");
+                return;
+            }
+            final String prefName = "webrtc.udp_port_range";
+            final String targetRange = com.bear27570.app.util.PortForwardingService.JCEF_WEBRTC_UDP_PORT_RANGE;
+            boolean canSet = ctx.canSetPreference(prefName);
+            String err = ctx.setPreference(prefName, targetRange);
+            Object actualValue = ctx.getPreference(prefName);
+            boolean verified = targetRange.equals(actualValue != null ? String.valueOf(actualValue) : null);
+            if ((err == null || err.isEmpty()) && verified) {
+                logger.info("[JCEF] Configured {}={} (canSet={}, verified={})",
+                        prefName, targetRange, canSet, actualValue);
+            } else {
+                logger.warn("[JCEF] webrtc.udp_port_range={} not accepted/verified (canSet={}, err={}, verified={})",
+                        targetRange, canSet, err, actualValue);
+            }
+        } catch (Throwable t) {
+            logger.warn("[JCEF] Exception configuring webrtc.udp_port_range: {}", t.toString());
         }
     }
 

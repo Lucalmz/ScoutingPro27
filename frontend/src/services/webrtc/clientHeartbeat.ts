@@ -36,15 +36,34 @@ export function createClientHeartbeatManager(deps: ClientHeartbeatDeps) {
     if (pendingPings.has(timestamp)) {
       const resolve = pendingPings.get(timestamp)
       pendingPings.delete(timestamp)
+      const rtt = Math.max(1, Date.now() - timestamp)
       const activeVirtualDc = getActiveVirtualDc()
       if (activeVirtualDc && ctx.getClientDc() === (activeVirtualDc as any) && ctx.peerMgr.currentTransportInfo) {
-        const rtt = Math.max(1, Date.now() - timestamp)
         ctx.peerMgr.currentTransportInfo = {
           ...ctx.peerMgr.currentTransportInfo,
           rttMs: rtt,
           securityFingerprint: ctx.sas.clientSecurityFingerprint || ctx.peerMgr.currentTransportInfo.securityFingerprint
         }
         ;(ctx.callbacks.onTransportInfoChanged || ctx.callbacks.onTransportChange)?.(ctx.peerMgr.currentTransportInfo)
+      } else {
+        const pc = ctx.getClientPc()
+        if (pc) {
+          void ctx.peerMgr.updateTransportInfo(pc).then(() => {
+            if (ctx.peerMgr.currentTransportInfo && ctx.peerMgr.currentTransportInfo.rttMs === null) {
+              ctx.peerMgr.currentTransportInfo = {
+                ...ctx.peerMgr.currentTransportInfo,
+                rttMs: rtt
+              }
+              ;(ctx.callbacks.onTransportInfoChanged || ctx.callbacks.onTransportChange)?.(ctx.peerMgr.currentTransportInfo)
+            }
+          })
+        } else if (ctx.peerMgr.currentTransportInfo && ctx.peerMgr.currentTransportInfo.rttMs === null) {
+          ctx.peerMgr.currentTransportInfo = {
+            ...ctx.peerMgr.currentTransportInfo,
+            rttMs: rtt
+          }
+          ;(ctx.callbacks.onTransportInfoChanged || ctx.callbacks.onTransportChange)?.(ctx.peerMgr.currentTransportInfo)
+        }
       }
       resolve?.(true)
     }
@@ -70,7 +89,12 @@ export function createClientHeartbeatManager(deps: ClientHeartbeatDeps) {
       })
 
       try {
-        ctx.sendMessage({ type: 'PING' as any, timestamp: ts })
+        ctx.sendMessage({
+          type: 'PING' as any,
+          timestamp: ts,
+          rttMs: ctx.peerMgr.currentTransportInfo?.rttMs ?? null,
+          transportInfo: ctx.peerMgr.currentTransportInfo ?? undefined
+        } as any)
       } catch {
         clearTimeout(timer)
         pendingPings.delete(ts)

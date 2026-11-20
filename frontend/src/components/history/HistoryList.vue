@@ -278,7 +278,7 @@ function enter(el: Element, done: () => void) {
             <span
               v-if="recordStore.scoutReliability[rec.scoutId] === 'low'"
               class="material-icons"
-              style="font-size: 18px; color: #ef4444; margin-right: 4px;"
+              style="font-size: 18px; color: var(--status-error); margin-right: 4px;"
               title="Low Reliability: High deviation from official scores"
             >warning</span>
             <span class="card-score">{{ rec.totalScore }} {{ t('history.pts') }}</span>
@@ -385,10 +385,10 @@ function enter(el: Element, done: () => void) {
   position: absolute;
   left: -4px;
   right: -4px;
-  background: rgba(255, 255, 255, 0.04);
-  border: 1px solid rgba(255, 255, 255, 0.08);
+  background: color-mix(in srgb, var(--g-50) 4%, transparent);
+  border: 1px solid var(--border-subtle);
   pointer-events: none;
-  transition: top var(--motion-duration-moderate) var(--motion-ease-out), height var(--motion-duration-moderate) var(--motion-ease-out), opacity var(--motion-duration-fast) ease;
+  transition: top var(--motion-duration-moderate) var(--motion-ease-out), height var(--motion-duration-moderate) var(--motion-ease-out), opacity var(--motion-duration-fast) var(--motion-ease-out);
   z-index: 10;
   border-radius: 14px;
 }
@@ -397,19 +397,18 @@ function enter(el: Element, done: () => void) {
 
 .history-card.highlight-conflict,
 .history-card.is-conflict-card {
-  border-color: #ef4444 !important;
-  box-shadow: 0 0 12px rgba(239, 68, 68, 0.4);
+  border-color: var(--status-error) !important;
   animation: pulse-conflict 2.5s infinite ease-in-out;
-  background-color: rgba(239, 68, 68, 0.05);
+  background-color: var(--status-error-bg);
 }
 
 @keyframes pulse-conflict {
-  0%, 100% { opacity: 1; border-color: rgba(239, 68, 68, 0.95); }
-  50% { opacity: 0.85; border-color: rgba(239, 68, 68, 0.4); }
+  0%, 100% { opacity: 1; border-color: var(--status-error); }
+  50% { opacity: 0.85; border-color: var(--status-error-border); }
 }
 
 .conflict-badge {
-  color: #ef4444;
+  color: var(--status-error);
   font-weight: 700;
   font-size: 13px;
   display: flex;
@@ -423,12 +422,12 @@ function enter(el: Element, done: () => void) {
 }
 
 .btn-edit-conflict {
-  background: #ef4444 !important;
-  color: white !important;
+  background: var(--status-error) !important;
+  color: var(--destructive-foreground) !important;
 }
 
 .btn-edit-conflict:hover {
-  background: #dc2626 !important;
+  background: color-mix(in srgb, var(--status-error) 85%, var(--g-950)) !important;
 }
 
 .history-card.editing {
@@ -471,19 +470,19 @@ function enter(el: Element, done: () => void) {
   gap: 3px;
   font-size: 11px;
   color: var(--muted-foreground);
-  background: rgba(255, 255, 255, 0.05);
-  border: 1px solid rgba(255, 255, 255, 0.1);
+  background: var(--surface-elevated);
+  border: 1px solid var(--border);
   padding: 1px 6px;
   border-radius: 4px;
 }
 
 .scout-meta-icon {
   font-size: 13px;
-  color: var(--primary, #39ff14);
+  color: var(--primary);
 }
 
 .scout-meta-text {
-  font-family: var(--font-mono, monospace);
+  font-family: var(--font-mono);
 }
 
 .scout-meta-name {
@@ -499,6 +498,8 @@ function enter(el: Element, done: () => void) {
 }
 
 .card-score {
+  font-family: var(--font-numeric);
+  font-variant-numeric: tabular-nums;
   font-size: 20px;
   font-weight: 800;
   color: var(--primary);
@@ -532,47 +533,49 @@ function enter(el: Element, done: () => void) {
   font-weight: 600;
   cursor: pointer;
   border: 1px solid transparent;
-  transition: all 0.15s ease;
+  transition: background-color var(--motion-duration-fast) var(--motion-ease-out),
+              border-color var(--motion-duration-fast) var(--motion-ease-out),
+              color var(--motion-duration-fast) var(--motion-ease-out);
 }
 
 .btn-edit {
-  background: #1c1c1a;
-  border: 1px solid #353532;
-  color: var(--foreground, #f0efe9);
+  background: var(--surface-elevated);
+  border: 1px solid var(--border-strong);
+  color: var(--foreground);
 }
 
 .btn-edit:hover {
-  background: #262624;
-  border-color: #4a4a46;
+  background: var(--surface-hover);
+  border-color: var(--g-500);
 }
 
 .btn-save {
-  background: var(--primary, #39ff14);
-  color: #080807;
+  background: var(--primary);
+  color: var(--on-primary);
   font-weight: 700;
 }
 
 .btn-save:hover {
-  filter: brightness(1.1);
+  background: var(--s-300);
 }
 
 .btn-cancel {
-  background: #1c1c1a;
-  border: 1px solid #353532;
-  color: var(--muted-foreground, #9e9d95);
+  background: var(--surface-elevated);
+  border: 1px solid var(--border-strong);
+  color: var(--muted-foreground);
 }
 
 .btn-cancel:hover {
-  background: #262624;
-  color: var(--foreground, #f0efe9);
+  background: var(--surface-hover);
+  color: var(--foreground);
 }
 
 .sync-badge.is-synced {
-  color: #39ff14;
+  color: var(--status-success);
 }
 
 .sync-badge.is-pending {
-  color: #f59e0b;
+  color: var(--status-warning);
 }
 
 .btn-resync {
@@ -584,15 +587,17 @@ function enter(el: Element, done: () => void) {
   font-size: 12px;
   font-weight: 600;
   cursor: pointer;
-  border: 1px solid rgba(245, 158, 11, 0.4);
-  background: rgba(245, 158, 11, 0.15);
-  color: #f59e0b;
-  transition: all 0.2s ease;
+  border: 1px solid var(--status-warning-border);
+  background: var(--status-warning-bg);
+  color: var(--status-warning);
+  transition: background-color var(--motion-duration-fast) var(--motion-ease-out),
+              border-color var(--motion-duration-fast) var(--motion-ease-out),
+              transform var(--motion-duration-fast) var(--motion-ease-out);
 }
 
 .btn-resync:hover {
-  background: rgba(245, 158, 11, 0.25);
-  border-color: #f59e0b;
+  background: color-mix(in srgb, var(--status-warning) 22%, transparent);
+  border-color: var(--status-warning);
 }
 
 .btn-resync:active {
@@ -613,30 +618,30 @@ function enter(el: Element, done: () => void) {
   border-radius: 999px;
   font-size: 11px;
   font-weight: 600;
-  background: rgba(255, 255, 255, 0.05);
-  border: 1px solid rgba(255, 255, 255, 0.12);
-  color: var(--foreground, #f0efe9);
+  background: var(--surface-elevated);
+  border: 1px solid var(--border);
+  color: var(--foreground);
 }
 
 .biobuzz-pill.is-park {
-  border-color: rgba(59, 130, 246, 0.4);
-  color: #60a5fa;
+  border-color: var(--status-info-border);
+  color: var(--status-info);
 }
 
 .biobuzz-pill.is-cycle {
-  border-color: rgba(57, 255, 20, 0.35);
-  color: #39ff14;
+  border-color: var(--status-success-border);
+  color: var(--status-success);
 }
 
 .biobuzz-pill.is-descore {
-  border-color: rgba(168, 85, 247, 0.4);
-  color: #c084fc;
+  border-color: var(--status-ai-border);
+  color: var(--status-ai);
 }
 
 .biobuzz-pill.is-foul {
-  border-color: rgba(245, 158, 11, 0.5);
-  background: rgba(245, 158, 11, 0.12);
-  color: #fbbf24;
+  border-color: var(--status-warning-border);
+  background: var(--status-warning-bg);
+  color: var(--status-warning);
 }
 </style>
 

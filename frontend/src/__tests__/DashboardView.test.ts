@@ -1,5 +1,5 @@
 import { mount } from '@vue/test-utils'
-import { describe, it, expect, vi, beforeEach } from 'vitest'
+import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
 import { setActivePinia, createPinia } from 'pinia'
 import DashboardView from '../views/DashboardView.vue'
 import { useUserStore } from '../stores/user'
@@ -53,6 +53,10 @@ describe('DashboardView.vue', () => {
     mockPush.mockClear()
     mockReplace.mockClear()
     vi.clearAllMocks()
+  })
+
+  afterEach(() => {
+    window.history.replaceState({}, '', '/')
   })
 
   it('redirects to / when user is not logged in', async () => {
@@ -391,5 +395,47 @@ describe('DashboardView.vue', () => {
     expect(langBtn.exists()).toBe(true)
     await langBtn.trigger('click')
     expect(mockSwitchLanguage).toHaveBeenCalledWith('en')
+  })
+
+  it('renders contextual page heading instead of duplicate brand inside desktop titlebar shell', async () => {
+    window.history.replaceState({}, '', '/index.html?shell=desktop#/dashboard')
+
+    const userStore = useUserStore()
+    userStore.user = { id: 'u1', username: 'Tester', token: 'token' }
+    const eventStore = useEventStore()
+    eventStore.events = [
+      { id: 'evt-1', name: 'FTC Championship', inviteCode: 'ABCDEF', hostId: 'u1' },
+      { id: 'evt-2', name: 'Scrimmage', inviteCode: 'SCRIM2', hostId: 'u1' }
+    ]
+    vi.spyOn(eventStore, 'fetchEvents').mockResolvedValue(undefined)
+
+    const wrapper = mount(DashboardView)
+    await new Promise((r) => setTimeout(r, 10))
+
+    expect(wrapper.find('.topbar').classes()).toContain('is-desktop-shell')
+    expect(wrapper.find('.page-heading').exists()).toBe(true)
+    expect(wrapper.find('.page-heading-title').text()).toBe('dashboard.title')
+    expect(wrapper.find('.page-heading-count').text()).toBe('2')
+    expect(wrapper.find('.brand').exists()).toBe(false)
+    expect(wrapper.find('.brand-logo').exists()).toBe(false)
+  })
+
+  it('renders ScoutingPro 27 brand logo and title in standalone web/browser mode', async () => {
+    window.history.replaceState({}, '', '/index.html#/dashboard')
+
+    const userStore = useUserStore()
+    userStore.user = { id: 'u1', username: 'Tester', token: 'token' }
+    const eventStore = useEventStore()
+    eventStore.events = []
+    vi.spyOn(eventStore, 'fetchEvents').mockResolvedValue(undefined)
+
+    const wrapper = mount(DashboardView)
+    await new Promise((r) => setTimeout(r, 10))
+
+    expect(wrapper.find('.topbar').classes()).not.toContain('is-desktop-shell')
+    expect(wrapper.find('.brand').exists()).toBe(true)
+    expect(wrapper.find('.brand-logo').exists()).toBe(true)
+    expect(wrapper.find('.brand').text()).toContain('ScoutingPro 27')
+    expect(wrapper.find('.page-heading').exists()).toBe(false)
   })
 })

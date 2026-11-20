@@ -76,7 +76,7 @@ const detailBragLabel = computed(() => {
   <div class="team-tags-card pit-profile-card">
     <div style="display: flex; align-items: center; justify-content: space-between; margin-bottom: 12px;">
       <h3 style="margin: 0; display: flex; align-items: center; gap: 6px;">
-        <span class="material-icons" style="font-size: 18px; color: var(--primary, #39ff14);">precision_manufacturing</span>
+        <span class="material-icons" style="font-size: 18px; color: var(--primary);">precision_manufacturing</span>
         {{ t('pit_scout.detail_card.title') }}
       </h3>
       <button
@@ -111,15 +111,15 @@ const detailBragLabel = computed(() => {
         </span>
       </div>
 
-      <div style="display: grid; grid-template-columns: repeat(3, 1fr); gap: 10px; background: rgba(255, 255, 255, 0.02); border: 1px solid var(--border); border-radius: 8px; padding: 10px;">
+      <div style="display: grid; grid-template-columns: repeat(3, 1fr); gap: 10px; background: var(--surface-recessed); border: 1px solid var(--border); border-radius: 8px; padding: 10px;">
         <div style="display: flex; flex-direction: column; gap: 2px;">
           <span style="font-size: 11px; color: var(--muted-foreground);">{{ t('pit_scout.detail_card.claimed_calc_total') }}</span>
-          <span style="font-size: 16px; font-weight: 700; color: var(--primary);">{{ unifiedTeam.pitRecord.claimedTotalScore }}</span>
+          <span class="pit-score-val" style="font-size: 16px; font-weight: 700; color: var(--primary);">{{ unifiedTeam.pitRecord.claimedTotalScore }}</span>
           <span style="font-size: 10px; color: var(--muted-foreground);">{{ t('pit_scout.detail_card.claimed_auto_teleop_endgame', { auto: unifiedTeam.pitRecord.claimedAutoScore, teleop: unifiedTeam.pitRecord.claimedTeleopScore, cycles: unifiedTeam.pitRecord.claimedTeleopCycles || 0, endgame: unifiedTeam.pitRecord.claimedEndgameScore || 0 }) }}</span>
         </div>
         <div style="display: flex; flex-direction: column; gap: 2px;">
           <span style="font-size: 11px; color: var(--muted-foreground);">{{ t('pit_scout.detail_card.actual_max_total') }}</span>
-          <span style="font-size: 16px; font-weight: 700; color: var(--foreground);">{{ unifiedTeam.maxTotalScore ?? '-' }}</span>
+          <span class="pit-score-val" style="font-size: 16px; font-weight: 700; color: var(--foreground);">{{ unifiedTeam.maxTotalScore ?? '-' }}</span>
           <span style="font-size: 10px; color: var(--muted-foreground);">{{ t('pit_scout.detail_card.actual_avg', { avg: unifiedTeam.avgTotalScore ?? '-' }) }}</span>
         </div>
         <div style="display: flex; flex-direction: column; gap: 4px;">
@@ -167,20 +167,25 @@ const detailBragLabel = computed(() => {
   color: var(--foreground);
 }
 
+.pit-score-val {
+  font-family: var(--font-numeric);
+  font-variant-numeric: tabular-nums;
+}
+
 .spec-badge {
   font-size: 11px;
   font-weight: 600;
   padding: 4px 10px;
   border-radius: 6px;
-  background: #080807;
-  color: var(--foreground, #f0efe9);
-  border: 1px solid var(--border, #262624);
+  background: var(--surface-recessed);
+  color: var(--foreground);
+  border: 1px solid var(--border);
 }
 
 .custom-spec-badge {
-  border-color: rgba(57, 255, 20, 0.25);
-  background: rgba(57, 255, 20, 0.05);
-  color: var(--primary, #39ff14);
+  border-color: var(--status-success-border);
+  background: var(--status-success-bg);
+  color: var(--s-200);
 }
 
 .detail-verify-row {
@@ -199,15 +204,15 @@ const detailBragLabel = computed(() => {
 }
 
 .verify-pill.is-verified {
-  background: rgba(57, 255, 20, 0.12);
-  color: #39ff14;
-  border: 1px solid rgba(57, 255, 20, 0.35);
+  background: var(--status-success-bg);
+  color: var(--status-success);
+  border: 1px solid var(--status-success-border);
 }
 
 .verify-pill.is-pending {
-  background: rgba(250, 204, 21, 0.12);
-  color: #facc15;
-  border: 1px solid rgba(250, 204, 21, 0.3);
+  background: var(--status-warning-bg);
+  color: var(--status-warning);
+  border: 1px solid var(--status-warning-border);
 }
 
 .user-tag-btn {
@@ -217,20 +222,22 @@ const detailBragLabel = computed(() => {
   gap: 5px;
   padding: 6px 14px;
   border-radius: 8px;
-  background: #1c1c1a;
-  border: 1px solid #353532;
-  color: var(--primary, #39ff14);
+  background: var(--surface-elevated);
+  border: 1px solid var(--border-strong);
+  color: var(--primary);
   font-size: 12px;
   font-weight: 700;
   cursor: pointer;
-  transition: all var(--motion-duration-fast) var(--motion-ease-out);
-  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.35);
+  transition: background-color var(--motion-duration-fast) var(--motion-ease-out),
+              border-color var(--motion-duration-fast) var(--motion-ease-out),
+              color var(--motion-duration-fast) var(--motion-ease-out);
+  box-shadow: var(--shadow-1);
 }
 
 .user-tag-btn:hover {
-  background: rgba(57, 255, 20, 0.12);
-  border-color: var(--primary, #39ff14);
-  color: var(--primary, #39ff14);
-  box-shadow: 0 0 14px rgba(57, 255, 20, 0.25);
+  background: var(--status-success-bg);
+  border-color: var(--primary);
+  color: var(--primary);
+  box-shadow: var(--shadow-1);
 }
 </style>

@@ -65,7 +65,7 @@
   border-radius: 12px;
   font-size: 14px;
   line-height: 1.6;
-  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.25);
+  box-shadow: var(--shadow-1);
 }
 
 .message-content {
@@ -98,7 +98,7 @@
 .inline-prompt-editor textarea:focus {
   outline: none;
   border-color: var(--primary);
-  box-shadow: 0 0 0 1px var(--primary);
+  box-shadow: var(--focus-ring-sm);
 }
 
 .inline-editor-actions {
@@ -108,18 +108,20 @@
 }
 
 .btn-editor-cancel {
-  background: rgba(255, 255, 255, 0.08);
+  background: var(--surface-elevated);
   color: var(--muted-foreground);
   border: 1px solid var(--border);
   border-radius: 6px;
   padding: 4px 10px;
   font-size: 12px;
   cursor: pointer;
-  transition: all 0.15s;
+  transition: background-color var(--motion-duration-fast) var(--motion-ease-out),
+              border-color var(--motion-duration-fast) var(--motion-ease-out),
+              color var(--motion-duration-fast) var(--motion-ease-out);
 }
 
 .btn-editor-cancel:hover {
-  background: rgba(255, 255, 255, 0.15);
+  background: var(--surface-hover);
   color: var(--foreground);
 }
 
@@ -135,18 +137,18 @@
   align-items: center;
   gap: 4px;
   cursor: pointer;
-  box-shadow: var(--glow-primary);
-  transition: all 0.15s;
+  transition: background-color var(--motion-duration-fast) var(--motion-ease-out),
+              opacity var(--motion-duration-fast) var(--motion-ease-out),
+              transform var(--motion-duration-fast) var(--motion-ease-out);
 }
 
 .btn-editor-submit:disabled {
   opacity: 0.5;
   cursor: not-allowed;
-  box-shadow: none;
 }
 
 .btn-editor-submit:hover:not(:disabled) {
-  box-shadow: var(--glow-primary-hover);
+  background: var(--s-300);
 }
 
 /* Hover actions */
@@ -157,12 +159,12 @@
   display: flex;
   gap: 3px;
   opacity: 0;
-  transition: opacity 0.15s ease-in-out;
+  transition: opacity var(--motion-duration-fast) var(--motion-ease-out);
   background: var(--card);
   border: 1px solid var(--border);
   border-radius: 6px;
   padding: 2px;
-  box-shadow: 0 4px 10px rgba(0, 0, 0, 0.4);
+  box-shadow: var(--shadow-2);
   z-index: 10;
 }
 
@@ -185,7 +187,8 @@
   display: flex;
   align-items: center;
   justify-content: center;
-  transition: all 0.15s;
+  transition: background-color var(--motion-duration-fast) var(--motion-ease-out),
+              color var(--motion-duration-fast) var(--motion-ease-out);
 }
 
 .message-actions button:hover {
@@ -246,8 +249,8 @@
 :deep(.markdown-body blockquote) {
   margin: 10px 0;
   padding: 6px 12px;
-  border-left: 3px solid var(--primary, #3498db);
-  background: rgba(255, 255, 255, 0.04);
+  border-left: 3px solid var(--primary);
+  background: color-mix(in srgb, var(--g-50) 4%, transparent);
   border-radius: 0 6px 6px 0;
   color: var(--muted-foreground);
 }
@@ -256,10 +259,10 @@
   margin: 10px 0;
   padding: 12px 14px;
   border-radius: 8px;
-  background: #181a1f !important;
-  border: 1px solid rgba(255, 255, 255, 0.1);
+  background: var(--surface-recessed) !important;
+  border: 1px solid var(--border);
   overflow-x: auto;
-  font-family: 'JetBrains Mono', 'Fira Code', Consolas, Monaco, monospace;
+  font-family: var(--font-mono);
   font-size: 13px;
   line-height: 1.45;
 }
@@ -267,9 +270,9 @@
 :deep(.markdown-body code:not(pre code)) {
   padding: 2px 6px;
   border-radius: 4px;
-  background: rgba(255, 255, 255, 0.1);
-  color: #f39c12;
-  font-family: 'JetBrains Mono', 'Fira Code', Consolas, Monaco, monospace;
+  background: var(--surface-hover);
+  color: var(--status-warning);
+  font-family: var(--font-mono);
   font-size: 12.5px;
 }
 
@@ -286,18 +289,18 @@
   text-align: left;
 }
 :deep(.markdown-body th) {
-  background: rgba(255, 255, 255, 0.06);
+  background: var(--surface-elevated);
   font-weight: 600;
 }
 :deep(.markdown-body tr:nth-child(even)) {
-  background: rgba(255, 255, 255, 0.02);
+  background: color-mix(in srgb, var(--g-50) 2%, transparent);
 }
 
 :deep(.markdown-body a) {
-  color: var(--primary, #3498db);
+  color: var(--primary);
   text-decoration: underline;
   text-underline-offset: 2px;
-  transition: opacity 0.2s;
+  transition: opacity var(--motion-duration-fast) var(--motion-ease-out);
 }
 :deep(.markdown-body a:hover) {
   opacity: 0.8;
@@ -311,26 +314,28 @@
 
 :deep(.team-chip) {
   display: inline;
-  color: var(--primary, #39ff14);
+  color: var(--primary);
   font-weight: 700;
-  font-family: 'Orbitron', monospace;
+  font-family: var(--font-numeric);
+  font-variant-numeric: tabular-nums;
   text-decoration: underline;
-  text-decoration-color: var(--primary, #39ff14);
+  text-decoration-color: var(--primary);
   text-decoration-thickness: 1.5px;
   text-underline-offset: 3px;
   cursor: pointer;
   user-select: none;
-  transition: all 0.15s ease-in-out;
+  transition: background-color var(--motion-duration-fast) var(--motion-ease-out),
+              color var(--motion-duration-fast) var(--motion-ease-out),
+              text-decoration-color var(--motion-duration-fast) var(--motion-ease-out);
   padding: 1px 3px;
   margin: 0 1px;
   border-radius: 4px;
 }
 
 :deep(.team-chip:hover) {
-  color: var(--primary, #39ff14);
-  text-shadow: 0 0 8px rgba(57, 255, 20, 0.7);
-  text-decoration-color: #ffffff;
-  background: rgba(57, 255, 20, 0.12);
+  color: var(--primary);
+  text-decoration-color: var(--g-50);
+  background: color-mix(in srgb, var(--primary) 12%, transparent);
 }
 
 :deep(.team-chip:active) {
@@ -339,14 +344,13 @@
 
 /* 用户气泡（绿底黑字）内的队伍标记：深色下划线与高对比度文字适配 */
 .message-wrapper.user .message-bubble :deep(.team-chip) {
-  color: #000000;
-  text-decoration-color: #000000;
+  color: var(--on-primary);
+  text-decoration-color: var(--on-primary);
   font-weight: 800;
 }
 
 .message-wrapper.user .message-bubble :deep(.team-chip:hover) {
-  color: #000000;
-  text-decoration-color: #000000;
-  background: rgba(0, 0, 0, 0.15);
-  text-shadow: none;
+  color: var(--on-primary);
+  text-decoration-color: var(--on-primary);
+  background: color-mix(in srgb, var(--on-primary) 15%, transparent);
 }

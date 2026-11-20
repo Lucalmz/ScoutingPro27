@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref, reactive, onMounted, onUnmounted, watch, computed, nextTick } from 'vue'
+import { ref, reactive, onMounted, onUnmounted, watch, computed } from 'vue'
 import { useRoute, useRouter, onBeforeRouteLeave, onBeforeRouteUpdate } from 'vue-router'
 import { useUserStore } from '@/stores/user'
 import { useEventStore } from '@/stores/events'
@@ -31,6 +31,8 @@ import MobileBottomNav from '@/components/common/MobileBottomNav.vue'
 import MobileStatusPill from '@/components/common/MobileStatusPill.vue'
 import MobilePhaseWizardForm from '@/components/scouting/mobile/MobilePhaseWizardForm.vue'
 import { useIsMobile, isMobileDevice } from '@/composables/useIsMobile'
+import { useUserProfileTransition } from '@/composables/useUserProfileTransition'
+import { hasDesktopTitleBar } from '@/utils/desktopShell'
 import { syncRecords } from '@/services/api'
 import { transitionState } from '@/utils/transitionState'
 import { useToastStore } from '@/stores/toast'
@@ -38,6 +40,7 @@ import { useEventWebRtcBridge } from './useEventWebRtcBridge'
 import { useEventTransitions } from './useEventTransitions'
 
 const { isMobile } = useIsMobile()
+const inDesktopShell = hasDesktopTitleBar()
 
 const route = useRoute()
 const router = useRouter()
@@ -68,21 +71,12 @@ const { t } = useI18n()
 const showRenameModal = ref(false)
 const showOfflineSyncModal = ref(false)
 const showMobileQrModal = ref(false)
-function handleOpenRenameModal() {
-  if (typeof document !== 'undefined' && 'startViewTransition' in document) {
-    document.documentElement.dataset.transitionType = 'user-profile'
-    const vt = (document as any).startViewTransition(async () => {
-      showRenameModal.value = true
-      await nextTick()
-    })
-    vt.ready?.catch(() => {})
-    vt.updateCallbackDone?.catch(() => {})
-    vt.finished.catch(() => {}).finally(() => {
-      document.documentElement.removeAttribute('data-transition-type')
-    })
-  } else {
-    showRenameModal.value = true
-  }
+const { openProfileModal } = useUserProfileTransition()
+function handleOpenRenameModal(e?: MouseEvent) {
+  const triggerEl = (e?.currentTarget as HTMLElement | null) ?? null
+  openProfileModal((val) => {
+    showRenameModal.value = val
+  }, triggerEl)
 }
 
 // Entrance animation and layout refs
@@ -342,7 +336,7 @@ async function handleTakeoverHost() {
         <button class="btn-back" @click="goBack" style="display: flex; align-items: center; gap: 4px;">
           <span class="material-icons" style="font-size: 18px;">arrow_back</span>{{ t('event.back') }}
         </button>
-        <img src="/logo_60.png" srcset="/logo_30.png 1x, /logo_60.png 2x" alt="SP27" class="event-brand-logo" />
+        <img v-if="!inDesktopShell" src="/logo_60.png" srcset="/logo_30.png 1x, /logo_60.png 2x" alt="SP27" class="event-brand-logo" />
         <div class="event-title">
           <span class="event-name" :style="{ viewTransitionName: 'event-card-title' }">{{ event?.name ?? t('event.event') }}</span>
           <div class="event-meta-row" v-if="event">
@@ -398,6 +392,7 @@ async function handleTakeoverHost() {
         </button>
         <button
           class="user-tag-btn user-profile-btn"
+          :class="{ 'is-profile-open': showRenameModal }"
           @click="handleOpenRenameModal"
           :title="t('user.edit_nickname')"
           :style="{ viewTransitionName: !showRenameModal ? 'user-profile-box' : 'none' }"

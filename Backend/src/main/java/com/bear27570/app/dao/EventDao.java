@@ -12,11 +12,14 @@ import java.util.List;
 @RegisterBeanMapper(ScoutingEvent.class)
 public interface EventDao {
 
-    @SqlUpdate("INSERT INTO events (id, name, invite_code, host_id, ftc_year, ftc_event_code) VALUES (:id, :name, :inviteCode, :hostId, :ftcYear, :ftcEventCode)")
+    @SqlUpdate("INSERT INTO events (id, name, invite_code, host_id, ftc_year, ftc_event_code, turn_config_encrypted) VALUES (:id, :name, :inviteCode, :hostId, :ftcYear, :ftcEventCode, :turnConfigEncrypted)")
     void insert(@BindBean ScoutingEvent event);
 
     @SqlUpdate("UPDATE events SET ftc_year = :year, ftc_event_code = :code WHERE id = :id")
     void updateFtcConfig(@Bind("id") String id, @Bind("year") Integer year, @Bind("code") String code);
+
+    @SqlUpdate("UPDATE events SET turn_config_encrypted = :turnConfigEncrypted WHERE id = :id")
+    void updateTurnConfig(@Bind("id") String id, @Bind("turnConfigEncrypted") String turnConfigEncrypted);
 
     @SqlUpdate("MERGE INTO event_users (event_id, user_id) KEY(event_id, user_id) VALUES (:eventId, :userId)")
     void joinEvent(@Bind("eventId") String eventId, @Bind("userId") String userId);

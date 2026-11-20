@@ -3,6 +3,9 @@ package com.bear27570.app.util;
 import org.junit.jupiter.api.Test;
 
 import java.net.InetAddress;
+import java.util.Collections;
+import java.util.Map;
+import java.util.concurrent.atomic.AtomicInteger;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
@@ -181,6 +184,131 @@ class NetworkUtilTest {
             System.out.println("[E2E-TEST] POST /api/system/heal-ipv6-routes -> " + healRes.code());
             assertThat(healRes.code()).isEqualTo(404);
         });
+    }
+
+    @Test
+    void testHasHeadlessArgNormalization() {
+        assertThat(NetworkUtil.hasHeadlessArg(new String[]{"--headless"})).isTrue();
+        assertThat(NetworkUtil.hasHeadlessArg(new String[]{"--port=8080", "\"--headless\""})).isTrue();
+        assertThat(NetworkUtil.hasHeadlessArg(new String[]{"  --headless  "})).isTrue();
+        assertThat(NetworkUtil.hasHeadlessArg(new String[]{" \"--headless\" "})).isTrue();
+
+        assertThat(NetworkUtil.hasHeadlessArg(null)).isFalse();
+        assertThat(NetworkUtil.hasHeadlessArg(new String[0])).isFalse();
+        assertThat(NetworkUtil.hasHeadlessArg(new String[]{null, "--port=8080", "--headless-mode"})).isFalse();
+    }
+
+    @Test
+    void testShouldSkipFirewallCheckFlagsAndHeadlessAlone() {
+        Map<String, String> empty = Collections.emptyMap();
+
+        // --headless alone WITHOUT SKIP_FIREWALL_CHECK / ENABLE_TEST_CLEANUP must NOT skip
+        assertThat(NetworkUtil.shouldSkipFirewallCheck(new String[]{"--headless"}, empty::get, empty::get)).isFalse();
+        assertThat(NetworkUtil.shouldSkipFirewallCheck(new String[]{"\"--headless\""}, empty::get, empty::get)).isFalse();
+        assertThat(NetworkUtil.shouldSkipFirewallCheck(new String[0], empty::get, empty::get)).isFalse();
+        assertThat(NetworkUtil.shouldSkipFirewallCheck(null, empty::get, empty::get)).isFalse();
+
+        // ENABLE_TEST_CLEANUP / SKIP_FIREWALL_CHECK via envLookup (case-insensitive, trimmed)
+        for (String val : new String[]{"true", "TRUE", "TrUe", " true "}) {
+            assertThat(NetworkUtil.shouldSkipFirewallCheck(
+                    new String[0], Map.of("ENABLE_TEST_CLEANUP", val)::get, empty::get)).isTrue();
+            assertThat(NetworkUtil.shouldSkipFirewallCheck(
+                    new String[0], Map.of("SKIP_FIREWALL_CHECK", val)::get, empty::get)).isTrue();
+            assertThat(NetworkUtil.shouldSkipFirewallCheck(
+                    new String[0], empty::get, Map.of("ENABLE_TEST_CLEANUP", val)::get)).isTrue();
+            assertThat(NetworkUtil.shouldSkipFirewallCheck(
+                    new String[0], empty::get, Map.of("SKIP_FIREWALL_CHECK", val)::get)).isTrue();
+        }
+
+        // Negative flag values
+        for (String val : new String[]{"false", "0", "1", "yes", ""}) {
+            assertThat(NetworkUtil.shouldSkipFirewallCheck(
+                    new String[]{"--headless"}, Map.of("ENABLE_TEST_CLEANUP", val)::get, empty::get)).isFalse();
+            assertThat(NetworkUtil.shouldSkipFirewallCheck(
+                    new String[]{"--headless"}, empty::get, Map.of("SKIP_FIREWALL_CHECK", val)::get)).isFalse();
+        }
+
+        // Real System property checks with try/finally cleanup
+        String prevCleanup = System.getProperty("ENABLE_TEST_CLEANUP");
+        String prevSkip = System.getProperty("SKIP_FIREWALL_CHECK");
+        try {
+            System.clearProperty("ENABLE_TEST_CLEANUP");
+            System.clearProperty("SKIP_FIREWALL_CHECK");
+            boolean envActive = "true".equalsIgnoreCase(String.valueOf(System.getenv("ENABLE_TEST_CLEANUP")).trim())
+                    || "true".equalsIgnoreCase(String.valueOf(System.getenv("SKIP_FIREWALL_CHECK")).trim());
+            if (!envActive) {
+                assertThat(NetworkUtil.shouldSkipFirewallCheck(new String[]{"--headless"})).isFalse();
+                assertThat(NetworkUtil.shouldSkipFirewallCheck()).isFalse();
+            }
+
+            System.setProperty("ENABLE_TEST_CLEANUP", " TrUe ");
+            assertThat(NetworkUtil.shouldSkipFirewallCheck()).isTrue();
+            assertThat(NetworkUtil.shouldSkipFirewallCheck(new String[0])).isTrue();
+
+            System.clearProperty("ENABLE_TEST_CLEANUP");
+            System.setProperty("SKIP_FIREWALL_CHECK", "TRUE");
+            assertThat(NetworkUtil.shouldSkipFirewallCheck()).isTrue();
+            assertThat(NetworkUtil.shouldSkipFirewallCheck(new String[0])).isTrue();
+        } finally {
+            if (prevCleanup == null) {
+                System.clearProperty("ENABLE_TEST_CLEANUP");
+            } else {
+                System.setProperty("ENABLE_TEST_CLEANUP", prevCleanup);
+            }
+            if (prevSkip == null) {
+                System.clearProperty("SKIP_FIREWALL_CHECK");
+            } else {
+                System.setProperty("SKIP_FIREWALL_CHECK", prevSkip);
+            }
+        }
+    }
+
+    @Test
+    void testEnsureWindowsFirewallPortAndPromptSkipWithoutUac() {
+        String prevCleanup = System.getProperty("ENABLE_TEST_CLEANUP");
+        String prevSkip = System.getProperty("SKIP_FIREWALL_CHECK");
+        try {
+            System.clearProperty("ENABLE_TEST_CLEANUP");
+            System.setProperty("SKIP_FIREWALL_CHECK", "true");
+
+            boolean executedWithSkipFlag = NetworkUtil.ensureWindowsFirewallPort(18080, port -> {
+                throw new AssertionError("Firewall action must be skipped when SKIP_FIREWALL_CHECK=true!");
+            });
+            assertThat(executedWithSkipFlag).isFalse();
+            NetworkUtil.ensureWindowsFirewallPort(18080);
+            assertThat(NetworkUtil.openWindowsFirewallPrompt(18080)).isFalse();
+
+            System.clearProperty("SKIP_FIREWALL_CHECK");
+            System.setProperty("ENABLE_TEST_CLEANUP", "TrUe");
+
+            boolean executedWithCleanupFlag = NetworkUtil.ensureWindowsFirewallPort(18080, port -> {
+                throw new AssertionError("Firewall action must be skipped when ENABLE_TEST_CLEANUP=true!");
+            });
+            assertThat(executedWithCleanupFlag).isFalse();
+            NetworkUtil.ensureWindowsFirewallPort(18080);
+            assertThat(NetworkUtil.openWindowsFirewallPrompt(18080)).isFalse();
+
+            // When flags are cleared (and env doesn't force skip), ensureWindowsFirewallPort delegates to applyAction
+            System.clearProperty("ENABLE_TEST_CLEANUP");
+            System.clearProperty("SKIP_FIREWALL_CHECK");
+            if (!NetworkUtil.shouldSkipFirewallCheck()) {
+                AtomicInteger invokedPort = new AtomicInteger(-1);
+                boolean executedWithoutFlags = NetworkUtil.ensureWindowsFirewallPort(18080, invokedPort::set);
+                assertThat(executedWithoutFlags).isTrue();
+                assertThat(invokedPort.get()).isEqualTo(18080);
+            }
+        } finally {
+            if (prevCleanup == null) {
+                System.clearProperty("ENABLE_TEST_CLEANUP");
+            } else {
+                System.setProperty("ENABLE_TEST_CLEANUP", prevCleanup);
+            }
+            if (prevSkip == null) {
+                System.clearProperty("SKIP_FIREWALL_CHECK");
+            } else {
+                System.setProperty("SKIP_FIREWALL_CHECK", prevSkip);
+            }
+        }
     }
 }
 

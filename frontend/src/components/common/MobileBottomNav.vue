@@ -193,7 +193,7 @@ function handleExit() {
               <span class="material-icons sheet-tool-icon">qr_code_2</span>
               <span>{{ t('event.mobile_qr_btn') }}</span>
             </div>
-            <span class="material-icons" style="font-size: 16px; color: #888;">chevron_right</span>
+            <span class="material-icons sheet-tool-chevron">chevron_right</span>
           </button>
 
           <button type="button" class="sheet-tool-row" @click="handleOpenOfflineSync">
@@ -201,7 +201,7 @@ function handleExit() {
               <span class="material-icons sheet-tool-icon">usb</span>
               <span>{{ t('offline_sync.open_modal') }}</span>
             </div>
-            <span class="material-icons" style="font-size: 16px; color: #888;">chevron_right</span>
+            <span class="material-icons sheet-tool-chevron">chevron_right</span>
           </button>
         </div>
 
@@ -249,10 +249,10 @@ function handleExit() {
   height: calc(56px + var(--sab, env(safe-area-inset-bottom, 0px)));
   padding-bottom: var(--sab, env(safe-area-inset-bottom, 0px));
   box-sizing: border-box;
-  background: var(--card, #141413);
-  border-top: 1px solid var(--border, #262624);
+  background: var(--card);
+  border-top: 1px solid var(--border);
   z-index: 850;
-  box-shadow: 0 -6px 24px rgba(0, 0, 0, 0.65);
+  box-shadow: 0 -6px 24px color-mix(in srgb, var(--g-950) 65%, transparent);
   user-select: none;
 }
 
@@ -280,10 +280,10 @@ function handleExit() {
   gap: 3px;
   background: transparent;
   border: none;
-  color: var(--muted-foreground, #888888);
+  color: var(--muted-foreground);
   cursor: pointer;
   padding: 4px 0;
-  transition: color 0.15s ease, transform 0.1s ease;
+  transition: color var(--motion-duration-fast) var(--motion-ease-out), transform var(--motion-duration-fast) var(--motion-ease-out);
   user-select: none;
   -webkit-tap-highlight-color: transparent;
   min-height: 44px;
@@ -306,9 +306,8 @@ function handleExit() {
   width: 5px;
   height: 5px;
   border-radius: 50%;
-  background: var(--primary, #39ff14);
-  box-shadow: 0 0 6px rgba(57, 255, 20, 0.8);
-  animation: dot-pop 0.25s cubic-bezier(0.34, 1.56, 0.64, 1) both;
+  background: var(--primary);
+  animation: dot-pop var(--motion-duration-moderate) var(--motion-ease-spring) both;
 }
 
 @keyframes dot-pop {
@@ -323,13 +322,12 @@ function handleExit() {
 }
 
 .nav-item-btn.is-active {
-  color: var(--primary, #39ff14);
+  color: var(--primary);
   font-weight: 600;
-  text-shadow: 0 0 10px rgba(57, 255, 20, 0.45);
 }
 
 .nav-item-btn.is-active .nav-icon {
-  animation: nav-pop 0.28s cubic-bezier(0.34, 1.56, 0.64, 1) both;
+  animation: nav-pop var(--motion-duration-moderate) var(--motion-ease-spring) both;
 }
 
 @keyframes nav-pop {
@@ -345,7 +343,7 @@ function handleExit() {
 }
 
 .nav-item-btn.is-more-opened {
-  color: var(--primary, #39ff14);
+  color: var(--primary);
 }
 
 .nav-icon {
@@ -361,7 +359,7 @@ function handleExit() {
 .more-sheet-backdrop {
   position: fixed;
   inset: 0;
-  background: rgba(8, 8, 7, 0.76);
+  background: color-mix(in srgb, var(--g-950) 76%, transparent);
   z-index: 840;
 }
 
@@ -373,15 +371,15 @@ function handleExit() {
   right: 0;
   margin: 0 auto;
   max-width: 540px;
-  background: var(--card, #141413);
+  background: var(--popover);
   border-top-left-radius: 20px;
   border-top-right-radius: 20px;
-  border: 1px solid var(--border, #262624);
+  border: 1px solid var(--border-strong);
   border-bottom: none;
   padding: 12px 16px 20px;
   box-sizing: border-box;
   z-index: 845;
-  box-shadow: 0 -12px 36px rgba(0, 0, 0, 0.78);
+  box-shadow: 0 -12px 36px color-mix(in srgb, var(--g-950) 78%, transparent);
 }
 
 .sheet-header {
@@ -395,14 +393,14 @@ function handleExit() {
 .sheet-handle {
   width: 36px;
   height: 4px;
-  background: rgba(255, 255, 255, 0.25);
+  background: color-mix(in srgb, var(--g-50) 25%, transparent);
   border-radius: 2px;
 }
 
 .sheet-title {
   font-size: 13px;
   font-weight: 600;
-  color: var(--muted-foreground, #888888);
+  color: var(--muted-foreground);
   letter-spacing: 0.5px;
 }
 
@@ -419,26 +417,25 @@ function handleExit() {
   justify-content: center;
   gap: 8px;
   padding: 14px 8px;
-  background: rgba(255, 255, 255, 0.04);
-  border: 1px solid rgba(255, 255, 255, 0.08);
+  background: color-mix(in srgb, var(--g-50) 4%, transparent);
+  border: 1px solid var(--border);
   border-radius: 12px;
-  color: var(--foreground, #ffffff);
+  color: var(--foreground);
   cursor: pointer;
-  transition: all 0.2s ease;
+  transition: background-color var(--motion-duration-fast) var(--motion-ease-out), border-color var(--motion-duration-fast) var(--motion-ease-out), color var(--motion-duration-fast) var(--motion-ease-out), transform var(--motion-duration-fast) var(--motion-ease-out);
   min-height: 48px;
   -webkit-tap-highlight-color: transparent;
 }
 
 .sheet-item-btn:active {
   transform: scale(0.95);
-  background: rgba(255, 255, 255, 0.08);
+  background: var(--surface-hover);
 }
 
 .sheet-item-btn.is-active {
-  background: rgba(57, 255, 20, 0.12);
-  border-color: var(--primary, #39ff14);
-  color: var(--primary, #39ff14);
-  box-shadow: 0 0 12px rgba(57, 255, 20, 0.25);
+  background: color-mix(in srgb, var(--primary) 12%, transparent);
+  border-color: var(--primary);
+  color: var(--primary);
 }
 
 .sheet-icon {
@@ -454,7 +451,7 @@ function handleExit() {
 /* Animations */
 .sheet-fade-enter-active,
 .sheet-fade-leave-active {
-  transition: opacity 0.2s ease;
+  transition: opacity var(--motion-duration-moderate) var(--motion-ease-out);
 }
 .sheet-fade-enter-from,
 .sheet-fade-leave-to {
@@ -462,10 +459,10 @@ function handleExit() {
 }
 
 .sheet-slide-enter-active {
-  transition: transform 0.32s cubic-bezier(0.34, 1.25, 0.64, 1), opacity 0.25s ease;
+  transition: transform var(--motion-duration-normal) var(--motion-ease-spring), opacity var(--motion-duration-moderate) var(--motion-ease-out);
 }
 .sheet-slide-leave-active {
-  transition: transform 0.22s cubic-bezier(0.16, 1, 0.3, 1), opacity 0.2s ease;
+  transition: transform var(--motion-duration-moderate) var(--motion-ease-out), opacity var(--motion-duration-fast) var(--motion-ease-out);
 }
 .sheet-slide-enter-from,
 .sheet-slide-leave-to {
@@ -474,11 +471,11 @@ function handleExit() {
 }
 
 .sheet-slide-enter-active .sheet-item-btn {
-  animation: sheet-item-pop 0.3s cubic-bezier(0.16, 1, 0.3, 1) both;
+  animation: sheet-item-pop var(--motion-duration-normal) var(--motion-ease-out) both;
 }
-.sheet-slide-enter-active .sheet-item-btn:nth-child(1) { animation-delay: 0.03s; }
-.sheet-slide-enter-active .sheet-item-btn:nth-child(2) { animation-delay: 0.06s; }
-.sheet-slide-enter-active .sheet-item-btn:nth-child(3) { animation-delay: 0.09s; }
+.sheet-slide-enter-active .sheet-item-btn:nth-child(1) { animation-delay: 30ms; }
+.sheet-slide-enter-active .sheet-item-btn:nth-child(2) { animation-delay: 60ms; }
+.sheet-slide-enter-active .sheet-item-btn:nth-child(3) { animation-delay: 90ms; }
 
 @keyframes sheet-item-pop {
   from {
@@ -497,16 +494,16 @@ function handleExit() {
   align-items: center;
   justify-content: space-between;
   padding: 12px 14px;
-  background: rgba(255, 255, 255, 0.05);
-  border: 1px solid rgba(255, 255, 255, 0.1);
+  background: color-mix(in srgb, var(--g-50) 5%, transparent);
+  border: 1px solid var(--border);
   border-radius: 12px;
   margin-bottom: 14px;
   cursor: pointer;
-  transition: all 0.2s ease;
+  transition: background-color var(--motion-duration-fast) var(--motion-ease-out), border-color var(--motion-duration-fast) var(--motion-ease-out);
 }
 
 .sheet-user-card:active {
-  background: rgba(255, 255, 255, 0.08);
+  background: var(--surface-hover);
 }
 
 .sheet-user-left {
@@ -517,7 +514,7 @@ function handleExit() {
 
 .sheet-user-avatar {
   font-size: 32px;
-  color: #39ff14;
+  color: var(--primary);
 }
 
 .sheet-user-info {
@@ -528,18 +525,18 @@ function handleExit() {
 .sheet-user-name {
   font-size: 15px;
   font-weight: 700;
-  color: #ffffff;
+  color: var(--foreground);
 }
 
 .sheet-user-role {
   font-size: 11px;
-  color: #8b949e;
+  color: var(--muted-foreground);
 }
 
 .btn-sheet-edit-profile {
-  background: rgba(255, 255, 255, 0.08);
+  background: var(--surface-hover);
   border: none;
-  color: #9ca3af;
+  color: var(--muted-foreground);
   border-radius: 8px;
   padding: 6px;
   cursor: pointer;
@@ -551,7 +548,7 @@ function handleExit() {
 .sheet-section-title {
   font-size: 11px;
   font-weight: 600;
-  color: #8b949e;
+  color: var(--muted-foreground);
   text-transform: uppercase;
   letter-spacing: 0.5px;
   margin-bottom: 8px;
@@ -570,19 +567,19 @@ function handleExit() {
   align-items: center;
   justify-content: space-between;
   padding: 12px 14px;
-  background: rgba(255, 255, 255, 0.04);
-  border: 1px solid rgba(255, 255, 255, 0.08);
+  background: color-mix(in srgb, var(--g-50) 4%, transparent);
+  border: 1px solid var(--border);
   border-radius: 10px;
-  color: #ffffff;
+  color: var(--foreground);
   cursor: pointer;
   font-size: 13px;
   font-weight: 500;
-  transition: background 0.15s ease;
+  transition: background-color var(--motion-duration-fast) var(--motion-ease-out), border-color var(--motion-duration-fast) var(--motion-ease-out);
   min-height: 46px;
 }
 
 .sheet-tool-row:active {
-  background: rgba(255, 255, 255, 0.08);
+  background: var(--surface-hover);
 }
 
 .sheet-tool-left {
@@ -593,14 +590,20 @@ function handleExit() {
 
 .sheet-tool-icon {
   font-size: 20px;
-  color: #9ca3af;
+  color: var(--muted-foreground);
+}
+
+.sheet-tool-chevron {
+  font-size: 16px;
+  color: var(--muted-foreground);
 }
 
 .sheet-tool-badge {
-  background: #ef4444;
-  color: #ffffff;
+  background: var(--status-error);
+  color: var(--destructive-foreground);
   font-size: 11px;
   font-weight: 700;
+  font-variant-numeric: tabular-nums;
   padding: 1px 6px;
   border-radius: 9999px;
 }
@@ -609,7 +612,7 @@ function handleExit() {
 .sheet-exit-wrap {
   margin-top: 16px;
   padding-top: 12px;
-  border-top: 1px solid rgba(255, 255, 255, 0.08);
+  border-top: 1px solid var(--border-subtle);
 }
 
 .btn-sheet-exit {
@@ -618,17 +621,17 @@ function handleExit() {
   display: flex;
   align-items: center;
   justify-content: center;
-  background: rgba(239, 68, 68, 0.12);
-  border: 1px solid rgba(239, 68, 68, 0.3);
-  color: #f87171;
+  background: var(--status-error-bg);
+  border: 1px solid var(--status-error-border);
+  color: var(--status-error);
   border-radius: 10px;
   font-size: 13px;
   font-weight: 600;
   cursor: pointer;
-  transition: all 0.2s ease;
+  transition: background-color var(--motion-duration-fast) var(--motion-ease-out), border-color var(--motion-duration-fast) var(--motion-ease-out), transform var(--motion-duration-fast) var(--motion-ease-out);
 }
 
 .btn-sheet-exit:active {
-  background: rgba(239, 68, 68, 0.2);
+  background: color-mix(in srgb, var(--status-error) 20%, transparent);
 }
 </style>

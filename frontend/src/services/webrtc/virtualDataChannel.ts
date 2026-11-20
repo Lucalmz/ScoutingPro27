@@ -85,20 +85,25 @@ export class VirtualDataChannel {
     }
   }
 
+  private isSendPermitted(): boolean {
+    return this.readyState !== 'closed' && (this.readyState === 'open' || this.isDraining)
+  }
+
   public sendAsync(data: string): Promise<void> {
-    if (this.readyState !== 'open' && !this.isDraining) {
+    if (!this.isSendPermitted()) {
       return Promise.reject(new Error(`VirtualDataChannel is not open (state: ${this.readyState})`))
     }
     const byteLen = typeof data === 'string' ? data.length : 0
     this.bufferedAmount += byteLen
 
+    const prevChain = this.sendChain
     const currentTask = (async () => {
       // 等待前序排队任务解决（无论成功与否，均允许后续任务继续执行）
       try {
-        await this.sendChain
+        await prevChain
       } catch {}
 
-      if (this.readyState !== 'open' && !this.isDraining) {
+      if (!this.isSendPermitted()) {
         throw new Error(`VirtualDataChannel closed before queued frame could be sent (state: ${this.readyState})`)
       }
       const signaling = this.options.getSignaling()
@@ -115,21 +120,26 @@ export class VirtualDataChannel {
           payload: data
         })
       )
+      if (!this.isSendPermitted()) {
+        throw new Error(`VirtualDataChannel closed before queued frame could be sent (state: ${this.readyState})`)
+      }
       let abortCallback: ((err: Error) => void) | null = null
       const closeRace = new Promise<never>((_, reject) => {
         abortCallback = reject
         this.pendingSendAborts.add(reject)
       })
 
-      const sendPromise = signaling.send(
-        {
-          encrypted,
-          clientSessionId: this.sessionId
-        },
-        target
-      )
-
       try {
+        const sendPromise = Promise.resolve(
+          signaling.send(
+            {
+              encrypted,
+              clientSessionId: this.sessionId
+            },
+            target
+          )
+        )
+        sendPromise.catch(() => {})
         await Promise.race([sendPromise, closeRace])
       } finally {
         if (abortCallback) {

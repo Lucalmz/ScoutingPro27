@@ -1,10 +1,11 @@
 <script setup lang="ts">
-import { ref, watch, nextTick, onMounted, onUnmounted } from 'vue'
+import { ref, computed, watch, nextTick, onMounted, onUnmounted } from 'vue'
 import { useUserStore } from '@/stores/user'
 import { useConnectionStore } from '@/stores/connection'
 import { useEventStore } from '@/stores/events'
 import { useToastStore } from '@/stores/toast'
 import { useI18n } from 'vue-i18n'
+import { useUserProfileTransition, supportsViewTransitionApi } from '@/composables/useUserProfileTransition'
 
 const props = defineProps<{
   visible: boolean
@@ -21,6 +22,7 @@ const userStore = useUserStore()
 const connStore = useConnectionStore()
 const eventStore = useEventStore()
 const toastStore = useToastStore()
+const { isProfileTransitioning, lastLandingSeq, closeProfileModal } = useUserProfileTransition()
 
 const newUsername = ref('')
 const changePassword = ref(false)
@@ -30,9 +32,18 @@ const confirmPassword = ref('')
 
 const saving = ref(false)
 const errorMsg = ref<string | null>(null)
-const isTransitioning = ref(false)
+const usernameInputRef = ref<HTMLInputElement | null>(null)
+const isLanded = ref(false)
+let landedTimer: ReturnType<typeof setTimeout> | null = null
+
+const useFallbackTransition = computed(() => !supportsViewTransitionApi())
 
 watch(() => props.visible, (val) => {
+  if (landedTimer !== null) {
+    clearTimeout(landedTimer)
+    landedTimer = null
+  }
+  isLanded.value = false
   if (val) {
     newUsername.value = userStore.username
     changePassword.value = false
@@ -41,32 +52,31 @@ watch(() => props.visible, (val) => {
     confirmPassword.value = ''
     errorMsg.value = null
     saving.value = false
-    isTransitioning.value = true
-    setTimeout(() => {
-      isTransitioning.value = false
-    }, 380)
-  } else {
-    isTransitioning.value = false
   }
 }, { immediate: true })
 
+watch(lastLandingSeq, async () => {
+  if (!props.visible || isProfileTransitioning.value) return
+  await nextTick()
+  const input = usernameInputRef.value
+  if (input) {
+    input.focus({ preventScroll: true })
+    const len = input.value.length
+    if (typeof input.setSelectionRange === 'function') {
+      input.setSelectionRange(len, len)
+    }
+  }
+  isLanded.value = true
+  if (landedTimer !== null) clearTimeout(landedTimer)
+  landedTimer = setTimeout(() => {
+    isLanded.value = false
+    landedTimer = null
+  }, 520)
+})
+
 function handleClose() {
   if (saving.value) return
-  if (typeof document !== 'undefined' && 'startViewTransition' in document) {
-    isTransitioning.value = false
-    document.documentElement.dataset.transitionType = 'user-profile'
-    const vt = (document as any).startViewTransition(async () => {
-      emit('update:visible', false)
-      await nextTick()
-    })
-    vt.ready?.catch(() => {})
-    vt.updateCallbackDone?.catch(() => {})
-    vt.finished.catch(() => {}).finally(() => {
-      document.documentElement.removeAttribute('data-transition-type')
-    })
-  } else {
-    emit('update:visible', false)
-  }
+  void closeProfileModal((val) => emit('update:visible', val))
 }
 
 function onGlobalKeyDown(e: KeyboardEvent) {
@@ -81,6 +91,10 @@ onMounted(() => {
 
 onUnmounted(() => {
   window.removeEventListener('keydown', onGlobalKeyDown)
+  if (landedTimer !== null) {
+    clearTimeout(landedTimer)
+    landedTimer = null
+  }
 })
 
 async function handleSave() {
@@ -126,22 +140,9 @@ async function handleSave() {
         connStore.requestSync(0, undefined, res.newId, res.newUsername)
       }
       toastStore.showToast(t('user.rename_success'), 'info')
+      newUsername.value = res.newUsername
       emit('renamed', res.newUsername)
-      if (typeof document !== 'undefined' && 'startViewTransition' in document) {
-        isTransitioning.value = false
-        document.documentElement.dataset.transitionType = 'user-profile'
-        const vt = (document as any).startViewTransition(async () => {
-          emit('update:visible', false)
-          await nextTick()
-        })
-        vt.ready?.catch(() => {})
-        vt.updateCallbackDone?.catch(() => {})
-        vt.finished.catch(() => {}).finally(() => {
-          document.documentElement.removeAttribute('data-transition-type')
-        })
-      } else {
-        emit('update:visible', false)
-      }
+      await closeProfileModal((val) => emit('update:visible', val))
     } else {
       const errLower = (res.error || '').toLowerCase()
       if (errLower.includes('401') || errLower.includes('old password') || errLower.includes('incorrect password')) {
@@ -161,14 +162,25 @@ async function handleSave() {
 </script>
 
 <template>
-  <Transition name="modal-overlay-fade">
-    <div v-if="visible" class="modal-overlay" @click.self="handleClose">
-      <div class="modal-card rename-modal">
+  <Transition :name="useFallbackTransition ? 'profile-fallback' : undefined" :css="useFallbackTransition">
+    <div
+      v-if="visible"
+      class="modal-overlay"
+      :style="{ viewTransitionName: isProfileTransitioning && visible ? 'user-profile-backdrop' : 'none' }"
+      @click.self="handleClose"
+    >
+      <div
+        class="modal-card rename-modal"
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="rename-modal-title"
+        :style="{ viewTransitionName: isProfileTransitioning && visible ? 'user-profile-panel' : 'none' }"
+      >
         <div class="modal-header">
           <div class="header-icon">
             <span class="material-icons">badge</span>
           </div>
-          <h3 class="modal-title">{{ t('user.rename_title') }}</h3>
+          <h3 id="rename-modal-title" class="modal-title">{{ t('user.rename_title') }}</h3>
         </div>
 
         <p class="modal-desc">
@@ -180,26 +192,28 @@ async function handleSave() {
           <span>{{ errorMsg }}</span>
         </div>
 
-        <!-- Username Field with View Transition Target -->
+        <!-- Username Field with Direct View Transition Target -->
         <div class="form-group">
           <label class="form-label">{{ t('user.nickname_label') }}</label>
-          <div class="input-wrapper" :style="{ viewTransitionName: isTransitioning && visible ? 'user-profile-box' : 'none' }">
+          <div class="input-wrapper username-input-wrapper" :class="{ 'is-landed': isLanded }">
             <span class="material-icons field-icon">person</span>
             <input
+              ref="usernameInputRef"
               v-model="newUsername"
               type="text"
-              class="form-input with-icon"
-              :class="{ 'text-transparent': isTransitioning }"
+              class="form-input with-icon username-input"
+              :class="{ 'text-transparent': isProfileTransitioning }"
               :placeholder="t('user.nickname_placeholder')"
               maxlength="30"
               :disabled="saving"
               @keydown.enter="handleSave"
             />
             <span
-              v-if="isTransitioning"
+              v-if="isProfileTransitioning"
               class="input-text-morph"
               :style="{ viewTransitionName: visible ? 'user-profile-text' : 'none' }"
-            >{{ newUsername }}</span>
+            >{{ newUsername.trim() || userStore.username }}</span>
+            <span class="dock-sheen" aria-hidden="true"></span>
           </div>
         </div>
 
@@ -281,52 +295,73 @@ async function handleSave() {
 .modal-overlay {
   position: fixed;
   inset: 0;
-  background: rgba(8, 8, 7, 0.86);
+  background: radial-gradient(ellipse 82% 72% at 50% 42%, rgba(9, 12, 15, 0.68) 0%, rgba(5, 7, 9, 0.88) 100%);
   display: flex;
   align-items: center;
   justify-content: center;
   z-index: 9999;
   padding: 16px;
-  will-change: opacity;
-  transform: translateZ(0);
 }
 
 .modal-card {
-  background: var(--card, #141413);
-  border: 1px solid var(--border, #262624);
-  border-top: 2px solid var(--primary, #39ff14);
-  border-radius: 14px;
+  position: relative;
+  background: linear-gradient(
+    180deg,
+    color-mix(in srgb, var(--g-800) 94%, var(--primary) 2.5%) 0%,
+    var(--popover) 24%,
+    color-mix(in srgb, var(--g-900) 96%, var(--g-950) 4%) 100%
+  );
+  border: 1px solid color-mix(in srgb, var(--border-strong) 82%, rgba(255, 255, 255, 0.1));
+  border-radius: 18px;
   max-width: 480px;
   width: 100%;
   padding: 24px;
-  box-shadow: 0 24px 60px rgba(0, 0, 0, 0.82);
+  box-shadow:
+    0 32px 80px rgba(0, 0, 0, 0.65),
+    0 10px 28px rgba(0, 0, 0, 0.38),
+    inset 0 1px 0 rgba(255, 255, 255, 0.07);
   max-height: 90vh;
+  overflow-x: hidden;
   overflow-y: auto;
   box-sizing: border-box;
-  will-change: transform, opacity;
-  transform: translateZ(0);
 }
 
-.modal-overlay-fade-enter-active,
-.modal-overlay-fade-leave-active {
-  transition: opacity var(--motion-duration-normal) var(--motion-ease-out);
+.modal-card::before {
+  content: '';
+  position: absolute;
+  inset: 0 24px auto;
+  height: 1px;
+  background: linear-gradient(90deg, transparent 0%, rgba(var(--primary-rgb), 0.42) 50%, transparent 100%);
+  pointer-events: none;
 }
 
-.modal-overlay-fade-enter-active .modal-card,
-.modal-overlay-fade-leave-active .modal-card {
-  transition: transform var(--motion-duration-normal) var(--motion-ease-out),
-              opacity var(--motion-duration-normal) var(--motion-ease-out);
+/* Fallback transition when document.startViewTransition is unavailable */
+.profile-fallback-enter-active,
+.profile-fallback-leave-active {
+  transition: opacity 240ms var(--motion-ease-out);
 }
 
-.modal-overlay-fade-enter-from,
-.modal-overlay-fade-leave-to {
+.profile-fallback-enter-active .modal-card,
+.profile-fallback-leave-active .modal-card {
+  transition: opacity 260ms var(--motion-ease-out), transform 260ms var(--motion-ease-out);
+}
+
+.profile-fallback-enter-from,
+.profile-fallback-leave-to {
   opacity: 0;
 }
 
-.modal-overlay-fade-enter-from .modal-card,
-.modal-overlay-fade-leave-to .modal-card {
+.profile-fallback-enter-from .modal-card,
+.profile-fallback-leave-to .modal-card {
   opacity: 0;
-  transform: scale(0.95) translateY(16px);
+  transform: translate3d(0, -14px, 0) scale(0.96);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .profile-fallback-enter-from .modal-card,
+  .profile-fallback-leave-to .modal-card {
+    transform: none;
+  }
 }
 
 .modal-header {
@@ -340,13 +375,13 @@ async function handleSave() {
   width: 44px;
   height: 44px;
   border-radius: 10px;
-  background: rgba(57, 255, 20, 0.12);
-  border: 1px solid rgba(57, 255, 20, 0.35);
-  color: var(--primary, #39ff14);
+  background: var(--status-success-bg);
+  border: 1px solid var(--status-success-border);
+  box-shadow: inset 0 1px 0 rgba(var(--primary-rgb), 0.25);
+  color: var(--primary);
   display: flex;
   align-items: center;
   justify-content: center;
-  box-shadow: var(--glow-primary, 0 0 10px rgba(57, 255, 20, 0.3));
 }
 
 .header-icon .material-icons {
@@ -354,17 +389,17 @@ async function handleSave() {
 }
 
 .modal-title {
-  font-family: 'Orbitron', 'ZCOOLQingKeHuangYou', sans-serif;
+  font-family: var(--font-sans);
   font-size: 1.25rem;
   font-weight: 700;
-  color: var(--foreground, #f1f5f9);
+  color: var(--foreground);
   margin: 0;
-  letter-spacing: 0.03em;
+  letter-spacing: -0.01em;
 }
 
 .modal-desc {
   font-size: 0.85rem;
-  color: var(--muted-foreground, #a3a3a3);
+  color: var(--muted-foreground);
   line-height: 1.5;
   margin-bottom: 18px;
 }
@@ -380,9 +415,9 @@ async function handleSave() {
 }
 
 .alert-banner.error {
-  background: rgba(239, 68, 68, 0.15);
-  border: 1px solid rgba(239, 68, 68, 0.4);
-  color: #f87171;
+  background: var(--status-error-bg);
+  border: 1px solid var(--status-error-border);
+  color: var(--status-error);
 }
 
 .form-group {
@@ -393,7 +428,7 @@ async function handleSave() {
   display: block;
   font-size: 0.8rem;
   font-weight: 600;
-  color: var(--muted-foreground, #a3a3a3);
+  color: var(--muted-foreground);
   margin-bottom: 6px;
   text-transform: uppercase;
   letter-spacing: 0.05em;
@@ -409,7 +444,7 @@ async function handleSave() {
 .field-icon {
   position: absolute;
   left: 12px;
-  color: var(--muted-foreground, #a3a3a3);
+  color: var(--muted-foreground);
   font-size: 18px;
   pointer-events: none;
   z-index: 3;
@@ -418,15 +453,15 @@ async function handleSave() {
 .form-input {
   width: 100%;
   height: 42px;
-  background: var(--input, #1a1a1a);
-  border: 1px solid var(--border, #262626);
+  background: var(--input);
+  border: 1px solid var(--border);
   border-radius: 10px;
   padding: 0 14px;
-  color: var(--foreground, #f1f5f9);
+  color: var(--foreground);
   font-size: 0.95rem;
   font-family: inherit;
   outline: none;
-  transition: border-color 0.2s ease, box-shadow 0.2s ease;
+  transition: border-color var(--motion-duration-fast) var(--motion-ease-out), box-shadow var(--motion-duration-fast) var(--motion-ease-out);
   box-sizing: border-box;
 }
 
@@ -434,30 +469,83 @@ async function handleSave() {
   padding-left: 38px;
 }
 
+.form-input.username-input {
+  font-weight: 500;
+  line-height: 1.25;
+}
+
 .form-input.text-transparent {
   color: transparent !important;
+  caret-color: transparent !important;
 }
 
 .input-text-morph {
   position: absolute;
-  left: 38px;
-  top: 1px;
-  bottom: 1px;
-  height: 40px;
-  display: flex;
-  align-items: center;
+  left: 39px;
+  top: 50%;
+  transform: translateY(-50%);
+  height: auto;
+  width: fit-content;
+  max-width: calc(100% - 54px);
+  line-height: 1.25;
   font-size: 0.95rem;
+  font-weight: 500;
   font-family: inherit;
-  color: var(--foreground, #f1f5f9);
+  color: var(--foreground);
   pointer-events: none;
   white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
   user-select: none;
   z-index: 2;
 }
 
+.dock-sheen {
+  position: absolute;
+  inset: 1px;
+  border-radius: 9px;
+  overflow: hidden;
+  pointer-events: none;
+  z-index: 4;
+}
+
+.dock-sheen::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  transform: translateX(-110%) skewX(-18deg);
+  background: linear-gradient(
+    90deg,
+    transparent 0%,
+    rgba(var(--primary-rgb), 0.14) 50%,
+    transparent 100%
+  );
+  opacity: 0;
+}
+
+@media (prefers-reduced-motion: no-preference) {
+  .username-input-wrapper.is-landed .dock-sheen::after {
+    animation: profile-dock-sheen 480ms var(--motion-ease-out) both;
+  }
+}
+
+@keyframes profile-dock-sheen {
+  0% {
+    opacity: 0;
+    transform: translateX(-110%) skewX(-18deg);
+  }
+  28% {
+    opacity: 1;
+  }
+  100% {
+    opacity: 0;
+    transform: translateX(130%) skewX(-18deg);
+  }
+}
+
 .form-input:focus {
-  border-color: var(--primary, #39ff14);
-  box-shadow: 0 0 10px rgba(57, 255, 20, 0.3);
+  border-color: var(--primary);
+  box-shadow: var(--focus-ring-sm);
 }
 
 .form-input:disabled {
@@ -466,18 +554,18 @@ async function handleSave() {
 
 /* Expandable Accordion Card Style */
 .accordion-card {
-  background: rgba(255, 255, 255, 0.02);
-  border: 1px solid var(--border, #262626);
+  background: var(--surface-recessed);
+  border: 1px solid var(--border);
   border-radius: 12px;
   margin-bottom: 18px;
   overflow: hidden;
-  transition: border-color 0.6s cubic-bezier(0.16, 1, 0.3, 1), box-shadow 0.6s cubic-bezier(0.16, 1, 0.3, 1), background-color 0.5s ease;
+  transition: border-color var(--motion-duration-slow) var(--motion-ease-out), box-shadow var(--motion-duration-slow) var(--motion-ease-out), background-color var(--motion-duration-normal) var(--motion-ease-out);
 }
 
 .accordion-card.open {
-  border-color: rgba(57, 255, 20, 0.45);
-  background: rgba(57, 255, 20, 0.02);
-  box-shadow: 0 4px 20px rgba(0, 0, 0, 0.3), 0 0 12px rgba(57, 255, 20, 0.08);
+  border-color: var(--status-success-border);
+  background: rgba(var(--primary-rgb), 0.03);
+  box-shadow: var(--shadow-1);
 }
 
 .accordion-header {
@@ -487,11 +575,11 @@ async function handleSave() {
   padding: 12px 14px;
   cursor: pointer;
   user-select: none;
-  transition: background-color 0.3s ease;
+  transition: background-color var(--motion-duration-moderate) var(--motion-ease-out);
 }
 
 .accordion-header:hover {
-  background: rgba(255, 255, 255, 0.04);
+  background: var(--surface-hover);
 }
 
 .accordion-header-left {
@@ -502,30 +590,30 @@ async function handleSave() {
 
 .lock-icon {
   font-size: 18px;
-  color: var(--primary, #39ff14);
+  color: var(--primary);
 }
 
 .accordion-title {
   font-size: 0.9rem;
   font-weight: 600;
-  color: var(--foreground, #f1f5f9);
+  color: var(--foreground);
 }
 
 .chevron-icon {
   font-size: 20px;
-  color: var(--muted-foreground, #a3a3a3);
-  transition: transform 0.6s cubic-bezier(0.16, 1, 0.3, 1), color 0.3s ease;
+  color: var(--muted-foreground);
+  transition: transform var(--motion-duration-normal) var(--motion-ease-out), color var(--motion-duration-moderate) var(--motion-ease-out);
 }
 
 .chevron-icon.rotated {
   transform: rotate(180deg);
-  color: var(--primary, #39ff14);
+  color: var(--primary);
 }
 
 .accordion-collapse-wrapper {
   display: grid;
   grid-template-rows: 0fr;
-  transition: grid-template-rows var(--motion-duration-normal) var(--motion-ease-out), opacity var(--motion-duration-moderate) ease;
+  transition: grid-template-rows var(--motion-duration-normal) var(--motion-ease-out), opacity var(--motion-duration-moderate) var(--motion-ease-out);
   opacity: 0;
 }
 
@@ -541,7 +629,7 @@ async function handleSave() {
 
 .accordion-body {
   padding: 14px;
-  border-top: 1px solid var(--border, #262626);
+  border-top: 1px solid var(--border);
 }
 
 .modal-actions {
@@ -561,7 +649,7 @@ async function handleSave() {
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  transition: all 0.2s ease;
+  transition: background-color var(--motion-duration-fast) var(--motion-ease-out), border-color var(--motion-duration-fast) var(--motion-ease-out), color var(--motion-duration-fast) var(--motion-ease-out), transform var(--motion-duration-fast) var(--motion-ease-out);
   font-family: inherit;
 }
 
@@ -571,26 +659,24 @@ async function handleSave() {
 }
 
 .btn-secondary {
-  background: var(--muted, #1a1a1a);
-  border: 1px solid var(--border, #262626);
-  color: var(--foreground, #f1f5f9);
+  background: var(--surface-elevated);
+  border: 1px solid var(--border);
+  color: var(--foreground);
 }
 
 .btn-secondary:hover:not(:disabled) {
-  background: rgba(255, 255, 255, 0.1);
-  border-color: rgba(255, 255, 255, 0.2);
+  background: var(--surface-hover);
+  border-color: var(--border-strong);
 }
 
 .btn-primary {
-  background: var(--primary, #39ff14);
-  color: #000000;
+  background: var(--primary);
+  color: var(--on-primary);
   font-weight: 700;
-  box-shadow: var(--glow-primary, 0 0 10px rgba(57, 255, 20, 0.3));
 }
 
 .btn-primary:hover:not(:disabled) {
-  box-shadow: var(--glow-primary-hover, 0 0 15px rgba(57, 255, 20, 0.6));
-  filter: brightness(1.05);
+  background: var(--s-300);
 }
 
 .spinning {
