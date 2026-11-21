@@ -34,6 +34,7 @@ import { useIsMobile, isMobileDevice } from '@/composables/useIsMobile'
 import { useUserProfileTransition } from '@/composables/useUserProfileTransition'
 import { hasDesktopTitleBar } from '@/utils/desktopShell'
 import { syncRecords } from '@/services/api'
+import { getExistingEventCrdt, isCrdtTransportActive } from '@/services/crdt'
 import { transitionState } from '@/utils/transitionState'
 import { useToastStore } from '@/stores/toast'
 import { useEventWebRtcBridge } from './useEventWebRtcBridge'
@@ -105,6 +106,8 @@ const state = reactive({
 
 const {
   initHostSeqCounter,
+  initEventCrdt,
+  disposeEventCrdtSession,
   setupWebRTC,
   cleanupWebRTC,
   handleBeforeUnload
@@ -182,6 +185,8 @@ onMounted(async () => {
 
   initHostSeqCounter()
 
+  await initEventCrdt()
+
   const savedPos = navStore.getEventPosition(eventId.value)
   if (savedPos) {
     restorePosition(savedPos)
@@ -209,6 +214,7 @@ onUnmounted(() => {
   window.removeEventListener('beforeunload', handleBeforeUnload)
   if (!navigatingToTeamDetail) {
     cleanupWebRTC()
+    void disposeEventCrdtSession()
   }
 })
 
@@ -228,6 +234,7 @@ onBeforeRouteLeave((to) => {
   } else {
     navigatingToTeamDetail = false
     cleanupWebRTC()
+    void disposeEventCrdtSession()
     if (to.name !== 'team-detail') {
       eventStore.setCurrentEvent(null)
     }
@@ -250,6 +257,7 @@ onBeforeRouteUpdate((to, from) => {
       return
     }
     cleanupWebRTC()
+    void disposeEventCrdtSession()
     eventStore.setCurrentEvent(null)
   }
 })
@@ -263,6 +271,7 @@ function handleEditRecord(record: any) {
 
 async function goBack() {
   cleanupWebRTC()
+  await disposeEventCrdtSession()
   eventStore.setCurrentEvent(null)
   if (event.value) {
     transitionState.startSharedTransition(`event-card-${event.value.id}`)
@@ -285,25 +294,30 @@ async function onRecordSubmitted(recordOrRecords: ScoutingRecord | ScoutingRecor
   }
 
   if (anyOk && allToPush.length > 0) {
-    // 按 id 严格去重，避免重复引用导致同一条记录多次自增 hostSeq
-    const deduplicatedRecords = Array.from(new Map(allToPush.map((r) => [r.id, r])).values())
-    // Host 本地写入也要打 hostSeq 并持久化落库，确保重启后单调递增及 Client 重连能增量同步（Standby 备用端不打序号，由主控端统一处理）
-    if (eventStore.isHost && !connStore.isStandbyHost) {
-      for (const r of deduplicatedRecords) {
-        r.hostSeq = undefined
-      }
-      connStore.stampHostSeq(deduplicatedRecords)
-      try {
-        await syncRecords(deduplicatedRecords)
-      } catch (e) {
-        console.error('[EventView] Failed to sync stamped records to DB:', e)
-      }
-      connStore.pushIfNeeded(deduplicatedRecords)
-    } else {
-      // 非主机客户端：只推送属于自己的记录！绝不越权推送其他人被 reassessConflicts 影响的记录
-      const myOnlyRecords = deduplicatedRecords.filter((r) => r.scoutId === userStore.userId)
-      if (myOnlyRecords.length > 0) {
-        connStore.pushIfNeeded(myOnlyRecords)
+    const crdtManaged = Boolean(
+      eventId.value && (isCrdtTransportActive(eventId.value) || getExistingEventCrdt(eventId.value))
+    )
+    if (!crdtManaged) {
+      // 按 id 严格去重，避免重复引用导致同一条记录多次自增 hostSeq
+      const deduplicatedRecords = Array.from(new Map(allToPush.map((r) => [r.id, r])).values())
+      // Host 本地写入也要打 hostSeq 并持久化落库，确保重启后单调递增及 Client 重连能增量同步（Standby 备用端不打序号，由主控端统一处理）
+      if (eventStore.isHost && !connStore.isStandbyHost) {
+        for (const r of deduplicatedRecords) {
+          r.hostSeq = undefined
+        }
+        connStore.stampHostSeq(deduplicatedRecords)
+        try {
+          await syncRecords(deduplicatedRecords)
+        } catch (e) {
+          console.error('[EventView] Failed to sync stamped records to DB:', e)
+        }
+        connStore.pushIfNeeded(deduplicatedRecords)
+      } else {
+        // 非主机客户端：只推送属于自己的记录！绝不越权推送其他人被 reassessConflicts 影响的记录
+        const myOnlyRecords = deduplicatedRecords.filter((r) => r.scoutId === userStore.userId)
+        if (myOnlyRecords.length > 0) {
+          connStore.pushIfNeeded(myOnlyRecords)
+        }
       }
     }
   }

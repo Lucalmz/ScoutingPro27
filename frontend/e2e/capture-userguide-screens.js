@@ -756,7 +756,7 @@ const COPY = {
         { selector: '.event-scouts-panel .settings-panel:first-child .form-group:nth-of-type(1)', label: '(1) 填写 FTC 赛季年份（网址中的起始年）', desc: '按 ftc-events.firstinspires.org/<年份>/<代码> 填写，如 2025-26 赛季填 2025', color: '#38bdf8', preferredPos: 'right', maxBoxWidth: 280, badgeAlign: 'right' },
         { selector: '.event-scouts-panel .settings-panel:first-child .form-group:nth-of-type(2)', label: '(2) 填写官方比赛代码 Event Code', desc: '填官网赛事页末尾代码（如 AUADQ / USUTSAS1），系统会自动校验是否存在', color: '#39ff14', preferredPos: 'right', maxBoxWidth: 660, badgeAlign: 'right' },
         { selector: '.event-scouts-panel .settings-panel:first-child .settings-form .btn-primary', label: '(3) 一键绑定并同步官方数据', desc: '软件已内置 FTC API 通道无需自备 Key！绑定后可同步名单、赛程、官方比分与顺延晋级分', color: '#f59e0b', preferredPos: 'right', maxBoxWidth: 960 },
-        { selector: '.event-scouts-panel > .settings-panel:nth-child(2) .settings-form .btn-primary:last-child', label: '(4) 赛后导出 CSV 与无外网 U盘离线同步', desc: '主机没通外网时仍可正常排班记分，或通过 U盘同步文件与 CSV 导出完整战报', color: '#a855f7', preferredPos: 'right' }
+        { selector: '.event-scouts-panel [data-testid="custom-turn-panel"] [data-testid="turn-status-banner"]', label: '(4) 可选：自定义 TURN 中继与数据导出', desc: '可配置 AES-256 加密的队伍专属 TURN；下方紧接 CSV 导出与 U盘离线同步', color: '#a855f7', preferredPos: 'right', maxBoxWidth: 660, badgeAlign: 'right' }
       ]
     },
     aiSamplePrompt: '请结合本场真实数据对比 #27570 和 #11115：谁的 Predict Cycle Time 更稳、Swarm RP 更靠谱，选联队优先选谁？',
@@ -886,7 +886,7 @@ const COPY = {
         { selector: '.event-scouts-panel .settings-panel:first-child .form-group:nth-of-type(1)', label: '(1) Enter FTC Season Year (URL Start Year)', desc: 'Match ftc-events.firstinspires.org/<year>/<code> (e.g., 2025 for 2025-26 season)', color: '#38bdf8', preferredPos: 'right', maxBoxWidth: 280, badgeAlign: 'right' },
         { selector: '.event-scouts-panel .settings-panel:first-child .form-group:nth-of-type(2)', label: '(2) Enter Official FTC Event Code', desc: 'Copy the event code from FTC Events URL (e.g., AUADQ, USUTSAS1); backend verifies it', color: '#39ff14', preferredPos: 'right', maxBoxWidth: 660, badgeAlign: 'right' },
         { selector: '.event-scouts-panel .settings-panel:first-child .settings-form .btn-primary', label: '(3) Bind & Sync Official Data', desc: 'Built-in API credentials included! Unlocks Roster, Schedule, Score Audit & Roll-Down Adv. Pts', color: '#f59e0b', preferredPos: 'right', maxBoxWidth: 960 },
-        { selector: '.event-scouts-panel > .settings-panel:nth-child(2) .settings-form .btn-primary:last-child', label: '(4) CSV Exports & Offline USB Sync', desc: 'Export Rankings/Records CSV anytime, or move packets offline if venue internet drops', color: '#a855f7', preferredPos: 'right' }
+        { selector: '.event-scouts-panel [data-testid="custom-turn-panel"] [data-testid="turn-status-banner"]', label: '(4) Optional: Custom TURN Relay & Data Export', desc: 'Configure AES-256 encrypted team TURN synced to all scouts; CSV & USB Sync sit right below', color: '#a855f7', preferredPos: 'right', maxBoxWidth: 660, badgeAlign: 'right' }
       ]
     },
     aiSamplePrompt: 'Compare #27570 and #11115 using our live data: whose Predict Cycle Time and Swarm RP look stronger for alliance selection?',

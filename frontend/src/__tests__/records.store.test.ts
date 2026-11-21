@@ -142,7 +142,7 @@ describe('Records Store', () => {
     expect(store.records.find(r => r.id === 'r1')?.totalScore).toBe(30)
   })
 
-  it('bulkSync detects conflicts and returns both accepted incoming and updated existing records', async () => {
+  it('bulkSync detects conflicts via pure derived state without mutating existing scout record version', async () => {
     const store = useRecordStore()
     
     // Scout 1 submitted Match 1 Team 9999
@@ -157,14 +157,14 @@ describe('Records Store', () => {
 
     const modified = await store.bulkSync(incoming)
 
-    // Both records should be marked as conflict and returned for unified Host persistence & broadcast
-    expect(modified).toHaveLength(2)
+    // Both records derive isConflict=true locally without cross-mutating r1.version or re-broadcasting r1
+    expect(modified).toHaveLength(1)
     const r1 = store.records.find(r => r.id === 'r1')
     const r2 = store.records.find(r => r.id === 'r2')
     expect(r1?.isConflict).toBe(true)
-    expect(r1?.version).toBe(2)
+    expect(r1?.version).toBe(1)
     expect(r2?.isConflict).toBe(true)
-    expect(modified.map(m => m.id).sort()).toEqual(['r1', 'r2'])
+    expect(modified.map(m => m.id)).toEqual(['r2'])
   })
 
   it('bulkSync does NOT trigger conflict between qualification and playoff records for the same match and team', async () => {
@@ -533,7 +533,7 @@ describe('Records Store', () => {
     expect(found?.syncStatus).toBe('SYNCED')
   })
 
-  it('addRecord detects local conflicts when another scout already recorded the same match and team', async () => {
+  it('addRecord detects local conflicts via pure derived state without pushing other scout records', async () => {
     const store = useRecordStore()
     vi.mocked(api.saveRecord).mockResolvedValue(undefined)
 
@@ -546,10 +546,10 @@ describe('Records Store', () => {
     const r2 = { ...createDummyRecord('r_local_2', 9999, 20, 20, 20, 'scout_bob'), matchNumber: 1 }
     const res = await store.addRecord(r2)
 
-    // Both records should be flagged as conflict and returned in recordsToPush
+    // Both records derive isConflict=true locally, while only the newly written record is returned in recordsToPush
     expect(store.records.find(r => r.id === 'r_local_1')?.isConflict).toBe(true)
     expect(store.records.find(r => r.id === 'r_local_2')?.isConflict).toBe(true)
-    expect(res.recordsToPush.map(r => r.id).sort()).toEqual(['r_local_1', 'r_local_2'])
+    expect(res.recordsToPush.map(r => r.id)).toEqual(['r_local_2'])
   })
 
   it('migrateScoutId automatically resolves conflict when conflicting records merge to the same user', async () => {

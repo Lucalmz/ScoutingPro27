@@ -4,21 +4,36 @@ import { createWebRtcService, compareHostAuthority } from '@/services/webrtc'
 
 // In-memory Virtual Signal Bus simulating MQTT Broker routing between multiple clients
 class VirtualSignalBus {
-  private clients = new Map<string, { topic: string; handler: (topic: string, payload: Uint8Array) => void }>()
+  private clients = new Map<string, { topics: Set<string>; handler: (topic: string, payload: Uint8Array) => void }>()
 
   register(clientId: string, topic: string, handler: (topic: string, payload: Uint8Array) => void) {
-    this.clients.set(clientId, { topic, handler })
+    const existing = this.clients.get(clientId)
+    if (existing) {
+      existing.topics.add(topic)
+      existing.handler = handler
+    } else {
+      this.clients.set(clientId, { topics: new Set([topic]), handler })
+    }
   }
 
-  unregister(clientId: string) {
-    this.clients.delete(clientId)
+  unregister(clientId: string, topic?: string) {
+    if (!topic) {
+      this.clients.delete(clientId)
+      return
+    }
+    const existing = this.clients.get(clientId)
+    if (!existing) return
+    existing.topics.delete(topic)
+    if (existing.topics.size === 0) {
+      this.clients.delete(clientId)
+    }
   }
 
   broadcast(senderClientId: string, topic: string, payloadString: string) {
     const raw = new TextEncoder().encode(payloadString)
     for (const [cid, entry] of this.clients.entries()) {
       if (cid === senderClientId) continue // Do not loopback to sender directly
-      if (entry.topic === topic) {
+      if (entry.topics.has(topic)) {
         entry.handler(topic, raw)
       }
     }
@@ -35,7 +50,6 @@ vi.mock('mqtt', () => ({
   default: {
     connect: vi.fn().mockImplementation((url: string, opts: any) => {
       const clientId = opts?.clientId || `mock_client_${Math.random()}`
-      let currentTopic = ''
       const listeners: Record<string, any[]> = {}
 
       const client = {
@@ -50,7 +64,6 @@ vi.mock('mqtt', () => ({
           return client
         }),
         subscribe: vi.fn().mockImplementation((topic: string, cb?: any) => {
-          currentTopic = topic
           signalBus.register(clientId, topic, (t, payload) => {
             listeners['message']?.forEach(fn => fn(t, payload))
           })
@@ -59,8 +72,8 @@ vi.mock('mqtt', () => ({
         publish: vi.fn().mockImplementation((topic: string, message: string) => {
           signalBus.broadcast(clientId, topic, message)
         }),
-        unsubscribe: vi.fn().mockImplementation(() => {
-          signalBus.unregister(clientId)
+        unsubscribe: vi.fn().mockImplementation((topic?: string) => {
+          signalBus.unregister(clientId, topic)
         }),
         end: vi.fn().mockImplementation(() => {
           signalBus.unregister(clientId)

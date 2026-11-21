@@ -60,6 +60,7 @@ export interface HostSessionContext {
   confirmSas?: (peerId: string) => void
   getUsername?: () => string
   getUserId?: () => string
+  getHostEpoch?: () => number
   callbacks: WebRtcCallbacks
   clientIdToScoutId?: Map<string, string>
   clientIdToScoutName?: Map<string, string>
@@ -109,6 +110,7 @@ export function createHostSignalingHandler(ctx: HostSessionContext) {
           hostIpv6: cachedHostIpv6 || undefined,
           ecdhPublicKey: localEcdhPubHex,
           deviceId: localDeviceId,
+          hostEpoch: ctx.getHostEpoch?.() || 1,
           username: ctx.getUsername?.() || '',
           userId: ctx.getUserId?.() || ''
         },
@@ -251,14 +253,18 @@ export function createHostSignalingHandler(ctx: HostSessionContext) {
                   )
                 }
               }
+              if ((sas.clientSasStates.get(sender) || 'VERIFIED') === 'VERIFIED') {
+                ctx.callbacks.onPeerDataChannelOpen?.(sender)
+              }
             }
             dc.onclose = () => {
               const holder = stagedClients.get(sender) || clients.get(sender)
-              if (holder && holder.dc && holder.dc !== dc && (holder.dc as any)?.isVirtual && holder.dc.readyState === 'open') {
+              if (holder && holder.dc && holder.dc !== dc && holder.dc.readyState === 'open') {
                 return
               }
               log.warn(`Host DataChannel closed with ${sender}`)
               ctx.updateHostStatus()
+              ctx.callbacks.onPeerDataChannelClose?.(sender)
             }
           }
         }
@@ -719,10 +725,18 @@ export function createHostSignalingHandler(ctx: HostSessionContext) {
                   sender
                 )
               }
+              if ((sas.clientSasStates.get(sender) || 'VERIFIED') === 'VERIFIED') {
+                ctx.callbacks.onPeerDataChannelOpen?.(sender)
+              }
             }
             vdc.onclose = () => {
+              const holder = stagedClients.get(sender) || clients.get(sender)
+              if (holder && holder.dc && holder.dc !== (vdc as unknown as RTCDataChannel) && holder.dc.readyState === 'open') {
+                return
+              }
               log.warn(`Host VirtualDataChannel closed with ${sender}`)
               ctx.updateHostStatus()
+              ctx.callbacks.onPeerDataChannelClose?.(sender)
             }
             vdc.open()
           }

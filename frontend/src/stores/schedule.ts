@@ -10,6 +10,19 @@ import {
 import { useConnectionStore } from './connection'
 import { getTournamentLevelOrder } from '@/utils/tournament'
 import { i18n } from '@/i18n'
+import {
+  CRDT_TABLES,
+  assignmentRowId,
+  getExistingEventCrdt,
+  isCrdtTransportActive,
+  readAssignmentsFromCrdt,
+  readSchedulesFromCrdt,
+  scheduleRowId,
+  setChangedCells,
+  withLocalCrdtWrite,
+  writeAssignmentToCrdt,
+  writeScheduleToCrdt
+} from '@/services/crdt'
 
 /**
  * Deduplicate and normalize schedule items by numeric matchNumber
@@ -182,6 +195,17 @@ export const useScheduleStore = defineStore('schedule', () => {
     }
   }
 
+  function syncFromCrdt(eventId: string) {
+    if (!eventId) return
+    const handle = getExistingEventCrdt(eventId)
+    if (!handle) return
+    schedules.value = deduplicateSchedules(readSchedulesFromCrdt(handle.store, eventId))
+    assignments.value = readAssignmentsFromCrdt(handle.store, eventId)
+    if (currentEventId.value === eventId || !currentEventId.value) {
+      saveToLocalStorage(eventId)
+    }
+  }
+
   // --- 加载赛程与排班 ---
   async function loadSchedule(eventId: string) {
     currentEventId.value = eventId
@@ -243,6 +267,48 @@ export const useScheduleStore = defineStore('schedule', () => {
       }
 
       saveToLocalStorage(eventId)
+
+      const crdtHandle = getExistingEventCrdt(eventId)
+      if (crdtHandle) {
+        withLocalCrdtWrite(eventId, () => {
+          crdtHandle.store.transaction(() => {
+            if (replace) {
+              const keepSchedIds = new Set(
+                cleanItems.map((i) => scheduleRowId(i.matchNumber, i.tournamentLevel || 'QUALIFICATION'))
+              )
+              const schedTable = crdtHandle.store.getTable(CRDT_TABLES.SCHEDULES)
+              for (const [rId, row] of Object.entries(schedTable)) {
+                const rowEv = typeof row.eventId === 'string' ? row.eventId : ''
+                if ((!rowEv || rowEv === eventId) && !keepSchedIds.has(rId)) {
+                  setChangedCells(crdtHandle.store, CRDT_TABLES.SCHEDULES, rId, { isDeleted: true })
+                }
+              }
+
+              const keepAssignIds = new Set(
+                Object.values(assignments.value).map((a) =>
+                  assignmentRowId(a.matchNumber, a.station, a.tournamentLevel || 'QUALIFICATION')
+                )
+              )
+              const assignTable = crdtHandle.store.getTable(CRDT_TABLES.ASSIGNMENTS)
+              for (const [rId, row] of Object.entries(assignTable)) {
+                const rowEv = typeof row.eventId === 'string' ? row.eventId : ''
+                if ((!rowEv || rowEv === eventId) && !keepAssignIds.has(rId)) {
+                  setChangedCells(crdtHandle.store, CRDT_TABLES.ASSIGNMENTS, rId, { isDeleted: true })
+                }
+              }
+            }
+
+            for (const item of cleanItems) {
+              writeScheduleToCrdt(crdtHandle.store, { ...item, eventId: item.eventId || eventId }, false)
+            }
+            for (const assign of Object.values(assignments.value)) {
+              if (!assign.eventId || assign.eventId === eventId) {
+                writeAssignmentToCrdt(crdtHandle.store, { ...assign, eventId: assign.eventId || eventId }, false)
+              }
+            }
+          })
+        })
+      }
 
       // 保存到后端 DB
       try {
@@ -428,6 +494,13 @@ export const useScheduleStore = defineStore('schedule', () => {
     assignments.value[key] = updated
     saveToLocalStorage(eventId)
 
+    const crdtHandle = getExistingEventCrdt(eventId)
+    if (crdtHandle) {
+      withLocalCrdtWrite(eventId, () => {
+        writeAssignmentToCrdt(crdtHandle.store, updated, false)
+      })
+    }
+
     // 保存到后端
     try {
       await saveScoutAssignments(eventId, [updated])
@@ -504,6 +577,17 @@ export const useScheduleStore = defineStore('schedule', () => {
 
     saveToLocalStorage(eventId)
 
+    const crdtHandle = getExistingEventCrdt(eventId)
+    if (crdtHandle && updates.length > 0) {
+      withLocalCrdtWrite(eventId, () => {
+        crdtHandle.store.transaction(() => {
+          for (const u of updates) {
+            writeAssignmentToCrdt(crdtHandle.store, u, false)
+          }
+        })
+      })
+    }
+
     try {
       await saveScoutAssignments(eventId, updates)
     } catch (e) {
@@ -519,6 +603,28 @@ export const useScheduleStore = defineStore('schedule', () => {
     assignments.value = {}
     selectedMatches.value.clear()
     saveToLocalStorage(eventId)
+
+    const crdtHandle = getExistingEventCrdt(eventId)
+    if (crdtHandle) {
+      withLocalCrdtWrite(eventId, () => {
+        crdtHandle.store.transaction(() => {
+          const schedTable = crdtHandle.store.getTable(CRDT_TABLES.SCHEDULES)
+          for (const [rId, row] of Object.entries(schedTable)) {
+            const rowEv = typeof row.eventId === 'string' ? row.eventId : ''
+            if (!rowEv || rowEv === eventId) {
+              setChangedCells(crdtHandle.store, CRDT_TABLES.SCHEDULES, rId, { isDeleted: true })
+            }
+          }
+          const assignTable = crdtHandle.store.getTable(CRDT_TABLES.ASSIGNMENTS)
+          for (const [rId, row] of Object.entries(assignTable)) {
+            const rowEv = typeof row.eventId === 'string' ? row.eventId : ''
+            if (!rowEv || rowEv === eventId) {
+              setChangedCells(crdtHandle.store, CRDT_TABLES.ASSIGNMENTS, rId, { isDeleted: true })
+            }
+          }
+        })
+      })
+    }
 
     try {
       await clearEventSchedule(eventId)
@@ -594,6 +700,7 @@ export const useScheduleStore = defineStore('schedule', () => {
 
   // --- WebRTC 直连隧道广播 ---
   function broadcastScheduleSync() {
+    if (currentEventId.value && isCrdtTransportActive(currentEventId.value)) return
     const connStore = useConnectionStore()
     if (connStore.rtcService) {
       connStore.rtcService.sendMessage({
@@ -605,6 +712,7 @@ export const useScheduleStore = defineStore('schedule', () => {
   }
 
   function broadcastAssignmentUpdate(assignment: ScoutAssignment) {
+    if (currentEventId.value && isCrdtTransportActive(currentEventId.value)) return
     const connStore = useConnectionStore()
     if (connStore.rtcService) {
       connStore.rtcService.sendMessage({
@@ -612,6 +720,25 @@ export const useScheduleStore = defineStore('schedule', () => {
         assignment
       })
     }
+  }
+
+  function mirrorScheduleStateToCrdt(eid: string) {
+    const crdtHandle = getExistingEventCrdt(eid)
+    if (!crdtHandle) return
+    withLocalCrdtWrite(eid, () => {
+      crdtHandle.store.transaction(() => {
+        for (const item of schedules.value) {
+          if (!item.eventId || item.eventId === eid) {
+            writeScheduleToCrdt(crdtHandle.store, { ...item, eventId: item.eventId || eid }, false)
+          }
+        }
+        for (const a of Object.values(assignments.value)) {
+          if (!a.eventId || a.eventId === eid) {
+            writeAssignmentToCrdt(crdtHandle.store, { ...a, eventId: a.eventId || eid }, false)
+          }
+        }
+      })
+    })
   }
 
   // --- 接收对端 WebRTC 同步 ---
@@ -627,6 +754,7 @@ export const useScheduleStore = defineStore('schedule', () => {
       assignments.value = assignMap
     }
     if (currentEventId.value) {
+      mirrorScheduleStateToCrdt(currentEventId.value)
       saveToLocalStorage(currentEventId.value)
     }
   }
@@ -653,6 +781,7 @@ export const useScheduleStore = defineStore('schedule', () => {
       assignments.value = assignMap
     }
     if (currentEventId.value && (batchIndex === totalBatches - 1 || totalBatches <= 1)) {
+      mirrorScheduleStateToCrdt(currentEventId.value)
       saveToLocalStorage(currentEventId.value)
     }
   }
@@ -662,6 +791,13 @@ export const useScheduleStore = defineStore('schedule', () => {
     const key = getAssignmentKey(incomingAssignment.matchNumber, incomingAssignment.station, incomingAssignment.tournamentLevel)
     assignments.value[key] = incomingAssignment
     if (currentEventId.value) {
+      const crdtHandle = getExistingEventCrdt(currentEventId.value)
+      if (crdtHandle) {
+        const eid = currentEventId.value
+        withLocalCrdtWrite(eid, () => {
+          writeAssignmentToCrdt(crdtHandle.store, { ...incomingAssignment, eventId: incomingAssignment.eventId || eid }, false)
+        })
+      }
       saveToLocalStorage(currentEventId.value)
     }
   }
@@ -677,7 +813,20 @@ export const useScheduleStore = defineStore('schedule', () => {
       }
     }
     if (changed && currentEventId.value) {
-      saveToLocalStorage(currentEventId.value)
+      const eid = currentEventId.value
+      const crdtHandle = getExistingEventCrdt(eid)
+      if (crdtHandle) {
+        withLocalCrdtWrite(eid, () => {
+          crdtHandle.store.transaction(() => {
+            for (const a of Object.values(assignments.value)) {
+              if (a && a.scoutId === newScoutId && (!a.eventId || a.eventId === eid)) {
+                writeAssignmentToCrdt(crdtHandle.store, { ...a, eventId: a.eventId || eid }, false)
+              }
+            }
+          })
+        })
+      }
+      saveToLocalStorage(eid)
     }
   }
 
@@ -736,6 +885,7 @@ export const useScheduleStore = defineStore('schedule', () => {
     applyScheduleBatchSync,
     applyAssignmentUpdate,
     migrateScoutId,
-    migrateEventId
+    migrateEventId,
+    syncFromCrdt
   }
 })

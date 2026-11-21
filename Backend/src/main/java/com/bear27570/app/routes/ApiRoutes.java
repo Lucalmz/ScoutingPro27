@@ -52,6 +52,16 @@ public class ApiRoutes {
         return t;
     });
     private final ScheduledThreadPoolExecutor heartbeatScheduler = createHeartbeatScheduler();
+    private volatile Runnable shutdownCallback;
+
+    public void setShutdownCallback(Runnable shutdownCallback) {
+        this.shutdownCallback = shutdownCallback;
+    }
+
+    private static boolean isTestCleanupEnabled() {
+        return "true".equals(System.getenv("ENABLE_TEST_CLEANUP"))
+                || "true".equals(System.getProperty("ENABLE_TEST_CLEANUP"));
+    }
 
     private static ScheduledThreadPoolExecutor createHeartbeatScheduler() {
         ScheduledThreadPoolExecutor executor = new ScheduledThreadPoolExecutor(2, r -> {
@@ -140,7 +150,7 @@ public class ApiRoutes {
         // Global Authentication Interceptor (Filter Monopoly)
         routes.before("/api/*", ctx -> {
             String path = ctx.path();
-            if (path.equals("/api/user/login") || path.equals("/api/user/register") || path.equals("/api/user/check") || path.equals("/api/user/verify-token") || path.equals("/api/test/cleanup") || path.equals("/api/system/network-info") || path.equals("/api/system/open-firewall-cmd") || path.equals("/api/system/log")) return; // skip user and system info routes
+            if (path.equals("/api/user/login") || path.equals("/api/user/register") || path.equals("/api/user/check") || path.equals("/api/user/verify-token") || path.equals("/api/test/cleanup") || (isTestCleanupEnabled() && path.equals("/api/test/shutdown")) || path.equals("/api/system/network-info") || path.equals("/api/system/open-firewall-cmd") || path.equals("/api/system/log")) return; // skip user and system info routes
             if (ctx.method().name().equals("GET") && path.matches("^/api/events/[^/]+/pit/photos/[^/]+$")) return; // skip public photo streaming for <img>
             if (ctx.method().name().equals("OPTIONS")) return; // skip CORS preflight
             
@@ -185,10 +195,11 @@ public class ApiRoutes {
         new RecordRoutes(jdbi, gson).register(routes);
         new PitScoutRoutes(jdbi, gson).register(routes);
         new CustomFieldRoutes(jdbi, gson).register(routes);
+        new CrdtRoutes(jdbi, gson).register(routes);
         new AiRoutes(jdbi, gson, heartbeatScheduler).register(routes);
 
-        // ==================== Test Cleanup ====================
-        if ("true".equals(System.getenv("ENABLE_TEST_CLEANUP")) || "true".equals(System.getProperty("ENABLE_TEST_CLEANUP"))) {
+        // ==================== Test Cleanup & Shutdown ====================
+        if (isTestCleanupEnabled()) {
             routes.post("/api/test/cleanup", ctx -> {
                 try {
                     Type t = new TypeToken<List<String>>() {}.getType();
@@ -205,6 +216,25 @@ public class ApiRoutes {
                 } catch (Exception e) {
                     ctx.status(500).result("Cleanup Failed: " + e.getMessage());
                 }
+            });
+
+            routes.post("/api/test/shutdown", ctx -> {
+                ctx.status(200).result("{\"status\":\"shutting_down\"}").contentType("application/json");
+                Runnable callback = this.shutdownCallback;
+                Thread t = new Thread(() -> {
+                    try {
+                        Thread.sleep(100);
+                    } catch (InterruptedException ignored) {
+                        Thread.currentThread().interrupt();
+                    }
+                    if (callback != null) {
+                        callback.run();
+                    } else {
+                        this.shutdown();
+                    }
+                }, "test-graceful-shutdown");
+                t.setDaemon(true);
+                t.start();
             });
         }
     }

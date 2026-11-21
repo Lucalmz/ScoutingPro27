@@ -21,6 +21,19 @@ import { calculateScoutReliability, calculateRankings } from '@/utils/analytics/
 import { buildAdvancementMap } from '@/utils/analytics/advancement'
 import { calculateMatchDiscrepancies, type MatchDiscrepancy } from '@/utils/analytics/audit'
 import { i18n } from '@/i18n'
+import {
+  getExistingEventCrdt,
+  isCrdtTransportActive,
+  normalizeTagName,
+  readScoutingRecordsFromCrdt,
+  readTeamTagsFromCrdt,
+  setTeamTagActive,
+  signScoutingRecordWithDeviceKey,
+  teamTagRowId,
+  withLocalCrdtWrite,
+  writeScoutingRecordToCrdt,
+  writeTeamTagToCrdt
+} from '@/services/crdt'
 
 function loadFromStorage<T>(key: string, defaultVal: T): T {
   try {
@@ -238,58 +251,90 @@ export const useRecordStore = defineStore('records', () => {
     }
   }
 
-  function reassessConflicts(
-    matchNumber: number,
-    teamNumber: number,
-    tournamentLevel?: string,
-    targetEventId?: string
-  ): ScoutingRecord[] {
-    const eid = targetEventId || currentEventId.value
-    const pool = eid ? records.value.filter(r => r.eventId === eid) : currentRecords.value
-    const targetLevel = (tournamentLevel || 'QUALIFICATION').toUpperCase()
-    const coordsRecords = pool.filter(r =>
-      !r.isDeleted &&
-      r.matchNumber === matchNumber &&
-      r.teamNumber === teamNumber &&
-      getRecordTournamentLevel(r) === targetLevel
-    )
-    const uniqueScouts = new Set(coordsRecords.map(r => r.scoutId))
-    const updatedRecords: ScoutingRecord[] = []
-    
-    if (uniqueScouts.size <= 1) {
-      for (const r of coordsRecords) {
-        if (r.isConflict) {
-          r.isConflict = false
-          r.updatedAt = new Date().toISOString()
-          r.version = (r.version || 0) + 1  // 冲突状态变更也要递增 version
-          r.syncStatus = 'PENDING'
-          r.hostSeq = undefined
-          updatedRecords.push(r)
-        }
+  const notifiedConflictCoords = new Set<string>()
+
+  const conflictCoords = computed<Set<string>>(() => {
+    const map = new Map<string, Set<string>>()
+    for (const r of records.value) {
+      if (r.isDeleted) continue
+      const key = `${r.eventId || ''}:${getRecordTournamentLevel(r)}:${r.matchNumber}:${r.teamNumber}`
+      let scouts = map.get(key)
+      if (!scouts) {
+        scouts = new Set<string>()
+        map.set(key, scouts)
       }
-    } else {
-      for (const r of coordsRecords) {
-        if (!r.isConflict) {
-          r.isConflict = true
-          r.updatedAt = new Date().toISOString()
-          r.version = (r.version || 0) + 1  // 冲突状态变更也要递增 version
-          r.syncStatus = 'PENDING'
-          r.hostSeq = undefined
-          updatedRecords.push(r)
-        }
+      scouts.add(r.scoutId || '')
+    }
+    const out = new Set<string>()
+    for (const [k, scouts] of map.entries()) {
+      if (scouts.size > 1) out.add(k)
+    }
+    return out
+  })
+
+  /**
+   * Pure derived conflict evaluation: updates in-memory display `isConflict` flags without
+   * mutating untouched records' `version`, `updatedAt`, `syncStatus`, or broadcasting them.
+   * Returns newly conflicted coordinate keys not yet alerted in Inbox.
+   */
+  function refreshDerivedConflictsLocal(targetEventId?: string): string[] {
+    const coordScouts = new Map<string, Set<string>>()
+    for (const r of records.value) {
+      if (r.isDeleted) continue
+      if (targetEventId && r.eventId !== targetEventId) continue
+      const key = `${r.eventId || ''}:${getRecordTournamentLevel(r)}:${r.matchNumber}:${r.teamNumber}`
+      let set = coordScouts.get(key)
+      if (!set) {
+        set = new Set<string>()
+        coordScouts.set(key, set)
+      }
+      set.add(r.scoutId || '')
+    }
+
+    const newlyConflicted = new Set<string>()
+    for (const r of records.value) {
+      if (targetEventId && r.eventId !== targetEventId) continue
+      const key = `${r.eventId || ''}:${getRecordTournamentLevel(r)}:${r.matchNumber}:${r.teamNumber}`
+      const isMultiScout = !r.isDeleted && (coordScouts.get(key)?.size ?? 0) > 1
+      if (Boolean(r.isConflict) !== isMultiScout) {
+        r.isConflict = isMultiScout
+      }
+      if (isMultiScout && !notifiedConflictCoords.has(key)) {
+        notifiedConflictCoords.add(key)
+        newlyConflicted.add(key)
+      } else if (!isMultiScout && notifiedConflictCoords.has(key)) {
+        notifiedConflictCoords.delete(key)
       }
     }
-    return updatedRecords
+    return Array.from(newlyConflicted)
+  }
+
+  function emitInboxAlertsForConflictCoords(coordKeys: string[]): void {
+    for (const key of coordKeys) {
+      const parts = key.split(':')
+      const evId = parts[0] || ''
+      const level = parts[1] || 'QUALIFICATION'
+      const matchStr = parts[2] || '0'
+      const teamStr = parts[3] || '0'
+      try {
+        useInboxStore().addMessage({
+          title: i18n.global.t('toast.conflict_detected_title', { match: matchStr, team: teamStr }),
+          body: i18n.global.t('toast.conflict_detected_body'),
+          type: 'conflict',
+          conflictMatchNumber: Number(matchStr),
+          conflictTeamNumber: Number(teamStr),
+          conflictTournamentLevel: level,
+          eventId: evId
+        })
+      } catch (e) {
+        console.warn('[RecordStore] Failed to post conflict message to inbox:', e)
+      }
+    }
   }
 
   // --- save a new record locally ---
   async function addRecord(record: ScoutingRecord): Promise<{ success: boolean, recordsToPush: ScoutingRecord[] }> {
     const idx = records.value.findIndex(r => r.id === record.id)
-    const oldRec = idx >= 0 ? records.value[idx] : null
-    const oldMatch = oldRec ? oldRec.matchNumber : null
-    const oldTeam = oldRec ? oldRec.teamNumber : null
-    const oldLevel = oldRec ? getRecordTournamentLevel(oldRec) : null
-    const newLevel = getRecordTournamentLevel(record)
 
     // 用户显式编辑永远更新时间戳和状态
     record.updatedAt = new Date().toISOString()
@@ -302,43 +347,58 @@ export const useRecordStore = defineStore('records', () => {
       records.value.push(record)
     }
 
+    refreshDerivedConflictsLocal(record.eventId)
     const recordsToPush: ScoutingRecord[] = [record]
 
-    if (oldMatch !== null && oldTeam !== null && (oldMatch !== record.matchNumber || oldTeam !== record.teamNumber || oldLevel !== newLevel)) {
-      recordsToPush.push(...reassessConflicts(oldMatch, oldTeam, oldLevel || undefined, record.eventId))
-    }
-    recordsToPush.push(...reassessConflicts(record.matchNumber, record.teamNumber, newLevel, record.eventId))
-    const uniqueRecordsToPush = Array.from(new Map(recordsToPush.map(r => [r.id, r])).values())
+    await signScoutingRecordWithDeviceKey(record)
 
     try {
-      const [{ useUserStore }, { useEventStore }] = await Promise.all([
-        import('@/stores/user'),
+      const [{ useEventStore }] = await Promise.all([
         import('@/stores/events')
       ])
-      const userStore = useUserStore()
       const eventStore = useEventStore()
       const isAuthoritativeHost = Boolean(eventStore.isHost && !isStaticCloudHost())
+      const crdtHandle = record.eventId ? getExistingEventCrdt(record.eventId) : undefined
+      const crdtTransportOn = Boolean(record.eventId && isCrdtTransportActive(record.eventId))
 
       if (isAuthoritativeHost) {
+        if (crdtHandle) {
+          withLocalCrdtWrite(record.eventId, () => {
+            writeScoutingRecordToCrdt(crdtHandle.store, record)
+          })
+        }
         await saveRecord(record)
         record.syncStatus = 'SYNCED'
       } else {
-        // 非主机客户端（手机端/从机/静态托管）：严格保持 PENDING 状态，等待连通主机并收到 ACK 及 hostSeq 后方可标为 SYNCED
-        record.syncStatus = 'PENDING'
+        // 非主机客户端（手机端/从机/静态托管）：CRDT 传输在线或 Host 落库后标记 SYNCED；离线严格保持 PENDING
         record.hostSeq = undefined
+        if (crdtHandle) {
+          withLocalCrdtWrite(record.eventId, () => {
+            writeScoutingRecordToCrdt(crdtHandle.store, record)
+          })
+        }
+        record.syncStatus = crdtTransportOn ? 'SYNCED' : 'PENDING'
         if (!isStaticCloudHost()) {
           try {
             await saveRecord(record)
           } catch {
-            // 离线环境静默忽略，由 WebRTC 链路接管
+            // 离线环境静默忽略，由 WebRTC / CRDT 链路接管
           }
         }
       }
-      return { success: true, recordsToPush: uniqueRecordsToPush }
+      flushStorage()
+      return { success: true, recordsToPush }
     } catch (e: any) {
       error.value = e.message ?? 'Failed to save record'
-      // It's still successfully stored locally, will be synced via WebRTC
-      return { success: true, recordsToPush: uniqueRecordsToPush }
+      const crdtHandle = record.eventId ? getExistingEventCrdt(record.eventId) : undefined
+      if (crdtHandle) {
+        withLocalCrdtWrite(record.eventId, () => {
+          writeScoutingRecordToCrdt(crdtHandle.store, record)
+        })
+      }
+      flushStorage()
+      // It's still successfully stored locally, will be synced via WebRTC / CRDT
+      return { success: true, recordsToPush }
     }
   }
 
@@ -352,36 +412,71 @@ export const useRecordStore = defineStore('records', () => {
     target.version = (target.version || 0) + 1
     target.syncStatus = 'PENDING'
 
-    const targetLevel = getRecordTournamentLevel(target)
+    await signScoutingRecordWithDeviceKey(target)
+    refreshDerivedConflictsLocal(target.eventId)
     const recordsToPush = [target]
-    recordsToPush.push(...reassessConflicts(target.matchNumber, target.teamNumber, targetLevel, target.eventId))
-    const uniqueRecordsToPush = Array.from(new Map(recordsToPush.map(r => [r.id, r])).values())
 
     try {
       const [{ useEventStore }] = await Promise.all([import('@/stores/events')])
       const eventStore = useEventStore()
       const isAuthoritativeHost = Boolean(eventStore.isHost && !isStaticCloudHost())
+      const crdtHandle = target.eventId ? getExistingEventCrdt(target.eventId) : undefined
+      const crdtTransportOn = Boolean(target.eventId && isCrdtTransportActive(target.eventId))
+
+      if (crdtHandle) {
+        withLocalCrdtWrite(target.eventId, () => {
+          writeScoutingRecordToCrdt(crdtHandle.store, target)
+        })
+      }
       if (isAuthoritativeHost) {
         await saveRecord(target)
         target.syncStatus = 'SYNCED'
       } else {
-        target.syncStatus = 'PENDING'
+        target.syncStatus = crdtTransportOn ? 'SYNCED' : 'PENDING'
+        if (!isStaticCloudHost()) {
+          saveRecord(target).catch(() => {})
+        }
       }
     } catch (e) {
       console.warn('[RecordStore] Failed to sync deleted tombstone to backend:', e)
     }
 
-    return { success: true, recordsToPush: uniqueRecordsToPush }
+    flushStorage()
+    return { success: true, recordsToPush }
+  }
+
+  function syncRecordsFromCrdt(eventId: string) {
+    if (!eventId) return
+    const handle = getExistingEventCrdt(eventId)
+    if (!handle) return
+    const crdtRecs = readScoutingRecordsFromCrdt(handle.store, eventId)
+    const transportActive = isCrdtTransportActive(eventId)
+    const prevStatusById = new Map<string, ScoutingRecord['syncStatus']>()
+    for (const r of records.value) {
+      if (!r.eventId || r.eventId === eventId) {
+        prevStatusById.set(r.id, r.syncStatus)
+      }
+    }
+
+    const otherEvents = records.value.filter((r) => r.eventId && r.eventId !== eventId)
+    const projected = crdtRecs.map((rec) => {
+      if (!transportActive && prevStatusById.get(rec.id) === 'PENDING') {
+        return { ...rec, syncStatus: 'PENDING' as const }
+      }
+      return rec
+    })
+    records.value = [...otherEvents, ...projected]
+
+    const newCoords = refreshDerivedConflictsLocal(eventId)
+    emitInboxAlertsForConflictCoords(newCoords)
+    flushStorage()
   }
 
   // --- bulk upsert from peer sync ---
-  // 返回真正受影响（写入本地/冲突变更）的全部记录，供 Host 统一打 hostSeq、落库并广播
   async function bulkSync(incoming: ScoutingRecord[]): Promise<ScoutingRecord[]> {
-    const recordsToBroadcast: ScoutingRecord[] = []
-    const acceptedRecords: ScoutingRecord[] = []  // 真正写入本地的记录
-    // 跟踪所有需要冲突重评的坐标
-    const coordsToReassess = new Set<string>()
-    
+    const acceptedRecords: ScoutingRecord[] = []
+    const touchedEventIds = new Set<string>()
+
     for (const inc of incoming) {
       const idx = records.value.findIndex((r) => r.id === inc.id)
       let savedLocal: ScoutingRecord | null = null
@@ -394,19 +489,14 @@ export const useRecordStore = defineStore('records', () => {
           const incHostSeq = inc.hostSeq ?? 0
           const localHostSeq = local.hostSeq ?? 0
 
-          // LWW：version 大的胜出；version 相等时有 hostSeq 权威序列号者胜出；均相等时以 updatedAt 比较
           const shouldAccept = incV > localV ||
             (incV === localV && incHostSeq > localHostSeq) ||
             (incV === localV && incHostSeq === localHostSeq && inc.updatedAt > local.updatedAt)
 
           if (shouldAccept) {
-            // 追踪覆写前的旧坐标（冲突可能在旧坐标处消失，包含 tournamentLevel 避免跨赛制碰撞）
-            const oldLevel = getRecordTournamentLevel(local)
-            coordsToReassess.add(`${local.eventId}:${oldLevel}:${local.matchNumber}:${local.teamNumber}`)
             records.value[idx] = inc
             savedLocal = records.value[idx] ?? null
           } else if (incV === localV && incHostSeq === localHostSeq && inc.syncStatus === 'SYNCED' && local.syncStatus !== 'SYNCED') {
-            // 版本与序列号均相同时，平滑吸收 Host 的 authoritative SYNCED 确认状态
             local.syncStatus = 'SYNCED'
             savedLocal = local
           }
@@ -418,68 +508,27 @@ export const useRecordStore = defineStore('records', () => {
 
       if (savedLocal) {
         acceptedRecords.push(savedLocal)
-        // 追踪新坐标（附带 eventId 与 tournamentLevel 避免跨赛事碰撞）
-        const incLevel = getRecordTournamentLevel(savedLocal)
-        coordsToReassess.add(`${savedLocal.eventId}:${incLevel}:${savedLocal.matchNumber}:${savedLocal.teamNumber}`)
-        
-        // 冲突检测 (非删除记录才检测冲突，且必须限定在相同 eventId 和 tournamentLevel 下)
-        if (!savedLocal.isDeleted) {
-          const conflictRecords = records.value.filter(r =>
-            !r.isDeleted &&
-            r.eventId === savedLocal!.eventId &&
-            r.matchNumber === savedLocal!.matchNumber &&
-            r.teamNumber === savedLocal!.teamNumber &&
-            getRecordTournamentLevel(r) === incLevel &&
-            r.scoutId !== savedLocal!.scoutId
-          )
-          if (conflictRecords.length > 0) {
-            let newlyConflicted = false
-            const allConflicting = [savedLocal, ...conflictRecords]
-            for (const r of allConflicting) {
-              if (!r.isConflict) {
-                r.isConflict = true
-                r.updatedAt = new Date().toISOString()
-                r.version = (r.version || 0) + 1
-                r.syncStatus = 'PENDING'
-                recordsToBroadcast.push(r)
-                newlyConflicted = true
-              }
-            }
-            if (newlyConflicted) {
-              try {
-                const inboxStore = useInboxStore()
-                const matchStr = String(savedLocal.matchNumber)
-                const teamStr = String(savedLocal.teamNumber)
-                inboxStore.addMessage({
-                  title: i18n.global.t('toast.conflict_detected_title', { match: matchStr, team: teamStr }),
-                  body: i18n.global.t('toast.conflict_detected_body'),
-                  type: 'conflict',
-                  conflictMatchNumber: savedLocal.matchNumber,
-                  conflictTeamNumber: savedLocal.teamNumber,
-                  conflictTournamentLevel: incLevel,
-                  eventId: savedLocal.eventId
-                })
-              } catch (e) {
-                console.warn('[RecordStore] Failed to post conflict message to inbox:', e)
-              }
-            }
-          }
-        }
+        if (savedLocal.eventId) touchedEventIds.add(savedLocal.eventId)
       }
     }
 
-    // 重评所有受影响坐标，清除已不成立的冲突标志
-    for (const key of coordsToReassess) {
-      const [evId, level, matchStr, teamStr] = key.split(':')
-      const cleared = reassessConflicts(Number(matchStr), Number(teamStr), level, evId)
-      recordsToBroadcast.push(...cleared)
-    }
+    const newCoords = refreshDerivedConflictsLocal()
+    emitInboxAlertsForConflictCoords(newCoords)
 
-    // 合并并去重所有受影响的记录（新进记录 + 冲突被改动的既有记录）
-    const allModifiedMap = new Map<string, ScoutingRecord>()
-    for (const r of acceptedRecords) allModifiedMap.set(r.id, r)
-    for (const r of recordsToBroadcast) allModifiedMap.set(r.id, r)
-    const allModified = Array.from(allModifiedMap.values())
+    for (const eid of touchedEventIds) {
+      const crdtHandle = getExistingEventCrdt(eid)
+      if (crdtHandle) {
+        withLocalCrdtWrite(eid, () => {
+          crdtHandle.store.transaction(() => {
+            for (const rec of acceptedRecords) {
+              if (rec.eventId === eid) {
+                writeScoutingRecordToCrdt(crdtHandle.store, rec)
+              }
+            }
+          })
+        })
+      }
+    }
 
     // 非 Host 端（Client 本地独立模式）自存自己名下产生的新记录
     const [{ useEventStore }, { useUserStore }] = await Promise.all([
@@ -489,7 +538,7 @@ export const useRecordStore = defineStore('records', () => {
     const eventStore = useEventStore()
     const userStore = useUserStore()
     if (!eventStore.isHost && userStore.userId) {
-      const toSync = allModified.filter(r => r.scoutId === userStore.userId || ((r.hostSeq ?? 0) > 0))
+      const toSync = acceptedRecords.filter(r => r.scoutId === userStore.userId || ((r.hostSeq ?? 0) > 0))
       if (toSync.length > 0) {
         try {
           await syncRecords(toSync)
@@ -499,7 +548,7 @@ export const useRecordStore = defineStore('records', () => {
       }
     }
 
-    return allModified
+    return acceptedRecords
   }
 
   // --- mark records as synced locally ---
@@ -534,6 +583,16 @@ export const useRecordStore = defineStore('records', () => {
   }
 
   // --- Custom Team Tags ---
+  function syncTagsFromCrdt(eventId: string) {
+    if (!eventId) return
+    const handle = getExistingEventCrdt(eventId)
+    if (!handle) return
+    const crdtTags = readTeamTagsFromCrdt(handle.store, eventId)
+    const otherEventsTags = teamTags.value.filter((t) => t.eventId !== eventId)
+    teamTags.value = [...otherEventsTags, ...crdtTags]
+    flushStorage()
+  }
+
   async function fetchTags(eventId: string) {
     try {
       const tags = await apiFetchEventTags(eventId)
@@ -552,17 +611,42 @@ export const useRecordStore = defineStore('records', () => {
     color?: string,
     isPreset?: boolean
   ): Promise<{ success: boolean; tag?: TeamTagItem; error?: string }> {
+    const crdtHandle = getExistingEventCrdt(eventId)
+    let saved: TeamTagItem
     try {
-      const saved = await apiAddTeamTag(eventId, teamNumber, tag, color, isPreset)
-      applyTagUpdate(saved, 'ADD')
+      const apiSaved = await apiAddTeamTag(eventId, teamNumber, tag, color, isPreset)
+      if (!apiSaved || typeof apiSaved !== 'object' || Array.isArray(apiSaved) || !apiSaved.tag) {
+        throw new Error('Static/offline tag fallback')
+      }
+      saved = apiSaved
+    } catch (e: any) {
+      if (!crdtHandle) {
+        console.error('Failed to add tag:', e)
+        return { success: false, error: e.message || 'Failed to add tag' }
+      }
+      const norm = normalizeTagName(tag) || tag.trim()
+      saved = {
+        id: `${eventId}_tag_${teamNumber}_${norm}`,
+        eventId,
+        teamNumber,
+        tag: norm,
+        color: ((color || 'blue') as TeamTagItem['color']),
+        isPreset: Boolean(isPreset)
+      }
+    }
+
+    applyTagUpdate(saved, 'ADD')
+    if (crdtHandle) {
+      withLocalCrdtWrite(eventId, () => {
+        writeTeamTagToCrdt(crdtHandle.store, { ...saved, eventId: saved.eventId || eventId }, true)
+      })
+    }
+    if (!isCrdtTransportActive(eventId)) {
       import('@/stores/connection').then(({ useConnectionStore }) => {
         useConnectionStore().broadcastTagUpdate(saved, 'ADD')
       }).catch(() => {})
-      return { success: true, tag: saved }
-    } catch (e: any) {
-      console.error('Failed to add tag:', e)
-      return { success: false, error: e.message || 'Failed to add tag' }
     }
+    return { success: true, tag: saved }
   }
 
   async function removeTag(
@@ -570,18 +654,30 @@ export const useRecordStore = defineStore('records', () => {
     teamNumber: number,
     tag: string
   ): Promise<{ success: boolean; error?: string }> {
+    const crdtHandle = getExistingEventCrdt(eventId)
+    const tagItem: TeamTagItem = { id: '', eventId, teamNumber, tag, color: 'blue', isPreset: false }
+
     try {
       await apiDeleteTeamTag(eventId, teamNumber, tag)
-      const tagItem: TeamTagItem = { id: '', eventId, teamNumber, tag, color: 'blue', isPreset: false }
-      applyTagUpdate(tagItem, 'REMOVE')
+    } catch (e: any) {
+      if (!crdtHandle) {
+        console.error('Failed to remove tag:', e)
+        return { success: false, error: e.message || 'Failed to remove tag' }
+      }
+    }
+
+    if (crdtHandle) {
+      withLocalCrdtWrite(eventId, () => {
+        setTeamTagActive(crdtHandle.store, eventId, tagItem, false)
+      })
+    }
+    applyTagUpdate(tagItem, 'REMOVE')
+    if (!isCrdtTransportActive(eventId)) {
       import('@/stores/connection').then(({ useConnectionStore }) => {
         useConnectionStore().broadcastTagUpdate(tagItem, 'REMOVE')
       }).catch(() => {})
-      return { success: true }
-    } catch (e: any) {
-      console.error('Failed to remove tag:', e)
-      return { success: false, error: e.message || 'Failed to remove tag' }
     }
+    return { success: true }
   }
 
   function normalizeTag(str?: string): string {
@@ -608,6 +704,14 @@ export const useRecordStore = defineStore('records', () => {
         t => !(t.eventId === tag.eventId && t.teamNumber === tag.teamNumber && normalizeTag(t.tag) === targetTag)
       )
     }
+
+    const eid = tag.eventId || currentEventId.value
+    const crdtHandle = eid ? getExistingEventCrdt(eid) : undefined
+    if (crdtHandle) {
+      withLocalCrdtWrite(eid, () => {
+        writeTeamTagToCrdt(crdtHandle.store, { ...tag, eventId: tag.eventId || eid || '' }, action === 'ADD')
+      })
+    }
   }
 
   function applyTagsFullSync(tags: TeamTagItem[], eventId?: string) {
@@ -617,6 +721,23 @@ export const useRecordStore = defineStore('records', () => {
     if (targetEventId) {
       const otherEventsTags = teamTags.value.filter(t => t.eventId !== targetEventId)
       teamTags.value = [...otherEventsTags, ...tags]
+      const crdtHandle = getExistingEventCrdt(targetEventId)
+      if (crdtHandle) {
+        const keepRowIds = new Set(tags.map((t) => teamTagRowId(t.teamNumber, t.tag)))
+        withLocalCrdtWrite(targetEventId, () => {
+          crdtHandle.store.transaction(() => {
+            const existing = readTeamTagsFromCrdt(crdtHandle.store, targetEventId)
+            for (const oldTag of existing) {
+              if (!keepRowIds.has(teamTagRowId(oldTag.teamNumber, oldTag.tag))) {
+                setTeamTagActive(crdtHandle.store, targetEventId, oldTag, false)
+              }
+            }
+            for (const inc of tags) {
+              writeTeamTagToCrdt(crdtHandle.store, { ...inc, eventId: inc.eventId || targetEventId }, true)
+            }
+          })
+        })
+      }
     } else {
       teamTags.value = tags
     }
@@ -627,13 +748,11 @@ export const useRecordStore = defineStore('records', () => {
     if (!oldId) return
     const effectiveNewId = newId || oldId
     let changed = false
-    const coordsToReassess = new Set<string>()
+    const migratedRecords: ScoutingRecord[] = []
     records.value = records.value.map(r => {
       if (r.scoutId === oldId) {
         changed = true
-        const level = getRecordTournamentLevel(r)
-        coordsToReassess.add(`${r.eventId}:${level}:${r.matchNumber}:${r.teamNumber}`)
-        return {
+        const updated: ScoutingRecord = {
           ...r,
           scoutId: effectiveNewId,
           scoutName: newScoutName || r.scoutName,
@@ -641,16 +760,27 @@ export const useRecordStore = defineStore('records', () => {
           updatedAt: new Date().toISOString(),
           syncStatus: 'PENDING'
         }
+        migratedRecords.push(updated)
+        return updated
       }
       return r
     })
 
-    for (const key of coordsToReassess) {
-      const [evId, level, matchStr, teamStr] = key.split(':')
-      reassessConflicts(Number(matchStr), Number(teamStr), level, evId)
-    }
+    refreshDerivedConflictsLocal()
     if (changed) {
       flushStorage()
+      void (async () => {
+        for (const rec of migratedRecords) {
+          await signScoutingRecordWithDeviceKey(rec)
+          const crdtHandle = rec.eventId ? getExistingEventCrdt(rec.eventId) : undefined
+          if (crdtHandle) {
+            withLocalCrdtWrite(rec.eventId, () => {
+              writeScoutingRecordToCrdt(crdtHandle.store, rec)
+            })
+          }
+        }
+        flushStorage()
+      })()
     }
   }
 
@@ -658,9 +788,11 @@ export const useRecordStore = defineStore('records', () => {
     if (!oldId || !newId || oldId === newId) return
     currentEventId.value = newId
     let changed = false
+    const migratedRecIds = new Set<string>()
     records.value = records.value.map((r) => {
       if (r.eventId === oldId) {
         changed = true
+        migratedRecIds.add(r.id)
         return { ...r, eventId: newId }
       }
       return r
@@ -672,18 +804,65 @@ export const useRecordStore = defineStore('records', () => {
       }
       return t
     })
+    refreshDerivedConflictsLocal(newId)
     if (changed) {
+      flushStorage()
+      void reSignEventAuthorRecords(newId, migratedRecIds)
+    }
+  }
+
+  async function reSignEventAuthorRecords(targetEventId: string, onlyIds?: Set<string>): Promise<void> {
+    if (!targetEventId) return
+    const { getOrCreateDeviceIdentity } = await import('@/utils/identityStore')
+    let localPubKey: string | undefined
+    try {
+      const id = await getOrCreateDeviceIdentity()
+      localPubKey = id.signingPubKey
+    } catch {}
+
+    const targetRecords = records.value.filter(
+      (r) =>
+        r.eventId === targetEventId &&
+        (!onlyIds || onlyIds.has(r.id)) &&
+        (!r.authorPubKey || (localPubKey && r.authorPubKey === localPubKey))
+    )
+    if (targetRecords.length === 0) return
+
+    let anyUpdated = false
+    for (const rec of targetRecords) {
+      const res = await signScoutingRecordWithDeviceKey(rec)
+      if (res.signed) {
+        anyUpdated = true
+      }
+    }
+
+    const crdtHandle = getExistingEventCrdt(targetEventId)
+    if (anyUpdated && crdtHandle) {
+      withLocalCrdtWrite(targetEventId, () => {
+        crdtHandle.store.transaction(() => {
+          for (const rec of targetRecords) {
+            writeScoutingRecordToCrdt(crdtHandle.store, rec)
+          }
+        })
+      })
+    }
+    if (anyUpdated) {
       flushStorage()
     }
   }
 
-  function clearRecords() {
+  function clearMemoryOnly() {
     records.value = []
     officialMatches.value = []
     bannedTeams.value = []
     teamTags.value = []
+    notifiedConflictCoords.clear()
     currentEventId.value = null
     error.value = null
+  }
+
+  function clearRecords() {
+    clearMemoryOnly()
     try {
       localStorage.removeItem('scoutingpro_records')
       localStorage.removeItem('scoutingpro_officialMatches')
@@ -725,6 +904,7 @@ export const useRecordStore = defineStore('records', () => {
     loading,
     error,
     rankings,
+    conflictCoords,
     pendingRecords,
     myRecords,
     fetchRecords,
@@ -733,6 +913,9 @@ export const useRecordStore = defineStore('records', () => {
     bulkSync,
     markSynced,
     updateRecord,
+    refreshDerivedConflictsLocal,
+    syncRecordsFromCrdt,
+    reSignEventAuthorRecords,
     migrateScoutId,
     migrateEventId,
     banTeam,
@@ -742,8 +925,10 @@ export const useRecordStore = defineStore('records', () => {
     removeTag,
     applyTagUpdate,
     applyTagsFullSync,
+    syncTagsFromCrdt,
     getTagsForTeam,
     purgeExpiredTombstones,
+    clearMemoryOnly,
     clearRecords
   }
 })

@@ -30,6 +30,7 @@ import java.io.InputStream;
 import java.nio.file.Files;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.concurrent.atomic.AtomicBoolean;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -40,8 +41,49 @@ public class Main {
 
     private static java.nio.channels.FileLock heldProfileLock = null;
     private static java.nio.channels.FileChannel heldProfileChannel = null;
+    private static java.io.PrintStream originalSystemOut = null;
+    private static java.io.PrintStream originalSystemErr = null;
+    private static FileOutputStream activeLogFileStream = null;
+
+    /**
+     * 解析需要在日志与数据库初始化前生效的引导级 CLI 参数（--data-dir、--no-auto-server）。
+     */
+    public static void applyBootstrapCliArgs(String[] args) {
+        if (args == null) return;
+        for (int i = 0; i < args.length; i++) {
+            String arg = args[i];
+            if (arg == null) continue;
+            if (arg.startsWith("--data-dir=")) {
+                String value = stripQuotes(arg.substring("--data-dir=".length()));
+                if (!value.isEmpty()) {
+                    System.setProperty("scouting.data.dir", value);
+                }
+            } else if ("--data-dir".equals(arg) && i + 1 < args.length) {
+                String value = stripQuotes(args[++i]);
+                if (!value.isEmpty()) {
+                    System.setProperty("scouting.data.dir", value);
+                }
+            } else if ("--no-auto-server".equals(arg)) {
+                System.setProperty("scouting.noAutoServer", "true");
+            }
+        }
+    }
+
+    private static String stripQuotes(String raw) {
+        if (raw == null) return "";
+        String trimmed = raw.trim();
+        if (trimmed.length() >= 2) {
+            if ((trimmed.startsWith("\"") && trimmed.endsWith("\""))
+                    || (trimmed.startsWith("'") && trimmed.endsWith("'"))) {
+                return trimmed.substring(1, trimmed.length() - 1).trim();
+            }
+        }
+        return trimmed;
+    }
 
     public static void main(String[] args) {
+        applyBootstrapCliArgs(args);
+
         // 配置 SLF4J SimpleLogger 时间戳格式（毫秒级精度）
         if (System.getProperty("org.slf4j.simpleLogger.showDateTime") == null) {
             System.setProperty("org.slf4j.simpleLogger.showDateTime", "true");
@@ -88,26 +130,29 @@ public class Main {
         try {
             File logFile = com.bear27570.app.db.AppConfig.resolveLogFile();
             FileOutputStream fos = new FileOutputStream(logFile, true);
-            java.io.PrintStream originalOut = System.out;
-            java.io.PrintStream originalErr = System.err;
+            java.io.PrintStream originalOut = originalSystemOut != null ? originalSystemOut : System.out;
+            java.io.PrintStream originalErr = originalSystemErr != null ? originalSystemErr : System.err;
+            originalSystemOut = originalOut;
+            originalSystemErr = originalErr;
+            activeLogFileStream = fos;
 
             java.io.OutputStream dualOut = new java.io.OutputStream() {
                 @Override
                 public synchronized void write(int b) throws IOException {
                     originalOut.write(b);
-                    fos.write(b);
+                    try { fos.write(b); } catch (IOException ignored) {}
                 }
 
                 @Override
                 public synchronized void write(byte[] b, int off, int len) throws IOException {
                     originalOut.write(b, off, len);
-                    fos.write(b, off, len);
+                    try { fos.write(b, off, len); } catch (IOException ignored) {}
                 }
 
                 @Override
                 public synchronized void flush() throws IOException {
                     originalOut.flush();
-                    fos.flush();
+                    try { fos.flush(); } catch (IOException ignored) {}
                 }
             };
 
@@ -115,19 +160,19 @@ public class Main {
                 @Override
                 public synchronized void write(int b) throws IOException {
                     originalErr.write(b);
-                    fos.write(b);
+                    try { fos.write(b); } catch (IOException ignored) {}
                 }
 
                 @Override
                 public synchronized void write(byte[] b, int off, int len) throws IOException {
                     originalErr.write(b, off, len);
-                    fos.write(b, off, len);
+                    try { fos.write(b, off, len); } catch (IOException ignored) {}
                 }
 
                 @Override
                 public synchronized void flush() throws IOException {
                     originalErr.flush();
-                    fos.flush();
+                    try { fos.flush(); } catch (IOException ignored) {}
                 }
             };
 
@@ -142,6 +187,27 @@ public class Main {
             System.out.println("=======================================================");
         } catch (Exception e) {
             System.err.println("初始化文件日志失败: " + e.getMessage());
+        }
+    }
+
+    /**
+     * 恢复标准输出流并关闭活动日志文件句柄，释放 Windows 文件锁。
+     */
+    public static synchronized void closeFileLogging() {
+        if (originalSystemOut != null) {
+            System.setOut(originalSystemOut);
+        }
+        if (originalSystemErr != null) {
+            System.setErr(originalSystemErr);
+        }
+        if (activeLogFileStream != null) {
+            try {
+                activeLogFileStream.flush();
+                activeLogFileStream.close();
+            } catch (IOException ignored) {
+            } finally {
+                activeLogFileStream = null;
+            }
         }
     }
 
@@ -294,6 +360,7 @@ public class Main {
             if (splash != null) splash.updateProgress(35, "Connecting to database...");
             logger.info("连接 JDBI 并执行确定性用户 ID 校验...");
             Jdbi jdbi = JdbiConfig.create(dataSource);
+            com.bear27570.app.service.CrdtProjectionService.ensureCrdtSchema(jdbi);
             com.bear27570.app.db.UserDeterministicIdMigrator.migrate(jdbi);
 
             // ==========================================
@@ -331,17 +398,37 @@ public class Main {
                     new com.bear27570.app.util.PortForwardingService();
             portForwardingService.startAsync();
 
-            Runtime.getRuntime().addShutdownHook(new Thread(() -> {
+            final AtomicBoolean shuttingDown = new AtomicBoolean(false);
+            final Runnable gracefulShutdown = () -> {
+                if (!shuttingDown.compareAndSet(false, true)) {
+                    return;
+                }
                 try {
                     portForwardingService.shutdown();
                 } catch (Throwable ignored) {}
                 try {
                     apiRoutes.shutdown();
+                } catch (Throwable ignored) {}
+                try {
                     app.stop();
+                } catch (Throwable ignored) {}
+                try {
                     JdbiConfig.closeDataSources();
+                } catch (Throwable ignored) {}
+                try {
                     releaseProfileLock();
                 } catch (Throwable ignored) {}
-            }, "app-shutdown-hook"));
+                try {
+                    closeFileLogging();
+                } catch (Throwable ignored) {}
+            };
+
+            apiRoutes.setShutdownCallback(() -> {
+                gracefulShutdown.run();
+                System.exit(0);
+            });
+
+            Runtime.getRuntime().addShutdownHook(new Thread(gracefulShutdown, "app-shutdown-hook"));
 
             String localUrl = "http://localhost:" + app.port() + "/index.html";
             logger.info("Javalin 运行在: {} (监听 IPv4/IPv6 双栈端口 :{})", localUrl, app.port());
@@ -509,6 +596,7 @@ public class Main {
                             if (cacheDir != null && cacheDir.getName().startsWith("scoutingpro-jcef-")) {
                                 deleteDir(cacheDir);
                             }
+                            closeFileLogging();
                             System.exit(0);
                         }, "app-graceful-shutdown").start();
                     }

@@ -8,6 +8,8 @@ import type {
   ConnectionTransportInfo
 } from '@/types'
 import { DataChannelSender } from '@/services/dataChannelSender'
+import type { CalibratedMonotonicClock, ClockSyncRunResult } from '@/services/clock'
+import type { EventEpochWitnessRecord } from './epochStore'
 
 export type SasState = 'PENDING_VERIFICATION' | 'VERIFIED' | 'REJECTED'
 
@@ -70,6 +72,16 @@ export type WebRtcCallbacks = {
   onHostDisconnected?: () => void
   onHostHandoffReceived?: (batch: import('@/types').WebRtcHostHandoffBatch) => Promise<number>
   onHostHandoffAck?: (ack: import('@/types').WebRtcHostHandoffAck) => void
+  onWitnessMetadataDiscovered?: (witness: EventEpochWitnessRecord) => void | Promise<void>
+  onEpochWitnessUpdated?: (record: EventEpochWitnessRecord) => void
+  onClockCalibrated?: (result: ClockSyncRunResult) => void
+  getMaxKnownHlcPt?: () => number
+  onCrdtSyncMessage?: (
+    senderPeerId: string,
+    msg: import('@/types').WebRtcCrdtSyncMsg | import('@/types').WebRtcCrdtSyncChunk
+  ) => void
+  onPeerDataChannelOpen?: (peerId: string) => void
+  onPeerDataChannelClose?: (peerId: string) => void
 }
 
 export interface ClientEntry {
@@ -127,6 +139,7 @@ export interface WebRtcService {
   getSasState: (peerId?: string) => SasState
   getSasFingerprint: (peerId?: string) => string | undefined
   getStatus: () => ConnectionStatus
+  getPeerUserId?: (peerId: string) => string | undefined
   getTransportInfo: () => ConnectionTransportInfo | null
   getScoutTransportInfo?: (userId: string) => ConnectionTransportInfo | null
   getDataChannel: () => RTCDataChannel | null
@@ -138,5 +151,9 @@ export interface WebRtcService {
     sourceUserId: string,
     sourceUsername: string
   ) => Promise<{ success: boolean; newId?: string; newUsername?: string; token?: string; error?: string }>
+  getHostEpoch?: () => number
+  getCalibratedClock?: () => CalibratedMonotonicClock
+  requestClockSync?: (forceReanchor?: boolean) => Promise<ClockSyncRunResult>
+  sendForceClockResync?: (targetId: string, reason?: string) => Promise<void>
   updateCallbacks?: (callbacks: Partial<WebRtcCallbacks>) => void
 }

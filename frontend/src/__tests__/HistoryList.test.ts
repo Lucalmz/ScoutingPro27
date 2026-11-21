@@ -276,10 +276,10 @@ describe('HistoryList.vue Component & Animations', () => {
     expect((highlightEl.element as HTMLElement).style.opacity).toBe('0')
   })
 
-  it('correctly distinguishes authoritative synced records and unstamped pending records', () => {
+  it('correctly distinguishes synced records and pending records without legacy hostSeq', () => {
     const records = [
-      createRecord({ id: 'r-synced', hostSeq: 42, syncStatus: 'SYNCED' }),
-      createRecord({ id: 'r-unstamped', hostSeq: undefined, syncStatus: 'SYNCED' })
+      createRecord({ id: 'r-synced', syncStatus: 'SYNCED' }),
+      createRecord({ id: 'r-pending', syncStatus: 'PENDING' })
     ]
     const wrapper = mount(HistoryList, {
       props: {
@@ -289,12 +289,12 @@ describe('HistoryList.vue Component & Animations', () => {
     })
 
     const cards = wrapper.findAll('.history-card')
-    // First card is stamped and synced
+    // First card is synced
     expect(cards[0].find('.sync-badge').text()).toBe('check_circle')
     expect(cards[0].find('.btn-edit').exists()).toBe(false)
     expect(cards[0].find('.btn-resync').exists()).toBe(false)
 
-    // Second card lacks hostSeq -> rendered as pending and editable/resyncable
+    // Second card is PENDING -> rendered with pending icon and editable/resyncable
     expect(cards[1].find('.sync-badge').text()).toBe('hourglass_empty')
     expect(cards[1].find('.btn-edit').exists()).toBe(true)
   })
@@ -345,7 +345,7 @@ describe('HistoryList.vue Component & Animations', () => {
     const toastStore = useToastStore()
     const toastSpy = vi.spyOn(toastStore, 'showToast')
 
-    const unconfirmed = createRecord({ id: 'r-unconfirmed-off', scoutId: 'scout-1', hostSeq: undefined, syncStatus: 'SYNCED' })
+    const unconfirmed = createRecord({ id: 'r-unconfirmed-off', scoutId: 'scout-1', syncStatus: 'PENDING' })
     const wrapper = mount(HistoryList, {
       props: {
         records: [unconfirmed],

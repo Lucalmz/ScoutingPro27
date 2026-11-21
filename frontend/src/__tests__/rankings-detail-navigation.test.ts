@@ -89,6 +89,19 @@ const i18n = createI18n({
 
 const mockRouterPush = vi.fn()
 const mockRouterBack = vi.fn()
+const { webrtcFactoryHook } = vi.hoisted(() => ({
+  webrtcFactoryHook: { fn: null as null | ((cb: any) => any) }
+}))
+
+vi.mock('@/services/webrtc', async (importOriginal) => {
+  const mod = await importOriginal<typeof import('@/services/webrtc')>()
+  return {
+    ...mod,
+    createWebRtcService: vi.fn((cb: any) =>
+      webrtcFactoryHook.fn ? webrtcFactoryHook.fn(cb) : mod.createWebRtcService(cb)
+    )
+  }
+})
 
 vi.mock('vue-router', () => ({
   useRouter: () => ({
@@ -106,6 +119,7 @@ describe('Rankings & Detail Navigation Integration', () => {
   beforeEach(() => {
     setActivePinia(createPinia())
     sessionStorage.clear()
+    webrtcFactoryHook.fn = null
     mockRouterPush.mockClear()
     mockRouterBack.mockClear()
     document.body.innerHTML = ''
@@ -581,5 +595,80 @@ describe('Rankings & Detail Navigation Integration', () => {
     await teamCell.trigger('click')
 
     expect(mockRouterPush).toHaveBeenCalledWith('/event/evt-123/team/27570')
+  })
+
+  it('useEventWebRtcBridge does not tear down or restart WebRTC when a fenced Standby host receives epoch_witness updates', async () => {
+    const { createWebRtcService } = await import('@/services/webrtc')
+    vi.mocked(createWebRtcService).mockClear()
+
+    const eventStore = useEventStore()
+    const connStore = useConnectionStore()
+    const userStore = useUserStore()
+
+    userStore.user = { id: 'host-1', username: 'HostUser', token: 'valid-token' }
+    const evt = {
+      id: 'evt-auth-1',
+      name: 'Epoch Fencing Event',
+      inviteCode: 'EP01',
+      hostId: 'host-1'
+    }
+    eventStore.setCurrentEvent(evt)
+
+    let capturedCallbacks: any = null
+    let hostModeFlag = true
+    let standbyFlag = false
+    const mockRtc: any = {
+      host: vi.fn(async () => {}),
+      join: vi.fn(async () => {}),
+      disconnect: vi.fn(),
+      updateCallbacks: vi.fn(),
+      setEventMetadata: vi.fn(),
+      getStatus: () => 'connecting',
+      isHostMode: () => hostModeFlag,
+      isStandbyHost: () => standbyFlag,
+      getHostEpoch: () => 2
+    }
+    webrtcFactoryHook.fn = (cb) => {
+      capturedCallbacks = cb
+      return mockRtc
+    }
+
+    const { setupWebRTC } = useEventWebRtcBridge({
+      eventId: ref('evt-auth-1'),
+      event: ref(evt),
+      router: {
+        replace: vi.fn(async () => {}),
+        currentRoute: ref({ params: { eventId: 'evt-auth-1' }, query: {} })
+      } as any,
+      t: (k: string) => k
+    })
+
+    await setupWebRTC()
+    expect(vi.mocked(createWebRtcService)).toHaveBeenCalledTimes(1)
+    expect(mockRtc.host).toHaveBeenCalledTimes(1)
+    expect(capturedCallbacks).toBeTruthy()
+
+    // Simulate Epoch-2 fencing into Standby while ICE/TURN connection is still in flight
+    hostModeFlag = false
+    standbyFlag = true
+    connStore.setStatus('connecting')
+    capturedCallbacks.onHostStandby?.({ hostSessionId: 'host-b', hostDeviceId: 'dev-b' })
+
+    const witnessPayload = {
+      inviteCode: 'EP01',
+      authoritativeEventId: 'evt-auth-1',
+      eventName: 'Epoch Fencing Event',
+      hostUserId: 'host-1',
+      highestSeenEpoch: 2,
+      activeHostSessionId: 'host-b',
+      activeHostDeviceId: 'dev-b',
+      updatedAt: Date.now()
+    }
+    capturedCallbacks.onEpochWitnessUpdated?.(witnessPayload)
+    await capturedCallbacks.onWitnessMetadataDiscovered?.(witnessPayload)
+
+    expect(mockRtc.disconnect).not.toHaveBeenCalled()
+    expect(vi.mocked(createWebRtcService)).toHaveBeenCalledTimes(1)
+    expect(connStore.isStandbyHost).toBe(true)
   })
 })

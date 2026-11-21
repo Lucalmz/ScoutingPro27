@@ -35,6 +35,11 @@ import { evaluateAndApplyClientTrust } from './clientTrustHelper'
 import { createClientSilentUpgradeManager } from './clientSilentUpgrade'
 import { createClientHeartbeatManager } from './clientHeartbeat'
 import { createClientVirtualFallbackController } from './clientVirtualFallback'
+import {
+  getEpochWitnessRecord,
+  saveEpochWitnessRecord,
+  type EventEpochWitnessRecord
+} from './epochStore'
 import { createLogger } from '@/utils/logger'
 
 const log = createLogger('WebRTC:Client')
@@ -86,6 +91,10 @@ export interface ClientSessionContext {
   confirmSas?: (peerId?: string) => void
   getUsername?: () => string
   getUserId?: () => string
+  getCurrentEventMetadata?: () => import('@/types').ScoutingEvent | null
+  getMaxKnownHlcPt?: () => number
+  onDataChannelReadyForSync?: () => void
+  onEpochWitnessUpdated?: (record: EventEpochWitnessRecord) => void
   callbacks: WebRtcCallbacks
 }
 
@@ -290,6 +299,7 @@ export function createClientSession(ctx: ClientSessionContext) {
       virtualDcFailedInRun = false
       ctx.setStatus('connected')
       startDataChannelHeartbeat()
+      ctx.onDataChannelReadyForSync?.()
       await ctx.peerMgr.updateTransportInfo(pc)
       if (epoch !== attemptEpoch || ctx.getClientPc() !== pc) return
       void checkAndScheduleSilentUpgrade()
@@ -300,6 +310,7 @@ export function createClientSession(ctx: ClientSessionContext) {
         return
       }
       log.warn(`DataChannel 'scoutingpro-data' CLOSED (epoch: ${epoch}, sasState: ${ctx.sas.clientSasState})`)
+      ctx.callbacks.onPeerDataChannelClose?.('host')
       stopDataChannelHeartbeat()
       resetSilentUpgradeState()
       const curSender = ctx.getClientSender?.()
@@ -457,6 +468,7 @@ export function createClientSession(ctx: ClientSessionContext) {
       try { oldSender.abort('Client channels hard-reset') } catch (_) {}
     }
 
+    const hadChannel = Boolean(isVirtualDcOpen() || ctx.getClientDc())
     abortPendingPings()
     closeActiveVirtualDc()
 
@@ -468,6 +480,9 @@ export function createClientSession(ctx: ClientSessionContext) {
       oldDc.onclose = null
       try { oldDc.close() } catch (_) {}
       ctx.setClientDc(null)
+    }
+    if (hadChannel) {
+      ctx.callbacks.onPeerDataChannelClose?.('host')
     }
 
     const oldPc = ctx.getClientPc()
@@ -843,11 +858,102 @@ export function createClientSession(ctx: ClientSessionContext) {
     void restartClientConnection(false)
   }
 
+  async function checkAndRecordIncomingHostEpoch(data: any): Promise<boolean> {
+    const code = (ctx.getCurrentInviteCode() || '').trim().toUpperCase()
+    if (!code) return true
+    const hasIncomingEpoch = data.hostEpoch !== undefined && data.hostEpoch !== null
+    const incomingEpoch = hasIncomingEpoch ? Number(data.hostEpoch) : 0
+    const stored = getEpochWitnessRecord(code)
+    const highestSeen = stored?.highestSeenEpoch ?? 0
+
+    if (hasIncomingEpoch && incomingEpoch > 0 && incomingEpoch < highestSeen) {
+      log.warn(
+        `[Fencing] Client rejected stale host packet '${data.type}' from ${data.sender} (epoch=${incomingEpoch} < highestSeen=${highestSeen})`
+      )
+      if (data.sender) {
+        try {
+          await ctx
+            .getSignaling()
+            ?.send(
+              {
+                type: 'epoch_superseded',
+                currentEpoch: highestSeen,
+                activeHostSessionId: stored?.activeHostSessionId || ctx.getCurrentHostSessionId() || '',
+                activeHostDeviceId: stored?.activeHostDeviceId || ''
+              },
+              data.sender
+            )
+        } catch {}
+      }
+      return false
+    }
+
+    if (incomingEpoch > 0 && incomingEpoch >= highestSeen) {
+      const meta = ctx.getCurrentEventMetadata?.()
+      const updated = saveEpochWitnessRecord({
+        inviteCode: code,
+        authoritativeEventId: meta?.id || stored?.authoritativeEventId || '',
+        eventName: meta?.name || stored?.eventName || '',
+        hostUserId: data.userId || meta?.hostId || stored?.hostUserId || '',
+        ftcYear: meta?.ftcYear ?? stored?.ftcYear,
+        ftcEventCode: meta?.ftcEventCode ?? stored?.ftcEventCode,
+        highestSeenEpoch: incomingEpoch,
+        activeHostSessionId: data.newHostSessionId || data.hostSessionId || stored?.activeHostSessionId,
+        activeHostDeviceId: data.deviceId || stored?.activeHostDeviceId
+      })
+      ctx.onEpochWitnessUpdated?.(updated)
+    }
+    return true
+  }
+
   async function processClientSignalingMessage(data: any) {
     const localEcdhKeyPair = ctx.getLocalEcdhKeyPair()
     const sas = ctx.sas
 
+    if (data.type === 'host_discovery') {
+      const code = (ctx.getCurrentInviteCode() || '').trim().toUpperCase()
+      const stored = code ? getEpochWitnessRecord(code) : null
+      const meta = ctx.getCurrentEventMetadata?.()
+      await ctx.getSignaling()?.send(
+        {
+          type: 'epoch_witness',
+          inviteCode: code,
+          highestEpoch: stored?.highestSeenEpoch ?? 0,
+          authoritativeEventId: stored?.authoritativeEventId || meta?.id || '',
+          eventName: stored?.eventName || meta?.name || '',
+          hostUserId: stored?.hostUserId || meta?.hostId || sas.clientHostUserId || '',
+          ftcYear: stored?.ftcYear ?? meta?.ftcYear,
+          ftcEventCode: stored?.ftcEventCode ?? meta?.ftcEventCode,
+          activeHostSessionId: stored?.activeHostSessionId || ctx.getCurrentHostSessionId() || '',
+          activeHostDeviceId: stored?.activeHostDeviceId || sas.clientHostDeviceId || '',
+          maxKnownHlcPt: ctx.getMaxKnownHlcPt?.() ?? 0,
+          deviceId: ctx.getLocalDeviceId()
+        },
+        data.sender
+      )
+      return
+    }
+
+    if (data.type === 'epoch_superseded') {
+      const code = (ctx.getCurrentInviteCode() || '').trim().toUpperCase()
+      const incomingEp = Number(data.currentEpoch ?? data.hostEpoch ?? 0) || 0
+      if (code && incomingEp > 0) {
+        const stored = getEpochWitnessRecord(code)
+        if (incomingEp >= (stored?.highestSeenEpoch ?? 0)) {
+          const updated = saveEpochWitnessRecord({
+            inviteCode: code,
+            highestSeenEpoch: incomingEp,
+            activeHostSessionId: data.activeHostSessionId,
+            activeHostDeviceId: data.activeHostDeviceId
+          })
+          ctx.onEpochWitnessUpdated?.(updated)
+        }
+      }
+      return
+    }
+
     if (data.type === 'host_heartbeat') {
+      if (!(await checkAndRecordIncomingHostEpoch(data))) return
       if (data.hostIpv6 && isGlobalIpv6Address(data.hostIpv6)) {
         lastHostIpv6 = cleanIpAddress(data.hostIpv6)
       }
@@ -891,6 +997,7 @@ export function createClientSession(ctx: ClientSessionContext) {
     }
 
     if (data.type === 'host_hello') {
+      if (!(await checkAndRecordIncomingHostEpoch(data))) return
       log.info(`Received host_hello: hostSessionId=${data.hostSessionId}, deviceId=${data.deviceId}, sender=${data.sender}, hostIpv6=${data.hostIpv6 || 'n/a'}`)
       if (data.hostIpv6 && isGlobalIpv6Address(data.hostIpv6)) {
         lastHostIpv6 = cleanIpAddress(data.hostIpv6)
@@ -961,6 +1068,7 @@ export function createClientSession(ctx: ClientSessionContext) {
     }
 
     if (data.type === 'host_takeover') {
+      if (!(await checkAndRecordIncomingHostEpoch(data))) return
       log.info(`Received host_takeover by new host session: ${data.newHostSessionId} (from ${data.sender})`)
       if (data.newHostSessionId) {
         ctx.setCurrentHostSessionId(data.newHostSessionId)

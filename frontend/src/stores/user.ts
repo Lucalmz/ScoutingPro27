@@ -5,6 +5,23 @@ import { useToastStore } from '@/stores/toast'
 import type { User } from '@/types'
 import { i18n } from '@/i18n'
 
+const beforeLogoutHooks = new Set<() => void | Promise<void>>()
+
+/**
+ * 注册登出前置清理/落盘钩子（例如在清理 JWT 前先 Flush CRDT 状态到共享 H2）。
+ * 返回取消注册函数。
+ */
+export function registerBeforeLogoutHook(hook: () => void | Promise<void>): () => void {
+  beforeLogoutHooks.add(hook)
+  return () => {
+    beforeLogoutHooks.delete(hook)
+  }
+}
+
+export function clearBeforeLogoutHooksForTesting(): void {
+  beforeLogoutHooks.clear()
+}
+
 export const useUserStore = defineStore('user', () => {
   const user = ref<User | null>(null)
   const loading = ref(false)
@@ -308,6 +325,21 @@ export const useUserStore = defineStore('user', () => {
   }
 
   async function logout() {
+    // 1. Run pre-logout hooks (e.g., CRDT flush to shared local H2) BEFORE clearing JWT credentials
+    if (beforeLogoutHooks.size > 0) {
+      const hookPromises = Array.from(beforeLogoutHooks).map(async (hook) => {
+        try {
+          await hook()
+        } catch (err) {
+          console.warn('[userStore] beforeLogout hook error:', err)
+        }
+      })
+      await Promise.race([
+        Promise.allSettled(hookPromises),
+        new Promise<void>((resolve) => setTimeout(resolve, 2000))
+      ])
+    }
+
     const prevUserId = user.value?.id
     user.value = null
     try {
@@ -318,7 +350,7 @@ export const useUserStore = defineStore('user', () => {
       }
     } catch {}
 
-    // 1. Disconnect WebRTC and reset connection store
+    // 2. Disconnect WebRTC and reset connection store
     try {
       const { useConnectionStore } = await import('@/stores/connection')
       const connStore = useConnectionStore()
@@ -333,7 +365,9 @@ export const useUserStore = defineStore('user', () => {
       console.warn('[userStore] Error disconnecting WebRTC on logout:', e)
     }
 
-    // 2. Clear Pinia stores in-memory state and localStorage caches
+    // 3. Clear ONLY user-scoped in-memory/UI session caches; preserve event-scoped shared caches
+    // (H2, sp27_epoch_*, sp27_clock_anchor_*, IndexedDB identity keys, and offline cached photos)
+    // so switching accounts on a shared standby/teammate laptop preserves offline work seamlessly.
     try {
       const [{ useRecordStore }, { useEventStore }, { useInboxStore }, { usePitScoutStore }, { useScheduleStore }] =
         await Promise.all([
@@ -344,21 +378,13 @@ export const useUserStore = defineStore('user', () => {
           import('@/stores/schedule')
         ])
 
-      useRecordStore().clearRecords()
-      useEventStore().clearAllLocalCache()
+      useRecordStore().clearMemoryOnly()
+      useEventStore().clearUserSessionCache()
       useInboxStore().clearAllMessages()
       usePitScoutStore().clearLocalCache()
       useScheduleStore().clearSelection()
     } catch (e) {
-      console.warn('[userStore] Error clearing stores on logout:', e)
-    }
-
-    // 3. Clear offline photos in IndexedDB
-    try {
-      const { clearAllMobileCachedPhotos } = await import('@/services/mobilePhotoCache')
-      await clearAllMobileCachedPhotos()
-    } catch (e) {
-      console.warn('[userStore] Error clearing offline photo cache on logout:', e)
+      console.warn('[userStore] Error clearing user session caches on logout:', e)
     }
   }
 

@@ -213,8 +213,8 @@ function enterEvent(evt: { id: string }) {
   })
 }
 
-function handleLogout() {
-  userStore.logout()
+async function handleLogout() {
+  await userStore.logout()
   router.replace('/')
 }
 

@@ -39,7 +39,7 @@ describe('SignalingChannel Multi-Broker & LAN WebSocket', () => {
 
     expect(mqtt.connect).toHaveBeenCalledWith(
       'wss://broker.emqx.io:8084/mqtt',
-      expect.objectContaining({ connectTimeout: 4000 })
+      expect.objectContaining({ connectTimeout: 8000 })
     )
     expect(channel.isLanMode()).toBe(false)
   })
@@ -171,5 +171,52 @@ describe('SignalingChannel Multi-Broker & LAN WebSocket', () => {
     expect(new Set(urls).size).toBe(BUILTIN_BROKERS.length)
     expect(BUILTIN_BROKERS[0]?.id).toBe('emqx')
     expect(BUILTIN_BROKERS[1]?.id).toBe('hivemq')
+  })
+
+  it('routes ws:// URLs ending in /mqtt to mqtt.connect instead of native LAN WebSocket', async () => {
+    const channel = new SignalingChannel('test-room-local-mqtt', 'ws://127.0.0.1:18883/mqtt')
+    await channel.initTopic()
+    channel.connect({
+      onMessage: vi.fn(),
+      onConnect: vi.fn()
+    })
+
+    expect(mqtt.connect).toHaveBeenCalledWith(
+      'ws://127.0.0.1:18883/mqtt',
+      expect.objectContaining({ connectTimeout: 8000 })
+    )
+    expect(channel.isLanMode()).toBe(false)
+  })
+
+  it('does not failover to BUILTIN_BROKERS when sp27-custom-broker is configured in localStorage', async () => {
+    localStorage.setItem('sp27-custom-broker', 'ws://127.0.0.1:18883/mqtt')
+    try {
+      const channel = new SignalingChannel('test-room-custom-sticky')
+      await channel.initTopic()
+      const onError = vi.fn()
+
+      channel.connect({
+        onMessage: vi.fn(),
+        onConnect: vi.fn(),
+        onError
+      })
+
+      expect(mqtt.connect).toHaveBeenCalledTimes(1)
+      expect(mqtt.connect).toHaveBeenCalledWith(
+        'ws://127.0.0.1:18883/mqtt',
+        expect.anything()
+      )
+
+      const errCb = mockMqttClient.on.mock.calls.find((c: any) => c[0] === 'error')?.[1]
+      expect(errCb).toBeDefined()
+      const err = new Error('connack timeout')
+      errCb(err)
+
+      // Must NOT failover to hivemq / mosquitto
+      expect(mqtt.connect).toHaveBeenCalledTimes(1)
+      expect(onError).toHaveBeenCalledWith(err)
+    } finally {
+      localStorage.removeItem('sp27-custom-broker')
+    }
   })
 })

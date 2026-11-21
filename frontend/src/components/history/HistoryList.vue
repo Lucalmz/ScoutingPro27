@@ -12,6 +12,12 @@ import { hapticLight, hapticSuccess, hapticWarning } from '@/utils/haptics'
 import { getRecordTournamentLevel, sortRecordsChronologically } from '@/utils/tournament'
 import { parseScoutRawData } from '@/utils/analytics/rankings'
 import { calcMatchPredictCycleTime } from '@/utils/analytics/predictCycleTime'
+import {
+  getExistingEventCrdt,
+  isCrdtTransportActive,
+  withLocalCrdtWrite,
+  writeScoutingRecordToCrdt
+} from '@/services/crdt'
 
 const { t } = useI18n()
 const recordStore = useRecordStore()
@@ -70,10 +76,7 @@ watch([highlightMatch, highlightTeam, highlightLevel, () => sortedRecords.value]
 }, { immediate: true })
 
 function isRecordSynced(rec: ScoutingRecord): boolean {
-  // 在 Host 端，只要状态为 SYNCED 即为权威落库
-  if (eventStore.isHost) return rec.syncStatus === 'SYNCED'
-  // 在 Client 端，必须同时满足 SYNCED 且获得 Host 分配的权威序号 hostSeq
-  return rec.syncStatus === 'SYNCED' && Boolean(rec.hostSeq)
+  return rec.syncStatus === 'SYNCED'
 }
 
 function syncIcon(rec: ScoutingRecord): string {
@@ -126,7 +129,15 @@ function retrySyncRecord(record: ScoutingRecord) {
   hapticLight()
   record.syncStatus = 'PENDING'
   if (connStore.isConnected) {
-    connStore.pushRecords([record])
+    const crdtHandle = record.eventId ? getExistingEventCrdt(record.eventId) : undefined
+    if (record.eventId && isCrdtTransportActive(record.eventId) && crdtHandle) {
+      withLocalCrdtWrite(record.eventId, () => {
+        writeScoutingRecordToCrdt(crdtHandle.store, record)
+      })
+      record.syncStatus = 'SYNCED'
+    } else {
+      connStore.pushRecords([record])
+    }
     hapticSuccess()
     toastStore.showToast(t('history.resync_triggered'), 'info')
   } else {

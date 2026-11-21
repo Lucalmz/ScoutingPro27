@@ -32,6 +32,7 @@
     "pinia": "^4.0.2",
     "puppeteer-core": "^25.5.0",
     "qrcode": "^1.5.4",
+    "tinybase": "^10.1.0",
     "vue": "^3.5.40",
     "vue-i18n": "^9.14.5",
     "vue-router": "^4.6.4"

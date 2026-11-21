@@ -112,11 +112,60 @@ public class AppConfig {
     }
 
     /**
+     * 解析显式指定的多实例隔离数据目录。
+     * 优先级：JVM 系统属性 {@code scouting.data.dir} > 环境变量 {@code SCOUTING_DATA_DIR}。
+     */
+    public static File resolveExplicitDataDir() {
+        String raw = System.getProperty("scouting.data.dir");
+        if (raw == null || raw.isBlank()) {
+            raw = System.getenv("SCOUTING_DATA_DIR");
+        }
+        if (raw == null || raw.isBlank()) {
+            return null;
+        }
+        String cleaned = stripMatchingQuotes(raw);
+        if (cleaned.isEmpty()) {
+            return null;
+        }
+        File dir = new File(cleaned);
+        if (!dir.exists()) {
+            dir.mkdirs();
+        }
+        return dir;
+    }
+
+    /**
+     * 是否禁用 H2 AUTO_SERVER（多进程临时库 E2E 隔离时开启，加快句柄释放且避免端口抢占）。
+     */
+    public static boolean isNoAutoServer() {
+        String sysProp = System.getProperty("scouting.noAutoServer");
+        if ("true".equalsIgnoreCase(sysProp)) {
+            return true;
+        }
+        String envVar = System.getenv("SCOUTING_NO_AUTO_SERVER");
+        return "true".equalsIgnoreCase(envVar);
+    }
+
+    private static String stripMatchingQuotes(String raw) {
+        String trimmed = raw.trim();
+        if (trimmed.length() >= 2) {
+            if ((trimmed.startsWith("\"") && trimmed.endsWith("\""))
+                    || (trimmed.startsWith("'") && trimmed.endsWith("'"))) {
+                return trimmed.substring(1, trimmed.length() - 1).trim();
+            }
+        }
+        return trimmed;
+    }
+
+    /**
      * 获取数据与资产的基准目录。
-     * DEV: <project_root>/app_data
-     * PROD: ~/.scoutingpro27
+     * 显式隔离目录 > DEV (<project_root>/app_data) > PROD (~/.scoutingpro27)
      */
     public static File resolveBaseDataDir() {
+        File explicitDir = resolveExplicitDataDir();
+        if (explicitDir != null) {
+            return explicitDir;
+        }
         if (isDev()) {
             File root = findProjectRootDir();
             File devDataDir = root != null ? new File(root, "app_data") : new File("app_data");
@@ -135,10 +184,13 @@ public class AppConfig {
 
     /**
      * 获取 H2 数据库物理文件前缀（H2 会自动追加 .mv.db）。
-     * DEV: <project_root>/app_data
-     * PROD: ~/.scoutingpro27/app_data
+     * 显式隔离目录 (<dataDir>/app_data) > DEV (<project_root>/app_data) > PROD (~/.scoutingpro27/app_data)
      */
     public static File resolveAppDbFile() {
+        File explicitDir = resolveExplicitDataDir();
+        if (explicitDir != null) {
+            return new File(explicitDir, "app_data");
+        }
         if (isDev()) {
             File root = findProjectRootDir();
             return root != null ? new File(root, "app_data") : new File("app_data");
@@ -150,7 +202,7 @@ public class AppConfig {
 
     /**
      * 解析 H2 数据库 JDBC 连接 URL。
-     * 支持 DB_URL 环境变量直接覆盖。
+     * 支持 DB_URL 环境变量直接覆盖，以及 --no-auto-server / scouting.noAutoServer 禁用 AUTO_SERVER。
      */
     public static String resolveAppDbUrl() {
         String envDb = System.getenv("DB_URL");
@@ -158,7 +210,11 @@ public class AppConfig {
             return envDb;
         }
         File dbFile = resolveAppDbFile();
-        return "jdbc:h2:" + dbFile.getAbsolutePath().replace('\\', '/') + ";AUTO_SERVER=TRUE;LOCK_TIMEOUT=15000;AUTO_RECONNECT=TRUE";
+        String dbPath = dbFile.getAbsolutePath().replace('\\', '/');
+        if (isNoAutoServer()) {
+            return "jdbc:h2:" + dbPath + ";AUTO_SERVER=FALSE;LOCK_TIMEOUT=15000";
+        }
+        return "jdbc:h2:" + dbPath + ";AUTO_SERVER=TRUE;LOCK_TIMEOUT=15000;AUTO_RECONNECT=TRUE";
     }
 
     /**
@@ -181,9 +237,17 @@ public class AppConfig {
 
     /**
      * 获取根目录日志文件夹 (log/) 与主日志文件 (scoutingpro.log)。
-     * 优先在项目源码根目录创建 log 文件夹，否则在用户资产目录下创建。
+     * 若指定显式隔离目录则写入 <dataDir>/log；否则优先项目根目录 log/，或用户资产目录下 log/。
      */
     public static File resolveLogDir() {
+        File explicitDir = resolveExplicitDataDir();
+        if (explicitDir != null) {
+            File logDir = new File(explicitDir, "log");
+            if (!logDir.exists()) {
+                logDir.mkdirs();
+            }
+            return logDir;
+        }
         File root = findProjectRootDir();
         File logDir = root != null ? new File(root, "log") : new File(resolveBaseDataDir(), "log");
         if (!logDir.exists()) {

@@ -25,6 +25,13 @@ import { createMessageDispatcher } from './messageDispatcher'
 import { setupSelfHealing } from './selfHealing'
 import { compareHostAuthority, createHostElectionController } from './hostElection'
 import { probeLocalInterfaceIpv6, warmUpDoHStunIpv6, setCustomTurnConfig } from './connectivity'
+import { saveEpochWitnessRecord, getHighestSeenEpoch, isPlaceholderEventId } from './epochStore'
+import {
+  getCalibratedClockForEvent,
+  migrateClockAnchor,
+  createClockSyncDriver,
+  type CalibratedMonotonicClock
+} from '@/services/clock'
 import { createLogger } from '@/utils/logger'
 import { isMobileDevice } from '@/composables/useIsMobile'
 
@@ -37,6 +44,8 @@ export * from './offlineQueue'
 export * from './sdpUtil'
 export * from './messageDispatcher'
 export * from './selfHealing'
+export * from './epochStore'
+export * from './roomDiscovery'
 export { compareHostAuthority }
 
 export function createWebRtcService(callbacks: WebRtcCallbacks): WebRtcService {
@@ -138,6 +147,7 @@ export function createWebRtcService(callbacks: WebRtcCallbacks): WebRtcService {
 
   function cleanupPeerIdentityAndNotify(targetSender: string): void {
     peerMgr.clearPeerTransportInfo(targetSender)
+    callbacks.onPeerDataChannelClose?.(targetSender)
     const scoutId = clientIdToScoutId.get(targetSender)
     if (scoutId) {
       const set = scoutIdToClientIds.get(scoutId)
@@ -339,6 +349,20 @@ export function createWebRtcService(callbacks: WebRtcCallbacks): WebRtcService {
 
   let electionCtrl: ReturnType<typeof createHostElectionController>
 
+  function getCalibratedClock(): CalibratedMonotonicClock {
+    return getCalibratedClockForEvent(currentEventMetadata?.id || currentInviteCode || 'default')
+  }
+
+  const clockSyncDriver = createClockSyncDriver({
+    clock: () => getCalibratedClock(),
+    sendReq: async (req) => {
+      await sendMessage({ ...req, authCode: currentInviteCode || undefined })
+    },
+    onCalibrated: (res) => {
+      callbacks.onClockCalibrated?.(res)
+    }
+  })
+
   const rawHandleChannelMessage = createChannelMessageHandler({
     isHostMode: () => isHostMode,
     currentInviteCode: () => currentInviteCode,
@@ -430,6 +454,22 @@ export function createWebRtcService(callbacks: WebRtcCallbacks): WebRtcService {
     },
     onPeerIdentityBound: (senderId: string, userId: string) => {
       syncScoutTransportForSender(senderId, userId)
+    },
+    getHostClockNow: () => getCalibratedClock().now(),
+    getHostEpoch: () => electionCtrl.getLocalEpoch() || 1,
+    onClockSyncResponse: (res) => {
+      clockSyncDriver.handleResponse(res)
+    },
+    onForceClockResync: (msg) => {
+      if (typeof window !== 'undefined') {
+        ;(window as any).__LAST_FORCE_CLOCK_RESYNC__ = {
+          ts: Date.now(),
+          reason: msg.reason,
+          hostEpoch: msg.hostEpoch,
+          hostNow: msg.hostNow
+        }
+      }
+      void clockSyncDriver.runCalibration({ forceReanchor: true })
     }
   })
 
@@ -497,8 +537,15 @@ export function createWebRtcService(callbacks: WebRtcCallbacks): WebRtcService {
     if (isHostMode && peerId && peerId !== 'host') {
       syncScoutTransportForSender(peerId)
       signaling?.send({ type: 'sas_verified', hostSessionId }, peerId)
+      if ((clients.get(peerId) || stagedClients.get(peerId))?.dc?.readyState === 'open') {
+        callbacks.onPeerDataChannelOpen?.(peerId)
+      }
     } else if (!isHostMode) {
       signaling?.send({ type: 'sas_verified', clientSessionId: currentClientSessionId })
+      if (clientDc?.readyState === 'open') {
+        void clockSyncDriver.runCalibration()
+        callbacks.onPeerDataChannelOpen?.('host')
+      }
     }
   }
 
@@ -610,6 +657,7 @@ export function createWebRtcService(callbacks: WebRtcCallbacks): WebRtcService {
     confirmSas,
     getUsername: resolveCurrentUsername,
     getUserId: resolveCurrentUserId,
+    getHostEpoch: () => electionCtrl.getLocalEpoch() || 1,
     callbacks,
     clientIdToScoutId,
     clientIdToScoutName,
@@ -667,6 +715,17 @@ export function createWebRtcService(callbacks: WebRtcCallbacks): WebRtcService {
     confirmSas,
     getUsername: resolveCurrentUsername,
     getUserId: resolveCurrentUserId,
+    getCurrentEventMetadata: () => currentEventMetadata,
+    getMaxKnownHlcPt: () => Math.max(getCalibratedClock().getLastCommittedHlcPt(), callbacks.getMaxKnownHlcPt?.() ?? 0),
+    onDataChannelReadyForSync: () => {
+      if (!isHostMode && sas.clientSasState === 'VERIFIED' && clientDc?.readyState === 'open') {
+        void clockSyncDriver.runCalibration()
+        callbacks.onPeerDataChannelOpen?.('host')
+      }
+    },
+    onEpochWitnessUpdated: (rec) => {
+      callbacks.onEpochWitnessUpdated?.(rec)
+    },
     callbacks
   })
 
@@ -686,6 +745,13 @@ export function createWebRtcService(callbacks: WebRtcCallbacks): WebRtcService {
     getLocalDeviceId: () => localDeviceId,
     getLocalEcdhPubHex: () => localEcdhPubHex,
     getHostIpv6: () => (hostSignalingHandler as any)?.getHostIpv6?.(),
+    getCurrentInviteCode: () => currentInviteCode,
+    getCurrentEventMetadata: () => currentEventMetadata,
+    getMaxKnownHlcPt: () => Math.max(getCalibratedClock().getLastCommittedHlcPt(), callbacks.getMaxKnownHlcPt?.() ?? 0),
+    onWitnessMetadataDiscovered: (witness) => callbacks.onWitnessMetadataDiscovered?.(witness),
+    onHostClockAlignWithWitnesses: (witnessPts) => {
+      getCalibratedClock().alignHostWithWitnesses(witnessPts)
+    },
     resolveCurrentUsername,
     resolveCurrentUserId,
     getClientPc: () => clientPc,
@@ -708,6 +774,27 @@ export function createWebRtcService(callbacks: WebRtcCallbacks): WebRtcService {
     hostSignalingHandler
   })
 
+  function handleClientEpochBeacon(beacon: import('./signaling').EpochBeaconPayload) {
+    if (!beacon || typeof beacon.hostEpoch !== 'number') return
+    const code = (beacon.inviteCode || currentInviteCode || '').trim().toUpperCase()
+    if (!code) return
+    const highest = getHighestSeenEpoch(code)
+    if (beacon.hostEpoch >= highest) {
+      const merged = saveEpochWitnessRecord({
+        inviteCode: code,
+        authoritativeEventId: beacon.authoritativeEventId,
+        eventName: beacon.eventName,
+        hostUserId: beacon.hostUserId,
+        ftcYear: beacon.ftcYear,
+        ftcEventCode: beacon.ftcEventCode,
+        highestSeenEpoch: beacon.hostEpoch,
+        activeHostSessionId: beacon.hostSessionId,
+        activeHostDeviceId: beacon.hostDeviceId
+      })
+      callbacks.onEpochWitnessUpdated?.(merged)
+    }
+  }
+
   function resolveTargetSignalingEndpoint(preferredBroker?: string): string {
     const activeTarget = preferredBroker || (typeof sessionStorage !== 'undefined' ? sessionStorage.getItem('sp27-active-broker') : null) || undefined
     return resolveBrokerUrl(activeTarget)
@@ -718,20 +805,21 @@ export function createWebRtcService(callbacks: WebRtcCallbacks): WebRtcService {
       log.warn('Mobile devices are strictly prohibited from acting as host. Falling back to join() client mode.')
       return join(inviteCode, username, userId, preferredBroker)
     }
-    electionCtrl.prepareForHostStart()
     if (signaling) {
       try { signaling.close() } catch {}
       signaling = null
     }
 
-    isHostMode = true
-    isExplicitlyClosed = false
     currentInviteCode = inviteCode
     if (username) currentUsername = username
     if (userId) currentUserId = userId
     if (eventMetadata) {
       currentEventMetadata = eventMetadata
     }
+    electionCtrl.prepareForHostStart()
+
+    isHostMode = true
+    isExplicitlyClosed = false
     setCustomTurnConfig(currentEventMetadata?.customTurnConfig ?? null)
     clients.forEach((c) => {
       if (c.drainingVirtualDc) {
@@ -793,6 +881,7 @@ export function createWebRtcService(callbacks: WebRtcCallbacks): WebRtcService {
       onError: () => {
         updateHostStatus()
       },
+      onEpochBeacon: (beacon) => electionCtrl.handleEpochBeacon(beacon),
       onMessage: electionCtrl.createHostSignalingMessageHandler(sessionStartTime)
     })
   }
@@ -856,6 +945,7 @@ export function createWebRtcService(callbacks: WebRtcCallbacks): WebRtcService {
         }
       },
       onError: () => setStatus('offline'),
+      onEpochBeacon: handleClientEpochBeacon,
       onMessage: async (data: any) => {
         await clientSession.handleClientSignalingMessage(data)
       }
@@ -924,6 +1014,7 @@ export function createWebRtcService(callbacks: WebRtcCallbacks): WebRtcService {
             setStatus('offline')
           }
         },
+        onEpochBeacon: handleClientEpochBeacon,
         onMessage: async (data: any) => {
           await clientSession.handleClientSignalingMessage(data)
         }
@@ -958,12 +1049,52 @@ export function createWebRtcService(callbacks: WebRtcCallbacks): WebRtcService {
   })
 
   function setEventMetadata(meta: ScoutingEvent) {
+    const prevEventId = currentEventMetadata?.id
     currentEventMetadata = meta
     setCustomTurnConfig(meta?.customTurnConfig ?? null)
+    if (meta?.id && !isPlaceholderEventId(meta.id)) {
+      if (currentInviteCode) {
+        migrateClockAnchor(currentInviteCode, meta.id)
+      }
+      if (prevEventId && prevEventId !== meta.id) {
+        migrateClockAnchor(prevEventId, meta.id)
+      }
+      const code = (meta.inviteCode || currentInviteCode || '').trim().toUpperCase()
+      const ep = electionCtrl.getLocalEpoch()
+      if (code && ep > 0) {
+        saveEpochWitnessRecord({
+          inviteCode: code,
+          authoritativeEventId: meta.id,
+          eventName: meta.name || '',
+          hostUserId: meta.hostId || '',
+          ftcYear: meta.ftcYear,
+          ftcEventCode: meta.ftcEventCode,
+          highestSeenEpoch: ep,
+          activeHostSessionId: isHostMode ? hostSessionId : currentHostSessionId,
+          activeHostDeviceId: isHostMode ? localDeviceId : undefined
+        })
+        if (isHostMode && signaling?.isConnected()) {
+          void signaling
+            .publishEpochBeacon({
+              inviteCode: code,
+              hostEpoch: ep,
+              hostSessionId,
+              hostDeviceId: localDeviceId,
+              hostUserId: meta.hostId || resolveCurrentUserId(),
+              authoritativeEventId: meta.id,
+              eventName: meta.name || '',
+              ftcYear: meta.ftcYear,
+              ftcEventCode: meta.ftcEventCode
+            })
+            .catch(() => {})
+        }
+      }
+    }
   }
 
   function disconnect() {
     isExplicitlyClosed = true
+    clockSyncDriver.cancelPending()
     selfHealing.dispose()
     clientSession.clearReconnectTimer()
     electionCtrl.stopAllElectionTimers()
@@ -982,6 +1113,7 @@ export function createWebRtcService(callbacks: WebRtcCallbacks): WebRtcService {
           })
           .catch(() => {})
       }
+      const closingPeerIds = Array.from(new Set([...clients.keys(), ...stagedClients.keys()]))
       clients.forEach((c) => {
         if (c.drainingVirtualDc) {
           try { c.drainingVirtualDc.close() } catch {}
@@ -1005,6 +1137,9 @@ export function createWebRtcService(callbacks: WebRtcCallbacks): WebRtcService {
         c.pc.close()
       })
       stagedClients.clear()
+      for (const pid of closingPeerIds) {
+        callbacks.onPeerDataChannelClose?.(pid)
+      }
       hostQueues.clear()
       preOfferCandidates.clear()
       offlineMessages.clear()
@@ -1016,6 +1151,7 @@ export function createWebRtcService(callbacks: WebRtcCallbacks): WebRtcService {
       takeoverCooldowns.clear()
       electionCtrl.finishTakeoverReconciliation('closed')
     } else {
+      callbacks.onPeerDataChannelClose?.('host')
       if (clientSender) {
         try { clientSender.abort('Service disconnected') } catch (_) {}
       }
@@ -1081,6 +1217,12 @@ export function createWebRtcService(callbacks: WebRtcCallbacks): WebRtcService {
     getSasState: (peerId?: string) => isHostMode ? (peerId ? sas.clientSasStates.get(peerId) || 'PENDING_VERIFICATION' : 'PENDING_VERIFICATION') : sas.clientSasState,
     getSasFingerprint: (peerId?: string) => isHostMode ? (peerId ? sas.clientFingerprints.get(peerId) : undefined) : sas.clientSecurityFingerprint,
     getStatus: () => status,
+    getPeerUserId: (peerId: string) => {
+      if (!isHostMode && (peerId === 'host' || (clientHostSenderId && peerId === clientHostSenderId))) {
+        return currentEventMetadata?.hostId || undefined
+      }
+      return resolveScoutIdForSender(peerId)
+    },
     getTransportInfo: () => peerMgr.currentTransportInfo,
     getScoutTransportInfo: (userId: string) => {
       const cids = scoutIdToClientIds.get(userId)
@@ -1095,6 +1237,21 @@ export function createWebRtcService(callbacks: WebRtcCallbacks): WebRtcService {
     isHostMode: () => isHostMode,
     isQuarantinedPeer: (peerId: string) => rawHandleChannelMessage.isQuarantinedPeer(peerId),
     requestAccountMerge,
+    getHostEpoch: () => electionCtrl.getLocalEpoch(),
+    getCalibratedClock: () => getCalibratedClock(),
+    requestClockSync: (forceReanchor = false) => clockSyncDriver.runCalibration({ forceReanchor }),
+    sendForceClockResync: async (targetId: string, reason = 'clock_skew_detected') => {
+      await sendMessage(
+        {
+          type: 'FORCE_CLOCK_RESYNC',
+          reason,
+          hostNow: getCalibratedClock().now(),
+          hostEpoch: electionCtrl.getLocalEpoch() || 1,
+          authCode: currentInviteCode || undefined
+        },
+        targetId
+      )
+    },
     updateCallbacks: (newCallbacks: Partial<WebRtcCallbacks>) => {
       Object.assign(callbacks, newCallbacks)
     }

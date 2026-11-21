@@ -2,660 +2,245 @@
 
 <p align="left">
   <img src="https://img.shields.io/badge/FTC_Team-27570_B.E.A.R.-FF6F00?style=for-the-badge&logo=target&logoColor=white" alt="FTC 27570" />
+  <img src="https://img.shields.io/badge/Season-BIOBUZZ_2026--2027-39FF14?style=for-the-badge&logoColor=black" alt="BIOBUZZ" />
+  <img src="https://img.shields.io/badge/CRDT-TinyBase_10_%2B_HLC-8A2BE2?style=for-the-badge" alt="CRDT" />
   <img src="https://img.shields.io/badge/Architecture-Public_P2P_Mesh-00B0FF?style=for-the-badge&logo=webrtc&logoColor=white" alt="P2P" />
-  <img src="https://img.shields.io/badge/Security-Zero_Trust_%26_SAS-00C853?style=for-the-badge&logo=auth0&logoColor=white" alt="Security" />
-  <img src="https://img.shields.io/badge/Vue.js_3-35495E?style=for-the-badge&logo=vue.js&logoColor=4FC08D" alt="Vue.js" />
-  <img src="https://img.shields.io/badge/TypeScript-007ACC?style=for-the-badge&logo=typescript&logoColor=white" alt="TypeScript" />
-  <img src="https://img.shields.io/badge/Java_21-ED8B00?style=for-the-badge&logo=openjdk&logoColor=white" alt="Java" />
-  <img src="https://img.shields.io/badge/Javalin_7-009688?style=for-the-badge&logo=fastapi&logoColor=white" alt="Javalin" />
-  <img src="https://img.shields.io/badge/H2_Database-003545?style=for-the-badge&logo=databricks&logoColor=white" alt="H2 Database" />
+  <img src="https://img.shields.io/badge/Security-Zero_Trust_%26_ECDSA-00C853?style=for-the-badge&logo=auth0&logoColor=white" alt="Security" />
+  <img src="https://img.shields.io/badge/Tests-1023_Unit_%2B_18_E2E-10B981?style=for-the-badge&logo=checkmarx&logoColor=white" alt="Tests" />
+  <img src="https://img.shields.io/badge/Vue_3_%2B_Vite_8-35495E?style=for-the-badge&logo=vue.js&logoColor=4FC08D" alt="Vue.js" />
+  <img src="https://img.shields.io/badge/TypeScript_6-007ACC?style=for-the-badge&logo=typescript&logoColor=white" alt="TypeScript" />
+  <img src="https://img.shields.io/badge/Java_21_%2B_Javalin_7-ED8B00?style=for-the-badge&logo=openjdk&logoColor=white" alt="Java" />
+  <img src="https://img.shields.io/badge/H2_%2B_Flyway_13-003545?style=for-the-badge&logo=databricks&logoColor=white" alt="H2 Database" />
 </p>
 
 <p align="left">
   <b>Language:</b>
   <a href="README.md"><b>简体中文</b></a> |
   <a href="README_en.md"><b>English</b></a>
+  &nbsp;|&nbsp;
+  <b>Standalone User Guides (Step-by-Step Illustrated Manuals):</b>
+  <a href="USER_GUIDE.md"><b>Bilingual Hub</b></a> ·
+  <a href="docs/USER_GUIDE.en.md"><b>English Guide</b></a> ·
+  <a href="docs/USER_GUIDE.zh.md"><b>中文教程</b></a> ·
+  <a href="docs/ScoutingPro27_UserGuide_EN.pdf"><b>Offline PDF (EN)</b></a> ·
+  <a href="docs/ScoutingPro27_UserGuide_ZH.pdf"><b>离线 PDF (ZH)</b></a>
 </p>
 
-> 💡 **This project was independently conceived, architected, and full-stack developed by middle and high school students of FIRST Tech Challenge (FTC) Team 27570 B.E.A.R.**  
-> Born directly out of front-line competition demands, it redefines the scouting and match collaboration experience across global FIRST events through hardcore modern engineering practices.
-> 
-> 📌 **Release Positioning & Season Commitment (v1.0.4 MVP)**:  
-> This release marks our **first battle-tested Production-Ready MVP for the new season**.  
-> **We solemnly commit: Before the first official qualifier kicks off, our team will deliver a major update**, incorporating rule clarifications and real-world field feedback to bring even deeper tactical insights and collaboration tools!
+> 💡 **Independently conceived, architected, and full-stack developed by middle and high school students of FIRST Tech Challenge (FTC) Team 27570 B.E.A.R.**  
+> A decentralized **WebRTC P2P + TinyBase CRDT/HLC collaborative scouting & tactical intelligence platform** built for extreme robotics competition arenas.
 
 ---
 
-## Table of Contents
-- [1. Project Introduction](#1-project-introduction)
-  - [1.1 Why Build ScoutingPro27?](#11-why-build-scoutingpro27)
-  - [1.2 Groundbreaking Innovation: Public P2P Direct Mesh via WebRTC](#12-groundbreaking-innovation-public-p2p-direct-mesh-via-webrtc)
-  - [1.3 Truly Decentralized: Zero Cloud Server, Zero Operational Cost](#13-truly-decentralized-zero-cloud-server-zero-operational-cost)
-  - [1.4 Comprehensive Comparison of Open-Source FIRST Scouting Systems](#14-comprehensive-comparison-of-open-source-first-scouting-systems)
-  - [1.5 Military-Grade User Data Security & Privacy Protection](#15-military-grade-user-data-security--privacy-protection)
-  - [1.6 Full Bilingual Support & Native Glassmorphic Interface](#16-full-bilingual-support--native-glassmorphic-interface)
-  - [1.7 Tech Stack Overview](#17-tech-stack-overview)
-- [2. User Guide](#2-user-guide)
-  - [2.1 Preparation & Quick Start (No Complex Setup)](#21-preparation--quick-start-no-complex-setup)
-  - [2.2 Step 1: Lead Creates Event Room (Desktop)](#22-step-1-lead-creates-event-room-desktop)
-  - [2.3 Step 2: Scouts Scan QR to Join (Mobile)](#23-step-2-scouts-scan-qr-to-join-mobile)
-  - [2.4 Step 3: Pit Scouting — Hardware Specs & High-Res Photos](#24-step-3-pit-scouting--hardware-specs--high-res-photos)
-  - [2.5 Step 4: Smart Scheduling — Station Assignment Matrix](#25-step-4-smart-scheduling--station-assignment-matrix)
-  - [2.6 Step 5: Match Scouting — Unified Cycle Tracker & High-Speed Blind Scoring](#26-step-5-match-scouting--unified-cycle-tracker--high-speed-blind-scoring)
-  - [2.7 Step 6: Power Ladder & "Brag Index" Quantified Reconciliation Model](#27-step-6-power-ladder--brag-index-quantified-reconciliation-model)
-  - [2.8 Step 7: Official FTC Events API Integration & Penalty Deduction](#28-step-7-official-ftc-events-api-integration--penalty-deduction)
-  - [2.9 Step 8: Dual-Host Standby Hot-Spare & Full-Sync Handoff Protocol](#29-step-8-dual-host-standby-hot-spare--full-sync-handoff-protocol)
-  - [2.10 Step 9: Tactical AI Advisor](#210-step-9-tactical-ai-advisor)
-  - [2.11 Step 10: Data Export & Flash Drive Offline Sync Package](#211-step-10-data-export--flash-drive-offline-sync-package)
-  - [2.12 Step 11: Safe Single-Entry Event Deletion & Deep Offline Cache Flush](#212-step-11-safe-single-entry-event-deletion--deep-offline-cache-flush)
-- [3. Technical Deep Dive](#3-technical-deep-dive)
-  - [3.1 Public P2P Mesh & Blind Signaling Architecture](#31-public-p2p-mesh--blind-signaling-architecture)
-  - [3.2 Zero-Trust Security & Mutual Authentication Flow](#32-zero-trust-security--mutual-authentication-flow)
-  - [3.3 Distributed Monotonic Clock & Conflict Auto-Resolution](#33-distributed-monotonic-clock--conflict-auto-resolution)
-  - [3.4 Host Takeover Full-Sync & Handoff Protocol](#34-host-takeover-full-sync--handoff-protocol)
-  - [3.5 "Brag Index" Algorithm & Regular Season Rest Amnesty State Machine](#35-brag-index-algorithm--regular-season-rest-amnesty-state-machine)
-- [4. Developer & Testing Guide](#4-developer--testing-guide)
-  - [4.1 Local Development Prerequisites](#41-local-development-prerequisites)
-  - [4.2 Fast Build & Run](#42-fast-build--run)
-  - [4.3 Automated Verification & Test Suite](#43-automated-verification--test-suite)
-- [License & Acknowledgements](#license--acknowledgements)
+## ⚡ Imagine the Ultimate Competition-Day Nightmare
+
+It is **15 minutes before Playoff Alliance Selection**, and your scouting operation is collapsing in real time:
+
+1. **Online Spreadsheets Freeze and Refuse to Save**: 3,000 people are jamming the venue Wi-Fi under strict RF spectrum control, and cellular towers are choked. Your Google Sheets / Feishu / Tencent Docs tab is stuck on an endless "Reconnecting..." spinner. Six scouts in the bleachers just finished logging crucial qualification matches, and **not a single cell can be written**.
+2. **One Misclicked Row Wipes Out Hours of Someone Else's Work**: Two scouts finally get a brief signal spike, scroll to the wrong row in panic, and type into the same team's entry at the same time — **silently overwriting and erasing an entire morning's worth of your top alliance candidate's hardware specs and match notes**.
+3. **The Single Central Database Drops Offline and Everyone Stares in Helplessness**: Maybe your team hosted a central cloud server or a single-laptop LAN backend. The moment the venue Internet drops — or the lead laptop's battery dies, crashes, or gets unplugged — **that single point of failure dies, every scout's phone throws a connection error, and the whole team is left staring at dead screens**.
+4. **Raw Spreadsheet Numbers Offer Zero Intuitive Tactical Clarity**: Your alliance captain is sweating in the queue line staring at hundreds of messy spreadsheet rows, unable to tell whose cycle time is actually repeatable, who exaggerated their pit claims, or whose official score was artificially inflated by opponent penalties.
+
+### 🛡️ Under This Exact Worst-Case Scenario, ScoutingPro27 Solves Everything:
+
+- **No Internet? Zero-Latency Offline Scoring + Sub-50ms P2P Direct Sync**: Built as an offline-first PWA backed by IndexedDB, scouts log matches and snap HD WebP photos completely offline. Whenever any path exists, phones on 4G/5G and laptops on Wi-Fi connect directly peer-to-peer via **WebRTC DataChannels** (with physical-NIC UPnP port mapping and an ECDH-encrypted WSS tunnel fallback) without relying on any cloud server.
+- **Concurrent Edits on the Same Team? Cell-Level CRDT Conflict-Free Merge**: Powered by **TinyBase `MergeableStore` CRDT + Crystal-Oscillator Calibrated Hybrid Logical Clocks (HLC)**. If Scout A edits a robot's weight offline while Scout B edits its launcher type and tags, reconnecting **merges every individual field losslessly**. If two scouts accidentally score the same team in the same match, both records are preserved with **pure derived conflict badges** for human review, backed by write-time **ECDSA P-256 device signatures** against tampering.
+- **Host Laptop Dies Mid-Tournament? Split-Brain-Proof Takeover + Teammate Relay Recovery**: Even if the primary host laptop suffers a hard hardware crash and stays dead for 2 hours, scouts keep working offline. The lead can log into their account on a teammate's shared backup laptop (1-click entry from the Dashboard with zero invite code needed) or even open a **brand-new empty laptop** and enter the 6-character invite code: **`hostEpoch` Fencing + Mobile Witness Discovery** automatically promotes the new host, **relays signed historical records from offline teammates' phones through online peers**, and automatically fences/demotes the old laptop if it ever revives while merging its pre-crash exclusive data.
+- **Instant Battlefield Decisions**: **FTC Official Rule A215 Advancement Points (`invErf`) + Roll-Down Badges**, **Predict Cycle Time (≥6-cycle outlier-trimmed speed)**, **Swarm RP Mobility tracking**, the **"Brag Index"** truth auditor, a **60fps Viper-Style Laser Tactical Whiteboard**, and a **streaming AI Tactical Advisor** turn raw data into instant alliance picks.
+
+**With ScoutingPro27, your team will never stress over scouting logistics again.**
 
 ---
 
-# 1. Project Introduction
+## 📖 Standalone User Guide (For Scouts & Team Leads)
 
-### 1.1 Why Build ScoutingPro27?
-In FIRST (FTC / FRC) Robotics Championships, **"Scouting" is the decisive strategic weapon for playoff alliance selection and match tactics**. However, real competition arenas present severe environmental obstacles:
-1. **Network Blackouts are the Norm**: Thousands of spectators and participants crowd the venue. Wi-Fi channels are heavily congested or subject to strict radio interference control by organizers, and cellular signals choke up. Traditional web-based or cloud-dependent scouting apps freeze and spin endlessly.
-2. **Traditional Tools are Inefficient**: Paper forms take immense labor to transcribe and cannot provide real-time aggregation. Manually scanning QR codes from scout phones one-by-one causes missed records and huge time lags. Self-hosting cloud servers incurs recurring annual expenses and complex DevOps.
-3. **Data Conflicts & Exaggerated Claims**: Multiple scouts submit conflicting records; during pit visits, opposing teams often boast about unrealistic scoring capabilities or high-hang consistency without an objective cross-validation mechanism.
-
-To fundamentally conquer these challenges, **the student engineering team of FTC Team 27570 independently developed ScoutingPro27**.
+> To keep this README focused on architecture and engineering, **step-by-step illustrated operating manuals are maintained separately**:
+> - 📘 **[Bilingual User Guide Hub (USER_GUIDE.md)](USER_GUIDE.md)**
+> - 🇺🇸 **[English Step-by-Step Illustrated Guide (docs/USER_GUIDE.en.md)](docs/USER_GUIDE.en.md)** / **[English Offline PDF](docs/ScoutingPro27_UserGuide_EN.pdf)**
+> - 🇨🇳 **[中文保姆级图文教程 (docs/USER_GUIDE.zh.md)](docs/USER_GUIDE.zh.md)** / **[中文离线 PDF](docs/ScoutingPro27_UserGuide_ZH.pdf)**
 
 ---
 
-### 1.2 Groundbreaking Innovation: Public P2P Direct Mesh via WebRTC
-ScoutingPro27 introduces an unprecedented breakthrough to the FIRST community by **bringing public WebRTC P2P direct peer-to-peer data channels and WSS blind signaling to competition collaboration**:
-- **Bypassing Physical Network Boundaries**: The team lead's laptop can be connected to the venue Wi-Fi while scouts in the bleachers use 4G/5G cellular data — **no shared local network or router is required**!
-- **True Sub-50ms Direct Communication**: Devices communicate directly through end-to-end encrypted WebRTC DataChannels. The moment a scout hits submit, records appear on the lead's screen within 50 milliseconds without passing through any intermediate proxy server.
-- **Self-Healing Adaptive Pipeline**: Built-in dynamic watchdog monitors connection health. LAN Direct -> Public STUN Reflexive P2P -> Metered.ca TURN Relay gracefully transitions in real time, recovering within seconds under high interference.
+## 1. Core Capabilities vs. Existing Scouting Solutions
+
+| Dimension | ScoutingPro27 (This Project 🚀) | Online Spreadsheets<br/>(Google / Feishu / Excel) | Local Master-Slave LAN Systems | Classic Offline QR<br/>(ScoutingPASS etc.) | Cloud SaaS Scouting Sites |
+| :--- | :---: | :---: | :---: | :---: | :---: |
+| **Core Sync Engine** | **WebRTC P2P + TinyBase CRDT/HLC** | Centralized cloud doc sync | Local Server + Hotspot/BT | Static single-direction QR | Centralized cloud CRUD |
+| **Cloud Server Cost** | **$0 / yr (Truly Decentralized)** | Requires public internet | Dedicated local server setup | $0 / yr | Recurring server & domain fees |
+| **Venue Blackout Resilience** | **100% Offline + Auto Anti-Entropy Merge** | **Spins endlessly; cannot write** | Fails outside local Wi-Fi | Works, but manual QR queue | **Total outage when offline** |
+| **Concurrent Same-Row Edits** | **Field-Level LWW-HLC + Derived Conflict** | **Accidental row overwrites & data loss** | Coarse whole-record overwrite | Manual post-match merge errors | Last HTTP POST overwrites prior |
+| **Host Crash / SPOF Recovery** | **Epoch Fencing + Teammate Signed Relay** | Account/network lock halts team | **Host crash halts everyone** | Master crash requires rescanning | **DB outage halts everyone** |
+| **System Clock Tamper Guard** | **3-RTT Crystal Clock + 300s Skew Fence** | Server timestamp only | Vulnerable to skewed phone clocks | None | Server timestamp only |
+| **Zero-Trust Security** | **ECDH + 4-Digit SAS + TOFU + ECDSA Sig** | Leaked link allows vandalism | Plaintext / basic password | QR codes easily photographed | Standard HTTPS + password |
+| **Tactical Analytics** | **Rule A215 Adv. Pts + Brag Index + Cycle** | **Wall of raw numbers; unintuitive** | External Tableau/scripts needed | External Tableau needed | Basic averages / OPR only |
+| **Whiteboard & AI Advisor** | **60fps Laser Sim Board + Streaming AI** | None | Separate static drawing tool | None | Rare |
 
 ---
 
-### 1.3 Truly Decentralized: Zero Cloud Server, Zero Operational Cost
-- **No Cloud Hosts Needed**: No need to purchase AliCloud, AWS, or Azure virtual machines; no domain registration; no Docker or public IP configuration.
-- **Physical Data Sovereignty**: All team profiles, match scores, and high-resolution robot close-up photos are stored directly on the host machine's embedded H2 database and local file system. Even if the venue completely cuts off Internet access, the system operates at 100% capacity in standalone/LAN mode. Data is never exposed to third-party platforms.
+## 2. Complete Tech Stack
+
+ScoutingPro27 pairs a **Vue 3 + TypeScript 6 Offline-First PWA Frontend** with a **Java 21 + Javalin 7 + H2 + JCEF Native Desktop Host Backend**:
+
+### 2.1 Frontend & Mobile PWA (`frontend/`)
+- **Core Framework & Build Toolchain**:
+  - **Vue `^3.5.40`** (Composition API / `<script setup>`)
+  - **TypeScript `~6.0.0`** + **`vue-tsc ^3.3.7`** (Strict static type checking)
+  - **Vite `^8.1.5`** (Rolldown-powered production bundler)
+  - **Pinia `^4.0.2`** (Reactive state stores bidirectionally bridged to CRDT)
+  - **Vue Router `^4.6.4`** & **Vue I18n `^9.14.5`** (**1,313 1:1 aligned bilingual keys** with instant hot-switching)
+- **Distributed CRDT & Anti-Poisoning Clock Layer**:
+  - **TinyBase `^10.1.0`** (`MergeableStore` cell-level LWW-CRDT, `createCustomSynchronizer`, `persister-indexed-db`, `getHlcFunctions` 16-char HLC codec, and `maxClockSkewSeconds=300` guard)
+  - **`CalibratedMonotonicClock`**: 3-sample min-RTT handshake zero-point calibration + `performance.now()` monotonic crystal oscillator + `[0, 12h]` offline sleep compensation & cold-restart anchor (`sp27_clock_anchor_${eventId}`) + Byzantine-resilient 5-minute cluster median witness alignment
+- **WebRTC P2P Mesh & Zero-Trust Cryptography**:
+  - **WebRTC `RTCDataChannel`**: Star-hub anti-entropy delta fan-out, 48 KiB framing (`CRDT_SYNC_CHUNK`), backpressure-aware `DataChannelSender`
+  - **MQTT over WSS (`mqtt ^5.15.2`)**: Multi-broker failover + companion LAN WebSocket (`/ws/signal/{room}`) + retained `epoch-beacon` sub-topic + **`VirtualDataChannel`** (3.8s automatic fallback to ECDH-encrypted WSS tunnel when UDP is blocked, with non-destructive background probes to hot-upgrade back to native UDP)
+  - **Web Crypto API + Pure-JS Fallback Engine (`crypto.ts` / `identityStore.ts`)**:
+    - **ECDH (P-256) + HKDF-SHA256 + AES-256-GCM**: End-to-end encryption for signaling and virtual channels
+    - **ECDSA (P-256 / SHA-256)**: Persistent device signing keypair, write-time record signing (`authorSig`), and Host-countersigned `member_identities` (`hostSig`) dual verification
+    - **PBKDF2-HMAC-SHA256 (100,000 iterations)**: Full-payload signaling authentication (with pure-JS midstate-accelerated HTTP LAN fallback) + 5,000-entry `NonceLruCache` replay defense + 4-digit **SAS** + **TOFU** trust store
+- **Offline Storage, Scanning & UI System**:
+  - **PWA (`vite-plugin-pwa ^1.3.0` / Workbox)** & **IndexedDB** (`sp27_crdt_${eventId}`, `scoutingpro_security_v1`, offline WebP photo queue)
+  - **QR & Rich Markdown**: `qrcode ^1.5.4`, `jsqr ^1.4.0`, `markdown-it ^15.0.0`, `highlight.js ^11.12.0`, `dompurify ^3.4.14`
+  - **Design & Motion**: Cold Graphite Pit Wall token system (`#0B0E10` + `#39FF14`), bundled `Noto Sans SC` variable font, CSS `linear()` spring physics, and 60fps Canvas 2D laser trajectory whiteboard
+
+### 2.2 Desktop Host Backend & Native Container (`Backend/`)
+- **Runtime & Microservice Core**:
+  - **Java 21 (LTS)** & **Javalin `7.2.3`** (Jetty 12 async REST API, LAN WebSocket signaling relay, and SSE AI streaming proxy)
+  - **Gson `2.11.0`** & **SLF4J Simple `2.0.17`** (Dual console + isolated per-instance file logging)
+- **Database, Connection Pool & Schema Migrations**:
+  - **H2 Database `2.2.224`** (`127.0.0.1` loopback-bound `AUTO_SERVER` + multi-instance `--data-dir` / `--no-auto-server` isolation)
+  - **HikariCP `5.1.0`** & **Jdbi3 `3.45.1`** (`jdbi3-core` + `jdbi3-sqlobject` with deadlock retry)
+  - **Flyway `13.10.3`** (`V1`–`V8` automated SQL migrations + `CrdtProjectionService` idempotent schema self-healing and incremental dirty-row relational projection)
+- **Authentication & Physical-NIC NAT Traversal**:
+  - **Auth0 `java-jwt 4.6.2`** + **jBCrypt `0.4`** + **AES-256-GCM** local secret vault
+  - **Offbynull PortMapper `2.0.6`** (`PortForwardingService.java`: filters out Clash TUN / WSL / VMware virtual adapters and probes **UPnP IGDv1/v2 incl. `WANIPv6FirewallControl:1`, NAT-PMP, and PCP** on physical NICs for `50000-50009/UDP` short-lease port mappings)
+- **Native Desktop Shell & Packaging**:
+  - **JCEF (`jcefmaven 146.0.10`)** (Embedded Chromium desktop container with `webrtc.udp_port_range=50000-50099`, custom Windows frameless `CustomTitleBar`, and `SplashScreen`)
+  - **Maven Shade Plugin `3.6.0`** (Executable `ScoutingPro27.jar`) + GitHub Actions CI for Windows `.msi` & macOS `.dmg`
+
+### 2.3 Automated Testing & Verification Stack
+- **Frontend Unit Tests**: **Vitest `^2.1.9`** + **`@vue/test-utils ^2.4.11`** + **`@pinia/testing ^0.1.7`** + **`happy-dom ^15.11.7`** (**102 test files / 831 tests**)
+- **Backend Unit Tests**: **JUnit Jupiter `5.10.2`** + **AssertJ `3.27.7`** + **Javalin TestTools `7.2.2`** (**43 test classes / 192 tests**)
+- **Full-Stack Disaster-Recovery E2E**: **Puppeteer `^25.5.0`** + in-process MQTT-over-WS broker + multi-JVM isolated H2 `E2EClusterManager` (**18 E2E & visual audit suites**)
 
 ---
 
-### 1.4 Comprehensive Comparison of Open-Source FIRST Scouting Systems
-The table below benchmarks **ScoutingPro27** against classic open-source scouting solutions across the FIRST community:
+## 3. Core Architecture Deep Dive
 
-| Comparison Dimension | ScoutingPro27<br/>(This Project 🚀) | FRC 1678 Citrus Circuits<br/>(Legendary FRC System) | ScoutingPASS / PWNAGE<br/>(Classic Offline QR) | Cloud SaaS / TBA-Based<br/>(e.g., ScoutMaster) | Traditional Paper / Excel |
-|:---|:---:|:---:|:---:|:---:|:---:|
-| **Networking Architecture** | **Public WebRTC P2P Direct Mesh**<br/>(Decentralized) | Local Server + Bluetooth/Hotspot<br/>(Restricted Centralized) | Pure Offline Static QR<br/>(No Mesh Network) | Central Cloud Server<br/>(Centralized B/S) | No Network / Cloud Drive |
-| **Server & Domain Cost** | **Zero Cost ($0 / yr)** | Requires Dedicated Master Laptop | **Zero Cost ($0 / yr)** | **High ($50–$300+ / yr)** | Cloud doc subscriptions |
-| **Cross-Network Support** | **Direct link across Wi-Fi & 4G/5G** | Rigid LAN / Bluetooth pairing | None (Physical proximity needed) | Requires all nodes on public web | Manual walking runner |
-| **Data Sync Latency** | **Sub-50ms bidirectional streaming** | Periodic batch polling | Single-record sequential QR scans | Cloud API polling delay | Post-match manual typing (hours) |
-| **Mobile Access Convenience** | **System camera QR scan -> Web**<br/>(Zero app installation) | Requires dedicated Android APK | Static web QR generator | Web login with credentials | None |
-| **Zero-Trust Security** | **ECDH + SAS 4-digit code + TOFU**<br/>(Defense-in-depth) | Plaintext / basic password | None (QR codes easily intercepted) | Standard HTTPS + Passwords | Plaintext |
-| **Schedule & Match Dispatch** | **4-station matrix push to mobile** | Manual or static schedule | No live push | Some support (no screen lock) | Printed paper sheets |
-| **Pit Scouting & HD Photos** | **Offline queue + WebP compression** | Basic text fields | Very limited text only | Cloud OSS object upload | Paper sketch / phone album mess |
-| **Live Power Reconciliation** | **Proprietary "Brag Index" Model**<br/>(Claimed vs Actual multi-factor) | Manual trend graphs | Manual export to Tableau | Basic OPR / Average stats | Manual estimation |
-| **High Hang Rest Amnesty** | **Built-in strategic rest detection** | None | None | None | None |
-| **High-Availability Hot-Spare** | **Dual-Host Standby + Instant Handoff** | None (Single point of failure) | None | Dependent on cloud uptime | None |
-| **Official API & Penalty Deduction** | **Event Code bind + Auto Penalty strip** | Partial support | None | Basic schedule fetch | Manual calculation |
-| **Interactive Tactical Whiteboard** | **Viper-Style 4-Team Board + Live Sim** | Static maps / Separate app | None | Standalone drawing tool | Physical dry-erase board |
-| **Tactical AI Advisor** | **Built-in streaming AI with context feed** | None | None | Rare | None |
-| **UI & Experience** | **Native Bilingual + Cyber Glassmorphism** | English only / Raw Android | English only / Basic forms | English mostly / Generic web | Handwritten paper |
-| **Development Team** | **FTC Team 27570 Students** | Mentors + Senior Students | Mentors / Alumni | Commercial / Third-party | Ad-hoc team members |
-
----
-
-### 1.5 Military-Grade User Data Security & Privacy Protection
-Robot scouting holds sensitive tactical intelligence: alliance preferences, mechanical vulnerabilities, and defense notes. ScoutingPro27 constructs a **Zero-Trust Defense-in-Depth Architecture**:
-1. **End-to-End Forward Secrecy**:
-   - Uses **ECDH (P-256)** for ephemeral key exchange with **HKDF-SHA256** session key derivation, enforcing **AES-256-GCM** authenticated encryption across all channels. Eavesdroppers sniffing public Wi-Fi only capture unreadable high-entropy ciphertext.
-2. **Visual Short Authentication String (SAS)**:
-   - Defends against Man-in-the-Middle (MITM) attacks. Upon connection establishment, both screens calculate a matching **4-digit visual fingerprint (e.g., `D157`)** based on mutual public keys. Scouts and the lead verify this code face-to-face to cryptographically guarantee node authenticity.
-3. **Trust-On-First-Use (TOFU) Device Identity**:
-   - Device keys are safely retained upon first verification. Subsequent reconnections bypass prompts; **if a device's public key abruptly shifts during an active session (a classic session hijacking indicator), the system instantly trips a security fuse, terminating the link and raising a red security alert!**
-4. **Anti-Tampering & Anti-Replay Defense**:
-   - Every payload includes an **HMAC-SHA256 signature** keyed with the room secret, a ±30s sliding timestamp window, and a **5,000-capacity Nonce LRU deduplication cache** to defeat packet replay attacks.
-5. **Local Secret Vault**:
-   - API keys for AI tactical advisors are encrypted on disk via AES-256 and decrypted only in host memory during inference. **Keys are never broadcast over the network**.
-
----
-
-### 1.6 Full Bilingual Support, Local High-Res Typography & Native Ergonomics
-ScoutingPro27 delivers an uncompromised user experience crafted for global FIRST championships and cross-alliance multinational collaboration:
-- **Seamless Internationalization (Full i18n Support)**:
-  - Powered by `vue-i18n` with comprehensive English and Simplified Chinese dictionaries (1100+ keys with 100% strict 1:1 parity), supporting sub-millisecond hot-switching and persistent preferences.
-  - Complete coverage spans Dashboard, QR onboarding, Pit scouting, match matrix, cycle counters, power ladders, dual-host takeover, and AI tactical chats.
-- **Embedded Noto Sans SC High-Res Variable Font**:
-  - Locally bundles Google Fonts `Noto Sans SC` Variable Font (weight range 100~900), completely packaged offline inside frontend static bundles and desktop installers;
-  - Completely cures font blurring and edge artifacts for small Chinese characters, form badges, and buttons on high-DPI screens.
-- **Unified Cyber Glassmorphic Design System**:
-  - Eliminates jarring native browser `window.confirm` / `alert` popups (`localhost:8080 says`).
-  - Powered by responsive custom glassmorphic modals (`ConfirmModal.vue` + `useConfirm.ts`) with Danger, Warning, and Info visual tiers, keyboard navigation, and mobile touch optimization.
-- **Mobile Fast Transport HUD & Live Network Indicator**:
-  - Micro Transport HUD pinned to mobile status bar displays real-time connection status with neon indicators (P2P Direct / TURN Relay / Offline);
-  - Tap anytime to inspect network round-trip diagnostic metrics directly from the bleachers.
-- **Host Permission Governance & Humanized Username Visibility**:
-  - Strict role-based permissions: Host administrators maintain global authority to inspect, edit, or delete any scout's records; scouts retain full control over their own submissions;
-  - History table and details completely hide internal database UUIDs, presenting human-readable scouter usernames.
-
----
-
-### 1.7 Tech Stack Overview
-- **Frontend & Client**: Vue 3 (Composition API), TypeScript, Pinia, Vue Router 4, TailwindCSS Animations, Web Crypto API, IndexedDB.
-- **Transport & P2P Mesh**: WebRTC DataChannel, MQTT over WSS (Multi-broker failover cluster + Blind Signaling), STUN/TURN (Tencent Cloud / Xiaomi / Metered.ca ICE Infrastructure).
-- **Desktop Host & Storage**: Java 21, Javalin 7 Lightweight Asynchronous Microservices, Embedded Relational H2 Database (`AUTO_SERVER=TRUE`), Jdbi 3, Flyway Database Migration, JCEF (Chromium Embedded Framework).
-
----
-
-# 2. User Guide
-
-### 2.1 Preparation & Quick Start (No Complex Setup)
-- **Lead (Desktop)**: Download and extract the green release zip, then double-click the launcher. The embedded service and database start automatically, presenting the desktop interface.
-- **Scouts (Mobile)**: **Zero download or app install required!** Any iPhone, Android phone, iPad, or tablet with a web browser (or WeChat) can join instantly.
-
----
-
-### 2.2 Step 1: Lead Creates Event Room (Desktop)
-1. Launch the desktop application and log in or register the lead name.
-2. In the Dashboard, click **[Create Event]** and enter the official event title (e.g., `2026 World Championship Division`).
-3. Once created, a unique **6-character room invite code (e.g., `7EL8BH`)** and a **dynamic onboarding QR code** are displayed on the screen.
-
----
-
-### 2.3 Step 2: Scouts Scan QR to Join (Mobile)
-1. Open the system camera or WeChat scanner on mobile and **scan the lead's desktop screen**.
-2. The web client loads automatically. Enter your scout name (e.g., "Alex") and tap "Join Room".
-3. **Verify Security Code**: Both devices display a matching 4-digit code (e.g., `D157`). Visually verify and confirm to complete zero-trust pairing.
-4. **Independent of Network**: Even if the desktop is on venue Wi-Fi and the phone is on 4G/5G cellular data, the P2P connection establishes in milliseconds!
-
----
-
-### 2.4 Step 3: Pit Scouting — Hardware Specs & High-Res Photos
-Before matches begin, scouts visit team pits to evaluate mechanical capabilities:
-1. Scouts tap **[Pit Scouting]** on the bottom navigation bar.
-2. Enter the target team number (e.g., `#27570`) and inspect key hardware parameters:
-   - **Drivetrain**: Mecanum, Tank (6WD/8WD), Swerve, Custom/Other;
-   - **Mechanism**: Slide + Claw, Slide + Roller Intake, 1/2-DOF Pivot Arm, Linkage Arm, Hybrid;
-   - **Launcher & Delivery**: Roller Drop, Catapult, Dual Flywheel, Turret;
-   - **Ball Compatibility**: Universal, Smart Sorting, Pollen-only;
-   - **Hang & Docking**: Winch, Cascade Slide, Linkage Lock, Passive Hooks;
-   - **Odometry**: Motor Encoders, Dual-Wheel + IMU, Three-Wheel Omni, GoBILDA Pinpoint, SparkFun OTOS;
-   - **Inspection Compliance**: 18" Sizing Cube check, Total Weight (≤42 lbs limit, auto-warning if overweight).
-3. **High-Res Photos & Offline Queue**: Take photos of key mechanisms. Images are compressed to optimized WebP format and saved to the local IndexedDB outbox, progressively streaming to the host in the background.
-4. Saved records synchronize to the lead's desktop instantaneously, where high-res photos can be viewed in detail.
-
----
-
-### 2.5 Step 4: Smart Scheduling — Station Assignment Matrix
-A standard match features 4 robots (Red 1, Red 2, Blue 1, Blue 2):
-1. The lead opens **[Schedule Workbench]** on desktop and syncs matches from the official FTC API or pastes a CSV schedule.
-2. Assign scout names across the 4 stations using batch drag-and-scroll or one-click clearing.
-3. Upon saving, **assigned scouts' phones receive a prompt vibration and notification**.
-4. **One-Tap Task Load**: On mobile, scouts tap [Load Task], and the match number, team number, and alliance color populate automatically — **preventing accidental errors under pressure!**
-
----
-
-### 2.6 Step 5: Match Scouting — Unified Cycle Tracker & High-Speed Blind Scoring
-1. Take a seat in the stands as the match begins! Open the **[Match Scouting]** form.
-2. Supports **Single Team** and **Alliance Dual Team** modes, engineered for one-handed blind scoring:
-   - **Autonomous Phase**:
-     - **Leave**: One-tap toggle (+3 pts);
-     - **Unified Cycle Tracker**: Tap **[+ Record New Cycle]** (starts at 0 balls). Tap the card to increment (0 -> 1 -> 2 -> 3 -> 4 cap) or directly tap 44px anti-misclick pills (0/1/2/3/4). Each scored ball earns +3 pts;
-     - **Park**: One-tap loading zone park (+5 pts).
-   - **TeleOp Phase**:
-     - **Unified Cycle Tracker**: Decoupled from autonomous cycles to avoid number bleeding. Incremental tapping or direct pill selection (+2 pts per scored ball).
-   - **Collapsible Waterfall View**:
-     - Defaults to a compact 3-cycle view to save screen real estate;
-     - **Smart Bottom Scroll**: Smoothly follows new cycles; historical review does not cause unexpected screen jumps. Expand all anytime.
-   - **Endgame Phase**:
-     - Rapidly record robot endgame park (5 pts / 10 pts) and Low / High Hang (15 pts / 30 pts).
-   - **Failure Alert & Tactical Tags**:
-     - Power failure or mechanical break? Tap the red **[Is Broken]** alarm button;
-     - Tag behavioral traits (Fast Intake, Heavy Defense, Tippy/Jam-prone) and record text notes.
-3. When the match ends, tap **[Submit Record]**, and data arrives at the host in 0.05s!
-4. **Offline Resiliency**: In case of severe venue radio interference, records buffer safely in IndexedDB and flush automatically upon reconnection with zero data loss.
-
----
-
-### 2.7 Step 6: Power Ladder & "Brag Index" Quantified Reconciliation Model
-The desktop automatically ranks all teams on the Power Leaderboard using our proprietary **"Brag Index" algorithm**:
-- **Calculation Formula**: Dynamically correlates pit-claimed theoretical scores with actual qualifications match baselines (averages and maximums):
-  - 🎯 **[Honest & Reliable (≤ 1.25x)]**: Actual scores align closely with self-reported capabilities. Prime alliance target!
-  - 🟡 **[Optimistic (1.25x ~ 1.65x)]**: Slightly inflated, but solid match consistency.
-  - ⚠️ **[Exaggerated (1.65x ~ 2.20x)]**: Notable performance gap; assess with caution.
-  - 🔥 **[Blown Out of Proportion (> 2.20x)]**: Scores less than half of claimed stats; red alert warning!
-- **Regular Season Rest Amnesty 🛡️**:  
-  If a premier team claimed high hang capabilities but did not hang in early qualifiers, is it false advertising? The algorithm intelligently identifies tactical mechanism preservation in early rounds and grants **[Regular Season Rest Amnesty 🛡️]**, protecting elite alliances from false penalties.
-
----
-
-### 2.8 Step 7: Official FTC Events API Integration & Penalty Deduction
-Connect directly to official FIRST data sources during sanctioned events:
-1. **One-Click Event Code Binding**: Enter the official Event Code (e.g., `USCMPHO1`) and official API Token in event settings.
-2. **Instant Schedule & Match Bracket Pull**: Pull qualifications/playoff matches, match order, and alliance pairings in seconds without manual CSV entry.
-3. **Score Reconciliation & Penalty Deduction**:
-   - Pull official match score breakdowns after referee confirmation;
-   - **Strip Opponent Fouls**: Separates opponent foul points (Major/Minor) to isolate true offensive output against scouted tallies.
-
----
-
-### 2.9 Step 8: Dual-Host Standby Hot-Spare & Full-Sync Handoff Protocol
-Lead laptops face dead batteries, hardware crashes, or accidental cable disconnects. ScoutingPro27 features a **zero single-point-of-failure, split-brain-proof dual host architecture**:
-1. **Standby Mirror & Debounce Protection**:
-   - An assistant's secondary laptop joins in standby host mode, mirroring all DataChannel messages to maintain a synchronized local H2 snapshot;
-   - The UI enforces an `isTakingOver` mutex with a **3-second countdown cooldown lock**, preventing accidental double-clicks and signaling floods.
-2. **One-Tap Takeover & Deterministic Tie-Breaker**:
-   - If the primary host goes down or shifts roles, the assistant clicks **[Take Over as Active Host]**;
-   - **Anti-Split-Brain Deadlock**: If both hosts trigger takeover concurrently, the **Distributed Epoch Term + Device ID Tie-Breaker Engine** arbitrates deterministically: the higher priority node stays Host and reaffirms authority with `host_hello`, while the lower priority node demotes to Standby. Neither drops into an orphaned state.
-3. **Full Handoff Batch (`HOST_HANDOFF_BATCH`)**:
-   - The demoted host reconnects as a Client and dispatches all local match records, schedules, station assignments, pit data, tags, and custom fields to the new host;
-   - The new host applies an idempotent **3-Way Guarded Merge (with photo key protection)**, advancing the global clock `hostSeqCounter` forward.
-4. **Takeover Staging Gate (Solving In-Flight Packets during Handoff)**:
-   - The new host activates a 2000ms asynchronous staging gate upon promotion. If a scout submits an unstamped match record during handoff, the record **pauses in a queue without receiving an outdated sequence number**;
-   - Once the handoff batch arrives and advances the clock, the gate releases, stamping the queued record with a strictly higher monotonic sequence. If the former host is dead, the gate safely times out without blocking the flow.
-5. **Mobile Scout Awareness & Orphan Self-Healing**:
-   - Scout phones detect `hostSessionId` changes within 1–2 seconds, request a fresh baseline sync (`sinceVersion: 0`), and **re-push all locally owned records** (even if marked SYNCED) to heal any orphaned data.
-
----
-
-### 2.10 Step 9: Viper-Style Interactive Tactical Whiteboard & Trajectory Simulation
-Before stepping onto the drive station, drivers, coaches, and alliance partners need to align on autonomous paths and teleop roles in seconds. ScoutingPro27 features a dedicated **[Tactical Whiteboard]** workspace inspired by **FTC Viper** and wired directly into your live scouting database:
-1. **Select Match -> Auto-Populate All 4 Teams (`R1 / R2 / B1 / B2`)**:
-   - Pick any match from the header selector (`Q12 · RED: 27570 19234 vs BLUE: 20401 20402`), step through matches with Prev/Next buttons, or jump directly from any row in the **[Schedule Workbench]** via the 1-click **[Whiteboard]** action button;
-   - All 4 draggable robot tokens (with heading arrows, role badges, and live field coordinates) automatically spawn in their alliance starting zones.
-2. **3-Phase Independent Layers & 1-Click Presets (`Auto / TeleOp / Endgame`)**:
-   - Autonomous, TeleOp, and Endgame each maintain isolated stroke layers, Undo/Redo stacks, and robot positions, with **[Sync from Previous Phase]** and 3 built-in tactical route presets.
-3. **Vector Drawing Tools, Magnetic Tile Snap & Select-Drag**:
-   - **9 Tools (Hotkeys `1`–`9` / `V,P,A,D,L,R,C,T,E`)**: Select & Stroke Translate, Quadratic-Smoothed Pen, Solid Tactical Arrow, Dashed Advance Arrow, Line, Defense Zone Rect, Circle, On-Field Text Callout, and Geometry Hit-Test Eraser (with crimson hover target preview);
-   - **FTC `A1–F6` 6×6 Tile Magnetic Snap (`G` or hold `Shift`)**: Dragging a robot token surfaces a floating coordinate & heading HUD badge (`🧲 C3 · 90°`) and snaps cleanly to tile centers and borders; double-clicking rotates heading by 90° and emits a sonar shockwave ripple.
-4. **🎬 1-Click Tactical Trajectory Simulation (`Space` or `[▶ Simulate]`)**:
-   - Click **[▶ Simulate]** to launch a 60fps laser playback loop: drawn paths progressively extend with a glowing laser head while robot tokens anchored near path origins automatically glide and rotate along their drawn trajectories to reveal potential path collisions.
-5. **Dual-Mode Intelligence Sidebar (4-Team Overview + 1-Team Deep Dive)**:
-   - **4-Team Overview**: Displays a live Red vs. Blue predicted score tug-of-war bar alongside all 4 teams' Average Total, Auto/TeleOp/Endgame breakdown, Max Score, Brag Index badge, and tactical role selector (Scorer / Cycler / Defense / Support);
-   - **Single-Team Deep Dive**: Click any team card or top-bar quick pill to inspect **Pit hardware specs, HD robot photo thumbnails, pros/cons tags, and recent match-by-match score breakdowns** (with a 1-click 🎯 button to load any historical match directly onto the board).
-
----
-
-### 2.11 Step 10: Tactical AI Advisor
-1. Open the **[Tactical AI]** tab to inject full event rankings, pit specs, brag indices, and defensive ratings directly into LLMs (Google Gemini & OpenAI).
-2. Ask tactical questions conversationally:
-   - *"Our robot scores high in auto but lacks a reliable high hang. Which two teams should we pick for alliance selection?"*
-   - *"Analyze weaknesses for team #18225. How should we play defense against them?"*
-3. The AI streams tactical advice in markdown format. Any team number mentioned (e.g., `#27570`) is clickable to immediately open that team's profile card!
-
----
-
-### 2.12 Step 11: Data Export & Flash Drive Offline Sync Package
-- **Standard Reports**: Export all match records and pit metrics into structured **Excel / CSV sheets** for presentations and alliance review.
-- **Extreme Venue Blackout: USB Flash Sync**:  
-  Under total wireless communication bans:
-  - The lead exports an **Event Configuration Package (`.event`)** and an **Incremental Update Package (`.info`)** to a flash drive;
-  - Scouts insert the drive to join the event and import records offline. Scout submissions can also be collected via flash drive for host consolidation!
-
----
-
-### 2.13 Step 12: Safe Single-Entry Event Deletion & Deep Offline Cache Flush
-1. **Single-Entry Focus: Dashboard Card Safe Deletion**:
-   - To eliminate accidental deletions during high-stakes scoring, **all delete buttons have been removed from the active event header and mobile HUD**;
-   - Deletion is consolidated exclusively on the Dashboard event cards with a trash icon. Clicking prompts a cyber glassmorphic Danger confirmation modal with the event title before executing cascading deletion.
-2. **Deep Local Cache Flush**:
-   - A dedicated **[Clear Cache]** button sits in the Dashboard top bar;
-   - Tapping it triggers a recursive scan that sweeps away stale event records, schedules, pit entries, and photo caches (matching `sp27_*`, `scoutingpro27_*`, `sp_inbox_*`), **while strictly preserving the scout's login credentials (`scoutingpro-user`)** so no re-login is needed.
-
----
-
-# 3. Technical Deep Dive
-
-### 3.1 Public P2P Mesh, Blind Signaling & Dual-Track Hot-Upgrade Architecture
-ScoutingPro27 operates on an **offline-first decentralized architecture**. The host machine hosts local microservices, an embedded H2 database, and photo storage. Clients connect via WebRTC DataChannels. Public MQTT brokers simply relay blind connection handshakes (public keys, SDP, ICE candidates) without holding plaintext data.
-
-Under the hood, the transport layer is powered by a **`VirtualDataChannel` Dual-Phase Bounded Drain & Zero-Loss Hot-Upgrade Engine**:
-- **1.8s Instant Fallback + Background P2P Promotion**: When venue firewalls throttle UDP, the client establishes an encrypted Relay virtual channel within 1.8 seconds for immediate match scouting while negotiating direct STUN/TURN P2P in the background;
-- **Zero-Loss Two-Phase Drain**: Once the native `RTCDataChannel` opens, `VirtualDataChannel` seamlessly promotes outbound traffic to the high-bandwidth P2P pipe while executing a **two-phase bounded drain on the retiring channel (Phase 1: waits for `bufferedAmount === 0` to flush the outbound buffer; Phase 2: keeps `onmessage` alive for a 3000ms grace window to finish reassembling in-flight `__SP27_CHUNK__|...` multi-part frames)**, eliminating mid-upgrade packet truncation.
-
-<p align="center">
-  <img src="docs/images/architecture.svg" alt="Architecture Diagram" width="100%" />
-</p>
-
-<details>
-<summary><b>🔍 View Mermaid Architecture Source</b></summary>
+### 3.1 TinyBase CRDT + Crystal-Calibrated HLC + Write-Time ECDSA Signing
+To eliminate whole-row LWW overwrites and single-host `hostSeq` bottlenecks, ScoutingPro27 models collaborative domains as normalized flat tables inside TinyBase `MergeableStore`:
 
 ```mermaid
 flowchart TB
-    subgraph Signaling["Public Blind Signaling Layer"]
-        MQTT["MQTT over WSS (broker.emqx.io:8084)<br/>• Dynamic encrypted room topic: scoutingpro/signal/{roomHash}<br/>• Blind Relay only; zero business plaintext"]
+    subgraph ClockLayer["1. Anti-Poisoning Crystal Clock (CalibratedMonotonicClock)"]
+        RTT["3-Sample CLOCK_SYNC_REQ/RES post-SAS<br/>Min-RTT anchors baseHostMs & baseMonoMs"]
+        Mono["Zero runtime Date.now() calls<br/>Advances strictly via performance.now() oscillator"]
+        Anchor["Per-event anchor (sp27_clock_anchor)<br/>[0, 12h] offline sleep compensation; rejects tampered jumps"]
+        RTT --> Mono --> Anchor
     end
 
-    subgraph HostApp["Host Desktop (JCEF / Java 21 / Local Storage)"]
-        Javalin["Javalin 7 RESTful API & SSE Streaming"]
-        H2DB[("Embedded H2 DB<br/>AUTO_SERVER=TRUE + Jdbi 3")]
-        PhotoStorage["Local Disk Photo Store (WebP Caching)"]
-        HostSeqEngine["Monotonic Logical Clock (hostSeq Engine)"]
-        HostSafety["Zero-Trust Session Guard (Anti-DoS / Key Flapping)"]
-        
-        Javalin --> H2DB
-        Javalin --> PhotoStorage
-        Javalin --> HostSeqEngine
-        Javalin --> HostSafety
+    subgraph CrdtLayer["2. TinyBase v10.1 MergeableStore (8 Normalized Flat Tables)"]
+        Tables["• pit_records (Field-level LWW-HLC via setChangedCells)<br/>• pit_photo_keys & team_tags (active:boolean tombstone LWW-Element-Set)<br/>• custom_fields (Fractional Indexing orderKey)<br/>• schedules & assignments (Station-level live dispatch)<br/>• member_identities (Host ECDSA-countersigned device public keys)<br/>• scouting_records (Write-time ECDSA authorSig + pure computed conflict badges)"]
     end
 
-    subgraph P2PPipe["WebRTC P2P Encrypted DataChannel"]
-        DirectPipe["AES-256-GCM Authenticated Channel<br/>• 4-digit SAS physical verification<br/>• TOFU trust asset registry<br/>• Backpressure-sensitive chunking"]
+    subgraph SyncGuard["3. WebRTC 48KiB Chunked Sync & Dual Pre-Merge Guards"]
+        HlcScan["Inbound decodeHlc scanner (inspects Stamp slot [1] only)<br/>Catches >300s future-poisoned packets & emits FORCE_CLOCK_RESYNC"]
+        SigVerify["Inbound sanitizeIncomingCrdtSyncBody pre-merge stripping<br/>Verifies ECDSA authorSig + member_identities binding for safe teammate relays"]
+        HlcScan --> SigVerify
     end
 
-    subgraph ClientNode["Scout Mobile (H5 / Responsive Web / Offline-First)"]
-        ScoutUI["Vue 3 + Pinia Responsive UI"]
-        IDBCache[("IndexedDB Local Store<br/>• Offline HD photos<br/>• Local device keypair")]
-        LSCache["LocalStorage (Dual-write business cache)"]
-        CursorSync["Incremental Cursor Sync (lastHostSeq)"]
-        
-        ScoutUI --> IDBCache
-        ScoutUI --> LSCache
-        ScoutUI --> CursorSync
+    subgraph H2Project["4. Debounced H2 Snapshot & Dirty-Row Relational Projection"]
+        Debounce["1500ms debounce + 5000ms maxWait + serial inFlight queue<br/>Immediate flush on beforeunload & logout()"]
+        DirtyProj["PUT /api/events/{id}/crdt-state<br/>Persists CLOB & projects only dirtyRows into 6 relational H2 tables<br/>100% compatible with AI Advisor, FTC score audit & CSV export"]
+        Debounce --> DirtyProj
     end
 
-    Signaling -.->|WSS Signaling Exchange| HostApp
-    Signaling -.->|WSS Signaling Exchange| ClientNode
-    HostApp <===>|WebRTC DataChannel| DirectPipe
-    DirectPipe <===>|WebRTC DataChannel| ClientNode
+    ClockLayer --> CrdtLayer --> SyncGuard --> H2Project
 ```
 
-</details>
-
----
-
-### 3.2 Zero-Trust Security & Mutual Authentication Flow
-During connection setup, both nodes execute cryptographic verification to thwart packet sniffing, MITM attacks, and unauthorized spoofing:
-
-<p align="center">
-  <img src="docs/images/security-flow.svg" alt="Zero-Trust Security Flow" width="100%" />
-</p>
-
-<details>
-<summary><b>🔍 View Mermaid Sequence Diagram Source</b></summary>
+### 3.2 Control-Plane Epoch Fencing (`hostEpoch`) & Dual-Entry Disaster Recovery
+ScoutingPro27 enforces a strict architectural separation between **control-plane authority (`hostEpoch`)** and **data-plane timestamps (`HLC`)**: `hostEpoch` governs who is the legitimate active Host and fences stale hosts, but never overrides cell-level HLC timestamps during data merges.
 
 ```mermaid
 sequenceDiagram
     autonumber
-    actor Lead as Lead (Desktop)
-    participant Host as Host Node (Desktop)
-    participant Signaling as Public MQTT Signaling
-    participant Scout as Scout Node (Mobile)
-    actor ScoutUser as Scout (Mobile)
+    participant HostA as "Primary Host A (H2 #1)"
+    participant HostB as "Shared-DB Backup Laptop B (H2 #2)"
+    participant MQTT as "MQTT Signaling + Retained epoch-beacon"
+    participant Phones as "Scout Phones S1/S2 (Witness + CRDT)"
+    participant HostC as "Bare-Metal Empty Laptop C (H2 #3)"
 
-    Lead->>Host: Start Event Room (Generate 6-char code 7EL8BH)
-    ScoutUser->>Scout: Scan QR with camera
-    Scout->>Signaling: Subscribe room topic & send JOIN_REQUEST (with ephemeral ECDH public key)
-    Host->>Signaling: Broadcast JOIN_ACCEPT (with Host ECDH public key)
-    Note over Host,Scout: Exchange SDP Offer/Answer & ICE candidates, open WebRTC DataChannel
+    Note over HostA,Phones: "Stage 1: HostA creates room (Epoch=1), publishes Retained Beacon, SAS & 3-RTT clock calibration"
+    HostA->>MQTT: "publish retained epoch-beacon (epoch=1, eventId=UUID, hostId=Lead)"
+    Note over HostA: "Stage 2: HostA logs 1 exclusive local record, then suffers hard power crash (no handoff!)"
+    Note over Phones,HostB: "Stage 3: 2-Hour Hostless Window — +10yr Date.now tamper ignored, concurrent Pit edits, offline reload"
+    Phones->>Phones: "S1 edits Pit weight + offline reload; S2 edits launcher + tags + ECDSA-signed match record"
+    HostB->>HostB: "AssistantBob edits schedule + signed record -> logout() flushes CRDT to shared H2 #2"
 
-    rect rgb(240, 248, 255)
-    Note over Host,Scout: Zero-Trust Cryptographic Verification (SAS & TOFU)
-    Host->>Host: Compute 4-digit code: SAS = SHA256(MinKey + MaxKey + Code)
-    Scout->>Scout: Compute local 4-digit SAS code
-    Host-->>Lead: Display SAS code on desktop (e.g., D157)
-    Scout-->>ScoutUser: Display SAS code on mobile (e.g., D157)
-    Lead->>ScoutUser: Verbal check: "Is it D157?" Scout responds: "Yes!"
-    Scout->>Scout: TOFU check: First connection stored in IndexedDB; alert if key flapped!
-    end
+    Note over HostB,Phones: "Stage 4 (Primary Path): Lead logs into Shared-DB Laptop B — Zero-Invite-Code Takeover (Epoch=2)"
+    HostB->>HostB: "Dashboard loads authoritative event card directly from H2 #2; Lead clicks to enter"
+    HostB->>MQTT: "1.5s HOST_DISCOVERY -> collects mobile EPOCH_WITNESS -> promotes to Epoch=2"
+    Phones<-->HostB: "CRDT anti-entropy merges Pit weight + launcher + photoKey + soft-deleted tags + Bob's offline work"
 
-    rect rgb(240, 255, 240)
-    Note over Host,Scout: Encrypted Business Data Transmission
-    Scout->>Host: Submit match record (HMAC-SHA256 signature + Nonce + Timestamp)
-    Host->>Host: Validate timestamp window (≤30s) + Nonce LRU check + verify sig
-    Host->>Host: Persist to H2 DB and assign monotonic hostSeq
-    Host-->>Scout: Return ACK with updated state
-    end
+    Note over HostA,HostB: "Stage 5 (Split-Brain Fencing): Old HostA revives with stale Epoch=1 heartbeat"
+    HostA->>MQTT: "host_heartbeat (epoch=1)"
+    HostB-->>HostA: "epoch_superseded (epoch=2)"
+    HostA->>HostA: "Fenced! Auto-demotes to Standby Client & connects to HostB"
+    HostA<-->HostB: "CRDT anti-entropy losslessly merges HostA's pre-crash exclusive record to all nodes"
+
+    Note over HostC,Phones: "Stage 6 (Fallback Path): HostB & S2 go offline; Empty Laptop C joins via 6-char invite code (Epoch=3)"
+    HostC->>MQTT: "HOST_DISCOVERY -> recovers authoritative UUID from S1 EPOCH_WITNESS into H2 #3"
+    Phones<-->HostC: "S1 relays offline teammate S2's ECDSA-signed historical records into empty HostC!"
 ```
 
-</details>
-
 ---
 
-### 3.3 Distributed Monotonic Clock & Conflict Auto-Resolution
-Local clocks frequently skew across phones. ScoutingPro27 discards fragile wall-clock timestamps in favor of a **host-assigned monotonically increasing logical clock `hostSeq`**:
+## 4. Developer & Automated Verification Guide
 
-<p align="center">
-  <img src="docs/images/state-sync.svg" alt="Distributed Sync State Machine" width="100%" />
-</p>
+### 4.1 Prerequisites & Quick Start
+- **Requirements**: JDK 21+, Maven 3.8+, Node.js `>=22.18.0` or `>=24.12.0`
+- **Build & Run**:
+  ```powershell
+  # 1. Build frontend production assets (includes TypeScript 6 check & PWA Service Worker)
+  cd frontend
+  npm install
+  npm run build
 
-<details>
-<summary><b>🔍 View Mermaid State Machine Source</b></summary>
+  # 2. Start backend microservice (--headless skips JCEF desktop window and serves on port 8080)
+  cd ../Backend
+  mvn compile exec:java -Dexec.mainClass="com.bear27570.app.Main" -Dexec.args="--headless --port=8080"
 
-```mermaid
-stateDiagram-v2
-    [*] --> Connected: P2P Channel Ready (lastHostSeq = N)
-    
-    state Connected {
-        ScoutSubmit --> HostReview: DataChannel push
-        HostReview --> AssignSeq: hostSeq = N + 1
-        AssignSeq --> BroadcastDelta: Disseminate to all peers
-    }
+  # 3. Package standalone executable Fat JAR (target/ScoutingPro27.jar)
+  mvn package -DskipTests
+  ```
 
-    Connected --> Disconnected: Venue RF Congestion / Range
-    
-    state Disconnected {
-        DualWriteLocal --> OutboxQueue: Status = PENDING_DELIVERY
-        OutboxQueue --> AwaitReconnection: Isolated in IndexedDB
-    }
-
-    Disconnected --> AutoReconnected: ICE Channel Restored
-    
-    state AutoReconnected {
-        RequestDelta: REQUEST_SYNC (sinceSeq = lastHostSeq)
-        QueryDelta: Host retrieves delta records > lastHostSeq
-        ThreeWayMerge: 3-Way Guarded Merge (Memory + Storage + Delta)
-        FlushOutbox: Transmit queued offline records
-        ResolveConflict: Clear conflict alerts on UI
-    }
-
-    AutoReconnected --> Connected: Synchronization complete
-```
-
-</details>
-
----
-
-### 3.4 Host Takeover Full-Sync & Handoff Protocol
-In decentralized or weak networks, multiple hosts attempting to take over can cause **dual-demotion deadlocks (split-brain)**, **clock regressions overwriting data**, or **lost in-flight packets**.
-
-ScoutingPro27 solves this with a **zero-bug, concurrency-safe, self-healing** full handoff protocol guarded by five technical shields:
-
-<details>
-<summary><b>🔍 View Mermaid Takeover & Handoff Sequence Source</b></summary>
-
-```mermaid
-sequenceDiagram
-    autonumber
-    participant Scout as Mobile Scout
-    participant Host1 as Demoted Host 1
-    participant Signaling as Public MQTT Signaling
-    participant Host2 as New Host 2
-    actor Lead as Team Lead
-
-    Note over Host1,Host2: Phase 1: Takeover Initiation & Tie-Breaker
-    Lead->>Host2: Tap [Take Over as Active Host] (3s cooldown lock)
-    Host2->>Host2: Increment localEpoch (Epoch = N + 1)
-    Host2->>Signaling: Broadcast host_takeover (epoch: N+1, deviceId: Dev-B)
-    
-    alt Dual-Takeover Conflict (Tie-Breaker Engine)
-        Note over Host1,Host2: If Host1 also triggered takeover simultaneously:
-        Host1->>Host1: Deterministic check: compare (epoch, deviceId). Lower yields to Standby
-        Host2->>Host2: Higher priority stays Host, immediately sends host_hello to reaffirm
-    else Standard Takeover
-        Host1->>Host1: Acknowledges higher priority takeover and demotes to Standby
-    end
-
-    Note over Host2: Phase 2: Takeover Staging Gate (2000ms window)
-    Host2->>Host2: inTakeoverReconciliation = true (buffers unstamped incoming records)
-
-    par In-Flight Packet Protection (Resolves race conditions during sync)
-        Scout->>Host2: SYNC_DATA (unstamped record, seq=0)
-        Note over Host2: Enqueued in Staging Gate task queue, awaiting clock elevation
-    and Full Database Handoff (HOST_HANDOFF_BATCH)
-        Host1->>Host2: Reconnects as Client and pushes HOST_HANDOFF_BATCH
-        Note over Host2: 3-Way Guarded Merge (Records/Schedules/Pit/Tags/Custom Fields)
-        Host2->>Host2: stampHostSeq: hostSeqCounter = max(current, peerMax, recordsMax)
-        Host2-->>Host1: HOST_HANDOFF_ACK (Confirms persistence and max seq)
-        Host2->>Host2: Release Staging Gate (finishTakeoverReconciliation)
-    end
-
-    Note over Host2: Phase 3: Drain Staging Gate & Broadcast
-    Host2->>Host2: Drain queue, assign strictly greater monotonic seq numbers
-    Host2->>Scout: ACK_SYNC (Returns authoritative hostSeq)
-    Host2->>Scout: Broadcast SYNC_DATA (Forward stamped records to all peers)
-
-    Note over Scout,Host2: Phase 4: Mobile Scout Self-Healing
-    Scout->>Scout: Detects hostSessionId transition, calls REQUEST_SYNC (sinceVersion: 0)
-    Scout->>Host2: Automatically re-pushes locally owned match records to prevent orphan data
-```
-
-</details>
-
-#### Key Defensive Concurrency Mechanisms:
-1. **Distributed Epoch Term + Device ID Deterministic Tie-Breaker**:
-   - Eliminates the classic split-brain condition where both nodes demote each other simultaneously, leaving the room without an active host.
-2. **Absolute Monotonic Clock Advancement (`stampHostSeq`)**:
-   - Preserves existing positive sequence numbers on historical records while advancing the local counter; only new records receive newly incremented sequence numbers.
-3. **Takeover Staging Gate**:
-   - Enforces a 2000ms staging gate on takeover. Fresh unstamped match records from mobile scouts pause in an asynchronous microtask queue until the predecessor's handoff batch elevates the clock, preventing duplicate or lower sequence numbers.
-4. **SDP Serialization & Error Isolation (`activeSetupPromise`)**:
-   - Serializes overlapping client connection requests with exception isolation in `try-catch`, eliminating WebRTC state errors (`Called in wrong state: have-local-offer`).
-5. **Loopback Binding for Embedded H2 (`h2.bindAddress=127.0.0.1`)**:
-   - Enforces `127.0.0.1` binding on startup for H2's `AUTO_SERVER`, immune to TUN virtual interfaces created by VPN or proxy clients.
-
----
-
-### 3.5 "Brag Index" Algorithm & Regular Season Rest Amnesty State Machine
-The system cross-references pit claims against actual competition performance:
-
-$$
-\text{OverallRatio} = \frac{\text{ClaimedTotalScore}}{\max(\text{MaxActualScore}, \text{AvgActualScore} \times 1.05, 1)}
-$$
-
-> 📌 **Benchmark Formula**:  
-> `OverallRatio = ClaimedTotalScore / max(MaxActualScore, AvgActualScore × 1.05, 1)`
-
-<p align="center">
-  <img src="docs/images/brag-index.svg" alt="Brag Index State Machine" width="100%" />
-</p>
-
-<details>
-<summary><b>🔍 View Mermaid Decision Flow Source</b></summary>
-
-```mermaid
-flowchart TD
-    A([Collect Data]) --> B[Read Pit Claimed Score]
-    A --> C[Read Actual Match Scores]
-    B --> D{Matches Played ≥ 1 ?}
-    C --> D
-    D -- No --> E[Status: ⏳ Pending Trials]
-    D -- Yes --> F[Calculate OverallRatio]
-    
-    F --> G{Ratio Tier}
-    G -- "Ratio ≤ 1.25" --> T1[🎯 Honest & Reliable]
-    G -- "1.25 < Ratio ≤ 1.65" --> T2[🟡 Optimistic]
-    G -- "1.65 < Ratio ≤ 2.2" --> T3[⚠️ Exaggerated]
-    G -- "Ratio > 2.2" --> T4[🔥 Blown Out of Proportion]
-
-    T1 --> H{Claimed High Hang Level ≥ 2 ?}
-    T2 --> H
-    T3 --> H
-    T4 --> H
-    H -- No --> EndNode([Output Final Tag])
-    H -- Yes --> I{Actual Endgame ≥ 15 pts ?}
-    I -- Yes --> J[Tag: High Hang Confirmed 🧗]
-    I -- No --> K{Matches Played ≥ 2 ?}
-    K -- Yes --> L[Trigger: Regular Season Rest Amnesty 🛡️]
-    K -- No --> M[Tag: High Hang Pending ⏳]
-    
-    J --> EndNode
-    L --> EndNode
-    M --> EndNode
-```
-
-</details>
-
----
-
-### 3.6 Viper-Style Tactical Whiteboard Geometry & Physics-Based Motion Engine
-The Tactical Whiteboard (`frontend/src/components/whiteboard/`) combines lossless normalized vector geometry with a physics-based spring animation engine across desktop and mobile viewports:
-- **Normalized Reversible Affine Coordinate Space (`[0, 1]` Field Space)**:
-  - All drawn strokes, geometric regions, and 4 robot tokens are stored in normalized `[0, 1] × [0, 1]` field space;
-  - `fieldToViewCoords` and `viewToFieldCoords` preserve $10^{-6}$-accurate round-trip transformations across all `0°/90°/180°/270°` rotations and Red/Blue alliance mirror flips.
-- **Arc-Length Parameterized Polyline Interpolation & 60fps Laser Simulation (`interpolatePointAlongPolyline`)**:
-  - Triggering **[▶ Simulate]** parameterizes drawn polylines, arrows, and lines by cumulative arc length to compute exact coordinates and first-order tangent headings $\theta = \text{atan2}(\Delta y, \Delta x)$ at any progress $p \in [0, 1]$;
-  - Robot tokens anchored near a trajectory origin automatically glide and rotate along their assigned paths during playback, accompanied by an on-canvas WCAG 2.2.2-compliant **[■ Stop Sim]** control pill.
-- **Physics-Based `linear()` Spring Easing & Reduced-Motion Accessibility**:
-  - Phase transitions and robot resets use under-damped spring interpolation, while popovers, shortcut modals, and the Red/Blue alliance prediction bar apply inline CSS `linear(...)` spring physics (with standard `ease-out` fallbacks) and respect `@media (prefers-reduced-motion: reduce)`.
-
----
-
-# 4. Developer & Testing Guide
-
-### 4.1 Local Development Prerequisites
-- **Backend**: JDK 21+, Maven 3.8+
-- **Frontend**: Node.js 18+ (20 or 22 recommended), npm 9+
-- **Network**: Internet access to public standard WSS / MQTT ports for signaling tests.
-
-### 4.2 Fast Build & Run
+### 4.2 Automated Test & 12-Step Disaster-Recovery E2E Suite
 ```powershell
-# 1. Compile frontend static assets (including PWA Service Worker & type checking)
-cd frontend
-npm install
-npm run build
-
-# 2. Run backend (Headless microservice mode)
-cd ../Backend
-mvn compile exec:java -Dexec.mainClass="com.bear27570.app.Main" -Dexec.args="--headless --port=8080"
-
-# 3. Production executable Fat Jar packaging
-mvn package -DskipTests
-# The packaged artifact is located at target/ScoutingPro27.jar; run directly with java -jar ScoutingPro27.jar
-```
-Navigate to `http://localhost:8080` in your browser.
-
-### 4.3 Automated Verification & Test Suite
-ScoutingPro27 enforces an **Evidence Triad verification policy** with comprehensive regression coverage:
-
-```powershell
-# 1. Frontend TypeScript static analysis (vue-tsc --build 0 error)
+# 1. Frontend TypeScript 6 static type check (0 errors)
 cd frontend
 npm run type-check
 
-# 2. Frontend Vitest unit & component test suite (88 test suites / 679 tests 100% passing)
+# 2. Frontend Vitest unit & component tests (102 test files / 831 tests passing)
 npm test -- --run
 
-# 3. Backend Maven Surefire test suite (136 tests 100% passing)
+# 3. Backend Maven JUnit 5 test suite (43 test classes / 192 tests passing, incl. Flyway V1-V8 & CRDT dirty-row projection)
 cd ../Backend
 mvn test
 
-# 4. Full-link End-to-End browser concurrency simulation
+# 4. Full-Stack 12-Step Disaster-Recovery E2E Suite (3 isolated temporary H2 backends + 5 isolated browsers)
+# Verifies: 3-RTT crystal calibration -> +10yr/-1yr clock spoofing & 2036 HLC packet interception -> HostA hard kill
+# -> 2h offline concurrent field-level Pit/Tag/Schedule edits & offline PWA reload -> Shared-DB HostB direct takeover (Epoch=2)
+# -> Revived HostA Epoch=1 fencing & exclusive record merge -> Bare-metal HostC invite-code Witness recovery (Epoch=3)
+# -> Teammate ECDSA-signed relay recovery & dual forgery rejection -> USB .info idempotency -> 4-node byte equality & temp H2 cleanup
 cd ../frontend
-node e2e/inbox-lifecycle.e2e.js     # Test 1: Inbox global lifecycle
-node e2e/motion-and-sheet.e2e.js     # Test 2: Motion specs & sheet teardown (24 tests pass)
-node e2e/qr-mobile-join.e2e.js       # Test 3: Mobile QR onboarding & viewport adaptation (15 tests pass)
-node e2e/multi-client.test.js        # Test 4: WebRTC Relay / offline queues / HMAC security (11 phases pass)
+npm run test:e2e
 ```
 
 ---
 
-## License & Acknowledgements
+## 📄 License & Acknowledgements
 
 - **License**: Released under the open-source [MIT License](LICENSE).
-- **Special Thanks**:
-  - To **FIRST** for creating an inspiring global robotics stage;
-  - To the open-source communities powering our stack (Vue.js, Javalin, WebRTC, EMQX, Metered.ca);
-  - To every scout, mentor, and team member of **FTC Team 27570 B.E.A.R.** who contributed testing, match logging, and invaluable suggestions!
-
----
+- **Acknowledgements**: Special thanks to **FIRST**, the open-source communities behind Vue.js, TinyBase, Javalin, WebRTC, and EMQX, and every member and mentor of **FTC Team 27570 B.E.A.R.**!
 
 <p align="center">
   <b>Designed & Built with ❤️ by FTC Team 27570 B.E.A.R.</b><br/>

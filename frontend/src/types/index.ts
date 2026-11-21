@@ -91,6 +91,12 @@ export interface ScoutingRecord {
   version: number
   /** Host 分配的全局单调序列号，用于客户端增量同步请求（sinceVersion 过滤）*/
   hostSeq?: number
+  /** 作者设备 ECDSA SPKI Base64 公钥（用于队友代传灾备验签）*/
+  authorPubKey?: string
+  /** 作者设备写时计算的 ECDSA-SHA256 签名 Base64 */
+  authorSig?: string
+  /** Host 权威认证签名（预留双签扩展）*/
+  hostSig?: string
 }
 
 // --- 前端表单数据（序列化后放入 rawData）---
@@ -237,8 +243,58 @@ export type WebRtcMessage =
   | WebRtcMergeAccountResponse
   | WebRtcHostHandoffBatch
   | WebRtcHostHandoffAck
+  | WebRtcClockSyncReq
+  | WebRtcClockSyncRes
+  | WebRtcForceClockResync
+  | WebRtcCrdtSyncMsg
+  | WebRtcCrdtSyncChunk
   | WebRtcPing
   | WebRtcPong
+
+export interface WebRtcCrdtSyncMsg {
+  type: 'CRDT_SYNC_MSG'
+  eventId: string
+  fromClientId: string
+  toClientId?: string
+  requestId?: string | null
+  message: number
+  body: unknown
+  authCode?: string
+}
+
+export interface WebRtcCrdtSyncChunk {
+  type: 'CRDT_SYNC_CHUNK'
+  eventId: string
+  transferId: string
+  chunkIndex: number
+  totalChunks: number
+  chunkData: string
+  authCode?: string
+}
+
+export interface WebRtcClockSyncReq {
+  type: 'CLOCK_SYNC_REQ'
+  reqId: string
+  clientMonoM1: number
+  authCode?: string
+}
+
+export interface WebRtcClockSyncRes {
+  type: 'CLOCK_SYNC_RES'
+  reqId: string
+  clientMonoM1: number
+  hostNow: number
+  hostEpoch: number
+  authCode?: string
+}
+
+export interface WebRtcForceClockResync {
+  type: 'FORCE_CLOCK_RESYNC'
+  reason?: string
+  hostNow?: number
+  hostEpoch?: number
+  authCode?: string
+}
 
 export interface WebRtcPing {
   type: 'PING'

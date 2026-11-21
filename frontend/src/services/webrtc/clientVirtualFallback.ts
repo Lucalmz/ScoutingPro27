@@ -330,6 +330,7 @@ export function createClientVirtualFallbackController(deps: ClientVirtualFallbac
       ;(ctx.callbacks.onTransportInfoChanged || ctx.callbacks.onTransportChange)?.(vdcTransportInfo)
       ctx.setStatus('connected')
       startDataChannelHeartbeat()
+      ctx.onDataChannelReadyForSync?.()
       if (!virtualNativeUpgradeTimer) {
         scheduleBackgroundNativeP2pRetry(epoch)
       }

@@ -9,6 +9,7 @@ import { useToastStore } from '@/stores/toast'
 import { useScheduleStore } from '@/stores/schedule'
 import { syncRecords } from '@/services/api'
 import type { ScoutingEvent, ScoutingRecord } from '@/types'
+import { getExistingEventCrdt, getOrCreateEventCrdt } from '@/services/crdt'
 import {
   generateEventFileName,
   generateSyncFileName,
@@ -173,7 +174,8 @@ function handleExportSync() {
     teamTags: isHost.value ? recordStore.teamTags : undefined,
     fromHostSeq: isHost.value ? Number(hostFromSeq.value) || 0 : 0,
     toHostSeq: isHost.value ? maxSeq : 0,
-    hostSessionId: undefined
+    hostSessionId: undefined,
+    crdtSnapshot: getExistingEventCrdt(currentEvent.value.id)?.store.getMergeableContent()
   })
 
   triggerFileDownload(previewFileName.value, content)
@@ -252,7 +254,12 @@ async function applyImport() {
       markSynced: recordStore.markSynced,
       applyTagsFullSync: recordStore.applyTagsFullSync,
       applyScheduleFullSync: scheduleStore.applyScheduleFullSync,
-      syncExternalEvent: eventStore.syncExternal
+      syncExternalEvent: eventStore.syncExternal,
+      applyCrdtSnapshot: (snap) => {
+        const eid = currentEvent.value?.id
+        if (!eid) return false
+        return getOrCreateEventCrdt(eid).persistence.applyMergeableSnapshot(snap, true)
+      }
     })
 
     if (res.totalDropped > 0) {

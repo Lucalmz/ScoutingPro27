@@ -665,6 +665,18 @@ public class EventRoutes {
         """, newEventId, oldEventId, newEventId);
         handle.execute("DELETE FROM event_custom_fields WHERE event_id = ?", oldEventId);
 
+        // 9.6 event_crdt_state
+        handle.execute("""
+            UPDATE event_crdt_state
+            SET event_id = ?
+            WHERE event_id = ?
+              AND NOT EXISTS (
+                  SELECT 1 FROM event_crdt_state target
+                  WHERE target.event_id = ?
+              )
+        """, newEventId, oldEventId, newEventId);
+        handle.execute("DELETE FROM event_crdt_state WHERE event_id = ?", oldEventId);
+
         // 10. Physically migrate pit photos directory
         try {
             File oldDir = new File(AppConfig.resolveBaseDataDir(), "pit_photos" + File.separator + oldEventId);

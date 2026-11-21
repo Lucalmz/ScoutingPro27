@@ -21,6 +21,22 @@ export interface SignalingEndpoint {
   region: 'cn' | 'global' | 'lan'
 }
 
+export interface EpochBeaconPayload {
+  type: 'epoch_beacon'
+  inviteCode: string
+  hostEpoch: number
+  hostSessionId: string
+  hostDeviceId: string
+  hostUserId: string
+  authoritativeEventId: string
+  eventName: string
+  ftcYear?: number
+  ftcEventCode?: string
+  publishedAt: number
+  sender: string
+  signature?: string
+}
+
 export const BUILTIN_BROKERS: SignalingEndpoint[] = [
   {
     id: 'emqx',
@@ -115,8 +131,11 @@ export class SignalingChannel {
   private mqttReadyFallbackTimer: ReturnType<typeof setTimeout> | null = null
   private isClosed: boolean = false
   private topic: string = ''
+  private beaconTopic: string = ''
   readonly clientId: string
   private messageCallback: ((data: unknown) => void | Promise<void>) | null = null
+  private epochBeaconCallback: ((beacon: EpochBeaconPayload) => void | Promise<void>) | null = null
+  private lastReceivedBeacon: EpochBeaconPayload | null = null
   private hmacKey: CryptoKey | null = null
   // 允许手机与电脑之间存在最多 ±15 分钟的系统时钟偏差，依靠 5000 容量 Nonce 缓存防重放
   private nonceCache: NonceLruCache = new NonceLruCache(5000, 15 * 60 * 1000)
@@ -137,7 +156,16 @@ export class SignalingChannel {
     }
     const hashHex = await sha256Hex(this.room + '-scoutingpro27')
     this.topic = `scoutingpro27/signal/${hashHex}`
+    this.beaconTopic = `${this.topic}/epoch-beacon`
     log.info(`Initialized signaling topic for room [${this.room}]: ${this.topic}`)
+  }
+
+  getBeaconTopic(): string {
+    return this.beaconTopic
+  }
+
+  getLastReceivedBeacon(): EpochBeaconPayload | null {
+    return this.lastReceivedBeacon
   }
 
   getActiveUrl(): string {
@@ -150,17 +178,20 @@ export class SignalingChannel {
 
   connect(callbacks: {
     onMessage: (data: unknown) => void | Promise<void>
+    onEpochBeacon?: (beacon: EpochBeaconPayload) => void | Promise<void>
     onConnect?: () => void
     onError?: (err?: Error) => void
   }): void {
     this.isClosed = false
     this.messageCallback = callbacks.onMessage
+    this.epochBeaconCallback = callbacks.onEpochBeacon ?? null
     const customConfig = typeof localStorage !== 'undefined' ? localStorage.getItem('sp27-custom-broker') : null
     const rawTarget = this.preferredEndpoint || customConfig || BUILTIN_BROKERS[this.currentBrokerIndex]?.url || BUILTIN_BROKERS[0]?.url || 'wss://broker.emqx.io:8084/mqtt'
     const target = resolveBrokerUrl(rawTarget)
 
-    // 1. 判断是否为局域网原生 WebSocket 端点 (以 ws:// 开头或包含 /ws/signal)
-    if (target.startsWith('ws://') || target.includes('/ws/signal')) {
+    // 1. 判断是否为局域网原生 WebSocket 端点（含 /ws/signal 或非 /mqtt 的 ws:// 端点）
+    const isMqttWsPath = /\/mqtt(\b|\/|\?|$)/i.test(target)
+    if (target.includes('/ws/signal') || (target.startsWith('ws://') && !isMqttWsPath)) {
       this.isNativeWs = true
       this.connectNativeWs(target, callbacks)
       return
@@ -264,7 +295,7 @@ export class SignalingChannel {
     this.client = mqtt.connect(brokerUrl, {
       clientId: this.clientId,
       clean: true,
-      connectTimeout: 4000
+      connectTimeout: 8000
     })
 
     let hasConnected = false
@@ -295,6 +326,13 @@ export class SignalingChannel {
         }
         notifyReady()
       })
+      if (this.beaconTopic) {
+        this.client!.subscribe(this.beaconTopic, (err) => {
+          if (err) {
+            log.warn(`Failed to subscribe to epoch-beacon topic ${this.beaconTopic}:`, err)
+          }
+        })
+      }
 
       if (isTestEnv && !enableSubackTimerInTest) {
         // 单测环境下 mockMqttClient.subscribe 常为无回调的 vi.fn()，直接放行
@@ -311,12 +349,20 @@ export class SignalingChannel {
 
     this.client.on('error', (err) => {
       log.error(`MQTT client error on ${brokerUrl}:`, err)
-      if (!hasConnected && this.currentBrokerIndex < BUILTIN_BROKERS.length - 1) {
+      const hasCustomBroker = Boolean(
+        typeof localStorage !== 'undefined' && localStorage.getItem('sp27-custom-broker')
+      )
+      if (!hasConnected && !hasCustomBroker && this.currentBrokerIndex < BUILTIN_BROKERS.length - 1) {
         log.warn(`Attempting failover to backup broker...`)
         this.currentBrokerIndex++
         this.preferredEndpoint = undefined
         this.closeMqttOnly()
-        this.connect({ onMessage: this.messageCallback!, onConnect: callbacks.onConnect, onError: callbacks.onError })
+        this.connect({
+          onMessage: this.messageCallback!,
+          onEpochBeacon: this.epochBeaconCallback ?? undefined,
+          onConnect: callbacks.onConnect,
+          onError: callbacks.onError
+        })
         return
       }
       if (this.companionLanWs && this.companionLanWs.readyState === WebSocket.OPEN) {
@@ -342,10 +388,73 @@ export class SignalingChannel {
       callbacks.onError?.()
     })
 
-    this.client.on('message', async (_topic: string, payload: Uint8Array) => {
+    this.client.on('message', async (topic: string, payload: Uint8Array) => {
       const decoded = typeof payload === 'string' ? payload : new TextDecoder().decode(payload)
+      if (this.beaconTopic && topic === this.beaconTopic) {
+        await this.handleIncomingEpochBeacon(decoded)
+        return
+      }
       await this.handleIncomingPayload(decoded)
     })
+  }
+
+  private async handleIncomingEpochBeacon(rawString: string): Promise<void> {
+    const msg = safeJsonParse<EpochBeaconPayload>(rawString)
+    if (!msg || msg.type !== 'epoch_beacon') {
+      return
+    }
+    if (typeof msg.hostEpoch !== 'number' || !Number.isFinite(msg.hostEpoch) || msg.hostEpoch < 1) {
+      return
+    }
+    if (msg.sender === this.clientId) {
+      return
+    }
+
+    // Retained epoch-beacon purposefully bypasses 15-min NonceLruCache TTL so hours-old beacons remain valid,
+    // while strictly validating the room HMAC-SHA256 signature.
+    if (this.hmacKey) {
+      if (!msg.signature) {
+        if (!(globalThis as any).__TEST_ALLOW_UNSIGNED_SIGNALING__) {
+          log.warn(`[Security] Dropped unsigned retained epoch_beacon from ${msg.sender}`)
+          return
+        }
+      } else {
+        const valid = await verifySignalingPayload(this.hmacKey, msg as unknown as Record<string, any>, msg.signature)
+        if (!valid) {
+          log.warn(`[Security] Dropped tampered retained epoch_beacon from ${msg.sender}`)
+          return
+        }
+      }
+    }
+
+    this.lastReceivedBeacon = msg
+    log.info(`<- Received retained epoch_beacon (epoch=${msg.hostEpoch}, eventId=${msg.authoritativeEventId}, hostUserId=${msg.hostUserId})`)
+    await this.epochBeaconCallback?.(msg)
+  }
+
+  async publishEpochBeacon(
+    beacon: Omit<EpochBeaconPayload, 'type' | 'sender' | 'signature' | 'publishedAt'>
+  ): Promise<void> {
+    if (!this.beaconTopic) {
+      await this.initTopic()
+    }
+    const payload: EpochBeaconPayload = {
+      ...beacon,
+      type: 'epoch_beacon',
+      sender: this.clientId,
+      publishedAt: Date.now()
+    }
+    if (this.hmacKey) {
+      try {
+        payload.signature = await signSignalingPayload(this.hmacKey, payload as unknown as Record<string, any>)
+      } catch (e) {
+        log.warn('[Signaling] Failed to sign epoch_beacon payload:', e)
+      }
+    }
+    if (this.client && typeof this.client.publish === 'function') {
+      this.client.publish(this.beaconTopic, JSON.stringify(payload), { retain: true, qos: 1 })
+      log.info(`-> Published retained epoch_beacon (epoch=${payload.hostEpoch}, eventId=${payload.authoritativeEventId})`)
+    }
   }
 
   private async handleIncomingPayload(rawString: string): Promise<void> {
@@ -376,7 +485,9 @@ export class SignalingChannel {
       'OFFICIAL_ROSTER_SYNC',
       'CUSTOM_FIELDS_FULL_SYNC',
       'CUSTOM_FIELD_UPDATE',
-      'REQUEST_CUSTOM_FIELDS_SYNC'
+      'REQUEST_CUSTOM_FIELDS_SYNC',
+      'CRDT_SYNC_MSG',
+      'CRDT_SYNC_CHUNK'
     ]
     if (BUSINESS_TYPES.includes(msg.type)) {
       log.warn(`[Security] Dropped illegal business payload '${msg.type}' over public MQTT signaling channel. (sender: ${msg.sender})`)
@@ -430,7 +541,10 @@ export class SignalingChannel {
       'sas_challenge',
       'sas_verified',
       'sas_rejected',
-      'sas_retry'
+      'sas_retry',
+      'host_discovery',
+      'epoch_witness',
+      'epoch_superseded'
     ]
     const hasAllowedType = msg.type && ALLOWED_SIGNAL_TYPES.includes(msg.type)
     const hasSdpPayload = msg.offer || msg.answer || msg.candidate || msg.encrypted
@@ -534,6 +648,9 @@ export class SignalingChannel {
         }
         if (typeof this.client.unsubscribe === 'function') {
           this.client.unsubscribe(this.topic)
+          if (this.beaconTopic) {
+            this.client.unsubscribe(this.beaconTopic)
+          }
         }
         if (typeof this.client.end === 'function') {
           this.client.end(true)

@@ -1,4 +1,5 @@
 import type { ScoutingEvent, ScoutingRecord, TeamTagItem } from '@/types'
+import { scanMergeableContent } from '@/services/crdt'
 
 export interface EventPackageFile {
   format: 'SCOUTING_PRO_27_EVENT'
@@ -42,6 +43,7 @@ export interface SyncPackageFile {
     records: ScoutingRecord[]
     teamTags?: TeamTagItem[]
     hostSessionId?: string
+    crdtSnapshot?: unknown
   }
 }
 
@@ -159,6 +161,7 @@ export function createSyncPackage(params: {
   fromHostSeq?: number
   toHostSeq?: number
   hostSessionId?: string
+  crdtSnapshot?: unknown
 }): string {
   const maxHostSeq = params.records.reduce((m, r) => Math.max(m, r.hostSeq ?? 0), 0)
   const fromSeq = params.fromHostSeq ?? 0
@@ -181,7 +184,8 @@ export function createSyncPackage(params: {
     payload: {
       records: params.records,
       teamTags: params.teamTags,
-      hostSessionId: params.hostSessionId
+      hostSessionId: params.hostSessionId,
+      ...(params.crdtSnapshot !== undefined ? { crdtSnapshot: params.crdtSnapshot } : {})
     }
   }
   return JSON.stringify(pkg, null, 2)
@@ -442,6 +446,7 @@ export interface BatchImportContext {
   applyTagsFullSync?: (tags: TeamTagItem[]) => void
   applyScheduleFullSync?: (schedules: import('@/types').MatchScheduleItem[], assignments: import('@/types').ScoutAssignment[]) => void
   syncExternalEvent?: (event: ScoutingEvent) => Promise<ScoutingEvent | null | void>
+  applyCrdtSnapshot?: (snapshot: unknown) => boolean
 }
 
 export interface BatchImportExecutionResult {
@@ -449,6 +454,21 @@ export interface BatchImportExecutionResult {
   totalFiles: number
   totalAccepted: number
   totalDropped: number
+}
+
+function maybeApplyIncomingCrdtSnapshot(
+  syncPkg: SyncPackageFile,
+  applyCrdtSnapshot?: (snapshot: unknown) => boolean
+): void {
+  const snapshot = syncPkg.payload?.crdtSnapshot
+  if (snapshot === undefined || !applyCrdtSnapshot) return
+  const scan = scanMergeableContent(snapshot, Date.now())
+  if (scan.hasFutureSkew) {
+    console.warn(
+      '[OfflineSync] Incoming CRDT snapshot contains future-skewed HLC cells (>300s); TinyBase will drop offending cells'
+    )
+  }
+  applyCrdtSnapshot(snapshot)
 }
 
 /**
@@ -498,6 +518,7 @@ export async function executeBatchSyncImport(ctx: BatchImportContext): Promise<B
         if (!sec.valid) {
           throw new Error(sec.error || '数据包安全核验失败')
         }
+        maybeApplyIncomingCrdtSnapshot(item.syncPkg, ctx.applyCrdtSnapshot)
         totalDropped += sec.droppedRecordIds.length
         allLegitimateRecords.push(...sec.legitimateRecords)
       }
@@ -522,6 +543,7 @@ export async function executeBatchSyncImport(ctx: BatchImportContext): Promise<B
         if (!sec.valid) {
           throw new Error(sec.error || '数据包安全核验失败')
         }
+        maybeApplyIncomingCrdtSnapshot(item.syncPkg, ctx.applyCrdtSnapshot)
         allLegitimateRecords.push(...sec.legitimateRecords)
         if (item.syncPkg.payload.teamTags && item.syncPkg.payload.teamTags.length > 0) {
           if (ctx.applyTagsFullSync) ctx.applyTagsFullSync(item.syncPkg.payload.teamTags)

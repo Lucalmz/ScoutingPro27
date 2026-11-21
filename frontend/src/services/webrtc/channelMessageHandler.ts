@@ -51,6 +51,10 @@ export interface ChannelMessageHandlerContext {
   onPongReceived?: (timestamp: number) => void
   onPeerPingReceived?: (senderId: string, msg: any) => void
   onPeerIdentityBound?: (senderId: string, userId: string) => void
+  getHostClockNow?: () => number
+  getHostEpoch?: () => number
+  onClockSyncResponse?: (res: import('@/types').WebRtcClockSyncRes) => void
+  onForceClockResync?: (msg: import('@/types').WebRtcForceClockResync) => void
 }
 
 export type ChannelMessageHandler = ((ev: MessageEvent, senderId?: string) => Promise<void>) & {
@@ -147,6 +151,40 @@ export function createChannelMessageHandler(ctx: ChannelMessageHandlerContext): 
         if (!isHostMode && ctx.onPongReceived) {
           ctx.onPongReceived((msg as any).timestamp)
         }
+        return
+      }
+      case 'CLOCK_SYNC_REQ': {
+        if (isHostMode && senderId) {
+          await ctx.sendMessage(
+            {
+              type: 'CLOCK_SYNC_RES',
+              reqId: msg.reqId,
+              clientMonoM1: msg.clientMonoM1,
+              hostNow: ctx.getHostClockNow?.() ?? Date.now(),
+              hostEpoch: ctx.getHostEpoch?.() ?? 1,
+              authCode: currentInviteCode || undefined
+            },
+            senderId
+          )
+        }
+        return
+      }
+      case 'CLOCK_SYNC_RES': {
+        if (!isHostMode) {
+          ctx.onClockSyncResponse?.(msg)
+        }
+        return
+      }
+      case 'FORCE_CLOCK_RESYNC': {
+        if (!isHostMode) {
+          log.warn(`Host requested forced clock resync: ${msg.reason || 'clock_skew_detected'}`)
+          ctx.onForceClockResync?.(msg)
+        }
+        return
+      }
+      case 'CRDT_SYNC_MSG':
+      case 'CRDT_SYNC_CHUNK': {
+        ctx.callbacks.onCrdtSyncMessage?.(senderId || 'host', msg)
         return
       }
       case 'REQUEST_SYNC':

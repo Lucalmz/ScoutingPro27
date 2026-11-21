@@ -18,6 +18,13 @@ import { useScheduleStore } from './schedule'
 import { useRecordStore } from './records'
 import { useConnectionStore } from './connection'
 import { useEventStore } from './events'
+import {
+  getExistingEventCrdt,
+  isCrdtTransportActive,
+  readPitRecordsFromCrdt,
+  withLocalCrdtWrite,
+  writePitRecordToCrdt
+} from '@/services/crdt'
 
 const STORAGE_PREFIX = 'sp27_pit_'
 
@@ -258,13 +265,43 @@ export const usePitScoutStore = defineStore('pitScout', () => {
     return records.value.filter((r) => r.syncStatus === 'PENDING')
   })
 
+  function syncFromCrdt(eventId: string) {
+    if (!eventId) return
+    const handle = getExistingEventCrdt(eventId)
+    if (!handle) return
+    const crdtRecs = readPitRecordsFromCrdt(handle.store, eventId)
+    const otherEvents = records.value.filter((r) => r.eventId && r.eventId !== eventId)
+    const activeMap = new Map<number, PitScoutingRecord>()
+    for (const r of crdtRecs) {
+      activeMap.set(r.teamNumber, r)
+    }
+    records.value = [...otherEvents, ...Array.from(activeMap.values())]
+    if (currentEventId.value === eventId || !currentEventId.value) {
+      saveToLocalStorage(eventId)
+    }
+  }
+
   async function saveRecord(record: PitScoutingRecord) {
     if (!currentEventId.value) return
+    const eid = currentEventId.value
 
-    record.eventId = currentEventId.value
+    record.eventId = eid
     record.version = (record.version || 0) + 1
     record.updatedAt = new Date().toISOString()
     record.syncStatus = 'PENDING'
+
+    const crdtHandle = getExistingEventCrdt(eid)
+    if (crdtHandle) {
+      withLocalCrdtWrite(eid, () => {
+        writePitRecordToCrdt(crdtHandle.store, record)
+      })
+      const merged = readPitRecordsFromCrdt(crdtHandle.store, eid).find(
+        (r) => r.teamNumber === record.teamNumber
+      )
+      if (merged) {
+        Object.assign(record, merged, { syncStatus: record.syncStatus })
+      }
+    }
 
     const idx = records.value.findIndex((r) => r.teamNumber === record.teamNumber)
     if (idx >= 0) {
@@ -273,12 +310,12 @@ export const usePitScoutStore = defineStore('pitScout', () => {
       records.value.push(record)
     }
 
-    saveToLocalStorage(currentEventId.value)
+    saveToLocalStorage(eid)
 
-    // 局域网 DataChannel 增量广播
+    // 局域网 DataChannel 增量广播（CRDT 通道已激活时由 TinyBase 自动增量同步，跳过全量覆盖消息）
     try {
       const connStore = useConnectionStore()
-      if (connStore.rtcService) {
+      if (connStore.rtcService && !isCrdtTransportActive(eid)) {
         connStore.rtcService.sendMessage({
           type: 'PIT_SCOUT_UPDATE',
           record
@@ -291,12 +328,12 @@ export const usePitScoutStore = defineStore('pitScout', () => {
     // 本地 / Host 后端落盘
     try {
       if (!isStaticCloudHost()) {
-        await apiSavePitRecord(currentEventId.value, record)
+        await apiSavePitRecord(eid, record)
         record.syncStatus = 'SYNCED'
       } else {
         record.syncStatus = 'PENDING'
       }
-      saveToLocalStorage(currentEventId.value)
+      saveToLocalStorage(eid)
     } catch (e) {
       console.warn('[PitScoutStore] Saved locally, backend sync deferred:', e)
     }
@@ -321,6 +358,10 @@ export const usePitScoutStore = defineStore('pitScout', () => {
       } catch (e) {
         console.warn('[PitScoutStore] HTTP batch flush deferred/failed:', e)
       }
+    }
+
+    if (isCrdtTransportActive(eid)) {
+      return
     }
 
     try {
@@ -373,6 +414,15 @@ export const usePitScoutStore = defineStore('pitScout', () => {
     }
 
     if (currentEventId.value) {
+      const crdtHandle = getExistingEventCrdt(currentEventId.value)
+      if (crdtHandle) {
+        const storedRec = records.value.find((r) => r.teamNumber === record.teamNumber)
+        if (storedRec) {
+          withLocalCrdtWrite(currentEventId.value, () => {
+            writePitRecordToCrdt(crdtHandle.store, storedRec)
+          })
+        }
+      }
       saveToLocalStorage(currentEventId.value)
 
       // Host 端收到客户端推送时，自动批量落盘
@@ -433,6 +483,19 @@ export const usePitScoutStore = defineStore('pitScout', () => {
     records.value = Array.from(map.values())
 
     if (currentEventId.value) {
+      const crdtHandle = getExistingEventCrdt(currentEventId.value)
+      if (crdtHandle) {
+        const eid = currentEventId.value
+        withLocalCrdtWrite(eid, () => {
+          crdtHandle.store.transaction(() => {
+            for (const rec of records.value) {
+              if (!rec.eventId || rec.eventId === eid) {
+                writePitRecordToCrdt(crdtHandle.store, { ...rec, eventId: rec.eventId || eid })
+              }
+            }
+          })
+        })
+      }
       saveToLocalStorage(currentEventId.value)
     }
   }
@@ -494,7 +557,20 @@ export const usePitScoutStore = defineStore('pitScout', () => {
       return r
     })
     if (changed && currentEventId.value) {
-      saveToLocalStorage(currentEventId.value)
+      const eid = currentEventId.value
+      const crdtHandle = getExistingEventCrdt(eid)
+      if (crdtHandle) {
+        withLocalCrdtWrite(eid, () => {
+          crdtHandle.store.transaction(() => {
+            for (const r of records.value) {
+              if (r.scoutId === effectiveNewId && (!r.eventId || r.eventId === eid)) {
+                writePitRecordToCrdt(crdtHandle.store, { ...r, eventId: r.eventId || eid }, { syncPhotoKeys: false })
+              }
+            }
+          })
+        })
+      }
+      saveToLocalStorage(eid)
     }
   }
 
@@ -563,6 +639,7 @@ export const usePitScoutStore = defineStore('pitScout', () => {
     migrateScoutId,
     markSynced,
     migrateEventId,
+    syncFromCrdt,
     clearLocalCache
   }
 })

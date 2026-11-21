@@ -22,6 +22,9 @@ public class ScoutingRecord {
     private int version;
     /** Host 分配的全局序列号，用于 Client 增量同步请求 */
     private Integer hostSeq;
+    private String authorPubKey;
+    private String authorSig;
+    private String hostSig;
 
     public ScoutingRecord() {}
 
@@ -66,4 +69,10 @@ public class ScoutingRecord {
     /** hostSeq 以 Host 最新分配为准，允许覆盖 */
     public Integer getHostSeq() { return hostSeq; }
     public void setHostSeq(Integer hostSeq) { this.hostSeq = hostSeq; }
+    public String getAuthorPubKey() { return authorPubKey; }
+    public void setAuthorPubKey(String authorPubKey) { this.authorPubKey = authorPubKey; }
+    public String getAuthorSig() { return authorSig; }
+    public void setAuthorSig(String authorSig) { this.authorSig = authorSig; }
+    public String getHostSig() { return hostSig; }
+    public void setHostSig(String hostSig) { this.hostSig = hostSig; }
 }

@@ -6,6 +6,7 @@ import { isMobileDevice } from '@/composables/useIsMobile'
 import { useUserStore } from '@/stores/user'
 import { useConnectionStore } from '@/stores/connection'
 import { setCustomTurnConfig } from '@/services/webrtc/connectivity'
+import { getEpochWitnessRecord, isPlaceholderEventId } from '@/services/webrtc/epochStore'
 import type { CustomTurnConfig, ScoutingEvent } from '@/types'
 
 export const useEventStore = defineStore('events', () => {
@@ -113,7 +114,7 @@ export const useEventStore = defineStore('events', () => {
         } catch {}
       }
     },
-    { deep: true }
+    { deep: true, flush: 'sync' }
   )
 
   watch(
@@ -209,6 +210,71 @@ export const useEventStore = defineStore('events', () => {
     error.value = null
     const cleanCode = inviteCode.trim().toUpperCase()
     try {
+      const existingLocal = events.value.find(
+        (e) => e.inviteCode?.trim().toUpperCase() === cleanCode && !isPlaceholderEventId(e.id)
+      )
+
+      if (!existingLocal && isDesktopHost() && !isMobileDevice() && !isStaticCloudHost()) {
+        let witness = getEpochWitnessRecord(cleanCode)
+        const isTestEnv =
+          (typeof process !== 'undefined' && (process.env?.NODE_ENV === 'test' || process.env?.VITEST === 'true')) ||
+          Boolean((globalThis as any).__vitest_worker__)
+        const shouldDiscoverOnline = !isTestEnv || Boolean((globalThis as any).__TEST_ENABLE_ROOM_DISCOVERY__)
+
+        if ((!witness || isPlaceholderEventId(witness.authoritativeEventId)) && shouldDiscoverOnline) {
+          try {
+            const { discoverRoomWitness } = await import('@/services/webrtc')
+            const discovered = await discoverRoomWitness({
+              inviteCode: cleanCode,
+              userId: userStore.userId,
+              username: userStore.username
+            })
+            if (discovered.authoritativeEventId && !isPlaceholderEventId(discovered.authoritativeEventId)) {
+              witness = {
+                inviteCode: cleanCode,
+                authoritativeEventId: discovered.authoritativeEventId,
+                eventName: discovered.eventName,
+                hostUserId: discovered.hostUserId,
+                ftcYear: discovered.ftcYear,
+                ftcEventCode: discovered.ftcEventCode,
+                highestSeenEpoch: discovered.highestSeenEpoch,
+                activeHostSessionId: discovered.activeHostSessionId,
+                activeHostDeviceId: discovered.activeHostDeviceId,
+                updatedAt: Date.now()
+              }
+            }
+          } catch (discErr) {
+            console.warn('[eventStore] Witness discovery skipped/failed:', discErr)
+          }
+        }
+
+        if (witness && witness.authoritativeEventId && !isPlaceholderEventId(witness.authoritativeEventId)) {
+          const authoritativeMeta: ScoutingEvent = {
+            id: witness.authoritativeEventId,
+            name: witness.eventName || eventName || `Event ${cleanCode}`,
+            inviteCode: cleanCode,
+            hostId: witness.hostUserId || 'external_host',
+            ftcYear: witness.ftcYear,
+            ftcEventCode: witness.ftcEventCode
+          }
+          try {
+            const synced = await syncExternalEvent(authoritativeMeta)
+            if (synced && synced.id) {
+              const existingIdx = events.value.findIndex((e) => e.id === synced.id)
+              if (existingIdx >= 0) {
+                events.value[existingIdx] = synced
+              } else {
+                events.value.push(synced)
+              }
+              currentEvent.value = synced
+              return synced
+            }
+          } catch (syncErr) {
+            console.warn('[eventStore] Witness external-sync fallback to joinEvent:', syncErr)
+          }
+        }
+      }
+
       const evt = await joinEvent(cleanCode)
       const existingIdx = events.value.findIndex(e => e.id === evt.id)
       if (existingIdx >= 0) {
@@ -379,6 +445,18 @@ export const useEventStore = defineStore('events', () => {
     }
   }
 
+  function clearUserSessionCache() {
+    events.value = []
+    currentEvent.value = null
+    setCustomTurnConfig(null)
+    if (typeof localStorage !== 'undefined') {
+      try {
+        localStorage.removeItem('scoutingpro_events')
+        localStorage.removeItem('scoutingpro_current_event')
+      } catch {}
+    }
+  }
+
   function clearAllLocalCache() {
     events.value = []
     currentEvent.value = null
@@ -425,6 +503,7 @@ export const useEventStore = defineStore('events', () => {
     restoreFromCache,
     deleteEvent,
     migratePlaceholder,
+    clearUserSessionCache,
     clearAllLocalCache,
   }
 })

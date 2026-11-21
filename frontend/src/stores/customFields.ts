@@ -15,6 +15,17 @@ import {
 } from '@/services/api'
 import { useConnectionStore } from './connection'
 import { useEventStore } from './events'
+import {
+  CRDT_TABLES,
+  customFieldRowId,
+  generateOrderKeyBetween,
+  getExistingEventCrdt,
+  isCrdtTransportActive,
+  orderKeyFromSeq,
+  readCustomFieldsFromCrdt,
+  withLocalCrdtWrite,
+  writeCustomFieldToCrdt
+} from '@/services/crdt'
 
 const STORAGE_PREFIX = 'sp27_custom_fields_'
 
@@ -105,11 +116,20 @@ export const useCustomFieldsStore = defineStore('customFields', () => {
     }
   }
 
+  function syncFromCrdt(eventId: string) {
+    if (!eventId) return
+    const handle = getExistingEventCrdt(eventId)
+    if (!handle) return
+    fieldsByEvent.value[eventId] = readCustomFieldsFromCrdt(handle.store, eventId).map(parseFieldOptions)
+    saveToLocalStorage(eventId)
+  }
+
   function broadcastFieldUpdate(
     eventId: string,
     field: CustomFieldDefinition,
     action: 'CREATE' | 'UPDATE' | 'DELETE'
   ) {
+    if (isCrdtTransportActive(eventId)) return
     const connStore = useConnectionStore()
     const eventStore = useEventStore()
     if (eventStore.isHost && connStore.rtcService) {
@@ -136,6 +156,13 @@ export const useCustomFieldsStore = defineStore('customFields', () => {
     fieldsByEvent.value[eventId].push(created)
     saveToLocalStorage(eventId)
 
+    const crdtHandle = getExistingEventCrdt(eventId)
+    if (crdtHandle) {
+      withLocalCrdtWrite(eventId, () => {
+        writeCustomFieldToCrdt(crdtHandle.store, { ...created, eventId: created.eventId || eventId }, false)
+      })
+    }
+
     if (broadcast) {
       broadcastFieldUpdate(eventId, created, 'CREATE')
     }
@@ -160,6 +187,13 @@ export const useCustomFieldsStore = defineStore('customFields', () => {
     fieldsByEvent.value[eventId] = [...list]
     saveToLocalStorage(eventId)
 
+    const crdtHandle = getExistingEventCrdt(eventId)
+    if (crdtHandle) {
+      withLocalCrdtWrite(eventId, () => {
+        writeCustomFieldToCrdt(crdtHandle.store, { ...updated, eventId: updated.eventId || eventId }, false)
+      })
+    }
+
     if (broadcast) {
       broadcastFieldUpdate(eventId, updated, 'UPDATE')
     }
@@ -176,6 +210,13 @@ export const useCustomFieldsStore = defineStore('customFields', () => {
     const targetField = list.find((f) => f.id === id)
     fieldsByEvent.value[eventId] = list.filter((f) => f.id !== id)
     saveToLocalStorage(eventId)
+
+    const crdtHandle = getExistingEventCrdt(eventId)
+    if (crdtHandle && targetField) {
+      withLocalCrdtWrite(eventId, () => {
+        writeCustomFieldToCrdt(crdtHandle.store, { ...targetField, eventId: targetField.eventId || eventId }, true)
+      })
+    }
 
     if (broadcast && targetField) {
       broadcastFieldUpdate(eventId, targetField, 'DELETE')
@@ -209,6 +250,22 @@ export const useCustomFieldsStore = defineStore('customFields', () => {
     const curr = list[idx]!
     const other = list[swapIdx]!
 
+    const crdtHandle = getExistingEventCrdt(eventId)
+    let computedOrderKey: string | undefined
+    if (crdtHandle) {
+      const reordered = [...list]
+      reordered[idx] = other
+      reordered[swapIdx] = curr
+      const leftItem = swapIdx > 0 ? reordered[swapIdx - 1] : null
+      const rightItem = swapIdx + 1 < reordered.length ? reordered[swapIdx + 1] : null
+      const readOrderKey = (item: CustomFieldDefinition | null | undefined): string | null => {
+        if (!item) return null
+        const raw = crdtHandle.store.getCell(CRDT_TABLES.CUSTOM_FIELDS, customFieldRowId(item.id), 'orderKey')
+        return typeof raw === 'string' && raw ? raw : orderKeyFromSeq(item.orderSeq)
+      }
+      computedOrderKey = generateOrderKeyBetween(readOrderKey(leftItem), readOrderKey(rightItem))
+    }
+
     const currSeq = curr.orderSeq
     const otherSeq = other.orderSeq
 
@@ -218,6 +275,16 @@ export const useCustomFieldsStore = defineStore('customFields', () => {
 
     await updateField(eventId, curr.id, { ...curr, orderSeq: curr.orderSeq })
     await updateField(eventId, other.id, { ...other, orderSeq: other.orderSeq })
+
+    if (crdtHandle && computedOrderKey) {
+      withLocalCrdtWrite(eventId, () => {
+        writeCustomFieldToCrdt(
+          crdtHandle.store,
+          { ...curr, eventId: curr.eventId || eventId, orderKey: computedOrderKey },
+          false
+        )
+      })
+    }
   }
 
   // WebRTC 同步接入方法
@@ -226,6 +293,17 @@ export const useCustomFieldsStore = defineStore('customFields', () => {
     const parsed = incomingFields.map(parseFieldOptions)
     fieldsByEvent.value[eventId] = parsed
     saveToLocalStorage(eventId)
+
+    const crdtHandle = getExistingEventCrdt(eventId)
+    if (crdtHandle) {
+      withLocalCrdtWrite(eventId, () => {
+        crdtHandle.store.transaction(() => {
+          for (const field of parsed) {
+            writeCustomFieldToCrdt(crdtHandle.store, { ...field, eventId: field.eventId || eventId }, false)
+          }
+        })
+      })
+    }
   }
 
   function applyRemoteUpdate(
@@ -263,6 +341,17 @@ export const useCustomFieldsStore = defineStore('customFields', () => {
     }
     fieldsByEvent.value[eventId] = [...list]
     saveToLocalStorage(eventId)
+
+    const crdtHandle = getExistingEventCrdt(eventId)
+    if (crdtHandle) {
+      withLocalCrdtWrite(eventId, () => {
+        writeCustomFieldToCrdt(
+          crdtHandle.store,
+          { ...field, eventId: field.eventId || eventId },
+          action === 'DELETE'
+        )
+      })
+    }
   }
 
   function migrateEventId(oldId: string, newId: string) {
@@ -295,6 +384,7 @@ export const useCustomFieldsStore = defineStore('customFields', () => {
     moveFieldOrder,
     applyFullSync,
     applyRemoteUpdate,
-    migrateEventId
+    migrateEventId,
+    syncFromCrdt
   }
 })

@@ -602,3 +602,92 @@ export async function computeSecurityFingerprint(
   const hex = (await sha256Hex(payload)).toUpperCase()
   return `${hex.slice(0, 4)}-${hex.slice(4, 8)}`
 }
+
+function uint8ArrayToBase64(bytes: Uint8Array): string {
+  let binary = ''
+  for (let i = 0; i < bytes.length; i++) {
+    binary += String.fromCharCode(bytes[i] ?? 0)
+  }
+  return btoa(binary)
+}
+
+function base64ToUint8Array(base64: string): Uint8Array<ArrayBuffer> {
+  const binary = atob(base64.trim())
+  const buf = new ArrayBuffer(binary.length)
+  const bytes = new Uint8Array(buf)
+  for (let i = 0; i < binary.length; i++) {
+    bytes[i] = binary.charCodeAt(i)
+  }
+  return bytes
+}
+
+/**
+ * Generate Persistent ECDSA (P-256) Signing Key Pair for author record authentication
+ */
+export async function generateEcdsaKeyPair(): Promise<CryptoKeyPair> {
+  return await crypto.subtle.generateKey(
+    { name: 'ECDSA', namedCurve: 'P-256' },
+    true,
+    ['sign', 'verify']
+  )
+}
+
+/**
+ * Export ECDSA Public Key as SPKI Base64 string (compact, fits VARCHAR(256))
+ */
+export async function exportEcdsaPublicKey(key: CryptoKey): Promise<string> {
+  const spki = await crypto.subtle.exportKey('spki', key)
+  return uint8ArrayToBase64(new Uint8Array(spki))
+}
+
+/**
+ * Import ECDSA Public Key from SPKI Base64 string
+ */
+export async function importEcdsaPublicKey(spkiBase64: string): Promise<CryptoKey> {
+  const bytes = base64ToUint8Array(spkiBase64)
+  return await crypto.subtle.importKey(
+    'spki',
+    bytes,
+    { name: 'ECDSA', namedCurve: 'P-256' },
+    true,
+    ['verify']
+  )
+}
+
+/**
+ * Sign canonical payload string with ECDSA P-256 / SHA-256; returns Base64 signature
+ */
+export async function signDataEcdsa(privateKey: CryptoKey, payload: string): Promise<string> {
+  const enc = new TextEncoder()
+  const sigBuffer = await crypto.subtle.sign(
+    { name: 'ECDSA', hash: 'SHA-256' },
+    privateKey,
+    enc.encode(payload)
+  )
+  return uint8ArrayToBase64(new Uint8Array(sigBuffer))
+}
+
+/**
+ * Verify ECDSA P-256 / SHA-256 signature against SPKI Base64 public key and payload.
+ * Never throws on malformed input or invalid signatures.
+ */
+export async function verifyDataEcdsa(
+  publicKeySpkiBase64: string,
+  payload: string,
+  signatureBase64: string
+): Promise<boolean> {
+  if (!publicKeySpkiBase64 || !signatureBase64 || !hasSubtleCrypto()) return false
+  try {
+    const pubKey = await importEcdsaPublicKey(publicKeySpkiBase64)
+    const sigBytes = base64ToUint8Array(signatureBase64)
+    const enc = new TextEncoder()
+    return await crypto.subtle.verify(
+      { name: 'ECDSA', hash: 'SHA-256' },
+      pubKey,
+      sigBytes,
+      enc.encode(payload)
+    )
+  } catch {
+    return false
+  }
+}

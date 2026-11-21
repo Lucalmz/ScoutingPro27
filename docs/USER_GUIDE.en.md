@@ -1,7 +1,7 @@
-# ScoutingPro 27 Beginner User Guide (BIOBUZZ Season · Bleacher & Pit Field Manual)
+# ScoutingPro 27 Beginner User Guide (BIOBUZZ Pit Wall Edition · Bleacher & Pit Field Manual)
 
-> **Welcome to ScoutingPro 27!** This manual is written for **first-time student scouts, parents, and bleacher volunteers** who have never used scouting software before.  
-> Zero technical jargon—every chapter walks through exactly 4 practical steps: **Where to Tap (matching the colored callouts in each screenshot) → What to Enter → What Success Looks Like → What to Do If You Mis-Tap or Lose Signal**.
+> **Welcome to ScoutingPro 27 (Pit Wall Edition)!** This manual is written for **first-time student scouts, parents, and bleacher volunteers** who have never used scouting software before.  
+> Upgraded to the **Cold Graphite Pit Wall** high-contrast theme (with automatic titlebar deduplication on Windows/macOS desktop shells and full headers on web/mobile PWA). Zero technical jargon—every chapter walks through exactly 4 practical steps: **Where to Tap (matching the colored callouts in each screenshot) → What to Enter → What Success Looks Like → What to Do If You Mis-Tap or Lose Signal**.
 >
 > 🌐 **需要中文版本？** Switch to the [**中文保姆级教程 (`USER_GUIDE.zh.md`)**](./USER_GUIDE.zh.md) or return to the [**Bilingual Hub (`USER_GUIDE.md`)**](./USER_GUIDE.md).
 
@@ -13,10 +13,10 @@ Check what role you are helping with today and jump straight to your chapters:
 
 | Your Arena Role | Top Tab You Use | What You Actually Do at the Venue | Go To Chapters |
 | :--- | :--- | :--- | :--- |
-| 🚩 **Event Host / Lead (1 laptop)** | Create Event → **Mobile QR** / **Schedule** / **Scouts & Settings** | Create the competition lobby, show the QR code, bind your **FTC Event Code** to pull official rosters & schedules, drag-select & auto-assign schedules, and add **Custom Fields** if needed | [Ch 1](#chapter-1-open-the-app--create-your-callsign) · [Ch 2](#chapter-2-scan-qr-to-join-the-same-event-even-without-venue-internet) · [Ch 9](#chapter-9-match-schedule--assignments-how-batch-scheduling-works) · [Ch 14](#chapter-14-how-to-add--manage-custom-fields) · [Ch 15](#chapter-15-how-to-fetch-official-ftc-data-roster-schedule-audit--roll-down-advancement) |
+| 🚩 **Event Host / Lead (1 laptop)** | Create Event → **Mobile QR** / **Schedule** / **Scouts & Settings** | Create the competition lobby, show the QR code, bind your **FTC Event Code** to pull official rosters & schedules, drag-select & auto-assign schedules, and add **Custom Fields** or **Custom TURN** if needed | [Ch 1](#chapter-1-open-the-app--create-your-callsign) · [Ch 2](#chapter-2-scan-qr-to-join-the-same-event-even-without-venue-internet) · [Ch 9](#chapter-9-match-schedule--assignments-how-batch-scheduling-works) · [Ch 14](#chapter-14-how-to-add--manage-custom-fields) · [Ch 15](#chapter-15-official-ftc-data-sync-roll-down-advancement-and-custom-turn) |
 | 📱 **Stand / Bleacher Scout (phone or laptop)** | **Scout** · **History** | Tap your 1-tap Schedule Banner to pre-load your match, log points & cycles, and use **`History` → `Edit`** anytime if you need to fix a submitted match | [Ch 3](#chapter-3-10-second-pre-match-setup-mode-alliance--pit-cross-check) – [Ch 7](#chapter-7-mobile-single-handed-wizard-scout-standing-up-with-one-thumb) · [Ch 12](#chapter-12-how-to-edit--fix-saved-match-records) |
 | 🔧 **Pit Scout (roaming the team pits)** | **Pit Scout** | Walk pit-to-pit and open the **Pit Form Drawer**: record **weight**, **Compact Small / Wide Large** chassis, flower mechanism, and claimed scores | [Ch 8](#chapter-8-pit-scouting-robot-size-weight--actual-pit-form-drawer) |
-| 🎯 **Drive Coach / Alliance Selection Lead** | **Rankings** · **Whiteboard** · **Chat with AI** | Check sticky **Advancement Points (w/ Roll-Down)**, **Predict Cycle Time**, **Swarm RP**, and **Brag Index**; bind an **API Key** so the AI Coach analyzes live event data for you, and animate Whiteboard routes | [Ch 10](#chapter-10-rankings--brag-index-picking-honest-alliance-partners) · [Ch 11](#chapter-11-tactical-whiteboard-plan--play-animated-routes-before-queuing) · [Ch 13](#chapter-13-how-to-bind-an-api-key--chat-with-ai) · [Ch 15](#chapter-15-how-to-fetch-official-ftc-data-roster-schedule-audit--roll-down-advancement) |
+| 🎯 **Drive Coach / Alliance Selection Lead** | **Rankings** · **Whiteboard** · **Chat with AI** | Check sticky **Advancement Points (w/ Roll-Down)**, **Predict Cycle Time**, **Swarm RP**, and **Brag Index**; bind an **API Key** so the AI Coach analyzes live event data for you, and animate Whiteboard routes | [Ch 10](#chapter-10-rankings--brag-index-picking-honest-alliance-partners) · [Ch 11](#chapter-11-tactical-whiteboard-plan--play-animated-routes-before-queuing) · [Ch 13](#chapter-13-how-to-bind-an-api-key--chat-with-ai) · [Ch 15](#chapter-15-official-ftc-data-sync-roll-down-advancement-and-custom-turn) |
 
 ---
 
@@ -36,7 +36,7 @@ Check what role you are helping with today and jump straight to your chapters:
 12. [How to Edit & Fix Saved Match Records](#chapter-12-how-to-edit--fix-saved-match-records)
 13. [How to Bind an API Key & Chat With AI](#chapter-13-how-to-bind-an-api-key--chat-with-ai)
 14. [How to Add & Manage Custom Fields](#chapter-14-how-to-add--manage-custom-fields)
-15. [How to Fetch Official FTC Data (Roster, Schedule, Audit & Roll-Down Advancement)](#chapter-15-how-to-fetch-official-ftc-data-roster-schedule-audit--roll-down-advancement)
+15. [Chapter 15: Official FTC Data Sync, Roll-Down Advancement, and Custom TURN](#chapter-15-official-ftc-data-sync-roll-down-advancement-and-custom-turn)
 16. [Emergency Troubleshooting FAQ](#chapter-16-emergency-troubleshooting-faq)
 
 ---
@@ -76,6 +76,10 @@ Once the Host creates an event, clicking **`Mobile QR`** in the top bar opens th
 
 ### What Success Looks Like
 - Every scout sees the exact same Event Title and 6-character code in their top header with a green online indicator—any match or pit card submitted anywhere appears automatically on the Host rankings and schedule.
+- **Understanding the 5-Tier Transport HUD Labels (Tap the status pill for details)**:
+  - **`IPv6 Direct` / `LAN Direct` / `IPv4 Hole-punch`**: True peer-to-peer sub-50ms direct links! On startup, the desktop Host automatically probes physical-NIC UPnP/NAT-PMP/PCP (`50000–50009/UDP`) to boost cross-network P2P punch-through.
+  - **`ECDH Tunnel (TLS)`**: If venue Wi-Fi blocks UDP or a scout's phone runs a VPN, the app automatically switches within 3.8 seconds to a **zero-TURN-quota** end-to-end encrypted WSS tunnel while silently probing in the background to upgrade back to Direct P2P.
+  - **`TURN Relay`**: Strict last-resort fallback only when Direct P2P and the ECDH TLS tunnel are both unreachable.
 
 ---
 
@@ -235,7 +239,7 @@ Once qualification matches accumulate, open **`Rankings`** (scroll the table hor
 
 ![Rankings leaderboard highlighting Swarm RP, BIOBUZZ averages, Predict Cycle Time, and Brag Index](images/userguide/en/10_rankings_brag_index.png)
 
-> 💡 **Sticky Column #1 `Adv. Pts` (Official Advancement Points)**: When you bind an official FTC Event Code (see [Chapter 15](#chapter-15-how-to-fetch-official-ftc-data-roster-schedule-audit--roll-down-advancement)), the first pinned column computes live total Advancement Points (Qual + Alliance + Playoff + Judged Awards per FTC Rule A215) and tags each team's live cut status: **`ADVANCING`**, **`ROLLED DOWN`**, **`PRE-QUAL`**, **`DECLINED`**, **`INELIGIBLE`**, **`BUBBLE`**, or **`COMPETING`**!
+> 💡 **Sticky Column #1 `Adv. Pts` (Official Advancement Points)**: When you bind an official FTC Event Code (see [Chapter 15](#chapter-15-official-ftc-data-sync-roll-down-advancement-and-custom-turn)), the first pinned column computes live total Advancement Points (Qual + Alliance + Playoff + Judged Awards per FTC Rule A215) and tags each team's live cut status: **`ADVANCING`**, **`ROLLED DOWN`**, **`PRE-QUAL`**, **`DECLINED`**, **`INELIGIBLE`**, **`BUBBLE`**, or **`COMPETING`**!
 
 ### The 4 Columns Every Captain Checks Before Alliance Selection
 1. **`(1)` `Mobility RP Pts` (`Swarm RP`)**: Combines **Leave (+3) + Auto Park (+5) + Endgame Park (+5)** = max **13.0 pts** per robot (`#27570`, `#11115`, `#31024` all hit `13.0`). Two robots combining for **≥ 16 pts** earn your alliance the **Swarm RP**!
@@ -326,7 +330,7 @@ Want to track extra team-specific observations beyond built-in BIOBUZZ scoring (
 
 ---
 
-## Chapter 15: How to Fetch Official FTC Data (Roster, Schedule, Audit & Roll-Down Advancement)
+## Chapter 15: Official FTC Data Sync, Roll-Down Advancement, and Custom TURN
 
 Once you bind your official FTC Event Code, ScoutingPro 27 connects through its backend proxy to the **FIRST Inspires FTC Events API v2.0 (`https://ftc-api.firstinspires.org`)** to automatically fetch team rosters, qualification/playoff schedules, official match scores, and **live Advancement Points with roll-down status**—zero manual spreadsheet typing required:
 
@@ -341,9 +345,9 @@ Once you bind your official FTC Event Code, ScoutingPro 27 connects through its 
    - **FTC Season (Year)**: Enter the **starting year** from the URL. For example, the 2025–2026 competition season uses `/2025/...`, so enter **`2025`** (and **`2026`** for 2026–2027).
    - **FTC Event Code**: Copy the alphanumeric code at the end of the URL (e.g., `AUADQ`, `AECMP`, `USUTSAS1`, `CNSHQ`).
 
-### Step 2: Bind the Official Event in `Scouts & Settings`
+### Step 2: Bind the Official Event & Optional Custom TURN in `Scouts & Settings`
 
-![Scouts & Settings panel showing FTC Season Year, Event Code, Bind & Sync Official Data button, and CSV / USB Sync options](images/userguide/en/16_ftc_official_sync.png)
+![Scouts & Settings panel showing FTC Season Year, Event Code, Bind & Sync Official Data button, and Optional Custom TURN](images/userguide/en/16_ftc_official_sync.png)
 
 1. Open the far-right **`Scouts & Settings`** tab on the Host computer.
 2. Fill **`(1)` `FTC Season (Year)`** (e.g., `2025`).
@@ -351,7 +355,9 @@ Once you bind your official FTC Event Code, ScoutingPro 27 connects through its 
 4. Click **`(3)` `Bind & Sync Official Data`**:
    - Once verified, the top header shows the green **`FTC: <CODE> (<YEAR>)`** verified badge and pulls initial official match scores and advancement standings automatically;
    - During the tournament, click **`Update & Re-sync Official Data`** anytime to refresh latest results.
-   - Panel **`(4)`** also houses **CSV exports** and **Offline USB Sync** for zero-internet venues.
+5. **Panel `(4)` (Host Only): `Custom TURN Relay Server (Optional)` & Data Export / USB Sync Below**:
+   - **Leave blank for standard events!** If your team operates a private `coturn`, Twilio, or dedicated Metered TURN server, enter your `turn:` / `turns:` URLs, username, and credential and click **`Save Custom TURN`**. Credentials are encrypted with AES-256 in the Host database and automatically synced to all scouts (bypassing the shared default fallback account); click **`Reset to Default Fallback`** anytime to revert;
+   - Directly below sits **Data Export** (`Export Rankings CSV`, `Export All Records CSV`) and **Offline Packet Sync (USB Drive)**.
 
 ### Step 3: 4 Places Official Data Powers Up Your Event Automatically
 
@@ -374,3 +380,4 @@ Once you bind your official FTC Event Code, ScoutingPro 27 connects through its 
 | **Q4: Why does a team show `— (<6 cyc)` instead of seconds in Predict Cycle Time?** | Predict Cycle Time requires **at least 6 logged TeleOp cycles** (`≥ 5` valid cycle gaps ≤ `120s`) using **`Record New Cycle`** / **`+ Next Cycle`**, then drops the single fastest outlier and averages the next 4 gaps. |
 | **Q5: How do I remember BIOBUZZ Endgame rules quickly?** | **No climbing!** Only: **last-60s Nectars (+2)**, **Bottom Nectar Flowers (+5 each)**, **Pollens (+2)**, **Garden Balls (+1)**, **Loading Park (+5)**, **G418 Descore**, and check **G410** if a Nectar goes in before the 1:00 mark! |
 | **Q6: Binding fails with `"FTC official event not found"` or `"service unreachable"`!** | Double-check `ftc-events.firstinspires.org/<year>/<code>`—make sure you entered the season **start year** (`2025` for 2025–26, not `2026`). If the Host laptop is completely offline at the venue, use **`Import Schedule` → `CSV`** temporarily and click **`Update & Re-sync Official Data`** once internet returns. |
+| **Q7: A scout phone shows `ECDH Tunnel (TLS)` while running a VPN—is that normal?** | **Yes—and it uses zero TURN quota!** When mobile VPNs (such as Clash/TUN) or strict venue Wi-Fi block UDP, ScoutingPro 27 seamlessly uses the end-to-end encrypted WSS tunnel while probing for Direct P2P in the background. Disabling the phone VPN upgrades back to `IPv6 Direct` / `IPv4 Hole-punch`, or Hosts can add a **Custom TURN** server in `Scouts & Settings` (see [VPN P2P Test Guide](./VPN_P2P_TEST_GUIDE.md)). |

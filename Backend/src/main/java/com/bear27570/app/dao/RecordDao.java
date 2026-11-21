@@ -24,14 +24,14 @@ public interface RecordDao {
                 WHEN NULLIF(TRIM(:updatedAt), '') IS NOT NULL AND CAST(REPLACE(REPLACE(NULLIF(TRIM(:updatedAt), ''), 'T', ' '), 'Z', '') AS TIMESTAMP) > DATEADD('SECOND', 5, CURRENT_TIMESTAMP) THEN CURRENT_TIMESTAMP
                 ELSE COALESCE(CAST(REPLACE(REPLACE(NULLIF(TRIM(:updatedAt), ''), 'T', ' '), 'Z', '') AS TIMESTAMP), CURRENT_TIMESTAMP)
             END,
-            :version, :hostSeq
+            :version, :hostSeq, :authorPubKey, :authorSig, :hostSig
         )) AS src (
             id, event_id, scout_id, scout_name,
             match_number, team_number,
             auto_score, teleop_score, endgame_score, total_score,
             notes, raw_data, sync_status, is_broken, is_deleted,
             created_at, updated_at,
-            version, host_seq
+            version, host_seq, author_pub_key, author_sig, host_sig
         )
         ON target.id = src.id
         WHEN MATCHED AND (
@@ -48,26 +48,29 @@ public interface RecordDao {
             )
         ) THEN
           UPDATE SET
-            event_id      = src.event_id,
-            scout_id      = src.scout_id,
-            scout_name    = src.scout_name,
-            match_number  = src.match_number,
-            team_number   = src.team_number,
-            auto_score    = src.auto_score,
-            teleop_score  = src.teleop_score,
-            endgame_score = src.endgame_score,
-            total_score   = src.total_score,
-            notes         = src.notes,
-            raw_data      = src.raw_data,
-            sync_status   = src.sync_status,
-            is_broken     = src.is_broken,
-            is_deleted    = src.is_deleted,
-            updated_at    = src.updated_at,
-            version       = src.version,
-            host_seq      = CASE
+            event_id       = src.event_id,
+            scout_id       = src.scout_id,
+            scout_name     = src.scout_name,
+            match_number   = src.match_number,
+            team_number    = src.team_number,
+            auto_score     = src.auto_score,
+            teleop_score   = src.teleop_score,
+            endgame_score  = src.endgame_score,
+            total_score    = src.total_score,
+            notes          = src.notes,
+            raw_data       = src.raw_data,
+            sync_status    = src.sync_status,
+            is_broken      = src.is_broken,
+            is_deleted     = src.is_deleted,
+            updated_at     = src.updated_at,
+            version        = src.version,
+            host_seq       = CASE
                 WHEN src.host_seq IS NULL THEN target.host_seq
                 ELSE GREATEST(COALESCE(target.host_seq, 0), src.host_seq)
-            END
+            END,
+            author_pub_key = COALESCE(NULLIF(TRIM(src.author_pub_key), ''), target.author_pub_key),
+            author_sig     = COALESCE(NULLIF(TRIM(src.author_sig), ''), target.author_sig),
+            host_sig       = COALESCE(NULLIF(TRIM(src.host_sig), ''), target.host_sig)
         WHEN NOT MATCHED THEN
           INSERT (
             id, event_id, scout_id, scout_name,
@@ -75,14 +78,14 @@ public interface RecordDao {
             auto_score, teleop_score, endgame_score, total_score,
             notes, raw_data, sync_status, is_broken, is_deleted,
             created_at, updated_at,
-            version, host_seq
+            version, host_seq, author_pub_key, author_sig, host_sig
           ) VALUES (
             src.id, src.event_id, src.scout_id, src.scout_name,
             src.match_number, src.team_number,
             src.auto_score, src.teleop_score, src.endgame_score, src.total_score,
             src.notes, src.raw_data, src.sync_status, src.is_broken, src.is_deleted,
             src.created_at, src.updated_at,
-            src.version, src.host_seq
+            src.version, src.host_seq, src.author_pub_key, src.author_sig, src.host_sig
           )
     """)
     void upsert(@BindBean ScoutingRecord record);

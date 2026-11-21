@@ -15,6 +15,9 @@ import {
   generateEcdhKeyPair,
   exportEcdhPublicKey,
   importEcdhPublicKey,
+  generateEcdsaKeyPair,
+  exportEcdsaPublicKey,
+  importEcdsaPublicKey,
   generateNonce,
   deriveFallbackPublicKeyHex
 } from './crypto'
@@ -23,6 +26,8 @@ export interface DeviceIdentity {
   deviceId: string
   keyPair: CryptoKeyPair | null
   publicKeyHex: string
+  signingKeyPair?: CryptoKeyPair | null
+  signingPubKey?: string
   createdAt: number
 }
 
@@ -128,6 +133,26 @@ export async function importPrivateKeyJwk(jwk: JsonWebKey): Promise<CryptoKey> {
 }
 
 /**
+ * Export ECDSA signing private key to JWK
+ */
+export async function exportEcdsaPrivateKeyJwk(key: CryptoKey): Promise<JsonWebKey> {
+  return await crypto.subtle.exportKey('jwk', key)
+}
+
+/**
+ * Import ECDSA signing private key from JWK
+ */
+export async function importEcdsaPrivateKeyJwk(jwk: JsonWebKey): Promise<CryptoKey> {
+  return await crypto.subtle.importKey(
+    'jwk',
+    jwk,
+    { name: 'ECDSA', namedCurve: 'P-256' },
+    true,
+    ['sign']
+  )
+}
+
+/**
  * 1. Persistent Device Identity Key:
  * Retrieve existing key pair & deviceId from IndexedDB, or create & persist a fresh one.
  */
@@ -158,10 +183,53 @@ export async function getOrCreateDeviceIdentity(): Promise<DeviceIdentity> {
             keyPair = null
           }
         }
+
+        let signingKeyPair: CryptoKeyPair | null = null
+        let signingPubKey: string | undefined = existing.signingPubKey
+        let signingPrivateKeyJwk: JsonWebKey | null = existing.signingPrivateKeyJwk || null
+        let needsSigningUpgrade = false
+
+        if (signingPrivateKeyJwk && signingPubKey) {
+          try {
+            const signPriv = await importEcdsaPrivateKeyJwk(signingPrivateKeyJwk)
+            const signPub = await importEcdsaPublicKey(signingPubKey)
+            signingKeyPair = { privateKey: signPriv, publicKey: signPub }
+          } catch {
+            signingKeyPair = null
+          }
+        }
+
+        if (!signingKeyPair) {
+          try {
+            signingKeyPair = await generateEcdsaKeyPair()
+            signingPubKey = await exportEcdsaPublicKey(signingKeyPair.publicKey)
+            signingPrivateKeyJwk = await exportEcdsaPrivateKeyJwk(signingKeyPair.privateKey)
+            needsSigningUpgrade = true
+          } catch (err) {
+            console.warn('[Security Store] ECDSA lazy upgrade unavailable in insecure context:', err)
+          }
+        }
+
+        if (needsSigningUpgrade && signingPrivateKeyJwk && signingPubKey) {
+          try {
+            const writeTx = db.transaction(STORE_DEVICE, 'readwrite')
+            writeTx.objectStore(STORE_DEVICE).put({
+              ...existing,
+              id: 'current_device',
+              signingPrivateKeyJwk,
+              signingPubKey
+            })
+          } catch (e) {
+            console.warn('[Security Store] Failed to persist ECDSA lazy upgrade:', e)
+          }
+        }
+
         memDeviceIdentity = {
           deviceId: existing.deviceId,
           keyPair,
           publicKeyHex: existing.publicKeyHex,
+          signingKeyPair,
+          signingPubKey,
           createdAt: existing.createdAt || Date.now()
         }
         console.log(`[Security Store] Loaded persistent device identity: ${existing.deviceId} (pub: ${existing.publicKeyHex.slice(0, 10)}...)`)
@@ -189,12 +257,26 @@ export async function getOrCreateDeviceIdentity(): Promise<DeviceIdentity> {
   if (!publicKeyHex) {
     publicKeyHex = deriveFallbackPublicKeyHex(deviceId)
   }
+
+  let signingKeyPair: CryptoKeyPair | null = null
+  let signingPubKey: string | undefined = undefined
+  let signingPrivateKeyJwk: JsonWebKey | null = null
+  try {
+    signingKeyPair = await generateEcdsaKeyPair()
+    signingPubKey = await exportEcdsaPublicKey(signingKeyPair.publicKey)
+    signingPrivateKeyJwk = await exportEcdsaPrivateKeyJwk(signingKeyPair.privateKey)
+  } catch (err) {
+    console.warn('[Security Store] ECDSA key generation unavailable in insecure context:', err)
+  }
+
   const createdAt = Date.now()
 
   memDeviceIdentity = {
     deviceId,
     keyPair,
     publicKeyHex,
+    signingKeyPair,
+    signingPubKey,
     createdAt
   }
 
@@ -207,6 +289,8 @@ export async function getOrCreateDeviceIdentity(): Promise<DeviceIdentity> {
         deviceId,
         privateKeyJwk,
         publicKeyHex,
+        signingPrivateKeyJwk,
+        signingPubKey,
         createdAt
       })
       console.log(`[Security Store] Generated and persisted new device identity: ${deviceId}`)

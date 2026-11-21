@@ -37,3 +37,7 @@ dist/
 *-failed-*.png
 **/*-failed-*.png
 **/__screenshots__/
+
+# Generated user guide PDFs and screenshots
+docs/*.pdf
+docs/images/userguide/
