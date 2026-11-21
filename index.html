@@ -2,21 +2,104 @@
 <html lang="en">
   <head>
     <meta charset="UTF-8" />
+    <meta name="theme-color" content="#0B0E10" />
+    <link rel="icon" type="image/svg+xml" href="./favicon.svg" />
     <link rel="icon" type="image/x-icon" href="./favicon.ico" />
     <link rel="icon" type="image/png" sizes="32x32" href="./logo_transparent.png" />
     <link rel="apple-touch-icon" href="./app_icon.png" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover, interactive-widget=resizes-content" />
     <title>ScoutingPro 27 — FTC Scouting</title>
     <link href="https://fonts.googleapis.com/icon?family=Material+Icons" rel="stylesheet">
-    <script type="module" crossorigin src="./assets/index-BTau1L2K.js"></script>
+    <style>
+      html,
+      body {
+        margin: 0;
+        background: #0B0E10;
+        color: #E6EBEE;
+        color-scheme: dark;
+      }
+
+      #web-boot-splash {
+        position: fixed;
+        inset: 0;
+        z-index: 99995;
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        justify-content: center;
+        gap: 18px;
+        background: #0B0E10;
+        pointer-events: none;
+        opacity: 1;
+        transition: opacity 240ms var(--motion-ease-out, cubic-bezier(0.16, 1, 0.3, 1));
+      }
+
+      #web-boot-splash.is-fading {
+        opacity: 0;
+      }
+
+      .web-boot-logo {
+        width: 56px;
+        height: 56px;
+        object-fit: contain;
+        display: block;
+      }
+
+      .web-boot-track {
+        position: relative;
+        width: 120px;
+        height: 2px;
+        border-radius: 999px;
+        background: #1B2126;
+        overflow: hidden;
+      }
+
+      .web-boot-bar {
+        position: absolute;
+        top: 0;
+        bottom: 0;
+        left: 0;
+        width: 32px;
+        border-radius: 999px;
+        background: var(--primary, #39FF14);
+        animation: web-boot-slide 1.1s cubic-bezier(0.16, 1, 0.3, 1) infinite;
+      }
+
+      @keyframes web-boot-slide {
+        0% {
+          transform: translateX(-32px);
+        }
+        100% {
+          transform: translateX(120px);
+        }
+      }
+
+      @media (prefers-reduced-motion: reduce) {
+        #web-boot-splash {
+          transition-duration: 0.01ms;
+        }
+        .web-boot-bar {
+          animation: none;
+          width: 100%;
+          transform: none;
+        }
+      }
+    </style>
+    <script type="module" crossorigin src="./assets/index-xUehOI5n.js"></script>
     <link rel="modulepreload" crossorigin href="./assets/rolldown-runtime-hePW80VL.js">
-    <link rel="modulepreload" crossorigin href="./assets/vendor-vue-DejyLyP3.js">
-    <link rel="modulepreload" crossorigin href="./assets/api-lYKHJwYO.js">
-    <link rel="modulepreload" crossorigin href="./assets/user-CRnhwKba.js">
-    <link rel="modulepreload" crossorigin href="./assets/mobilePhotoCache-7mdYHHSG.js">
-    <link rel="stylesheet" crossorigin href="./assets/index-CJwmkOSh.css">
+    <link rel="modulepreload" crossorigin href="./assets/vendor-vue-BMubVsGG.js">
+    <link rel="modulepreload" crossorigin href="./assets/api-mHP_Ow0k.js">
+    <link rel="modulepreload" crossorigin href="./assets/user-CoCtsrjW.js">
+    <link rel="modulepreload" crossorigin href="./assets/mobilePhotoCache-BSbw4oSh.js">
+    <link rel="stylesheet" crossorigin href="./assets/index-C8yM3cL-.css">
   <link rel="manifest" href="./manifest.webmanifest"></head>
   <body ontouchstart="">
     <div id="app"></div>
+    <div id="web-boot-splash" aria-hidden="true">
+      <img class="web-boot-logo" src="./logo_transparent.png" alt="" width="56" height="56" decoding="async" />
+      <div class="web-boot-track">
+        <div class="web-boot-bar"></div>
+      </div>
+    </div>
   </body>
 </html>
