@@ -51,7 +51,11 @@ public class CrdtProjectionService {
             Map<String, Integer> projectedCounts
     ) {}
 
-    private record ExistingStateMeta(int hostEpoch, long snapshotRevision) {}
+    private record ExistingStateMeta(int hostEpoch, long snapshotRevision, String crdtSnapshotJson) {}
+
+    private record MutableTableHandle(JsonArray tablesStamp, JsonArray tableStamp, JsonObject rowsObj) {}
+
+    private record NonHostSanitizeResult(Set<String> rejectedRowIds, boolean snapshotMutated) {}
 
     private final Jdbi jdbi;
     private final Gson gson;
@@ -128,16 +132,16 @@ public class CrdtProjectionService {
         if (snapshotEl == null || !snapshotEl.isJsonArray()) {
             throw new IllegalArgumentException("CRDT snapshot must be a TinyBase MergeableContent JSON array");
         }
-        final String snapshotJson = gson.toJson(snapshotEl);
 
         synchronized (DbUtil.RECORD_WRITE_LOCK) {
             return DbUtil.withDeadlockRetry(() -> jdbi.inTransaction(handle -> {
                 ExistingStateMeta existing = handle.createQuery(
-                                "SELECT host_epoch, snapshot_revision FROM event_crdt_state WHERE event_id = :eventId")
+                                "SELECT host_epoch, snapshot_revision, crdt_snapshot_json FROM event_crdt_state WHERE event_id = :eventId")
                         .bind("eventId", eventId)
                         .map((rs, ctx) -> new ExistingStateMeta(
                                 rs.getInt("host_epoch"),
-                                rs.getLong("snapshot_revision")
+                                rs.getLong("snapshot_revision"),
+                                rs.getString("crdt_snapshot_json")
                         ))
                         .findFirst()
                         .orElse(null);
@@ -180,14 +184,24 @@ public class CrdtProjectionService {
                     effectiveRev = Math.max(1L, snapshotRevision);
                 }
 
+                JsonElement persistedSnapshotEl = snapshotEl.deepCopy();
+                Set<String> rejectedScoutingRowIds = Collections.emptySet();
+                if (!isHost) {
+                    JsonElement previousSnapshotEl = parseNullableJsonArray(existing != null ? existing.crdtSnapshotJson() : null);
+                    NonHostSanitizeResult sanitizeResult = sanitizeNonHostScoutingSnapshot(
+                            handle, eventId, callerUserId, persistedSnapshotEl, previousSnapshotEl);
+                    rejectedScoutingRowIds = sanitizeResult.rejectedRowIds();
+                }
+
                 boolean noDirtyMap = dirtyRows == null || dirtyRows.isEmpty();
                 boolean projectAll = fullProjection || (existing == null && noDirtyMap);
 
                 // Validate and project scouting_records before overwriting event_crdt_state so
                 // key-binding verification reads previously persisted trusted state.
                 int projectedScoutingCount = projectScoutingRecords(
-                        handle, eventId, callerUserId, isHost, snapshotEl, dirtyRows, projectAll);
+                        handle, eventId, callerUserId, isHost, persistedSnapshotEl, dirtyRows, projectAll, rejectedScoutingRowIds);
 
+                final String snapshotJson = gson.toJson(persistedSnapshotEl);
                 handle.createUpdate("""
                         MERGE INTO event_crdt_state (event_id, host_epoch, snapshot_revision, crdt_snapshot_json, updated_at)
                         KEY (event_id)
@@ -200,16 +214,229 @@ public class CrdtProjectionService {
                         .execute();
 
                 Map<String, Integer> counts = new LinkedHashMap<>();
-                counts.put("pit_records", projectPitAndPhotos(handle, eventId, snapshotEl, dirtyRows, projectAll));
-                counts.put("team_tags", projectTeamTags(handle, eventId, snapshotEl, dirtyRows, projectAll));
-                counts.put("custom_fields", projectCustomFields(handle, eventId, snapshotEl, dirtyRows, projectAll));
-                counts.put("schedules", projectSchedules(handle, eventId, snapshotEl, dirtyRows, projectAll));
-                counts.put("assignments", projectAssignments(handle, eventId, snapshotEl, dirtyRows, projectAll));
+                counts.put("pit_records", projectPitAndPhotos(handle, eventId, persistedSnapshotEl, dirtyRows, projectAll));
+                counts.put("team_tags", projectTeamTags(handle, eventId, persistedSnapshotEl, dirtyRows, projectAll));
+                counts.put("custom_fields", projectCustomFields(handle, eventId, persistedSnapshotEl, dirtyRows, projectAll));
+                counts.put("schedules", projectSchedules(handle, eventId, persistedSnapshotEl, dirtyRows, projectAll));
+                counts.put("assignments", projectAssignments(handle, eventId, persistedSnapshotEl, dirtyRows, projectAll));
                 counts.put("scouting_records", projectedScoutingCount);
 
                 return new SaveResult(true, false, null, eventId, effectiveEpoch, effectiveRev, counts);
             }));
         }
+    }
+
+    private static JsonElement parseNullableJsonArray(String json) {
+        if (json == null || json.isBlank()) {
+            return null;
+        }
+        try {
+            JsonElement parsed = JsonParser.parseString(json);
+            return parsed != null && parsed.isJsonArray() ? parsed : null;
+        } catch (Exception e) {
+            return null;
+        }
+    }
+
+    private static Map<String, JsonElement> extractRawTableRows(JsonElement snapshotEl, String tableId) {
+        Map<String, JsonElement> out = new LinkedHashMap<>();
+        if (snapshotEl == null || !snapshotEl.isJsonArray()) return out;
+        JsonArray root = snapshotEl.getAsJsonArray();
+        if (root.size() < 1 || !root.get(0).isJsonArray()) return out;
+
+        JsonArray tablesStamp = root.get(0).getAsJsonArray();
+        if (tablesStamp.size() < 1 || !tablesStamp.get(0).isJsonObject()) return out;
+
+        JsonObject tablesObj = tablesStamp.get(0).getAsJsonObject();
+        JsonElement tableEl = tablesObj.get(tableId);
+        if (tableEl == null || !tableEl.isJsonArray()) return out;
+
+        JsonArray tableStamp = tableEl.getAsJsonArray();
+        if (tableStamp.size() < 1 || !tableStamp.get(0).isJsonObject()) return out;
+
+        JsonObject rowsObj = tableStamp.get(0).getAsJsonObject();
+        for (Map.Entry<String, JsonElement> rowEntry : rowsObj.entrySet()) {
+            out.put(rowEntry.getKey(), rowEntry.getValue());
+        }
+        return out;
+    }
+
+    private static MutableTableHandle getOrCreateMutableTable(JsonElement snapshotEl, String tableId) {
+        if (snapshotEl == null || !snapshotEl.isJsonArray()) return null;
+        JsonArray root = snapshotEl.getAsJsonArray();
+        if (root.size() < 1 || !root.get(0).isJsonArray()) return null;
+
+        JsonArray tablesStamp = root.get(0).getAsJsonArray();
+        if (tablesStamp.size() < 1 || !tablesStamp.get(0).isJsonObject()) return null;
+
+        JsonObject tablesObj = tablesStamp.get(0).getAsJsonObject();
+        JsonElement tableEl = tablesObj.get(tableId);
+        JsonArray tableStamp;
+        if (tableEl == null || !tableEl.isJsonArray()) {
+            tableStamp = new JsonArray();
+            tableStamp.add(new JsonObject());
+            tableStamp.add("");
+            tablesObj.add(tableId, tableStamp);
+        } else {
+            tableStamp = tableEl.getAsJsonArray();
+            if (tableStamp.size() < 1 || !tableStamp.get(0).isJsonObject()) {
+                while (tableStamp.size() > 0) {
+                    tableStamp.remove(tableStamp.size() - 1);
+                }
+                tableStamp.add(new JsonObject());
+                tableStamp.add("");
+            }
+        }
+        return new MutableTableHandle(tablesStamp, tableStamp, tableStamp.get(0).getAsJsonObject());
+    }
+
+    private static void trimStampHash(JsonArray stamp) {
+        while (stamp != null && stamp.size() > 2) {
+            stamp.remove(stamp.size() - 1);
+        }
+    }
+
+    private static String queryEventHostId(Handle handle, String eventId) {
+        return handle.createQuery("SELECT host_id FROM events WHERE id = :eventId")
+                .bind("eventId", eventId)
+                .mapTo(String.class)
+                .findFirst()
+                .orElse(null);
+    }
+
+    private static ScoutingRecord queryExistingScoutingRecord(Handle handle, String id) {
+        return handle.createQuery(
+                        "SELECT id, event_id, scout_id, author_pub_key, author_sig FROM scouting_records WHERE id = :id")
+                .bind("id", id)
+                .map((rs, ctx) -> {
+                    ScoutingRecord ex = new ScoutingRecord();
+                    ex.setId(rs.getString("id"));
+                    ex.setEventId(rs.getString("event_id"));
+                    ex.setScoutId(rs.getString("scout_id"));
+                    ex.setAuthorPubKey(rs.getString("author_pub_key"));
+                    ex.setAuthorSig(rs.getString("author_sig"));
+                    return ex;
+                })
+                .findFirst()
+                .orElse(null);
+    }
+
+    private static ScoutingRecord toCandidateScoutingRecord(String id, String eventId, JsonObject row) {
+        ScoutingRecord candidate = new ScoutingRecord();
+        candidate.setId(id);
+        candidate.setEventId(eventId);
+        candidate.setScoutId(getStr(row, "scoutId", "").trim());
+        candidate.setMatchNumber(getInt(row, "matchNumber", 0));
+        candidate.setTeamNumber(getInt(row, "teamNumber", 0));
+        candidate.setAutoScore(getInt(row, "autoScore", 0));
+        candidate.setTeleopScore(getInt(row, "teleopScore", 0));
+        candidate.setEndgameScore(getInt(row, "endgameScore", 0));
+        candidate.setTotalScore(getInt(row, "totalScore", 0));
+        candidate.setNotes(getStr(row, "notes", ""));
+        candidate.setRawData(getStr(row, "rawDataJson", "{}"));
+        candidate.setIsBroken(getBool(row, "isBroken", false));
+        candidate.setIsDeleted(getBool(row, "isDeleted", false));
+        candidate.setAuthorPubKey(truncateNullable(getStrOrNull(row, "authorPubKey"), 256));
+        candidate.setAuthorSig(truncateNullable(getStrOrNull(row, "authorSig"), 256));
+        candidate.setHostSig(truncateNullable(getStrOrNull(row, "hostSig"), 256));
+        return candidate;
+    }
+
+    private static boolean isNonHostScoutingRowAuthorized(
+            Handle handle,
+            String eventId,
+            String eventHostId,
+            String callerUserId,
+            String rowId,
+            JsonObject row
+    ) {
+        if (row == null) return false;
+        String rowEventId = getStr(row, "eventId", eventId);
+        if (!rowEventId.isEmpty() && !eventId.equals(rowEventId)) {
+            return false;
+        }
+        String id = nonBlankOr(getStr(row, "id", ""), rowId);
+        int matchNumber = getInt(row, "matchNumber", 0);
+        int teamNumber = getInt(row, "teamNumber", 0);
+        if (id.isEmpty() || matchNumber <= 0 || teamNumber <= 0) {
+            return false;
+        }
+        ScoutingRecord candidate = toCandidateScoutingRecord(id, eventId, row);
+        ScoutingRecord existing = queryExistingScoutingRecord(handle, id);
+        if (Objects.equals(candidate.getScoutId(), callerUserId)) {
+            return existing == null || Objects.equals(existing.getScoutId(), callerUserId);
+        }
+        return EcdsaRecordVerifier.verifyNonHostPeerRecordAuthorization(
+                handle, eventId, eventHostId, callerUserId, candidate, existing).allowed();
+    }
+
+    /**
+     * Validates all incoming `scouting_records` rows when a non-Host member calls PUT /crdt-state,
+     * stripping forged rows and restoring previously persisted trusted rows if tampered or omitted.
+     */
+    private NonHostSanitizeResult sanitizeNonHostScoutingSnapshot(
+            Handle handle,
+            String eventId,
+            String callerUserId,
+            JsonElement persistedSnapshotEl,
+            JsonElement previousSnapshotEl
+    ) {
+        Map<String, JsonObject> incomingPlainRows = extractTableRows(persistedSnapshotEl, "scouting_records");
+        Map<String, JsonElement> incomingRawRows = extractRawTableRows(persistedSnapshotEl, "scouting_records");
+        Map<String, JsonObject> previousPlainRows = extractTableRows(previousSnapshotEl, "scouting_records");
+        Map<String, JsonElement> previousRawRows = extractRawTableRows(previousSnapshotEl, "scouting_records");
+
+        if (incomingRawRows.isEmpty() && previousRawRows.isEmpty()) {
+            return new NonHostSanitizeResult(Collections.emptySet(), false);
+        }
+
+        MutableTableHandle tableHandle = getOrCreateMutableTable(persistedSnapshotEl, "scouting_records");
+        if (tableHandle == null) {
+            return new NonHostSanitizeResult(Collections.emptySet(), false);
+        }
+
+        String eventHostId = queryEventHostId(handle, eventId);
+        Set<String> rejectedRowIds = new HashSet<>();
+        boolean snapshotMutated = false;
+
+        for (String rowId : new ArrayList<>(incomingRawRows.keySet())) {
+            JsonElement incomingRaw = incomingRawRows.get(rowId);
+            JsonElement previousRaw = previousRawRows.get(rowId);
+            if (previousRaw != null && previousRaw.equals(incomingRaw)) {
+                continue;
+            }
+            JsonObject row = incomingPlainRows.get(rowId);
+            if (!isNonHostScoutingRowAuthorized(handle, eventId, eventHostId, callerUserId, rowId, row)) {
+                rejectedRowIds.add(rowId);
+                if (previousRaw != null) {
+                    tableHandle.rowsObj().add(rowId, previousRaw.deepCopy());
+                } else {
+                    tableHandle.rowsObj().remove(rowId);
+                }
+                snapshotMutated = true;
+            }
+        }
+
+        for (Map.Entry<String, JsonElement> prevEntry : previousRawRows.entrySet()) {
+            String prevRowId = prevEntry.getKey();
+            if (incomingRawRows.containsKey(prevRowId)) {
+                continue;
+            }
+            JsonObject prevPlain = previousPlainRows.get(prevRowId);
+            String prevScoutId = prevPlain != null ? getStr(prevPlain, "scoutId", "").trim() : "";
+            if (!Objects.equals(prevScoutId, callerUserId)) {
+                tableHandle.rowsObj().add(prevRowId, prevEntry.getValue().deepCopy());
+                rejectedRowIds.add(prevRowId);
+                snapshotMutated = true;
+            }
+        }
+
+        if (snapshotMutated) {
+            trimStampHash(tableHandle.tableStamp());
+            trimStampHash(tableHandle.tablesStamp());
+        }
+
+        return new NonHostSanitizeResult(rejectedRowIds, snapshotMutated);
     }
 
     /**
@@ -684,21 +911,18 @@ public class CrdtProjectionService {
             boolean isHost,
             JsonElement snapshotEl,
             Map<String, List<String>> dirtyRows,
-            boolean projectAll
+            boolean projectAll,
+            Set<String> preRejectedRowIds
     ) {
         Map<String, JsonObject> rows = extractTableRows(snapshotEl, "scouting_records");
         Set<String> targetRowIds = collectTargetRowIds(rows, dirtyRows, "scouting_records", projectAll);
-        String eventHostId = null;
-        if (!isHost) {
-            eventHostId = handle.createQuery("SELECT host_id FROM events WHERE id = :eventId")
-                    .bind("eventId", eventId)
-                    .mapTo(String.class)
-                    .findFirst()
-                    .orElse(null);
-        }
+        String eventHostId = isHost ? null : queryEventHostId(handle, eventId);
         int count = 0;
 
         for (String rowId : targetRowIds) {
+            if (preRejectedRowIds != null && preRejectedRowIds.contains(rowId)) {
+                continue;
+            }
             JsonObject row = rows.get(rowId);
             if (row == null) continue;
             String rowEventId = getStr(row, "eventId", eventId);
@@ -709,64 +933,23 @@ public class CrdtProjectionService {
             int teamNumber = getInt(row, "teamNumber", 0);
             if (id.isEmpty() || matchNumber <= 0 || teamNumber <= 0) continue;
 
-            String rawScoutId = getStr(row, "scoutId", "").trim();
-            int autoScore = getInt(row, "autoScore", 0);
-            int teleopScore = getInt(row, "teleopScore", 0);
-            int endgameScore = getInt(row, "endgameScore", 0);
-            int totalScore = getInt(row, "totalScore", 0);
-            String notes = getStr(row, "notes", "");
-            String rawDataJson = getStr(row, "rawDataJson", "{}");
-            boolean isBroken = getBool(row, "isBroken", false);
-            boolean isDeleted = getBool(row, "isDeleted", false);
-            String authorPubKey = truncateNullable(getStrOrNull(row, "authorPubKey"), 256);
-            String authorSig = truncateNullable(getStrOrNull(row, "authorSig"), 256);
-            String hostSig = truncateNullable(getStrOrNull(row, "hostSig"), 256);
-
-            if (!isHost) {
-                ScoutingRecord existing = handle.createQuery(
-                                "SELECT id, event_id, scout_id, author_pub_key, author_sig FROM scouting_records WHERE id = :id")
-                        .bind("id", id)
-                        .map((rs, ctx) -> {
-                            ScoutingRecord ex = new ScoutingRecord();
-                            ex.setId(rs.getString("id"));
-                            ex.setEventId(rs.getString("event_id"));
-                            ex.setScoutId(rs.getString("scout_id"));
-                            ex.setAuthorPubKey(rs.getString("author_pub_key"));
-                            ex.setAuthorSig(rs.getString("author_sig"));
-                            return ex;
-                        })
-                        .findFirst()
-                        .orElse(null);
-
-                if (Objects.equals(rawScoutId, callerUserId)) {
-                    if (existing != null && !Objects.equals(existing.getScoutId(), callerUserId)) {
-                        continue;
-                    }
-                } else {
-                    ScoutingRecord candidate = new ScoutingRecord();
-                    candidate.setId(id);
-                    candidate.setEventId(eventId);
-                    candidate.setScoutId(rawScoutId);
-                    candidate.setMatchNumber(matchNumber);
-                    candidate.setTeamNumber(teamNumber);
-                    candidate.setAutoScore(autoScore);
-                    candidate.setTeleopScore(teleopScore);
-                    candidate.setEndgameScore(endgameScore);
-                    candidate.setTotalScore(totalScore);
-                    candidate.setNotes(notes);
-                    candidate.setRawData(rawDataJson);
-                    candidate.setIsBroken(isBroken);
-                    candidate.setIsDeleted(isDeleted);
-                    candidate.setAuthorPubKey(authorPubKey);
-                    candidate.setAuthorSig(authorSig);
-                    candidate.setHostSig(hostSig);
-
-                    if (!EcdsaRecordVerifier.verifyNonHostPeerRecordAuthorization(
-                            handle, eventId, eventHostId, callerUserId, candidate, existing).allowed()) {
-                        continue;
-                    }
-                }
+            ScoutingRecord candidate = toCandidateScoutingRecord(id, eventId, row);
+            if (!isHost && !isNonHostScoutingRowAuthorized(handle, eventId, eventHostId, callerUserId, rowId, row)) {
+                continue;
             }
+
+            String rawScoutId = candidate.getScoutId();
+            int autoScore = candidate.getAutoScore();
+            int teleopScore = candidate.getTeleopScore();
+            int endgameScore = candidate.getEndgameScore();
+            int totalScore = candidate.getTotalScore();
+            String notes = candidate.getNotes();
+            String rawDataJson = candidate.getRawData();
+            boolean isBroken = candidate.getIsBroken();
+            boolean isDeleted = candidate.isDeleted();
+            String authorPubKey = candidate.getAuthorPubKey();
+            String authorSig = candidate.getAuthorSig();
+            String hostSig = candidate.getHostSig();
 
             String scoutId = nonBlankOr(rawScoutId, "crdt_sync");
             String scoutName = truncate(nonBlankOr(getStr(row, "scoutName", ""), "Scout"), 50);

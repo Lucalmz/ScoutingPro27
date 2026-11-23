@@ -16,7 +16,7 @@ Check what role you are helping with today and jump straight to your chapters:
 | 🚩 **Event Host / Lead (1 laptop)** | Create Event → **Mobile QR** / **Schedule** / **Scouts & Settings** | Create the competition lobby, show the QR code, bind your **FTC Event Code** to pull official rosters & schedules, drag-select & auto-assign schedules, and add **Custom Fields** or **Custom TURN** if needed | [Ch 1](#chapter-1-open-the-app--create-your-callsign) · [Ch 2](#chapter-2-scan-qr-to-join-the-same-event-even-without-venue-internet) · [Ch 9](#chapter-9-match-schedule--assignments-how-batch-scheduling-works) · [Ch 14](#chapter-14-how-to-add--manage-custom-fields) · [Ch 15](#chapter-15-official-ftc-data-sync-roll-down-advancement-and-custom-turn) |
 | 📱 **Stand / Bleacher Scout (phone or laptop)** | **Scout** · **History** | Tap your 1-tap Schedule Banner to pre-load your match, log points & cycles, and use **`History` → `Edit`** anytime if you need to fix a submitted match | [Ch 3](#chapter-3-10-second-pre-match-setup-mode-alliance--pit-cross-check) – [Ch 7](#chapter-7-mobile-single-handed-wizard-scout-standing-up-with-one-thumb) · [Ch 12](#chapter-12-how-to-edit--fix-saved-match-records) |
 | 🔧 **Pit Scout (roaming the team pits)** | **Pit Scout** | Walk pit-to-pit and open the **Pit Form Drawer**: record **weight**, **Compact Small / Wide Large** chassis, flower mechanism, and claimed scores | [Ch 8](#chapter-8-pit-scouting-robot-size-weight--actual-pit-form-drawer) |
-| 🎯 **Drive Coach / Alliance Selection Lead** | **Rankings** · **Whiteboard** · **Chat with AI** | Check sticky **Advancement Points (w/ Roll-Down)**, **Predict Cycle Time**, **Swarm RP**, and **Brag Index**; bind an **API Key** so the AI Coach analyzes live event data for you, and animate Whiteboard routes | [Ch 10](#chapter-10-rankings--brag-index-picking-honest-alliance-partners) · [Ch 11](#chapter-11-tactical-whiteboard-plan--play-animated-routes-before-queuing) · [Ch 13](#chapter-13-how-to-bind-an-api-key--chat-with-ai) · [Ch 15](#chapter-15-official-ftc-data-sync-roll-down-advancement-and-custom-turn) |
+| 🎯 **Drive Coach / Alliance Selection Lead** | **Rankings** · **Whiteboard** · **AI Copilot** | Check sticky **Advancement Points (w/ Roll-Down)**, **Predict Cycle Time**, **Swarm RP**, and **Brag Index**; bind an **API Key** so the **AI Copilot** analyzes live event data right beside the rankings, and animate Whiteboard routes | [Ch 10](#chapter-10-rankings--brag-index-picking-honest-alliance-partners) · [Ch 11](#chapter-11-tactical-whiteboard-plan--play-animated-routes-before-queuing) · [Ch 13](#chapter-13-how-to-bind-an-api-key--use-ai-copilot) · [Ch 15](#chapter-15-official-ftc-data-sync-roll-down-advancement-and-custom-turn) |
 
 ---
 
@@ -34,7 +34,7 @@ Check what role you are helping with today and jump straight to your chapters:
 10. [Rankings & Brag Index: Picking Honest Alliance Partners](#chapter-10-rankings--brag-index-picking-honest-alliance-partners)
 11. [Tactical Whiteboard: Plan & Play Animated Routes Before Queuing](#chapter-11-tactical-whiteboard-plan--play-animated-routes-before-queuing)
 12. [How to Edit & Fix Saved Match Records](#chapter-12-how-to-edit--fix-saved-match-records)
-13. [How to Bind an API Key & Chat With AI](#chapter-13-how-to-bind-an-api-key--chat-with-ai)
+13. [How to Bind an API Key & Use AI Copilot](#chapter-13-how-to-bind-an-api-key--use-ai-copilot)
 14. [How to Add & Manage Custom Fields](#chapter-14-how-to-add--manage-custom-fields)
 15. [Chapter 15: Official FTC Data Sync, Roll-Down Advancement, and Custom TURN](#chapter-15-official-ftc-data-sync-roll-down-advancement-and-custom-turn)
 16. [Emergency Troubleshooting FAQ](#chapter-16-emergency-troubleshooting-faq)
@@ -237,19 +237,24 @@ Click the **`Schedule`** tab to organize who watches which robot across every ma
 
 Once qualification matches accumulate, open **`Rankings`** (scroll the table horizontally to inspect every column):
 
-![Rankings leaderboard highlighting Swarm RP, BIOBUZZ averages, Predict Cycle Time, and Brag Index](images/userguide/en/10_rankings_brag_index.png)
-
-> 💡 **Sticky Column #1 `Adv. Pts` (Official Advancement Points)**: When you bind an official FTC Event Code (see [Chapter 15](#chapter-15-official-ftc-data-sync-roll-down-advancement-and-custom-turn)), the first pinned column computes live total Advancement Points (Qual + Alliance + Playoff + Judged Awards per FTC Rule A215) and tags each team's live cut status: **`ADVANCING`**, **`ROLLED DOWN`**, **`PRE-QUAL`**, **`DECLINED`**, **`INELIGIBLE`**, **`BUBBLE`**, or **`COMPETING`**!
+![Rankings leaderboard highlighting Adv. Pts, Predict Cycle Time, Cycle Variance, and Brag Index](images/userguide/en/10_rankings_brag_index.png)
 
 ### The 4 Columns Every Captain Checks Before Alliance Selection
-1. **`(1)` `Mobility RP Pts` (`Swarm RP`)**: Combines **Leave (+3) + Auto Park (+5) + Endgame Park (+5)** = max **13.0 pts** per robot (`#27570`, `#11115`, `#31024` all hit `13.0`). Two robots combining for **≥ 16 pts** earn your alliance the **Swarm RP**!
-2. **`(2)` `Avg Nectars` (`BIOBUZZ Flower & Garden`)**: Shows `N:2.5 B:2 / P:3.5 G:2.5` (avg **Nectars**, **Bottom Bonus Flowers**, **Pollens**, **Garden Balls**). Clearly separates true Flower specialists (`#27570`) from Garden-only pushers like Row 5 (`#9999`: `N:0 B:0 P:0 G:4`).
-3. **`(3)` `Predict Cycle Time` (`≥ 6 Cycles`)**:
+1. **`(1)` Sticky Column #1 `Adv. Pts` (Official Advancement Points)**:
+   - When you bind an official FTC Event Code (see [Chapter 15](#chapter-15-official-ftc-data-sync-roll-down-advancement-and-custom-turn)), the first pinned column computes live total Advancement Points (Qual + Alliance + Playoff + Judged Awards per FTC Rule A215) and tags each team's live cut status: **`ADVANCING`**, **`ROLLED DOWN`**, **`PRE-QUAL`**, **`DECLINED`**, **`INELIGIBLE`**, **`BUBBLE`**, or **`COMPETING`**!
+2. **`(2)` `Predict Cycle Time` (`≥ 6 Cycles`)**:
    - Row 1 (`#27570`) displays green **`8.7s · Spread ±0.2s · ~10.3 cyc · 2 qual matches`**—fast AND ultra-consistent!
    - Row 5 (`#9999`) only logged 4 cycles, so it clearly displays **`— (<6 cyc)`** rather than guessing.
+3. **`(3)` `Min Cycles` & `Cycle Variance`** (immediately right of `Predict Cycle Time`):
+   - **`Min Cycles`** shows the team's lowest single-match TeleOp cycle count in non-broken matches (exposing bad-match floors hidden by averages).
+   - **`Cycle Variance`** computes population variance across non-broken matches—lower variance (`0.0`, `0.3`) means rock-solid match-to-match consistency.
 4. **`(4)` `Brag Index Verification Badge`**:
    - Look for **`≤ 1.25x Realistic`** (green) with **`Flower Verified · Park Verified`** (`#27570` = `1.02x Realistic`).
    - Multiplier key: `≤ 1.25x` = **Realistic**; `> 1.25x` = **Optimistic**; `> 1.65x` = **Overclaimed**; `> 2.20x` = **Mythical** (`#28410` at `2.39x Mythical` + `Park Unstable`). Always trust proven field data!
+
+> 💡 **Scroll left in the table to also inspect `Mobility RP Pts` (`Swarm RP`) & `Avg Nectars` (`BIOBUZZ Flower & Garden`)**:
+> - **`Mobility RP Pts`**: Combines **Leave (+3) + Auto Park (+5) + Endgame Park (+5)** = max **13.0 pts** per robot; two robots combining for **≥ 16 pts** earn your alliance the **Swarm RP**!
+> - **`Avg Nectars`**: Displays `N:2.5 B:2 / P:3.5 G:2.5` (avg **Nectars**, **Bottom Bonus Flowers**, **Pollens**, **Garden Balls**), cleanly separating Flower specialists from Garden-only pushers.
 
 ---
 
@@ -283,31 +288,33 @@ Submitted a match and immediately realized you missed 1 ball in Cycle 2 or typed
 
 ---
 
-## Chapter 13: How to Bind an API Key & Chat With AI
+## Chapter 13: How to Bind an API Key & Use AI Copilot
 
-Before Alliance Selection, instead of manually scanning dozens of rows, bind an LLM **API Key** so the built-in **AI Coach** reads all live match telemetry, Predict Cycle Times, and Brag Index badges directly:
+Before Alliance Selection, instead of manually scanning dozens of rows, bind an LLM **API Key** and open the side-by-side **AI Copilot** workspace so the built-in AI Coach reads all live match telemetry, Predict Cycle Times, and Brag Index badges right alongside your Rankings or Whiteboard:
 
-### Step 1: Bind Your API Key in `Chat with AI → Settings`
+### Step 1: Configure Multi-Protocol API Profiles in Top-Bar `AI Copilot ⚙ Settings`
 
-![AI Settings tab showing provider preset, API Key field, Get API Key link, Test Connection, and Save](images/userguide/en/13_ai_api_key_settings.png)
+![AI Configuration modal showing protocol tabs, presets & profiles, API Key input, Test Connection, and Save](images/userguide/en/13_ai_api_key_settings.png)
 
-1. **Open `Chat with AI` in the top bar and switch to `(1)` `Settings`**.
-2. **Pick `(2)` Provider Protocol & Preset**:
-   - Choose **`OpenAI Compatible`** presets (`DeepSeek`, `Moonshot / Kimi`, `SiliconFlow`, `OpenAI`) to auto-fill Base URL and recommended model, or switch to **`Google Gemini`**.
+1. **Click the ⚙ gear icon next to `AI Copilot` in the top bar** to open the **AI Configuration** dialog, then pick `(1)` your **Provider Protocol** (**OpenAI Compatible**, **Google Gemini**, or native **Anthropic Claude**).
+2. **Choose `(2)` Provider Preset & Multi-Profile Roster**:
+   - Pick a built-in preset (`DeepSeek`, `Moonshot / Kimi`, `OpenAI`, `Google Gemini`, `Anthropic Claude`, etc.) to auto-fill the Base URL and recommended model; you can save multiple profiles in the left roster and switch anytime.
 3. **Generate & Paste `(3)` `API Key`**:
-   - Need a key? Click the green **`↗ Get API Key`** link above the input box to open the provider's console, copy your `sk-...` / `AIzaSy...` key, and paste it in (stored encrypted per user).
+   - Need a key? Click the green **`↗ Get API Key`** link above the input box to open the provider's console, copy your `sk-...` / `AIzaSy...` key, and paste it in (AES-256 encrypted per user).
 4. **Click `(4)` `Test Connection`, then green `Save Settings`**:
-   - Once you see the green success banner, switch back to **`Chat`**!
+   - Once verified, save and close the modal—you can now toggle **AI Copilot** from any tab!
 
-### Step 2: Ask Plain-Language Strategy Questions in `Chat`
+### Step 2: Open the Persistent `AI Copilot` Dock & Ask Plain-Language Questions
 
-![AI Chat view showing auto-attached live event telemetry and sample alliance-selection prompt](images/userguide/en/14_ai_chat_assistant.png)
+![AI Copilot side dock showing persona switcher, live event context meter, and @team /slash composer](images/userguide/en/14_ai_chat_assistant.png)
 
-1. **`(1)` AI Persona & Prompt**: Pre-tuned for FTC strategy; expand anytime to focus the coach on playoff defense or Swarm RP picks.
-2. **`(2)` Green `Realtime Data Attached` Badge + `(3)` `Attach Realtime Event Data` Toggle**:
-   - **Zero copy-pasting spreadsheets!** Keep `(3)` checked so every question automatically includes live BIOBUZZ averages, `Predict Cycle Time`, and `Brag Index` data for all teams.
-3. **Type in `(4)` & Tap Green Send**:
-   - Ask naturally, e.g., `"Compare #27570 and #11115 using our live data: whose Predict Cycle Time and Swarm RP look stronger for alliance selection?"`
+1. **Click `AI Copilot` in the top bar (or press `Alt + I`)** to open the right-side dock alongside your main view without hiding Rankings or the Tactical Whiteboard (on mobile, open the bottom **`Chat with AI`** tab).
+2. **`(1)` Choose AI Coach Persona**: Switch instantly between specialized FTC personas (Alliance Picker, Strategy Coach, Pit Analyst, etc.).
+3. **`(2)` `Live Data On` Toggle + `(3)` Live Telemetry Meter**:
+   - **Zero copy-pasting spreadsheets!** Keep `(2)` enabled and `(3)` displays how many live rankings, schedules, and pit records are bundled with every question (expand the tune icon beside it to toggle individual data sections).
+4. **Type in `(4)` & Send (`@team` & `/slash` supported)**:
+   - Type **`@`** to tag and focus specific teams, **`/`** for quick analysis commands, or ask naturally—e.g., `"Compare #27570 and #11115 using our live data: whose Predict Cycle Time and Swarm RP look stronger for alliance selection?"`
+   - Any **`#team`** badge in AI responses supports instant hover preview and click-to-open Team Detail Drawer, plus multi-thread history and 1-click Markdown export.
 
 ---
 

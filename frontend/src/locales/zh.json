@@ -331,6 +331,10 @@
     "predict_cycle_spread": "离散 ±{sec}秒",
     "estimated_max_cycles": "理论可打轮次",
     "estimated_max_cycles_unit": "约 {cycles} 轮",
+    "min_cycles": "最低 Cycle 数",
+    "min_cycles_desc": "非损坏场次中的单场最低 TeleOp Cycle 数",
+    "cycle_variance": "Cycle 数方差",
+    "cycle_variance_desc": "非损坏场次 TeleOp Cycle 数的总体方差（越小越稳定）",
     "unban_team": "解除标记",
     "banned_badge": "已屏蔽"
   },

@@ -228,8 +228,12 @@ async function annotateElements(page, annotations, options = {}) {
     const margin = isMobile ? 8 : 12;
     const maxCalloutWidth = isMobile ? Math.min(260, vw - margin * 2) : 320;
 
+    const hasOpenDialog = Boolean(document.querySelector('dialog[open]'));
     const layer = document.createElement('div');
     layer.className = 'ug-annotation-layer';
+    if (hasOpenDialog) {
+      layer.setAttribute('popover', 'manual');
+    }
     Object.assign(layer.style, {
       position: 'fixed',
       inset: '0',
@@ -237,7 +241,8 @@ async function annotateElements(page, annotations, options = {}) {
       height: `${vh}px`,
       pointerEvents: 'none',
       zIndex: '99999',
-      overflow: 'hidden',
+      overflow: hasOpenDialog ? 'visible' : 'hidden',
+      ...(hasOpenDialog ? { border: 'none', background: 'transparent', margin: '0', padding: '0' } : {}),
       fontFamily: '-apple-system, BlinkMacSystemFont, "Segoe UI", "PingFang SC", "Microsoft YaHei", sans-serif'
     });
 
@@ -251,6 +256,9 @@ async function annotateElements(page, annotations, options = {}) {
     });
     layer.appendChild(svg);
     document.body.appendChild(layer);
+    if (hasOpenDialog && typeof layer.showPopover === 'function') {
+      layer.showPopover();
+    }
 
     const resolveTarget = (spec) => {
       const selectors = Array.isArray(spec.selector) ? spec.selector : [spec.selector];
@@ -711,10 +719,10 @@ const COPY = {
         { selector: '.schedule-table .match-row:nth-child(3) .station-card.blue .scout-select', label: '(4) 指派具体某位队员盯这台车', desc: '下拉框选人，选中后对方手机顶部会自动跳出“一键接单”横幅！', color: '#39ff14', preferredPos: 'bottom' }
       ],
       s10: [
-        { selector: '.ranking-row:first-child td:nth-child(8)', label: '(1) 场均机动分 (Swarm RP)', desc: '离墙(3)+自动停泊(5)+终局停泊(5)；双车合计≥16分拿联盟RP', color: '#38bdf8', preferredPos: 'top', gap: 56 },
-        { selector: '.ranking-row:nth-child(5) td:nth-child(10)', label: '(2) BIOBUZZ 花朵与 Garden 实绩', desc: 'N=大球 Nectar / B=占底 / P=Pollen / G=Garden 场均数据', color: '#f59e0b', preferredPos: 'bottom', gap: 16 },
-        { selector: '.ranking-row:first-child td:nth-child(11)', label: '(3) 预测单轮耗时 (≥6轮触发)', desc: '打满 6 轮剔除最快 1 次取 4 轮均值；不足 6 轮如第5行显示“不足6轮”', color: '#39ff14', preferredPos: 'top', gap: 56 },
-        { selector: '.ranking-row:first-child td:nth-child(15) .brag-tier-pill', label: '(4) 吹牛指数与实测真伪徽章', desc: '对比展位自述与赛场实打实得分，选联队时优先挑“真实守信”队友', color: '#a855f7', preferredPos: 'top', gap: 56 }
+        { selector: '.ranking-row:first-child td:nth-child(1)', label: '(1) 固定首列：官方晋级分 (Adv. Pts)', desc: '绑定 FTC 代码后按 Rule A215 自动算分并标出晋级/顺延徽章', color: '#38bdf8', preferredPos: 'top', gap: 56 },
+        { selector: '.ranking-row:first-child td:nth-child(11)', label: '(2) 预测单轮耗时 (≥6轮触发)', desc: '打满 6 轮剔除最快 1 次取 4 轮均值；不足 6 轮如第5行显示“不足6轮”', color: '#39ff14', preferredPos: 'top', gap: 56 },
+        { selector: '.ranking-row:nth-child(5) td:nth-child(13)', label: '(3) Cycle 数方差（左侧为最低 Cycle 数）', desc: '衡量多场 TeleOp 轮次波动，方差越小说明机器人节奏越稳', color: '#f59e0b', preferredPos: 'bottom', gap: 20 },
+        { selector: '.ranking-row:first-child .brag-tier-pill', label: '(4) 吹牛指数与实测真伪徽章', desc: '对比展位自述与赛场实打实得分，选联队时优先挑“真实守信”队友', color: '#a855f7', preferredPos: 'top', gap: 56 }
       ],
       s11: [
         { selector: '[data-testid="wb-match-select"]', label: '(1) 选推演场次与 Auto/Tele/End 阶段', desc: '选 Q1..Q5 规划三阶段路线', color: '#38bdf8', preferredPos: 'right' },
@@ -735,16 +743,16 @@ const COPY = {
         { selector: '.history-card .card-score', label: '(4) 实时总分与同步状态', desc: '绿色表示已成功同步至主机总库', color: '#a855f7', preferredPos: 'left' }
       ],
       s13: [
-        { selector: '.inner-tabs', label: '(1) 在“对话”与“设置”间切换', desc: '首次使用先点右边“设置”绑定你的大模型 API Key', color: '#38bdf8', preferredPos: 'bottom' },
-        { selector: '.settings-form select', label: '(2) 选择 AI 服务商协议与预设', desc: '支持 DeepSeek / Moonshot / OpenAI 兼容或 Google Gemini', color: '#f59e0b', preferredPos: 'right' },
-        { selector: '.settings-form input[type="password"]', label: '(3) 粘贴 API Key（可点上方链接直达申请）', desc: '密钥仅加密保存在你的账号配置中，点右上方链接可去官方控制台生成', color: '#39ff14', preferredPos: 'bottom' },
-        { selector: '.settings-form .button-group', label: '(4) 先“测试连接”再点“保存设置”', desc: '看到绿色“连接成功”提示后切回“对话”页即可开始提问', color: '#a855f7', preferredPos: 'top' }
+        { selector: '.ai-settings-dialog .protocol-tabs', label: '(1) 三协议切换 (OpenAI / Gemini / Claude)', desc: '自由切换 OpenAI 兼容、Google Gemini 与 Anthropic Claude 原生协议', color: '#38bdf8', preferredPos: 'top', gap: 18 },
+        { selector: '.ai-settings-dialog #ai-preset-select', label: '(2) 选择厂商预设（支持多配置档案）', desc: '支持 DeepSeek / Moonshot / Gemini / Claude 等预设，左侧可存多份配置一键切换', color: '#f59e0b', preferredPos: 'left', gap: 16 },
+        { selector: '.ai-settings-dialog #ai-api-key', label: '(3) 粘贴 API Key（右上直达申请）', desc: '密钥按用户 AES-256 加密保存，点右上角链接可跳转官方控制台生成', color: '#39ff14', preferredPos: 'left', gap: 16 },
+        { selector: '.ai-settings-dialog .footer-actions', label: '(4) 先“测试连接”再点“保存配置”', desc: '看到绿色连接成功提示后保存并关闭弹窗，点击顶栏 AI Copilot 即可开聊', color: '#a855f7', preferredPos: 'top', gap: 14 }
       ],
       s14: [
-        { selector: '.btn-toggle-prompt', label: '(1) 自定义 AI 教练人设 / 提示词', desc: '可展开微调回答风格（如“只看淘汰赛选联队”）', color: '#38bdf8', preferredPos: 'bottom' },
-        { selector: '.data-badge', label: '(2) 自动携带全场队伍实测数据', desc: '无需手动复制表格！系统自动附带所有队伍的 Predict Cycle Time 与 BIOBUZZ 数据', color: '#39ff14', preferredPos: 'bottom' },
-        { selector: '.attach-toggle', label: '(3) 勾选“附带赛事数据上下文”', desc: '保持勾选，AI 才能基于真实赛场表现帮你分析队友', color: '#f59e0b', preferredPos: 'bottom' },
-        { selector: '.chat-input-area', label: '(4) 输入大白话问题并点击发送', desc: '例如直接问“帮我对比 27570 和 11115 谁更稳，会不会吹牛？”', color: '#a855f7', preferredPos: 'top' }
+        { selector: '.ai-copilot-dock .persona-select', label: '(1) 切换 AI 战术人设', desc: '内建联队选秀官、赛场战术官、维修区侦察官等多种人设可一键切换', color: '#38bdf8', preferredPos: 'left', gap: 16 },
+        { selector: '.ai-copilot-dock .ctx-toggle-pill', label: '(2) 实时赛事数据上下文开关', desc: '保持开启，无需复制表格即可让 AI 直接读取 Predict Cycle Time 与 BIOBUZZ 实绩', color: '#39ff14', preferredPos: 'top', gap: 16 },
+        { selector: '.ai-copilot-dock .token-meter', label: '(3) 自动载入全场实测数据量指示', desc: '实时显示已随问题打包的全场队伍、排班与展位上下文规模', color: '#f59e0b', preferredPos: 'bottom', gap: 18 },
+        { selector: '.ai-copilot-dock .composer-box', label: '(4) 大白话提问（支持 @队号 与 / 指令）', desc: '例如输入“对比 #27570 和 #11115 谁更稳”，还可输入 @ 指定关注队伍或 / 快捷指令', color: '#a855f7', preferredPos: 'top', gap: 14 }
       ],
       s15: [
         { selector: '.cf-tabs', label: '(1) 切换挂在“比赛表单”还是“展位侦察”', desc: '按需要给看台打分表或维修区展位表加专属字段', color: '#38bdf8', preferredPos: 'bottom' },
@@ -841,10 +849,10 @@ const COPY = {
         { selector: '.schedule-table .match-row:nth-child(3) .station-card.blue .scout-select', label: '(4) Assign Specific Scout per Robot', desc: 'Picked scout gets a 1-tap "Load Assigned Task" banner in their form', color: '#39ff14', preferredPos: 'bottom' }
       ],
       s10: [
-        { selector: '.ranking-row:first-child td:nth-child(8)', label: '(1) Mobility RP Pts (Swarm RP)', desc: 'Leave(3) + AutoPark(5) + TeleOpPark(5); Alliance >=16 earns Swarm RP', color: '#38bdf8', preferredPos: 'top', gap: 56 },
-        { selector: '.ranking-row:nth-child(5) td:nth-child(10)', label: '(2) BIOBUZZ Flower & Garden Avgs', desc: 'Shows avg Nectars (N), Bottom Bonus (B), Pollens (P), and Garden (G)', color: '#f59e0b', preferredPos: 'bottom', gap: 16 },
-        { selector: '.ranking-row:first-child td:nth-child(11)', label: '(3) Predict Cycle Time (>=6 Cycles)', desc: 'Drops fastest 1 & averages next 4; row 5 flags <6 cyc as insufficient', color: '#39ff14', preferredPos: 'top', gap: 56 },
-        { selector: '.ranking-row:first-child td:nth-child(15) .brag-tier-pill', label: '(4) Brag Index Verification Badge', desc: 'Honesty multiplier + Flower/Park verification for alliance selection', color: '#a855f7', preferredPos: 'top', gap: 56 }
+        { selector: '.ranking-row:first-child td:nth-child(1)', label: '(1) Sticky Col #1: Official Adv. Pts', desc: 'Auto-computes Rule A215 points & Roll-Down status when FTC code is bound', color: '#38bdf8', preferredPos: 'top', gap: 56 },
+        { selector: '.ranking-row:first-child td:nth-child(11)', label: '(2) Predict Cycle Time (>=6 Cycles)', desc: 'Drops fastest 1 & averages next 4; row 5 flags <6 cyc as insufficient', color: '#39ff14', preferredPos: 'top', gap: 56 },
+        { selector: '.ranking-row:nth-child(5) td:nth-child(13)', label: '(3) Cycle Variance (& Min Cycles left)', desc: 'Population variance of TeleOp cycles across matches (lower = steadier)', color: '#f59e0b', preferredPos: 'bottom', gap: 20 },
+        { selector: '.ranking-row:first-child .brag-tier-pill', label: '(4) Brag Index Verification Badge', desc: 'Honesty multiplier + Flower/Park verification for alliance selection', color: '#a855f7', preferredPos: 'top', gap: 56 }
       ],
       s11: [
         { selector: '[data-testid="wb-match-select"]', label: '(1) Match & Auto/Tele/End Selector', desc: 'Pick Q1..Q5 & toggle phase layers', color: '#38bdf8', preferredPos: 'right' },
@@ -865,16 +873,16 @@ const COPY = {
         { selector: '.history-card .card-score', label: '(4) Total Score & Sync Status', desc: 'Green badge confirms the record synced to the Host database', color: '#a855f7', preferredPos: 'left' }
       ],
       s13: [
-        { selector: '.inner-tabs', label: '(1) Switch Between Chat & Settings', desc: 'Open Settings first to bind your AI API Key', color: '#38bdf8', preferredPos: 'bottom' },
-        { selector: '.settings-form select', label: '(2) Choose Provider & Preset', desc: 'Supports DeepSeek, Moonshot, OpenAI-compatible, or Google Gemini', color: '#f59e0b', preferredPos: 'right' },
-        { selector: '.settings-form input[type="password"]', label: '(3) Paste API Key (+ One-Click Key Link)', desc: 'Encrypted per-user; click "Get API Key" above to open the provider console', color: '#39ff14', preferredPos: 'bottom' },
-        { selector: '.settings-form .button-group', label: '(4) Test Connection, Then Save', desc: 'Once "Connection Successful" appears, switch back to Chat to ask questions', color: '#a855f7', preferredPos: 'top' }
+        { selector: '.ai-settings-dialog .protocol-tabs', label: '(1) Switch Protocol (OpenAI / Gemini / Claude)', desc: 'Supports OpenAI Compatible, Google Gemini, and native Anthropic Claude', color: '#38bdf8', preferredPos: 'top', gap: 18 },
+        { selector: '.ai-settings-dialog #ai-preset-select', label: '(2) Choose Provider Preset & Multi-Profile', desc: 'Pick DeepSeek, Moonshot, Gemini, or Claude presets & manage multiple profiles', color: '#f59e0b', preferredPos: 'left', gap: 16 },
+        { selector: '.ai-settings-dialog #ai-api-key', label: '(3) Paste API Key (+ One-Click Key Link)', desc: 'Encrypted per-user; click "Get API Key" above to open the provider console', color: '#39ff14', preferredPos: 'left', gap: 16 },
+        { selector: '.ai-settings-dialog .footer-actions', label: '(4) Test Connection, Then Save Profile', desc: 'Once verified, save and open AI Copilot from the top bar to start chatting', color: '#a855f7', preferredPos: 'top', gap: 14 }
       ],
       s14: [
-        { selector: '.btn-toggle-prompt', label: '(1) Customize AI Coach Persona', desc: 'Expand to tune analysis style (e.g., focus on playoff alliance picks)', color: '#38bdf8', preferredPos: 'bottom' },
-        { selector: '.data-badge', label: '(2) Auto-Attached Live Event Telemetry', desc: 'Zero manual copy-paste! Includes Predict Cycle Time, Swarm RP & BIOBUZZ stats', color: '#39ff14', preferredPos: 'bottom' },
-        { selector: '.attach-toggle', label: '(3) Include Event Data Context', desc: 'Keep checked so the AI answers using real match results', color: '#f59e0b', preferredPos: 'bottom' },
-        { selector: '.chat-input-area', label: '(4) Ask Plain Questions & Send', desc: 'Example: "Compare #27570 vs #11115 for alliance selection"', color: '#a855f7', preferredPos: 'top' }
+        { selector: '.ai-copilot-dock .persona-select', label: '(1) Choose AI Coach Persona', desc: 'Switch between Alliance Picker, Strategy Coach, or Pit Analyst presets', color: '#38bdf8', preferredPos: 'left', gap: 16 },
+        { selector: '.ai-copilot-dock .ctx-toggle-pill', label: '(2) Live Event Context Toggle', desc: 'Keep ON so every answer reads Predict Cycle Time & BIOBUZZ telemetry', color: '#39ff14', preferredPos: 'top', gap: 16 },
+        { selector: '.ai-copilot-dock .token-meter', label: '(3) Auto-Attached Live Telemetry Meter', desc: 'Shows live event rows, schedule, and pit records bundled for the AI', color: '#f59e0b', preferredPos: 'bottom', gap: 18 },
+        { selector: '.ai-copilot-dock .composer-box', label: '(4) Ask Questions (@team & /slash ready)', desc: 'Type @team to focus or / for shortcuts (e.g. Compare #27570 vs #11115)', color: '#a855f7', preferredPos: 'top', gap: 14 }
       ],
       s15: [
         { selector: '.cf-tabs', label: '(1) Choose Target: Match Form vs Pit Form', desc: 'Attach extra team-specific questions to either form', color: '#38bdf8', preferredPos: 'bottom' },
@@ -1740,25 +1748,25 @@ async function captureLocaleSuite(browser, lang) {
     // 10. Rankings, Predict Cycle Time & Brag Index (10_rankings_brag_index.png)
     console.log(`📸 [${lang}] 10/11 Capturing 10_rankings_brag_index.png...`);
     await clickTab(page, 'rankings');
-    await page.waitForSelector('.ranking-row td:nth-child(15) .brag-tier-pill', { visible: true, timeout: 10000 });
+    await page.waitForSelector('.ranking-row .brag-tier-pill', { visible: true, timeout: 10000 });
     await delay(1000);
-    await waitForRectStable(page, '.ranking-row:first-child td:nth-child(15) .brag-tier-pill');
+    await waitForRectStable(page, '.ranking-row:first-child .brag-tier-pill');
 
-    // Scroll `.table-wrapper` horizontally so sticky Adv Pts (#1) + Team (#2) + Mobility RP (#8) + BIOBUZZ (#10) + Predict Cycle Time (#11) + Brag Index (#15) are all comfortably inside viewport!
+    // Scroll `.table-wrapper` horizontally so sticky Adv Pts (#1) + Team (#2) + Mobility RP (#8) + BIOBUZZ (#10) + Predict Cycle Time (#11) + Brag Index (#17) are all comfortably inside viewport!
     await page.evaluate(() => {
       window.scrollTo(0, 0);
       const wrap = document.querySelector('.table-wrapper');
-      const col15 = document.querySelector('.ranking-row:first-child td:nth-child(15)');
-      if (wrap && col15) {
+      const colBrag = document.querySelector('.ranking-row:first-child .brag-tier-pill')?.closest('td');
+      if (wrap && colBrag) {
         const wrapRect = wrap.getBoundingClientRect();
-        const colRect = col15.getBoundingClientRect();
+        const colRect = colBrag.getBoundingClientRect();
         if (colRect.right > wrapRect.right - 20) {
-          wrap.scrollLeft += colRect.right - wrapRect.right + 48;
+          wrap.scrollLeft += colRect.right - wrapRect.right + 20;
         }
       }
     });
     await delay(300);
-    await waitForRectStable(page, '.ranking-row:first-child td:nth-child(15) .brag-tier-pill');
+    await waitForRectStable(page, '.ranking-row:first-child .brag-tier-pill');
 
     await verifyLocaleAndCleanUi(page, lang, '10_rankings_brag_index');
     await annotateElements(page, c.annotations.s10);
@@ -1791,27 +1799,31 @@ async function captureLocaleSuite(browser, lang) {
 
     // 13. AI API Key Settings (13_ai_api_key_settings.png)
     console.log(`📸 [${lang}] 13/16 Capturing 13_ai_api_key_settings.png...`);
-    await clickTab(page, 'ai');
-    await page.waitForSelector('.ai-chat-view .inner-tabs button:nth-child(2)', { visible: true, timeout: 10000 });
-    await page.click('.ai-chat-view .inner-tabs button:nth-child(2)');
-    await page.waitForSelector('.ai-chat-view .settings-panel input[type="password"]', { visible: true, timeout: 8000 });
-    await page.evaluate(() => window.scrollTo(0, 0));
+    await page.waitForSelector('.copilot-topbar-group .copilot-settings-btn', { visible: true, timeout: 10000 });
+    await page.click('.copilot-topbar-group .copilot-settings-btn');
+    await page.waitForSelector('dialog.ai-settings-dialog[open] #ai-api-key', { visible: true, timeout: 8000 });
     await delay(450);
     await verifyLocaleAndCleanUi(page, lang, '13_ai_api_key_settings');
     await annotateElements(page, c.annotations.s13);
     await page.screenshot({ path: path.join(outDir, '13_ai_api_key_settings.png') });
     await clearAnnotations(page);
+    await page.click('.ai-settings-dialog .btn-dialog-close');
+    await delay(300);
 
     // 14. AI Chat Assistant (14_ai_chat_assistant.png)
     console.log(`📸 [${lang}] 14/16 Capturing 14_ai_chat_assistant.png...`);
-    await page.click('.ai-chat-view .inner-tabs button:nth-child(1)');
-    await page.waitForSelector('.chat-input-area textarea', { visible: true, timeout: 8000 });
-    await page.type('.chat-input-area textarea', c.aiSamplePrompt);
+    await clickTab(page, 'rankings');
+    await page.waitForSelector('.copilot-topbar-group .copilot-topbar-btn', { visible: true, timeout: 10000 });
+    await page.click('.copilot-topbar-group .copilot-topbar-btn');
+    await page.waitForSelector('.ai-copilot-dock .composer-box textarea', { visible: true, timeout: 8000 });
+    await page.type('.ai-copilot-dock .composer-box textarea', c.aiSamplePrompt);
     await delay(350);
     await verifyLocaleAndCleanUi(page, lang, '14_ai_chat_assistant');
     await annotateElements(page, c.annotations.s14);
     await page.screenshot({ path: path.join(outDir, '14_ai_chat_assistant.png') });
     await clearAnnotations(page);
+    await page.click('.ai-copilot-dock .hdr-right button:last-child');
+    await delay(300);
 
     // 15. Custom Fields Manager (15_custom_fields_manager.png)
     console.log(`📸 [${lang}] 15/16 Capturing 15_custom_fields_manager.png...`);

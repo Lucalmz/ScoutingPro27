@@ -432,4 +432,103 @@ describe('RankingsTable Integration', () => {
     expect(wrapper.find('[data-team-row="11115"] td:first-child').text()).toContain('ROLLED DOWN')
     expect(wrapper.find('[data-team-row="8417"] td:first-child').text()).toContain('DECLINED')
   })
+
+  it('renders minCycles and cycleVariance columns, formats empty values, and supports sorting', async () => {
+    const i18nInstance = createI18n({
+      legacy: false,
+      locale: 'zh',
+      messages: { zh, en }
+    })
+
+    const rows: RankingRow[] = [
+      {
+        teamNumber: 101,
+        matchCount: 3,
+        avgAutoScore: 10,
+        avgTeleopScore: 20,
+        avgEndgameScore: 5,
+        maxScore: 40,
+        avgRating: 35,
+        brokenCount: 0,
+        trend: 'stable',
+        minCycles: 3,
+        cycleVariance: 2.7
+      },
+      {
+        teamNumber: 102,
+        matchCount: 3,
+        avgAutoScore: 12,
+        avgTeleopScore: 24,
+        avgEndgameScore: 5,
+        maxScore: 45,
+        avgRating: 41,
+        brokenCount: 0,
+        trend: 'up',
+        minCycles: 5,
+        cycleVariance: 0.2
+      },
+      {
+        teamNumber: 103,
+        matchCount: 1,
+        avgAutoScore: 0,
+        avgTeleopScore: 0,
+        avgEndgameScore: 0,
+        maxScore: 0,
+        avgRating: 0,
+        brokenCount: 1,
+        trend: 'new',
+        minCycles: null,
+        cycleVariance: null
+      }
+    ]
+
+    const wrapper = track(
+      mount(RankingsTable, {
+        props: {
+          rankings: rows,
+          loading: false
+        },
+        global: {
+          plugins: [i18nInstance]
+        }
+      })
+    )
+
+    const headers = wrapper.findAll('thead th')
+    const minCyclesTh = headers.find((h) => h.text().includes('最低 Cycle 数'))
+    const cycleVarianceTh = headers.find((h) => h.text().includes('Cycle 数方差'))
+    expect(minCyclesTh).toBeDefined()
+    expect(cycleVarianceTh).toBeDefined()
+
+    const minCyclesIdx = headers.indexOf(minCyclesTh!)
+    const cycleVarianceIdx = headers.indexOf(cycleVarianceTh!)
+
+    const row101Cells = wrapper.find('[data-team-row="101"]').findAll('td')
+    const row103Cells = wrapper.find('[data-team-row="103"]').findAll('td')
+    expect(row101Cells[minCyclesIdx]?.text()).toBe('3')
+    expect(row101Cells[cycleVarianceIdx]?.text()).toBe('2.7')
+    expect(row103Cells[minCyclesIdx]?.text()).toBe('-')
+    expect(row103Cells[cycleVarianceIdx]?.text()).toBe('-')
+
+    // Sort by minCycles (first click -> desc: 102 (5), 101 (3), 103 (null at bottom))
+    await minCyclesTh!.trigger('click')
+    let orderedTeams = wrapper.findAll('tr[data-team-row]').map((tr) => tr.attributes('data-team-row'))
+    expect(orderedTeams).toEqual(['102', '101', '103'])
+
+    // Sort by cycleVariance (first click -> asc: 102 (0.2), 101 (2.7), 103 (null at bottom))
+    await cycleVarianceTh!.trigger('click')
+    orderedTeams = wrapper.findAll('tr[data-team-row]').map((tr) => tr.attributes('data-team-row'))
+    expect(orderedTeams).toEqual(['102', '101', '103'])
+
+    // Second click on cycleVariance -> desc: 101 (2.7), 102 (0.2), 103 (null at bottom)
+    await cycleVarianceTh!.trigger('click')
+    orderedTeams = wrapper.findAll('tr[data-team-row]').map((tr) => tr.attributes('data-team-row'))
+    expect(orderedTeams).toEqual(['101', '102', '103'])
+
+    // Locale switch check
+    i18nInstance.global.locale.value = 'en'
+    await nextTick()
+    expect(minCyclesTh!.text()).toContain('Min Cycles')
+    expect(cycleVarianceTh!.text()).toContain('Cycle Variance')
+  })
 })

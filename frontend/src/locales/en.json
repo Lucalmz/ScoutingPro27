@@ -331,6 +331,10 @@
     "predict_cycle_spread": "Spread ±{sec}s",
     "estimated_max_cycles": "Est. Max Cycles",
     "estimated_max_cycles_unit": "~{cycles} cyc",
+    "min_cycles": "Min Cycles",
+    "min_cycles_desc": "Lowest TeleOp cycle count in a single non-broken match",
+    "cycle_variance": "Cycle Variance",
+    "cycle_variance_desc": "Population variance of TeleOp cycle counts across non-broken matches (lower is more consistent)",
     "unban_team": "Unban Team",
     "banned_badge": "BANNED"
   },

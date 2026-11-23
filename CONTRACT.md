@@ -773,7 +773,7 @@ interface CustomFieldDefinition {
 - **说明**：赛事成员保存整个 `snapshot` 至 `event_crdt_state` 表，并按 `dirtyRows`（或当 `fullProjection === true`，或数据库尚无 `event_crdt_state` 记录且 `dirtyRows` 为空时执行全量投影）向关系表（`scouting_records`、`pit_scouting_records`、`team_tags`、`event_custom_fields`、`match_schedules`、`scout_assignments`）执行事务投影。
   - **注意 1（快照覆盖 vs 增量投影）**：`event_crdt_state.crdt_snapshot_json` 会在服务端直接被本次传入的 `snapshot` 替换覆盖（服务端不做 TinyBase CRDT 内存合并，合并由前端在 PUT 前完成）。
   - **注意 2（`dirtyRows` 键名规范）**：服务端 `CrdtProjectionService` 严格读取 **snake_case** 表名键（见下方类型定义）；若传入 camelCase 键名（如 `scoutingRecords`）会导致对应表增量投影被跳过！
-  - **注意 3（非 Host 权限静默过滤）**：当非 Host 普通成员调用 PUT 时，`scouting_records` 中不属于本人且未通过 ECDSA 验签/公钥绑定的记录会被**静默跳过投影**（不抛 `403`），但其余表（如 `pit_records`、`schedules` 等）及 `event_crdt_state` 快照仍会按传入内容落盘。
+  - **注意 3（非 Host 权限校验与快照强一致净化）**：当非 Host 普通成员调用 PUT 时，服务端会对传入快照中的全部 `scouting_records` 行（无论是否出现在 `dirtyRows` 中）执行作者归属与 ECDSA 验签校验：未通过校验的新增伪造行会被**同时跳过关系表投影并从 `event_crdt_state.crdt_snapshot_json` 中彻底剥离**；试图篡改或省略其他成员已有记录的行会被**自动回滚恢复为库内先前已落盘的可信行**（并裁剪对应 TinyBase 缓存哈希），确保 CRDT 快照与 `scouting_records` 关系表状态强一致，杜绝脏数据通过后续 `GET` 扩散或被 Host 反向写入关系表。其余表（如 `pit_records`、`schedules` 等）正常按传入内容落盘与投影。
 - **Request**：
   ```ts
   interface PutCrdtStateBody {

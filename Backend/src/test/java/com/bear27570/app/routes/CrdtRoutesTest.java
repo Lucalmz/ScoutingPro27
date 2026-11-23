@@ -633,6 +633,185 @@ class CrdtRoutesTest {
                         .mapTo(Integer.class).one();
                 assertThat(forgedCount).isZero();
             });
+
+            // 3. Verify persisted CRDT snapshot itself was sanitized (no forged row, genuine Alice row preserved)
+            var getAfterBob = client.get("/api/events/" + eventId + "/crdt-state",
+                    req -> req.header("Authorization", "Bearer " + aliceToken));
+            assertThat(getAfterBob.code()).isEqualTo(200);
+            JsonObject loadedAfterBob = JsonParser.parseString(getAfterBob.body().string()).getAsJsonObject();
+            JsonElement sanitizedSnapshot = loadedAfterBob.get("snapshot");
+            Map<String, JsonObject> persistedScouting = com.bear27570.app.service.CrdtProjectionService
+                    .extractTableRows(sanitizedSnapshot, "scouting_records");
+            assertThat(persistedScouting).doesNotContainKey("rec-alice-unsigned-forge");
+            assertThat(persistedScouting).containsKey("rec-alice-1");
+            assertThat(persistedScouting.get("rec-alice-1").get("totalScore").getAsInt()).isEqualTo(85);
+            assertThat(persistedScouting.get("rec-alice-1").get("notes").getAsString()).isEqualTo("alice genuine");
+            assertThat(persistedScouting.get("rec-alice-1").get("authorPubKey").getAsString()).isEqualTo(alicePub);
+
+            // 4. Host Alice reloads that snapshot and performs a fullProjection PUT -> zero laundering into H2
+            JsonObject hostReloadReq = new JsonObject();
+            hostReloadReq.addProperty("hostEpoch", 1);
+            hostReloadReq.addProperty("snapshotRevision", 3);
+            hostReloadReq.addProperty("fullProjection", true);
+            hostReloadReq.add("snapshot", sanitizedSnapshot);
+            var hostReplay = client.put("/api/events/" + eventId + "/crdt-state", gson.toJson(hostReloadReq),
+                    req -> req.header("Authorization", "Bearer " + aliceToken));
+            assertThat(hostReplay.code()).isEqualTo(200);
+
+            jdbi.useHandle(h -> {
+                Integer scoreAfterReplay = h.createQuery("SELECT total_score FROM scouting_records WHERE id = 'rec-alice-1'")
+                        .mapTo(Integer.class).one();
+                assertThat(scoreAfterReplay).isEqualTo(85);
+                Integer forgedAfterReplay = h.createQuery("SELECT COUNT(*) FROM scouting_records WHERE id = 'rec-alice-unsigned-forge'")
+                        .mapTo(Integer.class).one();
+                assertThat(forgedAfterReplay).isZero();
+            });
+        });
+    }
+
+    @Test
+    void testNonHostCrdtPutStripsSmuggledRowsOutsideDirtyRowsAndPreventsTruncation() throws Exception {
+        java.security.KeyPairGenerator kpg = java.security.KeyPairGenerator.getInstance("EC");
+        kpg.initialize(new java.security.spec.ECGenParameterSpec("secp256r1"));
+        java.security.KeyPair aliceKp = kpg.generateKeyPair();
+
+        JavalinTest.test(app, (server, client) -> {
+            Map<?, ?> alice = registerUser(client, "host_alice_smug");
+            String aliceId = (String) alice.get("id");
+            String aliceToken = (String) alice.get("token");
+            Map<?, ?> evt = createEvent(client, aliceToken, "CRDT Smuggling Guard Event");
+            String eventId = (String) evt.get("id");
+            String inviteCode = (String) evt.get("inviteCode");
+
+            Map<?, ?> bob = registerUser(client, "member_bob_smug");
+            String bobId = (String) bob.get("id");
+            String bobToken = (String) bob.get("token");
+            var joinRes = client.post("/api/events/join", gson.toJson(Map.of("inviteCode", inviteCode)),
+                    req -> req.header("Authorization", "Bearer " + bobToken));
+            assertThat(joinRes.code()).isEqualTo(200);
+
+            ScoutingRecord aliceDto = new ScoutingRecord();
+            aliceDto.setId("rec-alice-1");
+            aliceDto.setEventId(eventId);
+            aliceDto.setScoutId(aliceId);
+            aliceDto.setMatchNumber(1);
+            aliceDto.setTeamNumber(27570);
+            aliceDto.setAutoScore(20);
+            aliceDto.setTeleopScore(50);
+            aliceDto.setEndgameScore(15);
+            aliceDto.setTotalScore(85);
+            aliceDto.setNotes("alice original");
+            aliceDto.setRawData("{}");
+            aliceDto.setIsBroken(false);
+            aliceDto.setIsDeleted(false);
+
+            String alicePub = java.util.Base64.getEncoder().encodeToString(aliceKp.getPublic().getEncoded());
+            java.security.Signature aliceSig = java.security.Signature.getInstance("SHA256withECDSAinP1363Format");
+            aliceSig.initSign(aliceKp.getPrivate());
+            aliceSig.update(EcdsaRecordVerifier.buildCanonicalPayload(aliceDto).getBytes(java.nio.charset.StandardCharsets.UTF_8));
+            String aliceSigB64 = java.util.Base64.getEncoder().encodeToString(aliceSig.sign());
+
+            Map<String, Map<String, Map<String, Object>>> hostTables = new LinkedHashMap<>();
+            hostTables.put("scouting_records", Map.of(
+                    "rec-alice-1", new LinkedHashMap<>(Map.ofEntries(
+                            Map.entry("id", "rec-alice-1"),
+                            Map.entry("eventId", eventId),
+                            Map.entry("scoutId", aliceId),
+                            Map.entry("scoutName", "HostAlice"),
+                            Map.entry("matchNumber", 1),
+                            Map.entry("teamNumber", 27570),
+                            Map.entry("autoScore", 20),
+                            Map.entry("teleopScore", 50),
+                            Map.entry("endgameScore", 15),
+                            Map.entry("totalScore", 85),
+                            Map.entry("notes", "alice original"),
+                            Map.entry("rawDataJson", "{}"),
+                            Map.entry("isBroken", false),
+                            Map.entry("version", 1),
+                            Map.entry("isDeleted", false),
+                            Map.entry("authorPubKey", alicePub),
+                            Map.entry("authorSig", aliceSigB64)
+                    ))
+            ));
+            JsonObject hostReq = new JsonObject();
+            hostReq.addProperty("hostEpoch", 1);
+            hostReq.addProperty("snapshotRevision", 1);
+            hostReq.add("snapshot", buildSnapshot(hostTables));
+            hostReq.add("dirtyRows", JsonParser.parseString(gson.toJson(Map.of("scouting_records", List.of("rec-alice-1")))));
+            assertThat(client.put("/api/events/" + eventId + "/crdt-state", gson.toJson(hostReq),
+                    req -> req.header("Authorization", "Bearer " + aliceToken)).code()).isEqualTo(200);
+
+            // Non-Host Bob sends snapshot omitting rec-alice-1 (truncation attempt) and smuggling rec-smuggled
+            // while keeping dirtyRows empty {} (except bob's own legitimate record rec-bob-own)
+            Map<String, Map<String, Map<String, Object>>> bobTables = new LinkedHashMap<>();
+            bobTables.put("scouting_records", Map.of(
+                    "rec-smuggled", new LinkedHashMap<>(Map.ofEntries(
+                            Map.entry("id", "rec-smuggled"),
+                            Map.entry("eventId", eventId),
+                            Map.entry("scoutId", aliceId),
+                            Map.entry("scoutName", "HostAlice"),
+                            Map.entry("matchNumber", 3),
+                            Map.entry("teamNumber", 11115),
+                            Map.entry("autoScore", 10),
+                            Map.entry("teleopScore", 30),
+                            Map.entry("endgameScore", 5),
+                            Map.entry("totalScore", 45),
+                            Map.entry("notes", "smuggled unsigned"),
+                            Map.entry("rawDataJson", "{}"),
+                            Map.entry("isBroken", false),
+                            Map.entry("version", 1),
+                            Map.entry("isDeleted", false)
+                    )),
+                    "rec-bob-own", new LinkedHashMap<>(Map.ofEntries(
+                            Map.entry("id", "rec-bob-own"),
+                            Map.entry("eventId", eventId),
+                            Map.entry("scoutId", bobId),
+                            Map.entry("scoutName", "MemberBob"),
+                            Map.entry("matchNumber", 2),
+                            Map.entry("teamNumber", 27570),
+                            Map.entry("autoScore", 12),
+                            Map.entry("teleopScore", 24),
+                            Map.entry("endgameScore", 5),
+                            Map.entry("totalScore", 41),
+                            Map.entry("notes", "bob own"),
+                            Map.entry("rawDataJson", "{}"),
+                            Map.entry("isBroken", false),
+                            Map.entry("version", 1),
+                            Map.entry("isDeleted", false)
+                    ))
+            ));
+            JsonObject bobReq = new JsonObject();
+            bobReq.addProperty("hostEpoch", 1);
+            bobReq.addProperty("snapshotRevision", 2);
+            bobReq.add("snapshot", buildSnapshot(bobTables));
+            bobReq.add("dirtyRows", JsonParser.parseString(gson.toJson(Map.of(
+                    "scouting_records", List.of("rec-bob-own")
+            ))));
+
+            var bobPut = client.put("/api/events/" + eventId + "/crdt-state", gson.toJson(bobReq),
+                    req -> req.header("Authorization", "Bearer " + bobToken));
+            assertThat(bobPut.code()).isEqualTo(200);
+
+            var getRes = client.get("/api/events/" + eventId + "/crdt-state",
+                    req -> req.header("Authorization", "Bearer " + aliceToken));
+            assertThat(getRes.code()).isEqualTo(200);
+            JsonElement persistedSnap = JsonParser.parseString(getRes.body().string()).getAsJsonObject().get("snapshot");
+            Map<String, JsonObject> persistedRows = com.bear27570.app.service.CrdtProjectionService
+                    .extractTableRows(persistedSnap, "scouting_records");
+
+            assertThat(persistedRows).doesNotContainKey("rec-smuggled");
+            assertThat(persistedRows).containsKeys("rec-alice-1", "rec-bob-own");
+            assertThat(persistedRows.get("rec-alice-1").get("totalScore").getAsInt()).isEqualTo(85);
+            assertThat(persistedRows.get("rec-alice-1").get("notes").getAsString()).isEqualTo("alice original");
+
+            jdbi.useHandle(h -> {
+                assertThat(h.createQuery("SELECT COUNT(*) FROM scouting_records WHERE id = 'rec-smuggled'")
+                        .mapTo(Integer.class).one()).isZero();
+                assertThat(h.createQuery("SELECT total_score FROM scouting_records WHERE id = 'rec-alice-1'")
+                        .mapTo(Integer.class).one()).isEqualTo(85);
+                assertThat(h.createQuery("SELECT total_score FROM scouting_records WHERE id = 'rec-bob-own'")
+                        .mapTo(Integer.class).one()).isEqualTo(41);
+            });
         });
     }
 }

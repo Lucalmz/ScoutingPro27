@@ -280,6 +280,7 @@ export function calculateRankings(
     let totalAllocatedTips = 0
     let realMaxScore = 0
     const totalRealScoreForTrend: number[] = []
+    const cycleCounts: number[] = []
     const predictCycleInputs: Array<{ teleopCycles: number[]; teleopCycleTimestamps: number[]; isBroken?: boolean }> = []
     let brokenCount = 0
 
@@ -306,6 +307,7 @@ export function calculateRankings(
       totalWeightedGardenBalls += parsedRaw.endgame.gardenBalls * weight
       totalWeightedDescore += (parsedRaw.endgame.flowerDescore ? 1 : 0) * weight
       totalWeightedG410Foul += (parsedRaw.endgame.g410EarlyFlowerFoul ? 1 : 0) * weight
+      cycleCounts.push(parsedRaw.teleopCycles.length)
       predictCycleInputs.push({
         teleopCycles: parsedRaw.teleopCycles,
         teleopCycleTimestamps: parsedRaw.teleopCycleTimestamps,
@@ -397,6 +399,18 @@ export function calculateRankings(
     }
 
     const predictStats = aggregateTeamPredictCycleStats(predictCycleInputs)
+    let minCycles: number | null = null
+    let cycleVariance: number | null = null
+    if (cycleCounts.length > 0) {
+      minCycles = Math.min(...cycleCounts)
+      const meanCycles = cycleCounts.reduce((sum, c) => sum + c, 0) / cycleCounts.length
+      const rawVariance =
+        cycleCounts.reduce((sum, c) => {
+          const diff = c - meanCycles
+          return sum + diff * diff
+        }, 0) / cycleCounts.length
+      cycleVariance = Math.round(rawVariance * 10) / 10
+    }
     const adv = advancementMap ? advancementMap.get(teamNumber) : undefined
 
     rows.push({
@@ -431,7 +445,9 @@ export function calculateRankings(
       predictCycleTime: predictStats.predictCycleTime,
       predictCycleMatches: predictStats.predictCycleMatches,
       predictCycleSpread: predictStats.predictCycleSpread,
-      estimatedMaxCycles: predictStats.estimatedMaxCycles
+      estimatedMaxCycles: predictStats.estimatedMaxCycles,
+      minCycles,
+      cycleVariance
     })
   }
 

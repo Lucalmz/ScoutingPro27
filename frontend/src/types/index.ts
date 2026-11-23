@@ -744,6 +744,8 @@ export interface RankingRow {
   predictCycleMatches?: number        // 参与 predictCycleTime 计算的有效达标场次数（单场有效间隔 >= 5）
   predictCycleSpread?: number | null  // 有效循环耗时离散度（秒，样本不足为 null）
   estimatedMaxCycles?: number | null  // 基于 predictCycleTime 推算的理论手动可打轮次（无达标样本为 null）
+  minCycles?: number | null           // 非损坏场次中的单场最低 TeleOp Cycle 数
+  cycleVariance?: number | null       // 跨场 TeleOp Cycle 数总体方差
   maxScore: number
   avgRating: number
   brokenCount: number

@@ -505,6 +505,48 @@ describe('rankings analytics', () => {
     expect(row.predictCycleTime).toBe(10.0)
     expect(row.predictCycleMatches).toBe(1)
     expect(row.estimatedMaxCycles).toBe(9.0)
+    // Match 1 has 6 cycles, Match 2 has 2 cycles -> min = 2, variance = ((6-4)^2 + (2-4)^2)/2 = 4.0
+    expect(row.minCycles).toBe(2)
+    expect(row.cycleVariance).toBe(4.0)
+  })
+
+  it('computes minCycles and cycleVariance across non-broken matches and returns null when all matches are broken', () => {
+    const makeRec = (id: string, teamNumber: number, matchNumber: number, cycles: number[], isBroken = false): ScoutingRecord => ({
+      id,
+      eventId: 'e1',
+      matchNumber,
+      teamNumber,
+      scoutId: 's1',
+      scoutName: 'Alice',
+      autoScore: 10,
+      teleopScore: cycles.reduce((a, b) => a + b * 2, 0),
+      endgameScore: 0,
+      totalScore: 10 + cycles.reduce((a, b) => a + b * 2, 0),
+      rawData: JSON.stringify({ teleopCycles: cycles }),
+      isBroken,
+      syncStatus: 'SYNCED',
+      createdAt: '2026-01-01T10:00:00Z',
+      updatedAt: '2026-01-01T10:00:00Z'
+    })
+
+    const records: ScoutingRecord[] = [
+      // Team 100: [3, 5, 7] + 1 broken match with 0 cycles (ignored) -> min = 3, mean = 5, variance = (4+0+4)/3 = 2.7
+      makeRec('r1', 100, 1, [2, 2, 2]),
+      makeRec('r2', 100, 2, [2, 2, 2, 2, 2]),
+      makeRec('r3', 100, 3, [2, 2, 2, 2, 2, 2, 2]),
+      makeRec('r4', 100, 4, [], true),
+      // Team 200: only broken match -> null
+      makeRec('r5', 200, 1, [2, 2], true)
+    ]
+
+    const rankings = calculateRankings(records, [], {})
+    const team100 = rankings.find((r) => r.teamNumber === 100)!
+    const team200 = rankings.find((r) => r.teamNumber === 200)!
+
+    expect(team100.minCycles).toBe(3)
+    expect(team100.cycleVariance).toBe(2.7)
+    expect(team200.minCycles).toBeNull()
+    expect(team200.cycleVariance).toBeNull()
   })
 })
 

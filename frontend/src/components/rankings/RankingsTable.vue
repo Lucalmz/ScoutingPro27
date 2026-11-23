@@ -85,7 +85,7 @@ function setSort(key: SortKey) {
     sortDir.value = sortDir.value === 'asc' ? 'desc' : 'asc'
   } else {
     sortKey.value = key
-    sortDir.value = key === 'predictCycleTime' ? 'asc' : 'desc'
+    sortDir.value = (key === 'predictCycleTime' || key === 'cycleVariance') ? 'asc' : 'desc'
   }
 }
 
@@ -431,6 +431,12 @@ function enter(el: Element, done: () => void) {
               <th @click="setSort('predictCycleTime')" class="sortable" :title="t('rankings.predict_cycle_time_desc')">
                 {{ t('rankings.predict_cycle_time') }}<span class="material-icons sort-icon" :class="{ 'is-active': sortKey === 'predictCycleTime', 'is-asc': sortKey === 'predictCycleTime' && sortDir === 'asc' }">arrow_drop_down</span>
               </th>
+              <th @click="setSort('minCycles')" class="sortable" :title="t('rankings.min_cycles_desc')">
+                {{ t('rankings.min_cycles') }}<span class="material-icons sort-icon" :class="{ 'is-active': sortKey === 'minCycles', 'is-asc': sortKey === 'minCycles' && sortDir === 'asc' }">arrow_drop_down</span>
+              </th>
+              <th @click="setSort('cycleVariance')" class="sortable" :title="t('rankings.cycle_variance_desc')">
+                {{ t('rankings.cycle_variance') }}<span class="material-icons sort-icon" :class="{ 'is-active': sortKey === 'cycleVariance', 'is-asc': sortKey === 'cycleVariance' && sortDir === 'asc' }">arrow_drop_down</span>
+              </th>
               <th @click="setSort('avgTipsPerMatch')" class="sortable" :title="t('rankings.avg_tips_desc')">
                 {{ t('rankings.avg_tips') }}<span class="material-icons sort-icon" :class="{ 'is-active': sortKey === 'avgTipsPerMatch', 'is-asc': sortKey === 'avgTipsPerMatch' && sortDir === 'asc' }">arrow_drop_down</span>
               </th>
@@ -553,6 +559,14 @@ function enter(el: Element, done: () => void) {
                 <span v-else class="empty-cell" :title="t('rankings.predict_cycle_insufficient')">
                   {{ t('rankings.predict_cycle_insufficient_short') }}
                 </span>
+              </td>
+              <td>
+                <span v-if="row.minCycles !== null && row.minCycles !== undefined">{{ row.minCycles }}</span>
+                <span v-else class="empty-cell">-</span>
+              </td>
+              <td>
+                <span v-if="row.cycleVariance !== null && row.cycleVariance !== undefined">{{ row.cycleVariance.toFixed(1) }}</span>
+                <span v-else class="empty-cell">-</span>
               </td>
               <td><AnimatedNumber :value="row.avgTipsPerMatch ?? 0" /></td>
               <td><AnimatedNumber :value="row.maxScore ?? 0" /></td>
