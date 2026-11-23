@@ -1,6 +1,9 @@
 package com.bear27570.app.routes;
 
 import com.google.gson.Gson;
+import com.google.gson.JsonArray;
+import com.google.gson.JsonObject;
+import com.google.gson.JsonParser;
 import io.javalin.Javalin;
 import io.javalin.testtools.JavalinTest;
 import org.junit.jupiter.api.AfterEach;
@@ -36,12 +39,24 @@ class SystemRoutesTest {
             var infoRes = client.get("/api/system/network-info");
             assertThat(infoRes.code()).isEqualTo(200);
             String body = infoRes.body().string();
-            assertThat(body).contains("\"primaryIp\":");
-            assertThat(body).contains("\"allIps\":");
-            assertThat(body).contains("\"primaryIpv6\":");
-            assertThat(body).contains("\"allIpv6s\":");
-            assertThat(body).contains("\"firewallCommand\":");
-            assertThat(body).contains("\"port\":");
+            JsonObject json = JsonParser.parseString(body).getAsJsonObject();
+            assertThat(json.has("primaryIp")).isTrue();
+            assertThat(json.get("allIps").isJsonArray()).isTrue();
+            assertThat(json.get("allIpv6s").isJsonArray()).isTrue();
+            assertThat(json.has("firewallCommand")).isTrue();
+            assertThat(json.has("port")).isTrue();
+            assertThat(json.has("os")).isTrue();
+            assertThat(json.has("joinBaseUrl")).isTrue();
+
+            JsonArray allIpv6s = json.getAsJsonArray("allIpv6s");
+            if (!allIpv6s.isEmpty()) {
+                assertThat(json.has("primaryIpv6")).isTrue();
+                assertThat(json.get("primaryIpv6").isJsonNull()).isFalse();
+                assertThat(json.get("primaryIpv6").getAsString()).isNotBlank();
+                assertThat(json.has("joinBaseUrlIpv6")).isTrue();
+            } else {
+                assertThat(!json.has("primaryIpv6") || json.get("primaryIpv6").isJsonNull()).isTrue();
+            }
 
             var healRes = client.post("/api/system/heal-ipv6-routes");
             assertThat(healRes.code()).isEqualTo(404);

@@ -78,11 +78,15 @@ public class EnvironmentIsolationTest {
                     .contains(normalizedDbPath.toString().replace('\\', '/'));
         }
 
-        assertThat(jwtFile.toPath().toAbsolutePath().normalize()).startsWith(projectRoot);
+        assertThat(jwtFile.toPath().toAbsolutePath().normalize())
+                .startsWithRaw(projectRoot)
+                .isEqualTo(baseDataDir.resolve("jwt.secret"));
         assertThat(jwtFile.getAbsolutePath()).doesNotContain(".scoutingpro27");
         assertThat(jwtFile.getName()).isEqualTo("jwt.secret");
 
-        assertThat(masterKeyFile.toPath().toAbsolutePath().normalize()).startsWith(projectRoot);
+        assertThat(masterKeyFile.toPath().toAbsolutePath().normalize())
+                .startsWithRaw(projectRoot)
+                .isEqualTo(baseDataDir.resolve("master.key"));
         assertThat(masterKeyFile.getAbsolutePath()).doesNotContain(".scoutingpro27");
         assertThat(masterKeyFile.getName()).isEqualTo("master.key");
 
