@@ -142,10 +142,31 @@ class NetworkUtilTest {
     void testNetshOutputMatchesNonAsciiJavaPathAcrossNativeAndUtf8Charsets() throws Exception {
         String nonAsciiJava = "C:\\Users\\测试用户\\jdk-21\\bin\\java.exe";
         java.nio.charset.Charset nativeCs = NetworkUtil.resolveWindowsConsoleCharsets().get(0);
-        byte[] nativeBytes = ("Program: " + nonAsciiJava + "\r\n").getBytes(nativeCs);
+        if (nativeCs.newEncoder().canEncode(nonAsciiJava)) {
+            byte[] nativeBytes = ("Program: " + nonAsciiJava + "\r\n").getBytes(nativeCs);
+            assertThat(NetworkUtil.matchesJavaExeInNetshOutput(nativeBytes, nonAsciiJava)).isTrue();
+        }
+        String prevStdoutEnc = System.getProperty("sun.stdout.encoding");
+        String prevNativeEnc = System.getProperty("native.encoding");
+        try {
+            System.setProperty("sun.stdout.encoding", "GBK");
+            System.setProperty("native.encoding", "GBK");
+            byte[] gbkBytes = ("Program: " + nonAsciiJava + "\r\n").getBytes("GBK");
+            assertThat(NetworkUtil.matchesJavaExeInNetshOutput(gbkBytes, nonAsciiJava)).isTrue();
+        } finally {
+            if (prevStdoutEnc == null) {
+                System.clearProperty("sun.stdout.encoding");
+            } else {
+                System.setProperty("sun.stdout.encoding", prevStdoutEnc);
+            }
+            if (prevNativeEnc == null) {
+                System.clearProperty("native.encoding");
+            } else {
+                System.setProperty("native.encoding", prevNativeEnc);
+            }
+        }
         byte[] utf8Bytes = ("Program: " + nonAsciiJava + "\r\n").getBytes(java.nio.charset.StandardCharsets.UTF_8);
 
-        assertThat(NetworkUtil.matchesJavaExeInNetshOutput(nativeBytes, nonAsciiJava)).isTrue();
         assertThat(NetworkUtil.matchesJavaExeInNetshOutput(utf8Bytes, nonAsciiJava)).isTrue();
         assertThat(NetworkUtil.matchesJavaExeInNetshOutput("Program: C:\\Other\\java.exe\r\n".getBytes(java.nio.charset.StandardCharsets.UTF_8), nonAsciiJava)).isFalse();
         assertThat(NetworkUtil.matchesJavaExeInNetshOutput(new byte[0], nonAsciiJava)).isFalse();

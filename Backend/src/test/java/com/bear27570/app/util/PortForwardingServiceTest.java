@@ -520,10 +520,33 @@ class PortForwardingServiceTest {
         String os = System.getProperty("os.name", "").toLowerCase(java.util.Locale.ROOT);
         if (os.contains("win")) {
             java.nio.charset.Charset primary = NetworkUtil.resolveWindowsConsoleCharsets().get(0);
-            byte[] encoded = sampleRoute6.getBytes(primary);
-            String decoded = PortForwardingService.decodeWindowsConsoleOutput(encoded);
-            assertThat(decoded).contains("在链路上");
-            assertThat(decoded).contains("FE80::1");
+            if (primary.newEncoder().canEncode("在链路上")) {
+                byte[] encoded = sampleRoute6.getBytes(primary);
+                String decoded = PortForwardingService.decodeWindowsConsoleOutput(encoded);
+                assertThat(decoded).contains("在链路上");
+                assertThat(decoded).contains("FE80::1");
+            }
+            String prevStdoutEnc = System.getProperty("sun.stdout.encoding");
+            String prevNativeEnc = System.getProperty("native.encoding");
+            try {
+                System.setProperty("sun.stdout.encoding", "GBK");
+                System.setProperty("native.encoding", "GBK");
+                byte[] gbkEncoded = sampleRoute6.getBytes("GBK");
+                String decoded = PortForwardingService.decodeWindowsConsoleOutput(gbkEncoded);
+                assertThat(decoded).contains("在链路上");
+                assertThat(decoded).contains("FE80::1");
+            } finally {
+                if (prevStdoutEnc == null) {
+                    System.clearProperty("sun.stdout.encoding");
+                } else {
+                    System.setProperty("sun.stdout.encoding", prevStdoutEnc);
+                }
+                if (prevNativeEnc == null) {
+                    System.clearProperty("native.encoding");
+                } else {
+                    System.setProperty("native.encoding", prevNativeEnc);
+                }
+            }
         }
 
         // Case-insensitive FE80: gateway check must not fail on uppercase FE80::1
@@ -689,8 +712,10 @@ class PortForwardingServiceTest {
         String os = System.getProperty("os.name", "").toLowerCase(java.util.Locale.ROOT);
         if (os.contains("win")) {
             String prevStdoutEnc = System.getProperty("sun.stdout.encoding");
+            String prevNativeEnc = System.getProperty("native.encoding");
             try {
                 System.setProperty("sun.stdout.encoding", "UTF-8");
+                System.setProperty("native.encoding", "GBK");
                 byte[] gbkBytes = "  14    281 ::/0                     在链路上\r\n".getBytes("GBK");
                 String decoded = PortForwardingService.decodeWindowsConsoleOutput(gbkBytes);
                 assertThat(decoded).contains("在链路上");
@@ -699,6 +724,11 @@ class PortForwardingServiceTest {
                     System.clearProperty("sun.stdout.encoding");
                 } else {
                     System.setProperty("sun.stdout.encoding", prevStdoutEnc);
+                }
+                if (prevNativeEnc == null) {
+                    System.clearProperty("native.encoding");
+                } else {
+                    System.setProperty("native.encoding", prevNativeEnc);
                 }
             }
         }
