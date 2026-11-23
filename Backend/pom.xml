@@ -85,6 +85,12 @@
             <artifactId>portmapper</artifactId>
             <version>2.0.6</version>
         </dependency>
+        <!-- 显式锁定 commons-io 版本，避免 portmapper(2.5) 覆盖 jcefmaven/commons-compress 所需的 2.20.0 -->
+        <dependency>
+            <groupId>commons-io</groupId>
+            <artifactId>commons-io</artifactId>
+            <version>2.20.0</version>
+        </dependency>
         <!-- Test Dependencies -->
         <dependency>
             <groupId>org.junit.jupiter</groupId>
