@@ -22,6 +22,7 @@ Check what role you are helping with today and jump straight to your chapters:
 
 ## Table of Contents
 
+0. [Download & Install (macOS Users Read This First)](#chapter-0-download--install-macos-users-read-this-first)
 1. [Open the App & Create Your Callsign](#chapter-1-open-the-app--create-your-callsign)
 2. [Scan QR to Join the Same Event (Even Without Venue Internet)](#chapter-2-scan-qr-to-join-the-same-event-even-without-venue-internet)
 3. [10-Second Pre-Match Setup: Mode, Alliance & Pit Cross-Check](#chapter-3-10-second-pre-match-setup-mode-alliance--pit-cross-check)
@@ -38,6 +39,47 @@ Check what role you are helping with today and jump straight to your chapters:
 14. [How to Add & Manage Custom Fields](#chapter-14-how-to-add--manage-custom-fields)
 15. [Chapter 15: Official FTC Data Sync, Roll-Down Advancement, and Custom TURN](#chapter-15-official-ftc-data-sync-roll-down-advancement-and-custom-turn)
 16. [Emergency Troubleshooting FAQ](#chapter-16-emergency-troubleshooting-faq)
+
+---
+
+## Chapter 0: Download & Install (macOS Users Read This First)
+
+### Windows Users
+1. Go to [GitHub Releases](https://github.com/Lucalmz/ScoutingPro27/releases) and download the latest **`ScoutingPro27-windows-x.x.x.msi`**.
+2. Double-click the MSI installer and follow the prompts—done!
+
+### macOS Users (Apple Silicon)
+1. Go to [GitHub Releases](https://github.com/Lucalmz/ScoutingPro27/releases) and download the latest **`ScoutingPro27-mac-arm64-x.x.x.dmg`**.
+2. Double-click the `.dmg` to mount it and drag ScoutingPro27 into your **Applications** folder.
+
+> ⚠️ **Bypassing macOS Gatekeeper (Required on First Launch)**
+>
+> Because the app is not yet Apple-notarized, macOS will block it with **"cannot be opened because the developer cannot be verified"**. Follow one of these methods to open it:
+>
+> **Method 1: Right-Click → Open (Recommended, Fastest)**
+> 1. Open **Finder** → **Applications**, locate **ScoutingPro27**.
+> 2. Hold the **Control** key and **click** the app icon (or simply **right-click** it).
+> 3. Select **"Open"** from the context menu.
+> 4. A security dialog appears—click **"Open"** to confirm.
+> 5. ✅ You only need to do this once. After that, double-clicking works normally.
+>
+> **Method 2: Allow in System Settings (If Method 1 Doesn't Work)**
+> 1. Double-click ScoutingPro27 (it will be blocked—this step registers it with the system).
+> 2. Open **System Settings** → **Privacy & Security**.
+> 3. Scroll to the bottom. Under **Security**, you'll see: **"ScoutingPro27 was blocked from use because it is not from an identified developer."**
+> 4. Click the **"Open Anyway"** button.
+> 5. Enter your Mac login password or use Touch ID to confirm.
+> 6. ✅ The app will launch normally from now on.
+>
+> **Method 3: Terminal Command (Advanced Users)**
+> ```bash
+> # Remove the quarantine attribute (one-time only)
+> xattr -dr com.apple.quarantine /Applications/ScoutingPro27.app
+> ```
+> After running this, double-clicking the app opens it without any further prompts.
+
+### Web / PWA (No Installation Needed)
+If you're a bleacher scout or simply don't want to install the desktop app, just scan the QR code or click the invite link from your phone or laptop browser—no download required.
 
 ---
 
@@ -388,3 +430,4 @@ Once you bind your official FTC Event Code, ScoutingPro 27 connects through its 
 | **Q5: How do I remember BIOBUZZ Endgame rules quickly?** | **No climbing!** Only: **last-60s Nectars (+2)**, **Bottom Nectar Flowers (+5 each)**, **Pollens (+2)**, **Garden Balls (+1)**, **Loading Park (+5)**, **G418 Descore**, and check **G410** if a Nectar goes in before the 1:00 mark! |
 | **Q6: Binding fails with `"FTC official event not found"` or `"service unreachable"`!** | Double-check `ftc-events.firstinspires.org/<year>/<code>`—make sure you entered the season **start year** (`2025` for 2025–26, not `2026`). If the Host laptop is completely offline at the venue, use **`Import Schedule` → `CSV`** temporarily and click **`Update & Re-sync Official Data`** once internet returns. |
 | **Q7: A scout phone shows `ECDH Tunnel (TLS)` while running a VPN—is that normal?** | **Yes—and it uses zero TURN quota!** When mobile VPNs (such as Clash/TUN) or strict venue Wi-Fi block UDP, ScoutingPro 27 seamlessly uses the end-to-end encrypted WSS tunnel while probing for Direct P2P in the background. Disabling the phone VPN upgrades back to `IPv6 Direct` / `IPv4 Hole-punch`, or Hosts can add a **Custom TURN** server in `Scouts & Settings` (see [VPN P2P Test Guide](./testing/VPN_P2P_TEST_GUIDE.md)). |
+| **Q8: macOS says "cannot be opened because the developer cannot be verified"!** | In Finder → Applications, **right-click** (or Control-click) ScoutingPro27 → choose **"Open"** → click **"Open"** in the dialog. This is a one-time step. If that doesn't work, go to **System Settings → Privacy & Security** and click **"Open Anyway"** at the bottom. See [Chapter 0](#chapter-0-download--install-macos-users-read-this-first) for full details. |
