@@ -1,5 +1,5 @@
 import { setActivePinia, createPinia } from 'pinia'
-import { describe, it, expect, vi, beforeEach } from 'vitest'
+import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
 import { useScheduleStore } from '../stores/schedule'
 import type { OfficialMatch } from '../types'
 import * as api from '../services/api'
@@ -16,6 +16,11 @@ describe('Schedule Store', () => {
     setActivePinia(createPinia())
     localStorage.clear()
     vi.clearAllMocks()
+  })
+
+  afterEach(() => {
+    localStorage.clear()
+    vi.restoreAllMocks()
   })
 
   describe('CSV Parsing', () => {
@@ -169,14 +174,15 @@ describe('Schedule Store', () => {
 
     it('assigns scout to a station and unassigns by passing null', async () => {
       const store = useScheduleStore()
-      await store.assignStation('e1', 1, 'red1', 'scout-1', 'Alice', 100)
+      await store.assignStation('e1', 1, 'red1', 'scout-1', 'Alice', false)
 
       const assign1 = store.getStationAssignment(1, 'red1')
+      expect(assign1?.teamNumber).toBe(100)
       expect(assign1?.scoutId).toBe('scout-1')
       expect(assign1?.scoutName).toBe('Alice')
 
       // Always support unassigned (leave blank)
-      await store.assignStation('e1', 1, 'red1', null, null, 100)
+      await store.assignStation('e1', 1, 'red1', null, null, false)
       const assignAfter = store.getStationAssignment(1, 'red1')
       expect(assignAfter?.scoutId).toBeNull()
       expect(assignAfter?.scoutName).toBeNull()
@@ -305,7 +311,7 @@ describe('Schedule Store', () => {
       expect(playoffAssign?.teamNumber).toBe(991)
 
       const qualAssign = store.getStationAssignment(1, 'red1', 'QUALIFICATION')
-      expect(qualAssign?.scoutId).toBeUndefined()
+      expect(qualAssign).toBeUndefined()
     })
 
     it('myAssignments correctly associates match schedules across different tournament levels', () => {
@@ -399,6 +405,71 @@ describe('Schedule Store', () => {
         'QUALIFICATION_2',
         'PLAYOFF_1'
       ])
+    })
+
+    it('applyScheduleBatchSync correctly merges multiple batches', () => {
+      const store = useScheduleStore()
+
+      store.applyScheduleBatchSync(
+        [
+          { matchNumber: 1, tournamentLevel: 'QUALIFICATION', red1: 101, red2: 102, blue1: 201, blue2: 202 } as any,
+          { matchNumber: 2, tournamentLevel: 'QUALIFICATION', red1: 103, red2: 104, blue1: 203, blue2: 204 } as any
+        ],
+        [
+          { matchNumber: 1, station: 'Red 1', tournamentLevel: 'QUALIFICATION', scoutId: 's1', scoutName: 'Scout 1' } as any
+        ],
+        0,
+        2
+      )
+
+      expect(store.schedules).toHaveLength(2)
+      expect(Object.keys(store.assignments)).toHaveLength(1)
+
+      store.applyScheduleBatchSync(
+        [
+          { matchNumber: 3, tournamentLevel: 'QUALIFICATION', red1: 105, red2: 106, blue1: 205, blue2: 206 } as any,
+          { matchNumber: 4, tournamentLevel: 'QUALIFICATION', red1: 107, red2: 108, blue1: 207, blue2: 208 } as any
+        ],
+        [
+          { matchNumber: 3, station: 'Blue 2', tournamentLevel: 'QUALIFICATION', scoutId: 's2', scoutName: 'Scout 2' } as any
+        ],
+        1,
+        2
+      )
+
+      expect(store.schedules).toHaveLength(4)
+      expect(Object.keys(store.assignments)).toHaveLength(2)
+    })
+
+    it('migrateEventId migrates currentEventId, schedules, and assignments to real UUID', () => {
+      const store = useScheduleStore()
+      store.currentEventId = 'evt-K9X2B4'
+      store.schedules.push({
+        id: 'sched-1',
+        eventId: 'evt-K9X2B4',
+        matchNumber: 1,
+        tournamentLevel: 'QUALIFICATION',
+        red1: 27570,
+        red2: 12345,
+        blue1: 11111,
+        blue2: 22222
+      })
+      store.assignments['1-red1'] = {
+        id: 'assign-1',
+        eventId: 'evt-K9X2B4',
+        matchNumber: 1,
+        tournamentLevel: 'QUALIFICATION',
+        station: 'red1',
+        teamNumber: 27570,
+        scoutId: 'scout-1',
+        scoutName: 'ScoutOne'
+      }
+
+      store.migrateEventId('evt-K9X2B4', '550e8400-e29b-41d4-a716-446655440000')
+
+      expect(store.currentEventId).toBe('550e8400-e29b-41d4-a716-446655440000')
+      expect(store.schedules[0]?.eventId).toBe('550e8400-e29b-41d4-a716-446655440000')
+      expect(store.assignments['1-red1']?.eventId).toBe('550e8400-e29b-41d4-a716-446655440000')
     })
   })
 })

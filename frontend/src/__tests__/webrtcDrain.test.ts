@@ -1,4 +1,4 @@
-import { describe, it, expect, vi, beforeEach } from 'vitest'
+import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
 import { VirtualDataChannel } from '@/services/webrtc/virtualDataChannel'
 import { createClientVirtualFallbackController } from '@/services/webrtc/clientVirtualFallback'
 import { createMessageDispatcher } from '@/services/webrtc/messageDispatcher'
@@ -15,6 +15,10 @@ describe('WebRTC Hot-Upgrade Drain & Transition Hardening (CR-3)', () => {
       true,
       ['encrypt', 'decrypt']
     )
+  })
+
+  afterEach(() => {
+    vi.useRealTimers()
   })
 
   // =========================================================================
@@ -162,94 +166,127 @@ describe('WebRTC Hot-Upgrade Drain & Transition Hardening (CR-3)', () => {
   // Requirement 1c & Requirement 2: Send still pending after grace period (Flush cap & error surfacing)
   // =========================================================================
   it('1c & 2. flush-before-close cap expires on hung send and surfaces rejection error (no silent loss)', async () => {
-    let resolveHangingSend: (() => void) | null = null
-    const hangingPromise = new Promise<void>((resolve) => {
-      resolveHangingSend = resolve
-    })
+    vi.useFakeTimers()
+    let resolveHangingSend: () => void = () => {}
+    try {
+      const hangingPromise = new Promise<void>((resolve) => {
+        resolveHangingSend = resolve
+      })
 
-    const mockSignaling = {
-      send: vi.fn().mockReturnValue(hangingPromise) // Simulates hung signaling network
+      let markSendEntered!: () => void
+      const sendEntered = new Promise<void>((resolve) => {
+        markSendEntered = resolve
+      })
+
+      const mockSignaling = {
+        send: vi.fn().mockImplementation(() => {
+          markSendEntered()
+          return hangingPromise
+        }) // Simulates hung signaling network
+      }
+
+      const vdc = new VirtualDataChannel({
+        label: 'scoutingpro-data-virtual',
+        sessionId: 'session-pending-1c',
+        getSignaling: () => mockSignaling as any,
+        getSharedAesKey: () => mockAesKey,
+        getTargetPeerId: () => 'host-peer-1'
+      })
+
+      vdc.open()
+
+      // Start drain with 30ms grace period and 30ms flush cap
+      vdc.startDrain(30, 30)
+      expect(vdc.isDraining).toBe(true)
+
+      // Enqueue send while draining (attach catch handler immediately so rejection never becomes unhandled)
+      const pendingSendPromise = vdc.sendAsync('msg-should-fail-on-timeout')
+      const settledOutcome = pendingSendPromise.then(
+        () => ({ rejected: false as const }),
+        (err: unknown) => ({ rejected: true as const, err })
+      )
+
+      // Wait for crypto.subtle.encrypt to finish and signaling.send to be invoked before advancing timers
+      await sendEntered
+
+      // Advance past grace period (30ms) + flush cap (30ms)
+      await vi.advanceTimersByTimeAsync(65)
+
+      // Assert state transitions
+      expect(vdc.readyState).toBe('closed')
+      expect(vdc.isDraining).toBe(false)
+
+      // Assert that the pending send REJECTS and error is surfaced (not swallowed)
+      const outcome = await settledOutcome
+      expect(outcome.rejected).toBe(true)
+      if (outcome.rejected) {
+        expect((outcome.err as Error).message).toMatch(/VirtualDataChannel closed before queued frame could be sent/)
+      }
+    } finally {
+      resolveHangingSend()
+      vi.useRealTimers()
     }
-
-    const vdc = new VirtualDataChannel({
-      label: 'scoutingpro-data-virtual',
-      sessionId: 'session-pending-1c',
-      getSignaling: () => mockSignaling as any,
-      getSharedAesKey: () => mockAesKey,
-      getTargetPeerId: () => 'host-peer-1'
-    })
-
-    vdc.open()
-
-    // Start drain with 30ms grace period and 30ms flush cap
-    vdc.startDrain(30, 30)
-    expect(vdc.isDraining).toBe(true)
-
-    // Enqueue send while draining
-    const pendingSendPromise = vdc.sendAsync('msg-should-fail-on-timeout')
-
-    // Wait until grace period (30ms) + flush cap (30ms) expire
-    await new Promise((r) => setTimeout(r, 90))
-
-    // Assert state transitions
-    expect(vdc.readyState).toBe('closed')
-    expect(vdc.isDraining).toBe(false)
-
-    // Assert that the pending send REJECTS and error is surfaced (not swallowed)
-    await expect(pendingSendPromise).rejects.toThrow(
-      /VirtualDataChannel closed before queued frame could be sent/
-    )
-
-    // Cleanup
-    resolveHangingSend?.()
   })
 
   // =========================================================================
   // Requirement 2: Flush-before-close completes sendChain if it settles within cap
   // =========================================================================
   it('2. flush-before-close delivers pending sends when sendChain settles within flush cap', async () => {
-    let resolveSend: (() => void) | null = null
-    const mockSignaling = {
-      send: vi.fn().mockImplementation(() => {
-        return new Promise<void>((resolve) => {
-          resolveSend = resolve
-        })
+    vi.useFakeTimers()
+    let resolveSend: () => void = () => {}
+    try {
+      let markSendEntered!: () => void
+      const sendEntered = new Promise<void>((resolve) => {
+        markSendEntered = resolve
       })
+
+      const mockSignaling = {
+        send: vi.fn().mockImplementation(() => {
+          markSendEntered()
+          return new Promise<void>((resolve) => {
+            resolveSend = resolve
+          })
+        })
+      }
+
+      const vdc = new VirtualDataChannel({
+        label: 'scoutingpro-data-virtual',
+        sessionId: 'session-flush-settles',
+        getSignaling: () => mockSignaling as any,
+        getSharedAesKey: () => mockAesKey,
+        getTargetPeerId: () => 'host-peer-1'
+      })
+
+      vdc.open()
+
+      // 1. Start drain: 20ms grace, 100ms flush cap
+      let drainCompleted = false
+      vdc.startDrain(20, 100, () => {
+        drainCompleted = true
+      })
+
+      // 2. Enqueue send while draining
+      const sendPromise = vdc.sendAsync('msg-settles-during-flush')
+      await sendEntered
+
+      // 3. Advance 30ms: grace period expired, channel is in flush waiting for sendChain
+      await vi.advanceTimersByTimeAsync(30)
+      expect(vdc.isDraining).toBe(true)
+      expect(vdc.readyState).toBe('open')
+      expect(drainCompleted).toBe(false)
+
+      // 4. Resolve the pending send within flush cap
+      resolveSend()
+      await expect(sendPromise).resolves.toBeUndefined()
+
+      // 5. Channel flushes and formally closes cleanly
+      await vi.advanceTimersByTimeAsync(0)
+      expect(vdc.readyState).toBe('closed')
+      expect(drainCompleted).toBe(true)
+    } finally {
+      resolveSend()
+      vi.useRealTimers()
     }
-
-    const vdc = new VirtualDataChannel({
-      label: 'scoutingpro-data-virtual',
-      sessionId: 'session-flush-settles',
-      getSignaling: () => mockSignaling as any,
-      getSharedAesKey: () => mockAesKey,
-      getTargetPeerId: () => 'host-peer-1'
-    })
-
-    vdc.open()
-
-    // 1. Start drain: 20ms grace, 100ms flush cap
-    let drainCompleted = false
-    vdc.startDrain(20, 100, () => {
-      drainCompleted = true
-    })
-
-    // 2. Enqueue send while draining
-    const sendPromise = vdc.sendAsync('msg-settles-during-flush')
-
-    // 3. Wait 30ms: grace period expired, channel is in flush waiting for sendChain
-    await new Promise((r) => setTimeout(r, 30))
-    expect(vdc.isDraining).toBe(true)
-    expect(vdc.readyState).toBe('open')
-    expect(drainCompleted).toBe(false)
-
-    // 4. Resolve the pending send within flush cap
-    resolveSend?.()
-    await expect(sendPromise).resolves.toBeUndefined()
-
-    // 5. Channel flushes and formally closes cleanly
-    await new Promise((r) => setTimeout(r, 20))
-    expect(vdc.readyState).toBe('closed')
-    expect(drainCompleted).toBe(true)
   })
 
   // =========================================================================
@@ -384,32 +421,264 @@ describe('WebRTC Hot-Upgrade Drain & Transition Hardening (CR-3)', () => {
   // Requirement 5: Single timer ownership
   // =========================================================================
   it('5. single timer ownership: VirtualDataChannel owns the drain timer and cancels on early close', async () => {
+    vi.useFakeTimers()
+    try {
+      const vdc = new VirtualDataChannel({
+        label: 'vdc-timer-test',
+        sessionId: 'sess-timer',
+        getSignaling: () => null,
+        getSharedAesKey: () => null,
+        getTargetPeerId: () => undefined
+      })
+
+      vdc.open()
+
+      let drainCallbackFired = false
+      vdc.startDrain(100, 50, () => {
+        drainCallbackFired = true
+      })
+
+      expect(vdc.isDraining).toBe(true)
+
+      vdc.close()
+      expect(vdc.readyState).toBe('closed')
+      expect(vdc.isDraining).toBe(false)
+
+      await vi.advanceTimersByTimeAsync(120)
+
+      expect(drainCallbackFired).toBe(false)
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
+  it('6. Rapid oscillation between VirtualDataChannel and Native UDP without leaks or corruption', async () => {
+    let clientDc: any = null
+    let clientSender: any = null
+    const currentEpoch = 1
+    const receivedFrames: string[] = []
+
+    const mockSignaling = {
+      send: vi.fn().mockImplementation(async () => {
+        await Promise.resolve()
+      })
+    }
+
+    const ctx: any = {
+      sas: { clientSharedAesKey: mockAesKey },
+      getClientSessionId: () => 'sess-rapid-flap',
+      getCurrentHostSessionId: () => 'host-rapid-flap',
+      getClientHostSenderId: () => 'host-peer-1',
+      getClientDc: () => clientDc,
+      setClientDc: (dc: any) => { clientDc = dc },
+      getClientSender: () => clientSender,
+      setClientSender: (sender: any) => { clientSender = sender },
+      getClientPc: () => null,
+      getLocalDeviceId: () => 'dev-flap',
+      getLocalEcdhPubHex: () => '04aabb',
+      peerMgr: {
+        markVirtualChannelActive: vi.fn(),
+        updateTransportInfo: vi.fn(),
+        currentTransportInfo: null
+      },
+      callbacks: {},
+      setStatus: vi.fn(),
+      handleChannelMessage: vi.fn().mockImplementation((ev: MessageEvent) => {
+        receivedFrames.push(ev.data)
+      }),
+      getSignaling: () => mockSignaling
+    }
+
+    const ctrl = createClientVirtualFallbackController({
+      ctx,
+      getAttemptEpoch: () => currentEpoch,
+      clearFailedEpochIfMatch: vi.fn(),
+      clearConnectWatchdog: vi.fn(),
+      clearReconnectTimer: vi.fn(),
+      startDataChannelHeartbeat: vi.fn(),
+      checkAndScheduleSilentUpgrade: vi.fn().mockResolvedValue(undefined),
+      getSilentUpgradeProbeCount: () => 0,
+      incrementSilentUpgradeProbeCount: () => 1
+    })
+
+    for (let i = 0; i < 50; i++) {
+      ctrl.activateVirtualFallbackChannel(1, `sess-flap-${i}`)
+      const vdc = ctrl.getActiveVirtualDc()
+      expect(vdc).toBeDefined()
+      vdc!.open()
+
+      ctrl.closeActiveVirtualDc(true, true)
+      expect(ctrl.getActiveVirtualDc()).toBeNull()
+      expect(vdc!.isDraining).toBe(true)
+
+      ctrl.closeActiveVirtualDc()
+      expect(vdc!.readyState).toBe('closed')
+      expect(vdc!.isDraining).toBe(false)
+    }
+
+    ctrl.activateVirtualFallbackChannel(1, 'sess-flap-final')
+    const finalVdc = ctrl.getActiveVirtualDc()!
+    finalVdc.open()
+    expect(finalVdc.readyState).toBe('open')
+
+    const inboundMsg = JSON.stringify({ type: 'PING', count: 999 })
+    const encryptedFrame = await encryptSignalingData(
+      mockAesKey,
+      JSON.stringify({
+        vdc: 'data',
+        sessionId: 'sess-rapid-flap',
+        payload: inboundMsg
+      })
+    )
+    await ctrl.handleIncomingEncryptedVirtualFrame(encryptedFrame)
+    expect(receivedFrames).toContain(inboundMsg)
+
+    ctrl.closeActiveVirtualDc()
+    expect(finalVdc.readyState).toBe('closed')
+  })
+
+  it('7. High-concurrency 100-message burst during hot-upgrade drain preserves deterministic FIFO ordering', async () => {
+    const sentWirePayloads: string[] = []
+    let sendIndex = 0
+
+    const mockSignaling = {
+      send: vi.fn().mockImplementation(async (data: any) => {
+        const ticks = (sendIndex++ % 4) + 1
+        for (let t = 0; t < ticks; t++) {
+          await Promise.resolve()
+        }
+        const decryptedJson = await decryptSignalingData(mockAesKey, data.encrypted)
+        const parsed = JSON.parse(decryptedJson)
+        sentWirePayloads.push(parsed.payload)
+      })
+    }
+
     const vdc = new VirtualDataChannel({
-      label: 'vdc-timer-test',
-      sessionId: 'sess-timer',
-      getSignaling: () => null,
-      getSharedAesKey: () => null,
-      getTargetPeerId: () => undefined
+      label: 'stress-burst-dc',
+      sessionId: 'sess-burst-100',
+      getSignaling: () => mockSignaling as any,
+      getSharedAesKey: () => mockAesKey,
+      getTargetPeerId: () => 'host-peer'
     })
 
     vdc.open()
 
-    let drainCallbackFired = false
-    vdc.startDrain(100, 50, () => {
-      drainCallbackFired = true
-    })
+    const burstCount = 100
+    const sendPromises: Promise<void>[] = []
 
-    expect(vdc.isDraining).toBe(true)
+    for (let i = 0; i < burstCount; i++) {
+      if (i === 50) {
+        vdc.startDrain(2000, 2000)
+      }
+      sendPromises.push(vdc.sendAsync(`msg-${i}`))
+    }
 
-    // Immediate explicit close before timer fires
+    await Promise.all(sendPromises)
+
+    expect(sentWirePayloads.length).toBe(burstCount)
+    for (let i = 0; i < burstCount; i++) {
+      expect(sentWirePayloads[i]).toBe(`msg-${i}`)
+    }
+
+    expect(vdc.bufferedAmount).toBe(0)
+
     vdc.close()
     expect(vdc.readyState).toBe('closed')
-    expect(vdc.isDraining).toBe(false)
+  })
 
-    // Wait past the timer duration
-    await new Promise((r) => setTimeout(r, 120))
+  it('8. Abnormal session drop cleans up draining channels and prevents cross-session frame leaks', async () => {
+    let clientDc: any = null
+    let clientSender: any = null
+    const sessionBMessages: string[] = []
 
-    // Callback should not have fired after explicit close
-    expect(drainCallbackFired).toBe(false)
+    const mockSignaling = {
+      send: vi.fn().mockResolvedValue(undefined)
+    }
+
+    let currentSessionId = 'session-A'
+    let currentEpoch = 1
+
+    const ctx: any = {
+      sas: { clientSharedAesKey: mockAesKey },
+      getClientSessionId: () => currentSessionId,
+      getCurrentHostSessionId: () => 'host-1',
+      getClientHostSenderId: () => 'host-peer-1',
+      getClientDc: () => clientDc,
+      setClientDc: (dc: any) => { clientDc = dc },
+      getClientSender: () => clientSender,
+      setClientSender: (sender: any) => { clientSender = sender },
+      getClientPc: () => null,
+      getLocalDeviceId: () => 'dev-client-1',
+      getLocalEcdhPubHex: () => '04aabb',
+      peerMgr: {
+        markVirtualChannelActive: vi.fn(),
+        updateTransportInfo: vi.fn(),
+        currentTransportInfo: null
+      },
+      callbacks: {},
+      setStatus: vi.fn(),
+      handleChannelMessage: vi.fn().mockImplementation((ev: MessageEvent) => {
+        sessionBMessages.push(ev.data)
+      }),
+      getSignaling: () => mockSignaling
+    }
+
+    const ctrl = createClientVirtualFallbackController({
+      ctx,
+      getAttemptEpoch: () => currentEpoch,
+      clearFailedEpochIfMatch: vi.fn(),
+      clearConnectWatchdog: vi.fn(),
+      clearReconnectTimer: vi.fn(),
+      startDataChannelHeartbeat: vi.fn(),
+      checkAndScheduleSilentUpgrade: vi.fn().mockResolvedValue(undefined),
+      getSilentUpgradeProbeCount: () => 0,
+      incrementSilentUpgradeProbeCount: () => 1
+    })
+
+    ctrl.activateVirtualFallbackChannel(1, 'session-A')
+    const sessionAVdc = ctrl.getActiveVirtualDc()!
+    sessionAVdc.open()
+    ctrl.closeActiveVirtualDc(true, true)
+
+    expect(sessionAVdc.isDraining).toBe(true)
+    expect(sessionAVdc.readyState).toBe('open')
+
+    ctrl.closeActiveVirtualDc()
+    expect(sessionAVdc.readyState).toBe('closed')
+    expect(sessionAVdc.isDraining).toBe(false)
+
+    currentSessionId = 'session-B'
+    currentEpoch = 2
+    ctrl.activateVirtualFallbackChannel(2, 'session-B')
+    const sessionBVdc = ctrl.getActiveVirtualDc()!
+    sessionBVdc.open()
+    expect(sessionBVdc.readyState).toBe('open')
+
+    const staleFrameA = await encryptSignalingData(
+      mockAesKey,
+      JSON.stringify({
+        vdc: 'data',
+        sessionId: 'session-A',
+        payload: JSON.stringify({ type: 'DIRECT_MESSAGE', text: 'stale frame from session A' })
+      })
+    )
+    await ctrl.handleIncomingEncryptedVirtualFrame(staleFrameA)
+    expect(sessionBMessages.length).toBe(0)
+
+    const validFrameB = await encryptSignalingData(
+      mockAesKey,
+      JSON.stringify({
+        vdc: 'data',
+        sessionId: 'session-B',
+        payload: JSON.stringify({ type: 'DIRECT_MESSAGE', text: 'valid frame for session B' })
+      })
+    )
+    await ctrl.handleIncomingEncryptedVirtualFrame(validFrameB)
+
+    expect(sessionBMessages.length).toBe(1)
+    expect(sessionBMessages[0]).toContain('valid frame for session B')
+
+    ctrl.closeActiveVirtualDc()
+    expect(sessionBVdc.readyState).toBe('closed')
   })
 })

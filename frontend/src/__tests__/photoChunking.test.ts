@@ -1,4 +1,4 @@
-import { describe, it, expect, vi, beforeEach } from 'vitest'
+import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
 import { uploadPhotoViaWebRtcChunks } from '../services/photoStorage'
 import { createChannelMessageHandler } from '../services/webrtc/channelMessageHandler'
 import * as api from '../services/api'
@@ -23,6 +23,10 @@ vi.mock('@/stores/connection', () => ({
 describe('Photo WebRTC Chunking & Assembly', () => {
   beforeEach(() => {
     vi.clearAllMocks()
+  })
+
+  afterEach(() => {
+    vi.restoreAllMocks()
   })
 
   it('splits large photo into 24KB chunks and sends them sequentially via WebRTC', async () => {
@@ -71,9 +75,6 @@ describe('Photo WebRTC Chunking & Assembly', () => {
       promoteTakeover: vi.fn(),
       enqueueHostTask: vi.fn(),
       cleanupPeerResources: vi.fn(),
-      stampHostSeq: vi.fn(),
-      getHostSeqCounter: () => 1,
-      setHostSeqCounter: vi.fn(),
       closeClient: vi.fn(),
       setStatus: vi.fn()
     }
@@ -237,6 +238,48 @@ describe('Photo WebRTC Chunking & Assembly', () => {
     // None of these invalid chunks should trigger uploadPitPhoto or crash with RangeError
     expect(api.uploadPitPhoto).not.toHaveBeenCalled()
     expect(hostSendMessage).not.toHaveBeenCalled()
+
+    // Positive control on the exact same handler instance: valid chunks still assemble & ack
+    await handler(
+      {
+        data: JSON.stringify({
+          type: 'PIT_PHOTO_CHUNK',
+          transferId: 't-valid-ctrl',
+          eventId: 'e1',
+          key: 'k-valid',
+          chunkIndex: 0,
+          totalChunks: 2,
+          chunkData: 'valid0'
+        })
+      } as MessageEvent,
+      'client-sender'
+    )
+    await handler(
+      {
+        data: JSON.stringify({
+          type: 'PIT_PHOTO_CHUNK',
+          transferId: 't-valid-ctrl',
+          eventId: 'e1',
+          key: 'k-valid',
+          chunkIndex: 1,
+          totalChunks: 2,
+          chunkData: 'valid1'
+        })
+      } as MessageEvent,
+      'client-sender'
+    )
+
+    expect(api.uploadPitPhoto).toHaveBeenCalledTimes(1)
+    expect(api.uploadPitPhoto).toHaveBeenCalledWith('e1', 'k-valid', 'valid0valid1')
+    expect(hostSendMessage).toHaveBeenCalledWith(
+      expect.objectContaining({
+        type: 'PIT_PHOTO_ACK',
+        eventId: 'e1',
+        key: 'k-valid',
+        success: true
+      }),
+      'client-sender'
+    )
   })
 
   it('safely handles duplicate chunk delivery without incrementing count or causing premature assembly', async () => {

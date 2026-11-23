@@ -7,6 +7,7 @@ import com.bear27570.app.db.UserDeterministicIdMigrator;
 import com.bear27570.app.model.ScoutingRecord;
 import com.bear27570.app.model.User;
 import com.bear27570.app.util.DbUtil;
+import com.bear27570.app.util.EcdsaRecordVerifier;
 import com.google.gson.Gson;
 import com.google.gson.reflect.TypeToken;
 import io.javalin.config.RoutesConfig;
@@ -152,9 +153,9 @@ public class RecordRoutes {
                                 boolean isHost = eventDao.isHost(r.getEventId(), userId);
                                 ScoutingRecord existing = recordDao.findById(r.getId());
                                 
-                                boolean isAuthoritativeStamped = (r.getHostSeq() != null && r.getHostSeq() > 0);
-                                if (!isHost && !isAuthoritativeStamped) {
-                                    // Ordinary scouts can only sync their own unstamped records
+                                boolean isCryptographicallySignedPeerRecord = EcdsaRecordVerifier.verifyScoutingRecord(r);
+                                if (!isHost && !isCryptographicallySignedPeerRecord) {
+                                    // Ordinary scouts can only sync their own unsigned/local records
                                     if (r.getScoutId() == null || r.getScoutId().isBlank()) {
                                         r.setScoutId(userId);
                                     } else if (!Objects.equals(r.getScoutId(), userId)) {
@@ -164,17 +165,20 @@ public class RecordRoutes {
                                     if (existing != null && !Objects.equals(existing.getScoutId(), userId)) {
                                         throw new io.javalin.http.ForbiddenResponse("Cannot modify another scout's record");
                                     }
+                                } else if (!isHost) {
+                                    // Non-host ordinary scout relaying or updating a cryptographically signed record:
+                                    // enforce author immutability and ECDSA public-key-to-scout binding
+                                    com.bear27570.app.model.ScoutingEvent evt = eventDao.findById(r.getEventId());
+                                    String eventHostId = evt != null ? evt.getHostId() : null;
+                                    EcdsaRecordVerifier.AuthResult auth = EcdsaRecordVerifier.verifyNonHostPeerRecordAuthorization(
+                                            handle, r.getEventId(), eventHostId, userId, r, existing);
+                                    if (!auth.allowed()) {
+                                        throw new io.javalin.http.ForbiddenResponse(auth.rejectReason());
+                                    }
                                 } else {
-                                    if (!isHost) {
-                                        // Non-host ordinary scout cannot alter the author of an existing record even if stamped
-                                        if (existing != null && !Objects.equals(existing.getScoutId(), r.getScoutId())) {
-                                            throw new io.javalin.http.ForbiddenResponse("Cannot alter the author of an existing record");
-                                        }
-                                    } else {
-                                        // Host is authorized to alter author (e.g. account merge/migration)
-                                        if (existing != null && (r.getScoutId() == null || r.getScoutId().isBlank())) {
-                                            r.setScoutId(existing.getScoutId());
-                                        }
+                                    // Host is authorized to alter author (e.g. account merge/migration)
+                                    if (existing != null && (r.getScoutId() == null || r.getScoutId().isBlank())) {
+                                        r.setScoutId(existing.getScoutId());
                                     }
                                 }
                                 

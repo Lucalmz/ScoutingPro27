@@ -406,8 +406,7 @@ async function handleSubmit() {
         createdAt: props.editRecord ? props.editRecord.createdAt : new Date().toISOString(),
         updatedAt: new Date().toISOString(),
         isBroken: team.isBroken,
-        version: props.editRecord ? (props.editRecord.version || 0) : 0,
-        hostSeq: props.editRecord ? props.editRecord.hostSeq : undefined
+        version: props.editRecord ? (props.editRecord.version || 0) : 0
       }
     })
 

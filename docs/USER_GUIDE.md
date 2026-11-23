@@ -31,4 +31,4 @@
 ### 3. 最新版 5 级传输状态识别（顶部/手机端状态胶囊）
 - **`IPv6 直连 / IPv6 Direct`** · **`局域网直连 / LAN Direct`** · **`IPv4 打洞 / IPv4 Hole-punch`**：点对点毫秒级直连（桌面 Host 启动自动在物理网卡尝试 UPnP/PCP 开孔）。
 - **`ECDH 加密通道 / ECDH Tunnel (TLS)`**：UDP 受阻（如手机开 VPN）时秒级自动切入的 **零 TURN 流量** 端到端加密通道，后台持续静默探针升级回直连。
-- **`TURN 中继 / TURN Relay`**：极端防火墙最后保底（可在「考察员与设置」配置队伍专属 **自定义 TURN**）。详情见 [VPN P2P 真机测试指南](./VPN_P2P_TEST_GUIDE.md)。
+- **`TURN 中继 / TURN Relay`**：极端防火墙最后保底（可在「考察员与设置」配置队伍专属 **自定义 TURN**）。详情见 [VPN P2P 真机测试指南](./testing/VPN_P2P_TEST_GUIDE.md) 与 [赛前全功能手动测试清单](./testing/MANUAL_TESTING_CHECKLIST.md)。

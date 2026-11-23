@@ -1,5 +1,5 @@
-import { describe, it, expect, beforeEach, vi } from 'vitest'
-import { mount } from '@vue/test-utils'
+import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest'
+import { mount, type VueWrapper } from '@vue/test-utils'
 import { setActivePinia, createPinia } from 'pinia'
 import MobilePhaseWizardForm from '../components/scouting/mobile/MobilePhaseWizardForm.vue'
 import { useRecordStore } from '../stores/records'
@@ -39,18 +39,30 @@ vi.mock('vue-i18n', async (importOriginal) => {
 })
 
 describe('MobilePhaseWizardForm.vue', () => {
+  const wrappers: VueWrapper<any>[] = []
+  const track = <T extends VueWrapper<any>>(w: T): T => {
+    wrappers.push(w)
+    return w
+  }
+
   beforeEach(() => {
+    localStorage.clear()
     setActivePinia(createPinia())
   })
 
+  afterEach(() => {
+    while (wrappers.length) wrappers.pop()!.unmount()
+    localStorage.clear()
+  })
+
   it('renders Step 0 (Pre-match) initially, supports stepper adjustments and disables progression until valid', async () => {
-    const wrapper = mount(MobilePhaseWizardForm, {
+    const wrapper = track(mount(MobilePhaseWizardForm, {
       props: {
         eventId: 'evt_1',
         scoutId: 'scout_1',
         scoutName: 'Alice'
       }
-    })
+    }))
 
     // Stepper has 5 steps
     const stepButtons = wrapper.findAll('.stepper-step')
@@ -95,13 +107,13 @@ describe('MobilePhaseWizardForm.vue', () => {
   })
 
   it('completes the full 5-phase match scouting flow and submits record', async () => {
-    const wrapper = mount(MobilePhaseWizardForm, {
+    const wrapper = track(mount(MobilePhaseWizardForm, {
       props: {
         eventId: 'evt_1',
         scoutId: 'scout_1',
         scoutName: 'Alice'
       }
-    })
+    }))
 
     // STEP 0: Pre-Match Setup
     await wrapper.find('.blue-btn').trigger('click')
@@ -179,7 +191,7 @@ describe('MobilePhaseWizardForm.vue', () => {
   })
 
   it('populates fields when assignedTask prop is supplied', async () => {
-    const wrapper = mount(MobilePhaseWizardForm, {
+    const wrapper = track(mount(MobilePhaseWizardForm, {
       props: {
         eventId: 'evt_1',
         scoutId: 'scout_1',
@@ -190,7 +202,7 @@ describe('MobilePhaseWizardForm.vue', () => {
           allianceColor: 'red'
         }
       }
-    })
+    }))
 
     const numInputs = wrapper.findAll('.giant-num-input')
     expect((numInputs[0].element as HTMLInputElement).value).toBe('12')
@@ -231,14 +243,14 @@ describe('MobilePhaseWizardForm.vue', () => {
       version: 1
     }
 
-    const wrapper = mount(MobilePhaseWizardForm, {
+    const wrapper = track(mount(MobilePhaseWizardForm, {
       props: {
         eventId: 'evt_1',
         scoutId: 'scout_1',
         scoutName: 'Alice',
         editRecord: mockRecord
       }
-    })
+    }))
 
     // Edit mode top bar should be visible with cancel button
     const editBar = wrapper.find('.edit-mode-bar')
@@ -247,7 +259,7 @@ describe('MobilePhaseWizardForm.vue', () => {
     const cancelChip = wrapper.find('.btn-cancel-edit-chip')
     expect(cancelChip.exists()).toBe(true)
     await cancelChip.trigger('click')
-    expect(wrapper.emitted('cancelEdit')).toBeTruthy()
+    expect(wrapper.emitted('cancelEdit')).toHaveLength(1)
 
     const numInputs = wrapper.findAll('.giant-num-input')
     expect((numInputs[0].element as HTMLInputElement).value).toBe('8')
@@ -261,20 +273,23 @@ describe('MobilePhaseWizardForm.vue', () => {
 
     // Submit edit
     await wrapper.find('.btn-wizard-submit').trigger('click')
-    expect(wrapper.emitted('submit')).toBeTruthy()
+    const editSubmit = wrapper.emitted('submit')
+    expect(editSubmit).toHaveLength(1)
+    expect((editSubmit![0][0] as ScoutingRecord).matchNumber).toBe(8)
+    expect((editSubmit![0][0] as ScoutingRecord).teamNumber).toBe(9999)
   })
 
   it('shows banned warning card when team is in bannedTeams list', async () => {
     const recordStore = useRecordStore()
     recordStore.bannedTeams = [12345]
 
-    const wrapper = mount(MobilePhaseWizardForm, {
+    const wrapper = track(mount(MobilePhaseWizardForm, {
       props: {
         eventId: 'evt_1',
         scoutId: 'scout_1',
         scoutName: 'Alice'
       }
-    })
+    }))
 
     const teamInput = wrapper.findAll('.giant-num-input')[1]
     await teamInput.setValue('12345')
@@ -284,13 +299,13 @@ describe('MobilePhaseWizardForm.vue', () => {
   })
 
   it('supports teleop cycle chips: tapping chip decrements ball count, tapping close icon removes cycle', async () => {
-    const wrapper = mount(MobilePhaseWizardForm, {
+    const wrapper = track(mount(MobilePhaseWizardForm, {
       props: {
         eventId: 'evt_1',
         scoutId: 'scout_1',
         scoutName: 'Alice'
       }
-    })
+    }))
 
     // Setup match
     await wrapper.find('.red-btn').trigger('click')
@@ -323,13 +338,13 @@ describe('MobilePhaseWizardForm.vue', () => {
   })
 
   it('enforces manual cycle progression with 0-ball protection and max-4-balls cap with pulsing glow', async () => {
-    const wrapper = mount(MobilePhaseWizardForm, {
+    const wrapper = track(mount(MobilePhaseWizardForm, {
       props: {
         eventId: 'evt_1',
         scoutId: 'scout_1',
         scoutName: 'Alice'
       }
-    })
+    }))
 
     await wrapper.find('.red-btn').trigger('click')
     await wrapper.findAll('.giant-num-input')[1].setValue('27570')
@@ -373,13 +388,13 @@ describe('MobilePhaseWizardForm.vue', () => {
   })
 
   it('supports preset capsules [1, 2, 3, 4] with safety truncation', async () => {
-    const wrapper = mount(MobilePhaseWizardForm, {
+    const wrapper = track(mount(MobilePhaseWizardForm, {
       props: {
         eventId: 'evt_1',
         scoutId: 'scout_1',
         scoutName: 'Alice'
       }
-    })
+    }))
 
     await wrapper.find('.red-btn').trigger('click')
     await wrapper.findAll('.giant-num-input')[1].setValue('27570')
@@ -405,13 +420,13 @@ describe('MobilePhaseWizardForm.vue', () => {
   })
 
   it('supports single-step undo and cross-cycle empty undo', async () => {
-    const wrapper = mount(MobilePhaseWizardForm, {
+    const wrapper = track(mount(MobilePhaseWizardForm, {
       props: {
         eventId: 'evt_1',
         scoutId: 'scout_1',
         scoutName: 'Alice'
       }
-    })
+    }))
 
     await wrapper.find('.red-btn').trigger('click')
     await wrapper.findAll('.giant-num-input')[1].setValue('27570')
@@ -448,13 +463,13 @@ describe('MobilePhaseWizardForm.vue', () => {
     vi.setSystemTime(now)
 
     try {
-      const wrapper = mount(MobilePhaseWizardForm, {
+      const wrapper = track(mount(MobilePhaseWizardForm, {
         props: {
           eventId: 'evt_1',
           scoutId: 'scout_1',
           scoutName: 'Alice'
         }
-      })
+      }))
 
       await wrapper.find('.red-btn').trigger('click')
       await wrapper.findAll('.giant-num-input')[1].setValue('27570')

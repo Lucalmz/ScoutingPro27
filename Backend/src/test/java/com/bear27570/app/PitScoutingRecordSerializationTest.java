@@ -8,6 +8,8 @@ import com.bear27570.app.model.PitScoutingRecord;
 import com.bear27570.app.model.ScoutingEvent;
 import com.bear27570.app.model.User;
 import com.bear27570.app.routes.ApiRoutes;
+import com.bear27570.app.util.AESUtil;
+import com.bear27570.app.util.JwtUtil;
 import com.google.gson.Gson;
 import com.google.gson.JsonObject;
 import com.google.gson.JsonParser;
@@ -15,21 +17,34 @@ import io.javalin.Javalin;
 import io.javalin.testtools.JavalinTest;
 import org.flywaydb.core.Flyway;
 import org.jdbi.v3.core.Jdbi;
+import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.io.TempDir;
 
+import java.nio.file.Path;
 import java.util.List;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
 class PitScoutingRecordSerializationTest {
 
+    @TempDir
+    Path tempDir;
+
     private Jdbi jdbi;
+    private ApiRoutes apiRoutes;
     private Gson gson;
+    private String prevDataDir;
     private String eventId = "evt_photo_test";
 
     @BeforeEach
     void setUp() {
+        prevDataDir = System.getProperty("scouting.data.dir");
+        System.setProperty("scouting.data.dir", tempDir.toAbsolutePath().toString());
+        JwtUtil.resetForTest();
+        AESUtil.resetForTest();
+
         String url = "jdbc:h2:mem:test_pit_serialization_" + System.nanoTime() + ";DB_CLOSE_DELAY=-1";
         Flyway.configure()
                 .dataSource(url, "sa", "")
@@ -55,6 +70,24 @@ class PitScoutingRecordSerializationTest {
             evt.setHostId("user_pit_1");
             dao.insert(evt);
         });
+    }
+
+    @AfterEach
+    void tearDown() {
+        try {
+            if (apiRoutes != null) {
+                apiRoutes.shutdown();
+            }
+            JdbiConfig.closeDataSources();
+        } finally {
+            JwtUtil.resetForTest();
+            AESUtil.resetForTest();
+            if (prevDataDir == null) {
+                System.clearProperty("scouting.data.dir");
+            } else {
+                System.setProperty("scouting.data.dir", prevDataDir);
+            }
+        }
     }
 
     @Test
@@ -192,7 +225,8 @@ class PitScoutingRecordSerializationTest {
 
     @Test
     void testPitScoutRoutesStructuredAndLegacyCompatibility() {
-        Javalin app = Javalin.create(config -> new ApiRoutes(jdbi).register(config.routes));
+        apiRoutes = new ApiRoutes(jdbi);
+        Javalin app = Javalin.create(config -> apiRoutes.register(config.routes));
         JavalinTest.test(app, (server, client) -> {
             client.post("/api/user/register", "{\"username\":\"pithost\", \"password\":\"Pass123!\"}");
             var loginRes = client.post("/api/user/login", "{\"username\":\"pithost\", \"password\":\"Pass123!\"}");

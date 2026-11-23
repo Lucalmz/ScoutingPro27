@@ -193,8 +193,6 @@ export const useRecordStore = defineStore('records', () => {
         } else {
           if (cur.syncStatus === 'PENDING' && (cur.version || 0) > (f.version || 0)) {
             mergedMap.set(f.id, cur)
-          } else if ((f.hostSeq ?? 0) > (cur.hostSeq ?? 0)) {
-            mergedMap.set(f.id, f)
           } else if ((f.version || 0) > (cur.version || 0)) {
             mergedMap.set(f.id, f)
           } else if ((f.version || 0) === (cur.version || 0)) {
@@ -209,12 +207,12 @@ export const useRecordStore = defineStore('records', () => {
         }
       }
 
-      // 保留当前内存中已有但本地 DB 尚未返回的记录（如通过 WebRTC 接收且已打 hostSeq 的对端记录）
+      // 保留当前内存中已有但本地 DB 尚未返回的记录（如通过 CRDT 接收且含作者 ECDSA 签名的对端记录）
       const unpersistedToSync: ScoutingRecord[] = []
       for (const cur of currentMap.values()) {
         if (!mergedMap.has(cur.id)) {
           mergedMap.set(cur.id, cur)
-          if ((cur.hostSeq ?? 0) > 0) {
+          if (cur.authorPubKey && cur.authorSig) {
             unpersistedToSync.push(cur)
           }
         }
@@ -353,11 +351,13 @@ export const useRecordStore = defineStore('records', () => {
     await signScoutingRecordWithDeviceKey(record)
 
     try {
-      const [{ useEventStore }] = await Promise.all([
-        import('@/stores/events')
+      const [{ useEventStore }, { useConnectionStore }] = await Promise.all([
+        import('@/stores/events'),
+        import('@/stores/connection')
       ])
       const eventStore = useEventStore()
-      const isAuthoritativeHost = Boolean(eventStore.isHost && !isStaticCloudHost())
+      const connStore = useConnectionStore()
+      const isAuthoritativeHost = Boolean(eventStore.isHost && !connStore.isStandbyHost && !isStaticCloudHost())
       const crdtHandle = record.eventId ? getExistingEventCrdt(record.eventId) : undefined
       const crdtTransportOn = Boolean(record.eventId && isCrdtTransportActive(record.eventId))
 
@@ -371,7 +371,6 @@ export const useRecordStore = defineStore('records', () => {
         record.syncStatus = 'SYNCED'
       } else {
         // 非主机客户端（手机端/从机/静态托管）：CRDT 传输在线或 Host 落库后标记 SYNCED；离线严格保持 PENDING
-        record.hostSeq = undefined
         if (crdtHandle) {
           withLocalCrdtWrite(record.eventId, () => {
             writeScoutingRecordToCrdt(crdtHandle.store, record)
@@ -417,9 +416,13 @@ export const useRecordStore = defineStore('records', () => {
     const recordsToPush = [target]
 
     try {
-      const [{ useEventStore }] = await Promise.all([import('@/stores/events')])
+      const [{ useEventStore }, { useConnectionStore }] = await Promise.all([
+        import('@/stores/events'),
+        import('@/stores/connection')
+      ])
       const eventStore = useEventStore()
-      const isAuthoritativeHost = Boolean(eventStore.isHost && !isStaticCloudHost())
+      const connStore = useConnectionStore()
+      const isAuthoritativeHost = Boolean(eventStore.isHost && !connStore.isStandbyHost && !isStaticCloudHost())
       const crdtHandle = target.eventId ? getExistingEventCrdt(target.eventId) : undefined
       const crdtTransportOn = Boolean(target.eventId && isCrdtTransportActive(target.eventId))
 
@@ -486,17 +489,14 @@ export const useRecordStore = defineStore('records', () => {
         if (local) {
           const incV = inc.version || 0
           const localV = local.version || 0
-          const incHostSeq = inc.hostSeq ?? 0
-          const localHostSeq = local.hostSeq ?? 0
 
           const shouldAccept = incV > localV ||
-            (incV === localV && incHostSeq > localHostSeq) ||
-            (incV === localV && incHostSeq === localHostSeq && inc.updatedAt > local.updatedAt)
+            (incV === localV && inc.updatedAt > local.updatedAt)
 
           if (shouldAccept) {
             records.value[idx] = inc
             savedLocal = records.value[idx] ?? null
-          } else if (incV === localV && incHostSeq === localHostSeq && inc.syncStatus === 'SYNCED' && local.syncStatus !== 'SYNCED') {
+          } else if (incV === localV && inc.updatedAt === local.updatedAt && inc.syncStatus === 'SYNCED' && local.syncStatus !== 'SYNCED') {
             local.syncStatus = 'SYNCED'
             savedLocal = local
           }
@@ -538,7 +538,7 @@ export const useRecordStore = defineStore('records', () => {
     const eventStore = useEventStore()
     const userStore = useUserStore()
     if (!eventStore.isHost && userStore.userId) {
-      const toSync = acceptedRecords.filter(r => r.scoutId === userStore.userId || ((r.hostSeq ?? 0) > 0))
+      const toSync = acceptedRecords.filter(r => r.scoutId === userStore.userId || Boolean(r.authorPubKey && r.authorSig))
       if (toSync.length > 0) {
         try {
           await syncRecords(toSync)
@@ -553,14 +553,23 @@ export const useRecordStore = defineStore('records', () => {
 
   // --- mark records as synced locally ---
   async function markSynced(ids: string[]) {
+    let changed = false
     for (const id of ids) {
       const r = records.value.find((r) => r.id === id)
-      if (r) r.syncStatus = 'SYNCED'
+      if (r && r.syncStatus !== 'SYNCED') {
+        r.syncStatus = 'SYNCED'
+        changed = true
+      }
     }
-    try {
-      await markRecordsSynced(ids)
-    } catch {
-      // 后端更新失败不影响前端
+    if (changed) {
+      flushStorage()
+    }
+    if (!isStaticCloudHost()) {
+      try {
+        await markRecordsSynced(ids)
+      } catch {
+        // 后端更新失败不影响前端
+      }
     }
   }
 
@@ -641,7 +650,7 @@ export const useRecordStore = defineStore('records', () => {
         writeTeamTagToCrdt(crdtHandle.store, { ...saved, eventId: saved.eventId || eventId }, true)
       })
     }
-    if (!isCrdtTransportActive(eventId)) {
+    if (!isCrdtTransportActive(eventId) && !crdtHandle) {
       import('@/stores/connection').then(({ useConnectionStore }) => {
         useConnectionStore().broadcastTagUpdate(saved, 'ADD')
       }).catch(() => {})
@@ -672,7 +681,7 @@ export const useRecordStore = defineStore('records', () => {
       })
     }
     applyTagUpdate(tagItem, 'REMOVE')
-    if (!isCrdtTransportActive(eventId)) {
+    if (!isCrdtTransportActive(eventId) && !crdtHandle) {
       import('@/stores/connection').then(({ useConnectionStore }) => {
         useConnectionStore().broadcastTagUpdate(tagItem, 'REMOVE')
       }).catch(() => {})

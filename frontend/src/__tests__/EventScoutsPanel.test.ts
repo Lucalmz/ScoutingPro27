@@ -1,6 +1,6 @@
 import { setActivePinia, createPinia } from 'pinia'
-import { describe, it, expect, beforeEach, vi } from 'vitest'
-import { mount, flushPromises } from '@vue/test-utils'
+import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest'
+import { mount, flushPromises, type VueWrapper } from '@vue/test-utils'
 import EventScoutsPanel from '../components/scouting/EventScoutsPanel.vue'
 import SendMessageModal from '../components/scouting/SendMessageModal.vue'
 import { useConnectionStore } from '../stores/connection'
@@ -63,9 +63,23 @@ vi.mock('vue-i18n', async (importOriginal) => {
 })
 
 describe('EventScoutsPanel.vue', () => {
+  const wrappers: VueWrapper<any>[] = []
+  const track = <T extends VueWrapper<any>>(w: T): T => {
+    wrappers.push(w)
+    return w
+  }
+
   beforeEach(() => {
+    localStorage.clear()
     setActivePinia(createPinia())
     vi.clearAllMocks()
+  })
+
+  afterEach(() => {
+    while (wrappers.length) wrappers.pop()!.unmount()
+    document.body.innerHTML = ''
+    localStorage.clear()
+    vi.restoreAllMocks()
   })
 
   it('fetches event members and renders new users immediately even with 0 records', async () => {
@@ -75,7 +89,7 @@ describe('EventScoutsPanel.vue', () => {
     ]
     vi.mocked(api.fetchEventMembers).mockResolvedValue(mockMembers)
 
-    const wrapper = mount(EventScoutsPanel, {
+    const wrapper = track(mount(EventScoutsPanel, {
       props: {
         event: {
           id: 'event-test-1',
@@ -86,7 +100,7 @@ describe('EventScoutsPanel.vue', () => {
           updatedAt: ''
         }
       }
-    })
+    }))
 
     await flushPromises()
 
@@ -150,7 +164,7 @@ describe('EventScoutsPanel.vue', () => {
       } as ScoutingRecord
     ]
 
-    const wrapper = mount(EventScoutsPanel, {
+    const wrapper = track(mount(EventScoutsPanel, {
       props: {
         event: {
           id: 'event-test-1',
@@ -161,7 +175,7 @@ describe('EventScoutsPanel.vue', () => {
           updatedAt: ''
         }
       }
-    })
+    }))
 
     await flushPromises()
 
@@ -177,7 +191,7 @@ describe('EventScoutsPanel.vue', () => {
     ]
     vi.mocked(api.fetchEventMembers).mockResolvedValue(mockMembers)
 
-    const wrapper = mount(EventScoutsPanel, {
+    const wrapper = track(mount(EventScoutsPanel, {
       props: {
         event: {
           id: 'event-test-1',
@@ -188,7 +202,7 @@ describe('EventScoutsPanel.vue', () => {
           updatedAt: ''
         }
       }
-    })
+    }))
 
     await flushPromises()
 
@@ -238,11 +252,11 @@ describe('EventScoutsPanel.vue', () => {
     const { confirmState, handleConfirm } = useConfirm()
     expect(confirmState.value).toBeNull()
 
-    const wrapper = mount(EventScoutsPanel, {
+    const wrapper = track(mount(EventScoutsPanel, {
       props: {
         event: eventStore.currentEvent
       }
-    })
+    }))
 
     await flushPromises()
 
@@ -309,7 +323,7 @@ describe('EventScoutsPanel.vue', () => {
     ]
     recordStore.currentEventId = 'event-test-1'
 
-    const wrapper = mount(EventScoutsPanel, {
+    const wrapper = track(mount(EventScoutsPanel, {
       props: {
         event: {
           id: 'event-test-1',
@@ -320,16 +334,18 @@ describe('EventScoutsPanel.vue', () => {
           updatedAt: ''
         }
       }
-    })
+    }))
 
     await flushPromises()
 
     const btns = wrapper.findAll('button')
-    const exportRankingsBtn = btns.find(b => b.text().includes('event.export_rankings'))!
-    const exportRecordsBtn = btns.find(b => b.text().includes('event.export_records'))!
+    const exportRankingsBtn = btns.find(b => b.text().includes('event.export_rankings'))
+    const exportRecordsBtn = btns.find(b => b.text().includes('event.export_records'))
+    expect(exportRankingsBtn).toBeDefined()
+    expect(exportRecordsBtn).toBeDefined()
 
-    await exportRankingsBtn.trigger('click')
-    await exportRecordsBtn.trigger('click')
+    await exportRankingsBtn!.trigger('click')
+    await exportRecordsBtn!.trigger('click')
 
     expect(vi.mocked(downloadCSV)).toHaveBeenCalledTimes(2)
     const [rankFile, rankHeaders, rankRows] = vi.mocked(downloadCSV).mock.calls[0]!
@@ -366,7 +382,7 @@ describe('EventScoutsPanel.vue', () => {
       rttMs: 19
     })
 
-    const wrapper = mount(EventScoutsPanel, {
+    const wrapper = track(mount(EventScoutsPanel, {
       props: {
         event: {
           id: 'event-test-1',
@@ -377,7 +393,7 @@ describe('EventScoutsPanel.vue', () => {
           updatedAt: ''
         }
       }
-    })
+    }))
 
     await flushPromises()
 
@@ -435,19 +451,21 @@ describe('EventScoutsPanel.vue', () => {
     eventStore.setCurrentEvent(baseEvent)
     expect(eventStore.isHost).toBe(false)
 
-    const scoutWrapper = mount(EventScoutsPanel, {
+    const scoutWrapper = track(mount(EventScoutsPanel, {
       props: { event: baseEvent }
-    })
+    }))
     await flushPromises()
+    expect(scoutWrapper.find('.event-scouts-panel').exists()).toBe(true)
+    expect(scoutWrapper.find('.settings-panel').exists()).toBe(true)
     expect(scoutWrapper.find('[data-testid="custom-turn-panel"]').exists()).toBe(false)
 
     // Host
     userStore.user = { id: 'u_host', username: 'Host' } as any
     expect(eventStore.isHost).toBe(true)
 
-    const hostWrapper = mount(EventScoutsPanel, {
+    const hostWrapper = track(mount(EventScoutsPanel, {
       props: { event: baseEvent }
-    })
+    }))
     await flushPromises()
     expect(hostWrapper.find('[data-testid="custom-turn-panel"]').exists()).toBe(true)
     expect(hostWrapper.find('[data-testid="turn-status-banner"]').text()).toContain('event.turn_status_default')
@@ -489,9 +507,9 @@ describe('EventScoutsPanel.vue', () => {
     eventStore.setCurrentEvent(evt)
     eventStore.events = [evt]
 
-    const wrapper = mount(EventScoutsPanel, {
+    const wrapper = track(mount(EventScoutsPanel, {
       props: { event: eventStore.currentEvent }
-    })
+    }))
     await flushPromises()
 
     await wrapper.find('[data-testid="turn-urls-input"]').setValue(
@@ -545,9 +563,9 @@ describe('EventScoutsPanel.vue', () => {
     eventStore.setCurrentEvent(evt)
     eventStore.events = [evt]
 
-    const wrapper = mount(EventScoutsPanel, {
+    const wrapper = track(mount(EventScoutsPanel, {
       props: { event: eventStore.currentEvent }
-    })
+    }))
     await flushPromises()
 
     expect(wrapper.find('[data-testid="turn-status-banner"]').text()).toContain('event.turn_status_custom')
@@ -582,9 +600,9 @@ describe('EventScoutsPanel.vue', () => {
     userStore.user = { id: 'u_host', username: 'Host' } as any
     eventStore.setCurrentEvent(evt)
 
-    const wrapper = mount(EventScoutsPanel, {
+    const wrapper = track(mount(EventScoutsPanel, {
       props: { event: evt }
-    })
+    }))
     await flushPromises()
 
     await wrapper.find('[data-testid="turn-urls-input"]').setValue('https://not-a-turn-url.example.com')

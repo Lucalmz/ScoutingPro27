@@ -19,11 +19,12 @@
   <a href="README_en.md"><b>English</b></a>
   &nbsp;|&nbsp;
   <b>新手手册 / User Guide (独立图文教程):</b>
-  <a href="USER_GUIDE.md"><b>双语总入口</b></a> ·
+  <a href="docs/USER_GUIDE.md"><b>双语总入口</b></a> ·
   <a href="docs/USER_GUIDE.zh.md"><b>中文保姆级手册</b></a> ·
   <a href="docs/USER_GUIDE.en.md"><b>English Guide</b></a> ·
   <a href="docs/ScoutingPro27_UserGuide_ZH.pdf"><b>离线 PDF (ZH)</b></a> ·
-  <a href="docs/ScoutingPro27_UserGuide_EN.pdf"><b>Offline PDF (EN)</b></a>
+  <a href="docs/ScoutingPro27_UserGuide_EN.pdf"><b>Offline PDF (EN)</b></a> ·
+  <a href="docs/README.md"><b>完整文档索引</b></a>
 </p>
 
 > 💡 **由 FIRST Tech Challenge (FTC) Team 27570 B.E.A.R. 中学生团队独立构思、架构并全栈开发。**  
@@ -53,10 +54,11 @@
 
 ## 📖 新手操作指南（独立文档）
 
-> 为保持本 README 聚焦于工程架构与技术实现，**零基础图文操作手册已完全独立拆分**。队员与领队请直接阅读：
-> - 📘 **[双语手册总入口 (USER_GUIDE.md)](USER_GUIDE.md)**
+> 为保持本 README 聚焦于工程架构与技术实现，**零基础图文操作手册与工程文档已统一收纳至 `docs/`**。队员与领队请直接阅读：
+> - 📘 **[双语手册总入口 (docs/USER_GUIDE.md)](docs/USER_GUIDE.md)**
 > - 🇨🇳 **[中文保姆级图文教程 (docs/USER_GUIDE.zh.md)](docs/USER_GUIDE.zh.md)** / **[中文离线 PDF](docs/ScoutingPro27_UserGuide_ZH.pdf)**
 > - 🇺🇸 **[English Step-by-Step Guide (docs/USER_GUIDE.en.md)](docs/USER_GUIDE.en.md)** / **[English Offline PDF](docs/ScoutingPro27_UserGuide_EN.pdf)**
+> - 🗂️ **[完整文档目录（测试指南 / 发版记录 / 架构规划）(docs/README.md)](docs/README.md)**
 
 ---
 

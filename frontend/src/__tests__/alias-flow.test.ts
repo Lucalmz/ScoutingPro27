@@ -22,6 +22,7 @@ vi.mock('@/services/api', () => ({
 
 describe('Legacy Alias End-to-End Flow & Authoritative ID Binding', () => {
   let mockMqttClient: any
+  const origRtcpc = global.RTCPeerConnection
 
   beforeEach(() => {
     (globalThis as any).__TEST_ALLOW_UNSIGNED_SIGNALING__ = true
@@ -56,7 +57,9 @@ describe('Legacy Alias End-to-End Flow & Authoritative ID Binding', () => {
   })
 
   afterEach(() => {
-    (globalThis as any).__TEST_ALLOW_UNSIGNED_SIGNALING__ = false
+    delete (globalThis as any).__TEST_ALLOW_UNSIGNED_SIGNALING__
+    global.RTCPeerConnection = origRtcpc
+    localStorage.clear()
     vi.clearAllMocks()
     vi.useRealTimers()
   })
@@ -144,7 +147,9 @@ describe('Legacy Alias End-to-End Flow & Authoritative ID Binding', () => {
       sender: 'peer_primary_alice',
       offer: { type: 'offer', sdp: '...' }
     })))
-    await new Promise(r => setTimeout(r, 10))
+    await vi.waitFor(() => {
+      expect(vi.mocked(global.RTCPeerConnection).mock.results[0]?.value?.ondatachannel).toBeTypeOf('function')
+    })
     const pcPrimary = vi.mocked(global.RTCPeerConnection).mock.results[0].value
     const dcPrimary = { send: vi.fn(), readyState: 'open', close: vi.fn(), onmessage: null as any }
     pcPrimary.ondatachannel({ channel: dcPrimary })
@@ -164,7 +169,9 @@ describe('Legacy Alias End-to-End Flow & Authoritative ID Binding', () => {
       sender: 'peer_alias_alice',
       offer: { type: 'offer', sdp: '...' }
     })))
-    await new Promise(r => setTimeout(r, 10))
+    await vi.waitFor(() => {
+      expect(vi.mocked(global.RTCPeerConnection).mock.results[1]?.value?.ondatachannel).toBeTypeOf('function')
+    })
     const pcAlias = vi.mocked(global.RTCPeerConnection).mock.results[1].value
     const dcAlias = { send: vi.fn(), readyState: 'open', close: vi.fn(), onmessage: null as any }
     pcAlias.ondatachannel({ channel: dcAlias })
@@ -208,5 +215,7 @@ describe('Legacy Alias End-to-End Flow & Authoritative ID Binding', () => {
     expect(dcAlias.send).toHaveBeenCalledWith(
       expect.stringContaining('"recordIds":["rec_alias_100"]')
     )
+
+    service.disconnect()
   })
 })

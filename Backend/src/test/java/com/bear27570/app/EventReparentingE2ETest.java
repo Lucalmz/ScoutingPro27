@@ -1,8 +1,11 @@
 package com.bear27570.app;
 
 import com.bear27570.app.db.AppConfig;
+import com.bear27570.app.db.JdbiConfig;
 import com.bear27570.app.model.ScoutingEvent;
 import com.bear27570.app.routes.ApiRoutes;
+import com.bear27570.app.util.AESUtil;
+import com.bear27570.app.util.JwtUtil;
 import com.google.gson.Gson;
 import io.javalin.Javalin;
 import io.javalin.testtools.JavalinTest;
@@ -12,16 +15,22 @@ import org.jdbi.v3.sqlobject.SqlObjectPlugin;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.io.TempDir;
 
 import java.io.File;
 import java.nio.file.Files;
+import java.nio.file.Path;
 import java.util.Map;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
 class EventReparentingE2ETest {
 
+    @TempDir
+    Path tempDir;
+
     private Jdbi jdbi;
+    private ApiRoutes apiRoutes;
     private Javalin app;
     private Gson gson = new Gson();
     private String inviteCode = "TEST99";
@@ -29,9 +38,15 @@ class EventReparentingE2ETest {
     private String authoritativeEventId = "evt_authoritative_" + System.nanoTime();
     private File stubPhotoDir;
     private File targetPhotoDir;
+    private String prevDataDir;
 
     @BeforeEach
     void setUp() {
+        prevDataDir = System.getProperty("scouting.data.dir");
+        System.setProperty("scouting.data.dir", tempDir.toAbsolutePath().toString());
+        JwtUtil.resetForTest();
+        AESUtil.resetForTest();
+
         String url = "jdbc:h2:mem:test_reparent_" + System.nanoTime() + ";DB_CLOSE_DELAY=-1";
 
         Flyway.configure()
@@ -43,9 +58,8 @@ class EventReparentingE2ETest {
         jdbi = Jdbi.create(url, "sa", "");
         jdbi.installPlugin(new SqlObjectPlugin());
 
-        app = Javalin.create(config -> {
-            new ApiRoutes(jdbi).register(config.routes);
-        });
+        apiRoutes = new ApiRoutes(jdbi);
+        app = Javalin.create(config -> apiRoutes.register(config.routes));
 
         stubPhotoDir = new File(AppConfig.resolveBaseDataDir(), "pit_photos" + File.separator + stubEventId);
         targetPhotoDir = new File(AppConfig.resolveBaseDataDir(), "pit_photos" + File.separator + authoritativeEventId);
@@ -53,8 +67,22 @@ class EventReparentingE2ETest {
 
     @AfterEach
     void tearDown() {
-        cleanupDir(stubPhotoDir);
-        cleanupDir(targetPhotoDir);
+        try {
+            if (apiRoutes != null) {
+                apiRoutes.shutdown();
+            }
+            JdbiConfig.closeDataSources();
+            cleanupDir(stubPhotoDir);
+            cleanupDir(targetPhotoDir);
+        } finally {
+            JwtUtil.resetForTest();
+            AESUtil.resetForTest();
+            if (prevDataDir == null) {
+                System.clearProperty("scouting.data.dir");
+            } else {
+                System.setProperty("scouting.data.dir", prevDataDir);
+            }
+        }
     }
 
     private void cleanupDir(File dir) {
@@ -127,6 +155,21 @@ class EventReparentingE2ETest {
                     INSERT INTO ai_chat_sessions (user_id, event_id, chat_history_json)
                     VALUES (?, ?, '[]')
                 """, hostId, stubEventId);
+
+                handle.execute("""
+                    INSERT INTO ai_chat_threads (id, user_id, event_id, title)
+                    VALUES ('thread_stub_1', ?, ?, 'Stub Tactical Thread')
+                """, hostId, stubEventId);
+
+                handle.execute("""
+                    INSERT INTO event_custom_fields (id, event_id, target, phase, name, field_key, field_type)
+                    VALUES ('cf_stub_1', ?, 'MATCH', 'teleop', 'Cycle Rating', 'cycle_rating', 'level')
+                """, stubEventId);
+
+                handle.execute("""
+                    INSERT INTO event_crdt_state (event_id, host_epoch, snapshot_revision, crdt_snapshot_json)
+                    VALUES (?, 1, 3, '{"tables":{}}')
+                """, stubEventId);
             });
 
             // 3. Create physical photo on disk in stubPhotoDir
@@ -146,10 +189,10 @@ class EventReparentingE2ETest {
 
             var syncRes = client.post("/api/events/external-sync", gson.toJson(incoming),
                     b -> b.header("Authorization", "Bearer " + hostToken));
-            if (syncRes.code() != 200) {
-                System.err.println("SYNC ERROR: " + syncRes.code() + " -> " + syncRes.body().string());
-            }
-            assertThat(syncRes.code()).isEqualTo(200);
+            String syncBody = syncRes.body() != null ? syncRes.body().string() : "";
+            assertThat(syncRes.code())
+                    .withFailMessage("SYNC ERROR: %s -> %s", syncRes.code(), syncBody)
+                    .isEqualTo(200);
 
             // 5. Verify Database Reparenting
             jdbi.useHandle(handle -> {
@@ -170,6 +213,9 @@ class EventReparentingE2ETest {
                 assertThat(handle.createQuery("SELECT COUNT(*) FROM team_tags WHERE event_id = ?").bind(0, authoritativeEventId).mapTo(Integer.class).one()).isEqualTo(1);
                 assertThat(handle.createQuery("SELECT COUNT(*) FROM banned_teams WHERE event_id = ?").bind(0, authoritativeEventId).mapTo(Integer.class).one()).isEqualTo(1);
                 assertThat(handle.createQuery("SELECT COUNT(*) FROM ai_chat_sessions WHERE event_id = ?").bind(0, authoritativeEventId).mapTo(Integer.class).one()).isEqualTo(1);
+                assertThat(handle.createQuery("SELECT COUNT(*) FROM ai_chat_threads WHERE event_id = ?").bind(0, authoritativeEventId).mapTo(Integer.class).one()).isEqualTo(1);
+                assertThat(handle.createQuery("SELECT COUNT(*) FROM event_custom_fields WHERE event_id = ?").bind(0, authoritativeEventId).mapTo(Integer.class).one()).isEqualTo(1);
+                assertThat(handle.createQuery("SELECT COUNT(*) FROM event_crdt_state WHERE event_id = ?").bind(0, authoritativeEventId).mapTo(Integer.class).one()).isEqualTo(1);
                 assertThat(handle.createQuery("SELECT COUNT(*) FROM event_users WHERE event_id = ? AND user_id = ?").bind(0, authoritativeEventId).bind(1, scoutId).mapTo(Integer.class).one()).isEqualTo(1);
             });
 

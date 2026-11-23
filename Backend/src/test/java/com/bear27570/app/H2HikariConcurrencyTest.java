@@ -51,39 +51,43 @@ public class H2HikariConcurrencyTest {
         List<Future<Integer>> futures = new ArrayList<>();
         AtomicInteger totalSuccess = new AtomicInteger(0);
 
-        for (int i = 0; i < threadCount; i++) {
-            final int threadIdx = i;
-            futures.add(executor.submit(() -> {
-                latch.await(); // ensure all 20 threads hit Jdbi at the exact same instant
-                int count = 0;
-                for (int op = 0; op < operationsPerThread; op++) {
-                    String userId = "user_conc_" + threadIdx + "_" + op;
-                    String username = "Scout_" + threadIdx + "_" + op;
-                    jdbi.useExtension(UserDao.class, dao -> {
-                        User u = new User(userId, username);
-                        u.setPassword("pwd_" + threadIdx);
-                        dao.upsert(u);
-                    });
+        try {
+            for (int i = 0; i < threadCount; i++) {
+                final int threadIdx = i;
+                futures.add(executor.submit(() -> {
+                    latch.await(); // ensure all 20 threads hit Jdbi at the exact same instant
+                    int count = 0;
+                    for (int op = 0; op < operationsPerThread; op++) {
+                        String userId = "user_conc_" + threadIdx + "_" + op;
+                        String username = "Scout_" + threadIdx + "_" + op;
+                        jdbi.useExtension(UserDao.class, dao -> {
+                            User u = new User(userId, username);
+                            u.setPassword("pwd_" + threadIdx);
+                            dao.upsert(u);
+                        });
 
-                    User found = jdbi.withExtension(UserDao.class, dao -> dao.findById(userId));
-                    if (found != null && username.equals(found.getUsername())) {
-                        count++;
-                        totalSuccess.incrementAndGet();
+                        User found = jdbi.withExtension(UserDao.class, dao -> dao.findById(userId));
+                        if (found != null && username.equals(found.getUsername())) {
+                            count++;
+                            totalSuccess.incrementAndGet();
+                        }
                     }
-                }
-                return count;
-            }));
+                    return count;
+                }));
+            }
+
+            // Fire all threads simultaneously
+            latch.countDown();
+
+            for (Future<Integer> future : futures) {
+                future.get(30, TimeUnit.SECONDS);
+            }
+
+            executor.shutdown();
+            assertThat(executor.awaitTermination(5, TimeUnit.SECONDS)).isTrue();
+        } finally {
+            executor.shutdownNow();
         }
-
-        // Fire all threads simultaneously
-        latch.countDown();
-
-        for (Future<Integer> future : futures) {
-            future.get(30, TimeUnit.SECONDS);
-        }
-
-        executor.shutdown();
-        assertThat(executor.awaitTermination(5, TimeUnit.SECONDS)).isTrue();
 
         int expectedTotal = threadCount * operationsPerThread;
         assertThat(totalSuccess.get()).isEqualTo(expectedTotal);

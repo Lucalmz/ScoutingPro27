@@ -1,0 +1,497 @@
+.copilot-message {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  max-width: 100%;
+}
+
+.copilot-message.is-user {
+  align-items: flex-end;
+}
+
+.copilot-message.is-assistant {
+  align-items: flex-start;
+}
+
+.msg-role-bar {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 11px;
+  color: var(--muted-foreground);
+  padding: 0 2px;
+}
+
+.msg-role-dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+}
+
+.is-user .msg-role-dot {
+  background: var(--primary);
+}
+
+.is-assistant .msg-role-dot {
+  background: var(--status-ai);
+}
+
+.msg-role-label {
+  font-weight: 700;
+  color: var(--foreground);
+  font-size: 11px;
+}
+
+.msg-model-pill {
+  font-family: var(--font-mono);
+  font-size: 10px;
+  padding: 1px 6px;
+  border-radius: 999px;
+  background: var(--surface-elevated);
+  border: 1px solid var(--border-subtle);
+  color: var(--muted-foreground);
+  max-width: 180px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.msg-ctx-pill {
+  font-size: 10px;
+  color: var(--status-info);
+}
+
+/* Message Bubble / Card */
+.msg-bubble {
+  max-width: 100%;
+  border-radius: 12px;
+  padding: 10px 14px;
+  box-sizing: border-box;
+  font-size: 13.5px;
+  line-height: 1.55;
+  overflow-wrap: anywhere;
+}
+
+.is-user .msg-bubble {
+  max-width: 88%;
+  background: color-mix(in srgb, var(--primary) 14%, var(--surface-elevated));
+  border: 1px solid color-mix(in srgb, var(--primary) 34%, var(--border));
+  border-bottom-right-radius: 4px;
+}
+
+.is-assistant .msg-bubble {
+  width: 100%;
+  background: var(--surface);
+  border: 1px solid var(--border-subtle);
+  border-bottom-left-radius: 4px;
+}
+
+/* User plain text keeps line breaks cleanly */
+.user-text {
+  white-space: pre-wrap;
+  word-break: break-word;
+  color: var(--foreground);
+}
+
+/* CRITICAL FIX: Assistant rendered HTML MUST reset white-space: normal so markdown-it newlines do NOT explode lists and paragraphs! */
+.markdown-body {
+  white-space: normal;
+  word-break: break-word;
+  overflow-wrap: anywhere;
+  color: var(--foreground);
+  font-size: 13.5px;
+  line-height: 1.62;
+}
+
+.markdown-body :deep(> *:first-child) {
+  margin-top: 0;
+}
+
+.markdown-body :deep(> *:last-child) {
+  margin-bottom: 0;
+}
+
+.markdown-body :deep(p) {
+  margin: 0 0 8px;
+}
+
+.markdown-body :deep(h1),
+.markdown-body :deep(h2),
+.markdown-body :deep(h3),
+.markdown-body :deep(h4) {
+  margin: 12px 0 6px;
+  font-weight: 700;
+  color: var(--g-50);
+  line-height: 1.35;
+}
+
+.markdown-body :deep(h1) { font-size: 1.18em; }
+.markdown-body :deep(h2) { font-size: 1.1em; }
+.markdown-body :deep(h3) { font-size: 1.02em; }
+.markdown-body :deep(h4) { font-size: 0.96em; }
+
+.markdown-body :deep(ul),
+.markdown-body :deep(ol) {
+  margin: 6px 0 8px;
+  padding-left: 20px;
+}
+
+.markdown-body :deep(li) {
+  margin: 3px 0;
+}
+
+.markdown-body :deep(li > p) {
+  margin: 0;
+}
+
+.markdown-body :deep(blockquote) {
+  margin: 8px 0;
+  padding: 6px 12px;
+  border-left: 3px solid var(--status-ai);
+  background: color-mix(in srgb, var(--status-ai-bg) 45%, var(--surface-recessed));
+  border-radius: 0 6px 6px 0;
+  color: var(--g-200);
+}
+
+.markdown-body :deep(code:not(.hljs)) {
+  font-family: var(--font-mono);
+  font-size: 0.88em;
+  background: var(--g-800);
+  border: 1px solid var(--border-subtle);
+  padding: 1px 5px;
+  border-radius: 4px;
+  color: var(--s-200);
+}
+
+.markdown-body :deep(.md-code-block) {
+  margin: 8px 0;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  overflow: hidden;
+  background: var(--g-950);
+}
+
+.markdown-body :deep(.md-code-header) {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 4px 10px;
+  background: var(--g-850);
+  border-bottom: 1px solid var(--border-subtle);
+  font-size: 11px;
+  color: var(--muted-foreground);
+}
+
+.markdown-body :deep(.md-code-lang) {
+  font-family: var(--font-mono);
+  text-transform: lowercase;
+}
+
+.markdown-body :deep(.md-code-copy-btn) {
+  background: transparent;
+  border: 1px solid var(--border);
+  color: var(--g-200);
+  border-radius: 5px;
+  padding: 2px 8px;
+  font-size: 11px;
+  cursor: pointer;
+}
+
+.markdown-body :deep(.md-code-copy-btn:hover) {
+  border-color: var(--primary);
+  color: var(--primary);
+}
+
+.markdown-body :deep(pre.hljs) {
+  margin: 0;
+  padding: 10px 12px;
+  overflow-x: auto;
+  font-size: 12px;
+  line-height: 1.5;
+  white-space: pre;
+}
+
+.markdown-body :deep(.md-table-scroll) {
+  margin: 8px 0;
+  width: 100%;
+  overflow-x: auto;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+}
+
+.markdown-body :deep(table) {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 12px;
+  white-space: nowrap;
+}
+
+.markdown-body :deep(th),
+.markdown-body :deep(td) {
+  padding: 6px 10px;
+  border-bottom: 1px solid var(--border-subtle);
+  text-align: left;
+}
+
+.markdown-body :deep(th) {
+  background: var(--g-800);
+  font-weight: 700;
+  color: var(--g-100);
+}
+
+.markdown-body :deep(a) {
+  color: var(--status-info);
+  text-decoration: underline;
+  text-underline-offset: 2px;
+}
+
+/* Interactive Team Chips */
+.msg-bubble :deep(.team-chip) {
+  display: inline-flex;
+  align-items: center;
+  padding: 0 6px;
+  margin: 0 1px;
+  border-radius: 5px;
+  background: var(--status-ai-bg);
+  color: var(--status-ai);
+  border: 1px solid var(--status-ai-border);
+  font-family: var(--font-numeric);
+  font-size: 0.9em;
+  font-weight: 700;
+  cursor: pointer;
+  vertical-align: baseline;
+  transition: background-color 0.14s ease, border-color 0.14s ease, transform 0.14s ease;
+}
+
+.msg-bubble :deep(.team-chip:hover),
+.msg-bubble :deep(.team-chip:focus-visible) {
+  background: color-mix(in srgb, var(--status-ai) 26%, var(--g-900));
+  border-color: var(--status-ai);
+  outline: none;
+  transform: translateY(-1px);
+}
+
+/* Deep Thinking Accordion */
+.thinking-accordion {
+  margin-bottom: 8px;
+  border: 1px solid var(--status-ai-border);
+  border-radius: 8px;
+  background: color-mix(in srgb, var(--status-ai-bg) 50%, var(--surface-recessed));
+  overflow: hidden;
+}
+
+.thinking-toggle {
+  width: 100%;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 10px;
+  background: transparent;
+  border: none;
+  color: var(--status-ai);
+  font-size: 11.5px;
+  font-weight: 600;
+  cursor: pointer;
+  text-align: left;
+}
+
+.thinking-pulse {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: var(--status-ai);
+  animation: thinkingPulse 1.2s ease-in-out infinite;
+}
+
+@keyframes thinkingPulse {
+  0%, 100% { opacity: 0.4; transform: scale(0.9); }
+  50% { opacity: 1; transform: scale(1.15); }
+}
+
+.thinking-chevron {
+  margin-left: auto;
+  font-size: 16px;
+}
+
+.thinking-body {
+  padding: 8px 10px;
+  border-top: 1px solid var(--status-ai-border);
+  font-size: 12px;
+  line-height: 1.5;
+  color: var(--muted-foreground);
+  white-space: pre-wrap;
+  max-height: 220px;
+  overflow-y: auto;
+}
+
+.streaming-caret {
+  display: inline-block;
+  width: 7px;
+  height: 14px;
+  margin-left: 2px;
+  background: var(--status-ai);
+  vertical-align: text-bottom;
+  animation: caretBlink 0.9s steps(2, start) infinite;
+}
+
+@keyframes caretBlink {
+  0%, 49% { opacity: 1; }
+  50%, 100% { opacity: 0.1; }
+}
+
+.msg-stopped-note {
+  margin-top: 6px;
+  font-size: 11.5px;
+  color: var(--status-warning);
+  font-style: italic;
+}
+
+.msg-error-banner {
+  margin-top: 8px;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 7px 10px;
+  border-radius: 8px;
+  background: var(--status-error-bg);
+  border: 1px solid var(--status-error-border);
+  color: var(--status-error-text);
+  font-size: 12px;
+}
+
+/* Inline Editor */
+.inline-edit-box {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  width: 100%;
+  min-width: 220px;
+}
+
+.inline-edit-textarea {
+  width: 100%;
+  box-sizing: border-box;
+  padding: 8px 10px;
+  border-radius: 8px;
+  border: 1px solid var(--primary);
+  background: var(--input);
+  color: var(--foreground);
+  font-size: 13px;
+  font-family: inherit;
+  resize: vertical;
+}
+
+.inline-edit-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 6px;
+}
+
+.btn-edit-cancel,
+.btn-edit-resend {
+  padding: 4px 10px;
+  border-radius: 6px;
+  font-size: 12px;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.btn-edit-cancel {
+  background: transparent;
+  border: 1px solid var(--border);
+  color: var(--muted-foreground);
+}
+
+.btn-edit-resend {
+  background: var(--primary);
+  border: 1px solid var(--primary);
+  color: var(--primary-foreground);
+}
+
+/* Bottom Meta + Action Strip */
+.msg-footer-bar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  width: 100%;
+  padding: 0 2px;
+}
+
+.is-user .msg-footer-bar {
+  justify-content: flex-end;
+}
+
+.msg-meta-stats {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  font-size: 11px;
+  color: var(--muted-foreground);
+  font-variant-numeric: tabular-nums;
+}
+
+.msg-actions-row {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+}
+
+.btn-msg-act {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 3px;
+  background: transparent;
+  border: none;
+  color: var(--muted-foreground);
+  padding: 3px 6px;
+  border-radius: 5px;
+  cursor: pointer;
+  font-size: 11px;
+}
+
+.btn-msg-act:hover {
+  background: var(--surface-hover);
+  color: var(--foreground);
+}
+
+.btn-msg-act.copied {
+  color: var(--status-success);
+}
+
+.btn-msg-act .material-icons {
+  font-size: 14px;
+}
+
+/* Follow-up Suggestion Chips */
+.followup-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-top: 4px;
+}
+
+.followup-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 5px 10px;
+  border-radius: 999px;
+  border: 1px solid var(--status-ai-border);
+  background: color-mix(in srgb, var(--status-ai-bg) 70%, var(--surface));
+  color: var(--g-100);
+  font-size: 11.5px;
+  cursor: pointer;
+  transition: border-color 0.14s ease, background-color 0.14s ease;
+}
+
+.followup-chip:hover {
+  border-color: var(--status-ai);
+  background: var(--status-ai-bg);
+}
+
+.followup-chip .material-icons {
+  font-size: 13px;
+  color: var(--status-ai);
+}

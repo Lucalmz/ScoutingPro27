@@ -26,31 +26,29 @@ public class AESUtil {
     private static final int GCM_TAG_LENGTH_BIT = 128;
     private static final int CBC_IV_SIZE = 16;
 
-    private static SecretKey secretKey;
+    private record LoadedKey(Path path, SecretKey key) {}
+    private static volatile LoadedKey loadedKey;
 
     public static File getMasterKeyFile() {
         return AppConfig.resolveMasterKeyFile();
     }
 
-    static {
-        try {
-            initMasterKey();
-        } catch (Exception e) {
-            System.err.println("CRITICAL: Failed to initialize AES Master Key. AI features will fail.");
-            e.printStackTrace();
-        }
+    private static Path normalizeKeyPath(File keyFile) {
+        return keyFile.toPath().toAbsolutePath().normalize();
     }
 
     public static synchronized void initMasterKey() throws Exception {
         File keyFile = getMasterKeyFile();
+        Path currentPath = normalizeKeyPath(keyFile);
+        SecretKey key;
         if (keyFile.exists() && keyFile.length() > 0) {
             byte[] keyBytes = Files.readAllBytes(keyFile.toPath());
-            secretKey = new SecretKeySpec(keyBytes, ALGORITHM);
+            key = new SecretKeySpec(keyBytes, ALGORITHM);
         } else {
             // Generate a new 256-bit AES key
             KeyGenerator keyGen = KeyGenerator.getInstance(ALGORITHM);
             keyGen.init(KEY_SIZE, new SecureRandom());
-            secretKey = keyGen.generateKey();
+            key = keyGen.generateKey();
 
             // Ensure parent directory exists
             File parentDir = keyFile.getParentFile();
@@ -59,11 +57,36 @@ public class AESUtil {
             }
 
             // Save the key
-            Files.write(keyFile.toPath(), secretKey.getEncoded());
+            Files.write(keyFile.toPath(), key.getEncoded());
 
             // Restrict permissions cross-platform without locking out the owner
             restrictFilePermissions(keyFile.toPath());
         }
+        loadedKey = new LoadedKey(currentPath, key);
+    }
+
+    public static synchronized void resetForTest() {
+        loadedKey = null;
+    }
+
+    private static SecretKey ensureInitialized() {
+        Path currentPath = normalizeKeyPath(getMasterKeyFile());
+        LoadedKey state = loadedKey;
+        if (state == null || !currentPath.equals(state.path())) {
+            synchronized (AESUtil.class) {
+                currentPath = normalizeKeyPath(getMasterKeyFile());
+                state = loadedKey;
+                if (state == null || !currentPath.equals(state.path())) {
+                    try {
+                        initMasterKey();
+                        state = loadedKey;
+                    } catch (Exception e) {
+                        throw new IllegalStateException("AES Master Key initialization failed", e);
+                    }
+                }
+            }
+        }
+        return state.key();
     }
 
     private static void restrictFilePermissions(Path path) {
@@ -80,14 +103,14 @@ public class AESUtil {
 
     public static String encrypt(String plainText) {
         if (plainText == null || plainText.isEmpty()) return plainText;
-        if (secretKey == null) throw new IllegalStateException("AES Master Key not initialized");
+        SecretKey key = ensureInitialized();
         try {
             byte[] iv = new byte[GCM_IV_SIZE];
             new SecureRandom().nextBytes(iv);
 
             Cipher cipher = Cipher.getInstance(GCM_CIPHER_ALGORITHM);
             GCMParameterSpec gcmSpec = new GCMParameterSpec(GCM_TAG_LENGTH_BIT, iv);
-            cipher.init(Cipher.ENCRYPT_MODE, secretKey, gcmSpec);
+            cipher.init(Cipher.ENCRYPT_MODE, key, gcmSpec);
 
             byte[] encryptedText = cipher.doFinal(plainText.getBytes(StandardCharsets.UTF_8));
 
@@ -104,7 +127,7 @@ public class AESUtil {
 
     public static String decrypt(String encryptedBase64) {
         if (encryptedBase64 == null || encryptedBase64.isEmpty()) return encryptedBase64;
-        if (secretKey == null) throw new IllegalStateException("AES Master Key not initialized");
+        SecretKey key = ensureInitialized();
 
         byte[] cipherWithIv;
         try {
@@ -123,7 +146,7 @@ public class AESUtil {
             byte[] encryptedText = Arrays.copyOfRange(cipherWithIv, GCM_IV_SIZE, cipherWithIv.length);
 
             Cipher cipher = Cipher.getInstance(GCM_CIPHER_ALGORITHM);
-            cipher.init(Cipher.DECRYPT_MODE, secretKey, new GCMParameterSpec(GCM_TAG_LENGTH_BIT, iv));
+            cipher.init(Cipher.DECRYPT_MODE, key, new GCMParameterSpec(GCM_TAG_LENGTH_BIT, iv));
             byte[] plainText = cipher.doFinal(encryptedText);
 
             return new String(plainText, StandardCharsets.UTF_8);
@@ -135,7 +158,7 @@ public class AESUtil {
                     byte[] encryptedText = Arrays.copyOfRange(cipherWithIv, CBC_IV_SIZE, cipherWithIv.length);
 
                     Cipher cipher = Cipher.getInstance(CBC_CIPHER_ALGORITHM);
-                    cipher.init(Cipher.DECRYPT_MODE, secretKey, new IvParameterSpec(iv));
+                    cipher.init(Cipher.DECRYPT_MODE, key, new IvParameterSpec(iv));
                     byte[] plainText = cipher.doFinal(encryptedText);
 
                     return new String(plainText, StandardCharsets.UTF_8);

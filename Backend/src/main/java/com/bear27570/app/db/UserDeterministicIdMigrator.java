@@ -183,5 +183,18 @@ public class UserDeterministicIdMigrator {
 
         // 8. pit_scouting_records (scout_id)
         handle.execute("UPDATE pit_scouting_records SET scout_id = ? WHERE scout_id = ?", newId, oldId);
+
+        // 9. ai_provider_profiles (user_id) - preserve target active profile uniqueness
+        int targetActiveCount = handle.createQuery("SELECT COUNT(*) FROM ai_provider_profiles WHERE user_id = ? AND is_active = TRUE")
+                .bind(0, newId)
+                .mapTo(Integer.class)
+                .one();
+        if (targetActiveCount > 0) {
+            handle.execute("UPDATE ai_provider_profiles SET is_active = FALSE WHERE user_id = ?", oldId);
+        }
+        handle.execute("UPDATE ai_provider_profiles SET user_id = ? WHERE user_id = ?", newId, oldId);
+
+        // 10. ai_chat_threads (user_id)
+        handle.execute("UPDATE ai_chat_threads SET user_id = ? WHERE user_id = ?", newId, oldId);
     }
 }

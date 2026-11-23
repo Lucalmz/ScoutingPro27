@@ -1,5 +1,6 @@
-import { mount } from '@vue/test-utils'
-import { describe, it, expect, vi, beforeEach } from 'vitest'
+import { mount, type VueWrapper } from '@vue/test-utils'
+import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
+import { nextTick } from 'vue'
 import { setActivePinia, createPinia } from 'pinia'
 import SasVerificationModal from '../components/common/SasVerificationModal.vue'
 import { useConnectionStore } from '../stores/connection'
@@ -29,18 +30,32 @@ vi.mock('vue-i18n', () => ({
   })
 }))
 
-const mountModal = () => mount(SasVerificationModal, {
-  global: {
-    stubs: {
-      teleport: true
-    }
-  }
-})
-
 describe('SasVerificationModal.vue', () => {
+  const mountedWrappers: VueWrapper<any>[] = []
+  const mountModal = () => {
+    const w = mount(SasVerificationModal, {
+      global: {
+        stubs: {
+          teleport: true
+        }
+      }
+    })
+    mountedWrappers.push(w)
+    return w
+  }
+
   beforeEach(() => {
     setActivePinia(createPinia())
     vi.clearAllMocks()
+  })
+
+  afterEach(() => {
+    while (mountedWrappers.length > 0) {
+      mountedWrappers.pop()?.unmount()
+    }
+    document.body.innerHTML = ''
+    vi.useRealTimers()
+    vi.restoreAllMocks()
   })
 
   it('renders nothing when there is no pending SAS or modal is closed', () => {
@@ -178,31 +193,33 @@ describe('SasVerificationModal.vue', () => {
 
     it('does not reject connection on 60s timeout, displays timeout banner and retry button', async () => {
       vi.useFakeTimers()
-      const connStore = useConnectionStore()
-      const rejectSpy = vi.spyOn(connStore, 'rejectSas').mockImplementation(() => {})
-      const retrySpy = vi.spyOn(connStore, 'retrySas').mockImplementation(async () => {})
+      try {
+        const connStore = useConnectionStore()
+        const rejectSpy = vi.spyOn(connStore, 'rejectSas').mockImplementation(() => {})
+        const retrySpy = vi.spyOn(connStore, 'retrySas').mockImplementation(async () => {})
 
-      const wrapper = mountModal()
-      expect(wrapper.find('.sas-countdown').text()).toContain('60s')
+        const wrapper = mountModal()
+        expect(wrapper.find('.sas-countdown').text()).toContain('60s')
 
-      // Fast-forward 61 seconds
-      vi.advanceTimersByTime(61000)
-      await wrapper.vm.$nextTick()
+        // Fast-forward 61 seconds
+        vi.advanceTimersByTime(61000)
+        await nextTick()
 
-      // Ensure rejectSas was NOT called
-      expect(rejectSpy).not.toHaveBeenCalled()
+        // Ensure rejectSas was NOT called
+        expect(rejectSpy).not.toHaveBeenCalled()
 
-      // Check timeout banner is visible
-      expect(wrapper.find('.sas-timeout-banner').exists()).toBe(true)
-      const retryBtn = wrapper.find('.btn-warning')
-      expect(retryBtn.exists()).toBe(true)
-      expect(retryBtn.text()).toContain('重新发起核验')
+        // Check timeout banner is visible
+        expect(wrapper.find('.sas-timeout-banner').exists()).toBe(true)
+        const retryBtn = wrapper.find('.btn-warning')
+        expect(retryBtn.exists()).toBe(true)
+        expect(retryBtn.text()).toContain('重新发起核验')
 
-      // Trigger retry
-      await retryBtn.trigger('click')
-      expect(retrySpy).toHaveBeenCalledWith('client_scout_1')
-
-      vi.useRealTimers()
+        // Trigger retry
+        await retryBtn.trigger('click')
+        expect(retrySpy).toHaveBeenCalledWith('client_scout_1')
+      } finally {
+        vi.useRealTimers()
+      }
     })
   })
 })

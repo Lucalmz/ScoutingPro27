@@ -1,42 +1,57 @@
-import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
-import { mount } from '@vue/test-utils'
+import { describe, it, expect, vi, afterEach } from 'vitest'
+import { nextTick } from 'vue'
+import { mount, VueWrapper } from '@vue/test-utils'
 import ImagePreviewModal from '@/components/common/ImagePreviewModal.vue'
 
 describe('ImagePreviewModal', () => {
-  it('does not render when modelValue is false', () => {
-    const wrapper = mount(ImagePreviewModal, {
+  const wrappers: VueWrapper[] = []
+  const track = (w: VueWrapper) => {
+    wrappers.push(w)
+    return w
+  }
+
+  afterEach(() => {
+    while (wrappers.length > 0) {
+      wrappers.pop()!.unmount()
+    }
+    document.body.innerHTML = ''
+  })
+
+  it('does not render Teleported overlay when modelValue is false, and renders on true', async () => {
+    const wrapper = track(mount(ImagePreviewModal, {
       props: {
         modelValue: false,
         imageUrl: 'https://example.com/robot.jpg'
-      }
-    })
-    expect(wrapper.find('.image-preview-overlay').exists()).toBe(false)
+      },
+      attachTo: document.body
+    }))
+    expect(document.body.querySelector('.image-preview-overlay')).toBeNull()
+
+    await wrapper.setProps({ modelValue: true })
+    expect(document.body.querySelector('.image-preview-overlay')).not.toBeNull()
   })
 
   it('renders correctly when modelValue is true with single image', async () => {
-    const wrapper = mount(ImagePreviewModal, {
+    track(mount(ImagePreviewModal, {
       props: {
         modelValue: true,
         imageUrl: 'https://example.com/robot.jpg',
         title: 'Team 12345 Robot'
       },
       attachTo: document.body
-    })
+    }))
 
-    const overlay = document.querySelector('.image-preview-overlay')
+    const overlay = document.body.querySelector('.image-preview-overlay')
     expect(overlay).not.toBeNull()
 
-    const title = document.querySelector('.preview-title')
+    const title = document.body.querySelector('.preview-title')
     expect(title?.textContent).toContain('Team 12345 Robot')
 
-    const img = document.querySelector('.preview-image') as HTMLImageElement
+    const img = document.body.querySelector('.preview-image') as HTMLImageElement
     expect(img?.src).toContain('robot.jpg')
 
-    // No nav buttons for single image
-    expect(document.querySelector('.prev-btn')).toBeNull()
-    expect(document.querySelector('.next-btn')).toBeNull()
-
-    wrapper.unmount()
+    expect(document.body.querySelector('.prev-btn')).toBeNull()
+    expect(document.body.querySelector('.next-btn')).toBeNull()
   })
 
   it('renders multi-image navigation and cycles through images', async () => {
@@ -46,52 +61,47 @@ describe('ImagePreviewModal', () => {
       'https://example.com/img3.jpg'
     ]
 
-    const wrapper = mount(ImagePreviewModal, {
+    const wrapper = track(mount(ImagePreviewModal, {
       props: {
         modelValue: true,
         images,
         initialIndex: 0
       },
       attachTo: document.body
-    })
+    }))
 
-    const counter = document.querySelector('.preview-counter')
+    const counter = document.body.querySelector('.preview-counter')
     expect(counter?.textContent?.trim()).toBe('1 / 3')
 
-    const nextBtn = document.querySelector('.next-btn') as HTMLButtonElement
+    const nextBtn = document.body.querySelector('.next-btn') as HTMLButtonElement
     expect(nextBtn).not.toBeNull()
     nextBtn.click()
-    await wrapper.vm.$nextTick()
+    await nextTick()
 
-    expect(document.querySelector('.preview-counter')?.textContent?.trim()).toBe('2 / 3')
+    expect(document.body.querySelector('.preview-counter')?.textContent?.trim()).toBe('2 / 3')
 
-    const prevBtn = document.querySelector('.prev-btn') as HTMLButtonElement
+    const prevBtn = document.body.querySelector('.prev-btn') as HTMLButtonElement
     prevBtn.click()
-    await wrapper.vm.$nextTick()
+    await nextTick()
 
-    expect(document.querySelector('.preview-counter')?.textContent?.trim()).toBe('1 / 3')
-
-    wrapper.unmount()
+    expect(document.body.querySelector('.preview-counter')?.textContent?.trim()).toBe('1 / 3')
   })
 
   it('emits update:modelValue false when close button clicked or Escape pressed', async () => {
-    const wrapper = mount(ImagePreviewModal, {
+    const wrapper = track(mount(ImagePreviewModal, {
       props: {
         modelValue: true,
         imageUrl: 'https://example.com/robot.jpg'
       },
       attachTo: document.body
-    })
+    }))
 
-    const closeBtn = document.querySelector('.close-btn') as HTMLButtonElement
+    const closeBtn = document.body.querySelector('.close-btn') as HTMLButtonElement
     closeBtn.click()
     expect(wrapper.emitted('update:modelValue')?.[0]).toEqual([false])
 
-    // Escape key
     window.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape' }))
     expect(wrapper.emitted('update:modelValue')?.length).toBeGreaterThanOrEqual(2)
-
-    wrapper.unmount()
   })
 
   it('converts data: URL to Blob and opens via URL.createObjectURL to bypass browser security restrictions', async () => {
@@ -109,15 +119,15 @@ describe('ImagePreviewModal', () => {
 
     try {
       const dataUrl = 'data:image/webp;base64,AAAA'
-      const wrapper = mount(ImagePreviewModal, {
+      track(mount(ImagePreviewModal, {
         props: {
           modelValue: true,
           imageUrl: dataUrl
         },
         attachTo: document.body
-      })
+      }))
 
-      const openBtn = document.querySelector('button[title="查看原图"]') as HTMLButtonElement
+      const openBtn = document.body.querySelector('button[title="查看原图"]') as HTMLButtonElement
       expect(openBtn).not.toBeNull()
       openBtn.click()
 
@@ -127,7 +137,6 @@ describe('ImagePreviewModal', () => {
       expect(passedBlob.type).toBe('image/webp')
 
       expect(mockOpen).toHaveBeenCalledWith('blob:http://localhost/mock-blob-uuid', '_blank')
-      wrapper.unmount()
     } finally {
       window.open = originalOpen
       URL.createObjectURL = originalCreateObjectURL
@@ -146,21 +155,20 @@ describe('ImagePreviewModal', () => {
     URL.createObjectURL = mockCreateObjectURL
 
     try {
-      const wrapper = mount(ImagePreviewModal, {
+      track(mount(ImagePreviewModal, {
         props: {
           modelValue: true,
           imageUrl: 'https://example.com/robot-hd.jpg'
         },
         attachTo: document.body
-      })
+      }))
 
-      const openBtn = document.querySelector('button[title="查看原图"]') as HTMLButtonElement
+      const openBtn = document.body.querySelector('button[title="查看原图"]') as HTMLButtonElement
       expect(openBtn).not.toBeNull()
       openBtn.click()
 
       expect(mockCreateObjectURL).not.toHaveBeenCalled()
       expect(mockOpen).toHaveBeenCalledWith('https://example.com/robot-hd.jpg', '_blank')
-      wrapper.unmount()
     } finally {
       window.open = originalOpen
       URL.createObjectURL = originalCreateObjectURL

@@ -1,5 +1,6 @@
-import { mount } from '@vue/test-utils'
-import { describe, it, expect, beforeEach } from 'vitest'
+import { mount, type VueWrapper } from '@vue/test-utils'
+import { describe, it, expect, beforeEach, afterEach } from 'vitest'
+import { nextTick } from 'vue'
 import { createPinia, setActivePinia } from 'pinia'
 import { createRouter, createMemoryHistory } from 'vue-router'
 import App from '../App.vue'
@@ -24,12 +25,23 @@ function createTestRouter() {
 }
 
 describe('Inbox View Independence & Lifecycle Isolation', () => {
+  const wrappers: VueWrapper<any>[] = []
+  const track = <T extends VueWrapper<any>>(w: T): T => {
+    wrappers.push(w)
+    return w
+  }
   let router: ReturnType<typeof createTestRouter>
 
   beforeEach(() => {
     setActivePinia(createPinia())
     localStorage.clear()
     router = createTestRouter()
+  })
+
+  afterEach(() => {
+    while (wrappers.length) wrappers.pop()!.unmount()
+    document.body.innerHTML = ''
+    localStorage.clear()
   })
 
   it('InboxWidget is always mounted (single instance), hidden on login page when not logged in', async () => {
@@ -39,12 +51,12 @@ describe('Inbox View Independence & Lifecycle Isolation', () => {
     await router.push('/')
     await router.isReady()
 
-    const wrapper = mount(App, {
+    const wrapper = track(mount(App, {
       global: {
         plugins: [router],
         stubs: { ToastProvider: true }
       }
-    })
+    }))
 
     // Component always exists (v-show, not v-if) — single instance guarantee
     const inbox = wrapper.findComponent(InboxWidget)
@@ -59,12 +71,12 @@ describe('Inbox View Independence & Lifecycle Isolation', () => {
     await router.push('/')
     await router.isReady()
 
-    const wrapper = mount(App, {
+    const wrapper = track(mount(App, {
       global: {
         plugins: [router],
         stubs: { ToastProvider: true }
       }
-    })
+    }))
 
     const inbox = wrapper.findComponent(InboxWidget)
     expect(inbox.exists()).toBe(true)
@@ -78,13 +90,13 @@ describe('Inbox View Independence & Lifecycle Isolation', () => {
     await router.push('/dashboard')
     await router.isReady()
 
-    const wrapper = mount(App, {
+    const wrapper = track(mount(App, {
       global: {
         plugins: [router],
         stubs: { ToastProvider: true }
       },
       attachTo: document.body
-    })
+    }))
 
     // 1. Initial: InboxWidget exists and visible on dashboard
     const inbox = wrapper.findComponent(InboxWidget)
@@ -99,7 +111,7 @@ describe('Inbox View Independence & Lifecycle Isolation', () => {
     // 3. Navigate to /event/event-123
     await router.push('/event/event-123')
     await router.isReady()
-    await wrapper.vm.$nextTick()
+    await nextTick()
 
     // 4. Still mounted, still open (NOT re-rendered / re-created)
     const inboxAfterNav1 = wrapper.findComponent(InboxWidget)
@@ -109,7 +121,7 @@ describe('Inbox View Independence & Lifecycle Isolation', () => {
     // 5. Navigate to team detail
     await router.push('/event/event-123/team/456')
     await router.isReady()
-    await wrapper.vm.$nextTick()
+    await nextTick()
 
     const inboxAfterNav2 = wrapper.findComponent(InboxWidget)
     expect(inboxAfterNav2.exists()).toBe(true)
@@ -118,12 +130,10 @@ describe('Inbox View Independence & Lifecycle Isolation', () => {
     // 6. Back to dashboard
     await router.push('/dashboard')
     await router.isReady()
-    await wrapper.vm.$nextTick()
+    await nextTick()
 
     expect(wrapper.findComponent(InboxWidget).exists()).toBe(true)
     expect(wrapper.findComponent(InboxWidget).find('.inbox-widget').classes()).toContain('is-open')
-
-    wrapper.unmount()
   })
 
   it('InboxWidget is outside router-view-container (independent DOM tree)', async () => {
@@ -133,12 +143,12 @@ describe('Inbox View Independence & Lifecycle Isolation', () => {
     await router.push('/dashboard')
     await router.isReady()
 
-    const wrapper = mount(App, {
+    const wrapper = track(mount(App, {
       global: {
         plugins: [router],
         stubs: { ToastProvider: true }
       }
-    })
+    }))
 
     const routerViewContainer = wrapper.find('.router-view-container')
     expect(routerViewContainer.exists()).toBe(true)

@@ -1,762 +1,792 @@
-import puppeteer from 'puppeteer-core';
-import { spawn, execSync } from 'child_process';
-import path from 'path';
-import os from 'os';
-import { fileURLToPath } from 'url';
+import assert from 'node:assert/strict'
+import fs from 'node:fs'
+import path from 'node:path'
+import { fileURLToPath } from 'node:url'
+import { E2EClusterManager, allocateFreePort } from './helpers/e2eBackendManager.js'
+import {
+  assertNoStuckTransition,
+  createEventViaUi,
+  createTinyPngFile,
+  fetchBackendJson,
+  robustLogin,
+  submitMatchRecordViaUi,
+  switchToTab,
+  waitForCondition,
+  waitForTransition,
+} from './helpers/e2eUiActions.js'
 
-const __filename = fileURLToPath(import.meta.url);
-const __dirname = path.dirname(__filename);
-const SHOW_UI = process.env.SHOW_UI === '1';
-const PORT = 7076; // Dedicated port for comprehensive interactive suite
-const BASE_URL = `http://localhost:${PORT}/index.html`;
+const __dirname = path.dirname(fileURLToPath(import.meta.url))
+const REPO_ROOT = path.resolve(__dirname, '../..')
 
-function getChromeExecutablePath() {
-  const platform = os.platform();
-  if (platform === 'win32') return 'C:\\Program Files\\Google\\Chrome\\Application\\chrome.exe';
-  if (platform === 'darwin') return '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome';
-  return '/usr/bin/google-chrome';
+async function getAuthSession(page) {
+  return page.evaluate(() => {
+    const raw = localStorage.getItem('scoutingpro-user')
+    if (!raw) return null
+    return JSON.parse(raw)
+  })
 }
 
-const CHROME_PATH = getChromeExecutablePath();
-
-function delay(ms) {
-  return new Promise(resolve => setTimeout(resolve, ms));
+async function setNumericInputValue(page, selector, valueStr) {
+  const ok = await page.evaluate(
+    (sel, val) => {
+      const el = document.querySelector(sel)
+      if (!el) return false
+      el.focus()
+      el.value = val
+      el.dispatchEvent(new Event('input', { bubbles: true }))
+      el.dispatchEvent(new Event('change', { bubbles: true }))
+      return true
+    },
+    selector,
+    String(valueStr)
+  )
+  assert.equal(ok, true, `Input element not found for selector: ${selector}`)
 }
 
-function killProcessTree(pid) {
+async function run() {
+  const rootDbPaths = [
+    path.join(REPO_ROOT, 'app_data.mv.db'),
+    path.join(REPO_ROOT, 'Backend', 'app_data.mv.db'),
+  ]
+  const preExistingRootDbs = new Set(rootDbPaths.filter((p) => fs.existsSync(p)))
+
+  const manager = new E2EClusterManager('comprehensive-e2e')
+  let activePages = []
+  let exitCode = 0
+
   try {
-    if (os.platform() === 'win32') {
-      execSync(`taskkill /pid ${pid} /f /t`, { stdio: 'ignore' });
-    } else {
-      process.kill(-pid, 'SIGKILL');
+    const PORT_HOST_A = await allocateFreePort()
+    console.log(`[Interactive-E2E] Starting local MQTT broker + HostA (${PORT_HOST_A})...`)
+    await manager.startLocalMqttBroker()
+
+    const tmpHostA = manager.createTempDir('host-a')
+    await manager.startBackend({ name: 'hostA', port: PORT_HOST_A, tmpDir: tmpHostA })
+    const urlHostA = `http://localhost:${PORT_HOST_A}/index.html`
+
+    const launchA = await manager.launchBrowser({
+      name: 'HostA',
+      index: 0,
+      userDataDir: manager.createTempDir('profile-host-a'),
+    })
+    const hostAPage = launchA.page
+    activePages = [hostAPage]
+    await hostAPage.setViewport({ width: 1360, height: 920 })
+    await hostAPage.goto(urlHostA, { waitUntil: 'networkidle2', timeout: 30000 })
+    await hostAPage.waitForSelector('.login-card #username', { visible: true, timeout: 20000 })
+    await waitForTransition(hostAPage, { strict: true })
+    manager.clearPageErrors(activePages)
+
+    // =========================================================================
+    // Scenario 1: Login, Event Create, AiCopilotDock + AiSettingsModal + RenameModal
+    // =========================================================================
+    console.log('[Interactive-E2E] Scenario 1: Login, Event, AiCopilotDock, AiSettingsModal & RenameModal...')
+    await robustLogin(hostAPage, 'InteractiveHostA')
+    const { eventCode, eventId } = await createEventViaUi(hostAPage, 'Interactive Comprehensive Classic')
+    await waitForTransition(hostAPage, { strict: true })
+
+    // Desktop AI Copilot Dock open -> splitter present -> collapse
+    await hostAPage.waitForSelector('.copilot-topbar-btn', { visible: true, timeout: 10000 })
+    await hostAPage.evaluate(() => {
+      const btn = document.querySelector('.copilot-topbar-btn')
+      if (!btn) throw new Error('Expected .copilot-topbar-btn')
+      btn.click()
+    })
+    await waitForCondition(
+      () =>
+        hostAPage.evaluate(
+          () =>
+            Boolean(document.querySelector('.ai-copilot-dock')) &&
+            Boolean(document.querySelector('.ai-copilot-dock .dock-splitter'))
+        ),
+      { timeoutMs: 10000, label: 'AiCopilotDock opened with .dock-splitter' }
+    )
+    await hostAPage.evaluate(() => {
+      const btn = document.querySelector('.copilot-topbar-btn')
+      if (!btn) throw new Error('Expected .copilot-topbar-btn')
+      btn.click()
+    })
+    await waitForCondition(
+      () => hostAPage.evaluate(() => !document.querySelector('.ai-copilot-dock')),
+      { timeoutMs: 10000, label: 'AiCopilotDock collapsed' }
+    )
+
+    // AiSettingsModal open via topbar button -> native <dialog class="ai-settings-dialog"> open -> close
+    await hostAPage.waitForSelector('.copilot-settings-btn', { visible: true, timeout: 10000 })
+    await hostAPage.evaluate(() => {
+      const btn = document.querySelector('.copilot-settings-btn')
+      if (!btn) throw new Error('Expected .copilot-settings-btn')
+      btn.click()
+    })
+    await waitForCondition(
+      () =>
+        hostAPage.evaluate(() => {
+          const dlg = document.querySelector('dialog.ai-settings-dialog')
+          return Boolean(dlg && dlg.open)
+        }),
+      { timeoutMs: 10000, label: 'dialog.ai-settings-dialog opened' }
+    )
+    await hostAPage.click('dialog.ai-settings-dialog .btn-dialog-close')
+    await waitForCondition(
+      () =>
+        hostAPage.evaluate(() => {
+          const dlg = document.querySelector('dialog.ai-settings-dialog')
+          return Boolean(!dlg || !dlg.open)
+        }),
+      { timeoutMs: 10000, label: 'dialog.ai-settings-dialog closed cleanly' }
+    )
+
+    // RenameModal strict lifecycle (wait for modal unmount + topbar username update)
+    await hostAPage.waitForSelector('.event-view .user-profile-btn', { visible: true, timeout: 10000 })
+    await hostAPage.evaluate(() => {
+      const btn = document.querySelector('.event-view .user-profile-btn')
+      if (!btn) throw new Error('Expected .event-view .user-profile-btn')
+      btn.click()
+    })
+    await hostAPage.waitForSelector('.rename-modal .username-input', { visible: true, timeout: 10000 })
+    await waitForTransition(hostAPage, { strict: true })
+    await setNumericInputValue(hostAPage, '.rename-modal .username-input', 'InteractiveRenamed')
+    await hostAPage.evaluate(() => {
+      const saveBtn = document.querySelector('.rename-modal .modal-actions .btn-primary')
+      if (!saveBtn) throw new Error('Expected .rename-modal .modal-actions .btn-primary')
+      saveBtn.click()
+    })
+    await waitForCondition(
+      () =>
+        hostAPage.evaluate(() => {
+          const modalStillOpen = Boolean(document.querySelector('.rename-modal'))
+          const badge = document.querySelector('.event-view .user-profile-btn .username-text')?.textContent?.trim()
+          return !modalStillOpen && badge === 'InteractiveRenamed'
+        }),
+      { timeoutMs: 12000, label: 'RenameModal closed cleanly & username updated to InteractiveRenamed' }
+    )
+    await waitForTransition(hostAPage, { strict: true })
+    await assertNoStuckTransition(hostAPage)
+
+    // =========================================================================
+    // Scenario 2: BIOBUZZ Scoring Math, 4-Ball Cycle Cap, Endgame Clamp, Alliance Toggle & Draft Reload
+    // =========================================================================
+    console.log('[Interactive-E2E] Scenario 2: BIOBUZZ scoring boundaries, alliance mode & Match 2 reload draft...')
+    await switchToTab(hostAPage, 'scout')
+    await hostAPage.waitForSelector('.scouting-form .phase-teleop', { visible: true, timeout: 10000 })
+
+    // 4-ball cycle cap boundary
+    for (let i = 0; i < 4; i++) {
+      await hostAPage.click('.scouting-form .phase-teleop .pad-hit-btn')
     }
-  } catch (e) {}
-}
-
-async function waitForTransition(page) {
-  await page.waitForFunction(() => {
-    return !document.documentElement.hasAttribute('data-direction') && 
-           !document.documentElement.hasAttribute('data-transition-type');
-  }, { timeout: 5000 }).catch(() => {});
-  await delay(120);
-}
-
-async function selectEventTab(page, tabKey) {
-  await page.evaluate((key) => {
-    const btns = Array.from(document.querySelectorAll('.tab-bar .tab-btn'));
-    if (typeof key === 'number') {
-      if (key === -1) {
-        btns[btns.length - 1]?.click();
-      } else if (btns[key]) {
-        btns[key].click();
+    const disabledAtFour = await hostAPage.evaluate(() => {
+      const hitBtn = document.querySelector('.scouting-form .phase-teleop .pad-hit-btn')
+      const missBtn = document.querySelector('.scouting-form .phase-teleop .pad-miss-btn')
+      return {
+        hitDisabled: Boolean(hitBtn?.disabled),
+        missDisabled: Boolean(missBtn?.disabled),
       }
-      return;
-    }
-    const target = btns.find(b => 
-      b.getAttribute('data-tab') === key || 
-      (b.textContent && b.textContent.toLowerCase().includes(key.toLowerCase()))
-    );
-    if (target) {
-      target.click();
-    } else {
-      const keyMap = {
-        'scout': 0,
-        'pit': 1,
-        'schedule': 2,
-        'whiteboard': 3,
-        'rankings': 4,
-        'history': 5,
-        'ai': 6,
-        'scouts': -1
-      };
-      const idx = keyMap[key];
-      if (idx !== undefined) {
-        if (idx === -1) btns[btns.length - 1]?.click();
-        else btns[idx]?.click();
+    })
+    assert.equal(disabledAtFour.hitDisabled, true, '.pad-hit-btn must be disabled after 4 balls in active cycle')
+    assert.equal(disabledAtFour.missDisabled, true, '.pad-miss-btn must be disabled after 4 balls in active cycle')
+
+    // New cycle resets ball slot capacity -> record hit -> undo
+    await hostAPage.click('.scouting-form .phase-teleop .btn-new-cycle')
+    await waitForCondition(
+      () =>
+        hostAPage.evaluate(() => {
+          const missBtn = document.querySelector('.scouting-form .phase-teleop .pad-miss-btn')
+          return Boolean(missBtn && !missBtn.disabled)
+        }),
+      { timeoutMs: 5000, label: '.btn-new-cycle re-enables teleop pads' }
+    )
+    await hostAPage.click('.scouting-form .phase-teleop .pad-hit-btn')
+    await hostAPage.click('.scouting-form .phase-teleop .btn-undo-cycle')
+    // Clear back cleanly or check teleop undo leaves cycle enabled
+
+    // Endgame bottom-bonus clamp: set Nectars = 2, try to increment Bottom Bonus 5 times -> clamped at 2!
+    const clampCheck = await hostAPage.evaluate(async () => {
+      const endgameSec = document.querySelector('.scouting-form .phase-endgame') ||
+        Array.from(document.querySelectorAll('.scouting-form .form-section')).find((s) =>
+          /endgame|终局/i.test(s.textContent || '')
+        )
+      if (!endgameSec) throw new Error('Endgame section not found in ScoutingForm')
+      // Find numeric stepper groups inside endgame section in order:
+      // 1: flowerNectars, 2: flowerBottomBonusCount, 3: flowerPollens, 4: gardenBalls
+      const steppers = Array.from(endgameSec.querySelectorAll('.endgame-stepper-card .counter-controls')).filter(
+        (c) => c.querySelectorAll('button').length >= 2
+      )
+      if (steppers.length < 2) {
+        return { stepperCount: steppers.length, ok: false }
       }
+      const nectarsBtns = steppers[0].querySelectorAll('button')
+      const bottomBtns = steppers[1].querySelectorAll('button')
+      const nectarsPlus = nectarsBtns[nectarsBtns.length - 1]
+      const bottomPlus = bottomBtns[bottomBtns.length - 1]
+      // Add 2 nectars
+      nectarsPlus.click()
+      nectarsPlus.click()
+      await Promise.resolve()
+      // Try adding bottom bonus 5 times (must clamp to min(4, nectars) = 2)
+      for (let i = 0; i < 5; i++) {
+        bottomPlus.click()
+        await Promise.resolve()
+      }
+      const valNode = steppers[1].querySelector('.counter-val')
+      const bottomVal = parseInt((valNode?.textContent || '').trim(), 10)
+      return { stepperCount: steppers.length, bottomVal, plusDisabled: Boolean(bottomPlus.disabled), ok: true }
+    })
+    assert.equal(clampCheck.ok, true, `Endgame steppers missing in ScoutingForm: ${JSON.stringify(clampCheck)}`)
+    assert.equal(clampCheck.bottomVal, 2, `Bottom bonus expected clamped at 2 (nectars=2), got ${clampCheck.bottomVal}`)
+    assert.equal(clampCheck.plusDisabled, true, 'Bottom bonus + button should be disabled when clamped at nectars=2')
+
+    // Alliance 2-team mode toggle -> assert 2 .team-column elements -> switch back to Single
+    const allianceToggleStats = await hostAPage.evaluate(() => {
+      const beforeCols = document.querySelectorAll('.scouting-form .team-column').length
+      const segButtons = Array.from(document.querySelectorAll('.scouting-form .segmented-control button'))
+      const allianceBtn = segButtons.find((b) => /alliance|双车|同盟/i.test(b.textContent || ''))
+      const singleBtn = segButtons.find((b) => /single|单车/i.test(b.textContent || ''))
+      if (!allianceBtn || !singleBtn) return { ok: false, beforeCols }
+      allianceBtn.click()
+      return { ok: true, beforeCols }
+    })
+    assert.equal(allianceToggleStats.ok, true, 'Alliance/Single segmented buttons not found')
+    assert.equal(allianceToggleStats.beforeCols, 1, 'Expected 1 .team-column in single mode initially')
+    await waitForCondition(
+      () => hostAPage.evaluate(() => document.querySelectorAll('.scouting-form .team-column').length === 2),
+      { timeoutMs: 5000, label: 'Alliance mode renders 2 .team-column panels' }
+    )
+    await hostAPage.evaluate(() => {
+      const segButtons = Array.from(document.querySelectorAll('.scouting-form .segmented-control button'))
+      const singleBtn = segButtons.find((b) => /single|单车/i.test(b.textContent || ''))
+      singleBtn.click()
+    })
+    await waitForCondition(
+      () => hostAPage.evaluate(() => document.querySelectorAll('.scouting-form .team-column').length === 1),
+      { timeoutMs: 5000, label: 'Single mode returns to 1 .team-column panel' }
+    )
+
+    // Add tags for #27570 and #12345 AND submit Match 1 (#27570) so both teams exist cleanly in Pit / Rankings
+    await submitMatchRecordViaUi(hostAPage, { matchNumber: 1, teamNumber: 27570, alliance: 'Blue' })
+
+    // Match 2 draft persistence across page.reload() -> submit -> sp27_active_draft_* cleanup
+    await setNumericInputValue(hostAPage, '.scouting-form input[placeholder="1-999"]', '2')
+    await setNumericInputValue(hostAPage, '.scouting-form input[placeholder="e.g. 12345"]', '12345')
+    // Select Red alliance via .spdt-labels span
+    await hostAPage.evaluate(() => {
+      const redSpan = Array.from(document.querySelectorAll('.scouting-form .spdt-labels span')).find((el) =>
+        /red|红/i.test(el.textContent || '')
+      )
+      if (!redSpan) throw new Error('Red alliance option not found in .spdt-labels')
+      redSpan.click()
+    })
+    await hostAPage.click('.scouting-form .phase-teleop .pad-hit-btn')
+
+    // Also add quick tag on #12345 and #27570? Wait: Scenario 3 needs >=2 teams in PitRoster, OR let's tag #12345 right here via TagPicker
+    await hostAPage.waitForSelector('.scouting-form .team-tags-section .btn-add-tag', { visible: true, timeout: 5000 })
+    await hostAPage.click('.scouting-form .team-tags-section .btn-add-tag')
+    await hostAPage.waitForSelector('.scouting-form .team-tags-section .tag-input', { visible: true, timeout: 5000 })
+    await hostAPage.type('.scouting-form .team-tags-section .tag-input', 'DraftPeerTag')
+    await hostAPage.click('.scouting-form .team-tags-section .btn-confirm-add')
+    await waitForCondition(
+      () =>
+        hostAPage.evaluate(
+          () =>
+            (document.querySelector('.scouting-form .team-tags-section')?.textContent || '').includes('draftpeertag') &&
+            Object.keys(localStorage).some(
+              (k) => k.startsWith('sp27_active_draft_') && (localStorage.getItem(k) || '').includes('"matchNumber":"2"')
+            )
+        ),
+      { timeoutMs: 8000, label: 'sp27_active_draft_* and draftpeertag saved before reload' }
+    )
+
+    await hostAPage.reload({ waitUntil: 'networkidle2', timeout: 30000 })
+    await waitForTransition(hostAPage, { strict: true })
+    await hostAPage.waitForSelector('.scouting-form .draft-restored-banner', { visible: true, timeout: 15000 })
+    const restoredDraft = await hostAPage.evaluate(() => ({
+      matchVal: document.querySelector('.scouting-form input[placeholder="1-999"]')?.value,
+      teamVal: document.querySelector('.scouting-form input[placeholder="e.g. 12345"]')?.value,
+    }))
+    assert.equal(restoredDraft.matchVal, '2', `Restored draft match expected 2, got ${restoredDraft.matchVal}`)
+    assert.equal(restoredDraft.teamVal, '12345', `Restored draft team expected 12345, got ${restoredDraft.teamVal}`)
+
+    // Submit Match 2 -> verify sp27_active_draft_* cleared
+    await hostAPage.click('.scouting-form .btn-submit')
+    await waitForCondition(
+      () =>
+        hostAPage.evaluate(
+          () => !document.querySelector('.scouting-form .draft-restored-banner') &&
+            !Object.keys(localStorage).some((k) => k.startsWith('sp27_active_draft_') && localStorage.getItem(k)?.includes('"matchNumber":"2"'))
+        ),
+      { timeoutMs: 12000, label: 'Match 2 submitted and active draft cleared' }
+    )
+
+    // Give #27570 a tag in Rankings -> TeamDetailView so Pit Roster has BOTH #12345 and #27570 (>= 2 cards for search narrowing)
+    await switchToTab(hostAPage, 'rankings')
+    await hostAPage.waitForSelector('tr[data-team-row="27570"] .team-cell', { visible: true, timeout: 10000 })
+    await hostAPage.click('tr[data-team-row="27570"] .team-cell')
+    await waitForCondition(
+      () => hostAPage.evaluate(() => Boolean(document.querySelector('.team-detail-view .btn-add-tag'))),
+      { timeoutMs: 12000, label: 'TeamDetailView mounted with .btn-add-tag' }
+    )
+    await waitForTransition(hostAPage, { strict: true })
+    await hostAPage.click('.team-detail-view .btn-add-tag')
+    await hostAPage.waitForSelector('.team-detail-view .tag-input', { visible: true, timeout: 10000 })
+    await hostAPage.type('.team-detail-view .tag-input', 'pitrosterseed27570')
+    await hostAPage.click('.team-detail-view .btn-confirm-add')
+    await waitForCondition(
+      () => hostAPage.evaluate(() => (document.querySelector('.team-detail-view')?.textContent || '').includes('pitrosterseed27570')),
+      { timeoutMs: 10000, label: 'pitrosterseed27570 tag visible in TeamDetailView' }
+    )
+    await hostAPage.click('.team-detail-view .btn-close')
+    await waitForCondition(() => hostAPage.evaluate(() => !document.querySelector('.team-detail-view')), {
+      timeoutMs: 10000,
+      label: 'TeamDetailView closed after seeding #27570 tag',
+    })
+    await waitForTransition(hostAPage, { strict: true })
+
+    // =========================================================================
+    // Scenario 3: Pit Scouting (Swerve + Real PNG Upload + Dirty Close Cancel + Reload + Strict Search)
+    // =========================================================================
+    console.log('[Interactive-E2E] Scenario 3: Pit Scouting, PNG photo upload, dirty confirm & strict search...')
+    await switchToTab(hostAPage, 'pit')
+    await hostAPage.waitForSelector('.pit-scout-view .team-roster-card', { visible: true, timeout: 15000 })
+    const initialPitCards = await hostAPage.evaluate(
+      () => document.querySelectorAll('.pit-scout-view .team-roster-card').length
+    )
+    assert.ok(initialPitCards >= 2, `Expected >= 2 pit roster cards (#12345 & #27570), got ${initialPitCards}`)
+
+    // Click #27570 card to open PitScoutFormDrawer
+    await hostAPage.evaluate(() => {
+      const card = Array.from(document.querySelectorAll('.pit-scout-view .team-roster-card')).find((c) =>
+        (c.textContent || '').includes('27570')
+      )
+      if (!card) throw new Error('Pit roster card for #27570 not found')
+      card.click()
+    })
+    await hostAPage.waitForSelector('.drawer-panel', { visible: true, timeout: 10000 })
+
+    // Select Swerve drivetrain
+    await hostAPage.evaluate(() => {
+      const swerveBtn = Array.from(document.querySelectorAll('.drawer-panel .radio-btn')).find((b) =>
+        /swerve|舵轮/i.test(b.textContent || '')
+      )
+      if (!swerveBtn) throw new Error('Swerve radio button not found in Pit drawer')
+      swerveBtn.click()
+    })
+
+    // Upload real PNG photo into .drawer-panel input[type="file"]
+    const pitPngPath = path.join(manager.createTempDir('pit-img'), 'robot-pit-photo.png')
+    createTinyPngFile(pitPngPath, 24, 24)
+    const fileInput = await hostAPage.$('.drawer-panel input[type="file"]')
+    assert.ok(fileInput, 'Pit photo file input not found in .drawer-panel')
+    await fileInput.uploadFile(pitPngPath)
+    await hostAPage.waitForSelector('.drawer-panel .photo-item img', { visible: true, timeout: 10000 })
+
+    // Dirty close confirmation: click .close-btn -> .confirm-modal-overlay -> cancel stays inside drawer!
+    await hostAPage.click('.drawer-panel .close-btn')
+    await hostAPage.waitForSelector('.confirm-modal-overlay', { visible: true, timeout: 10000 })
+    await hostAPage.click('.confirm-modal-overlay .confirm-btn.btn-secondary')
+    await waitForCondition(
+      () =>
+        hostAPage.evaluate(
+          () => !document.querySelector('.confirm-modal-overlay') && Boolean(document.querySelector('.drawer-panel'))
+        ),
+      { timeoutMs: 8000, label: 'Canceling dirty-close confirmation kept Pit drawer open' }
+    )
+
+    // Save Pit record -> drawer closes
+    await hostAPage.click('.drawer-panel .drawer-footer .btn-primary')
+    await waitForCondition(
+      () => hostAPage.evaluate(() => !document.querySelector('.drawer-panel')),
+      { timeoutMs: 12000, label: 'Pit drawer closed after saving #27570' }
+    )
+
+    const hostSession = await getAuthSession(hostAPage)
+    assert.ok(hostSession && hostSession.id, 'Expected host auth session with id')
+    await waitForCondition(
+      async () => {
+        await hostAPage.evaluate(() => window.__sp27E2eBridge?.flushCrdtNow?.())
+        const res = await fetchBackendJson(PORT_HOST_A, `/api/events/${eventId}/pit-records`, hostSession.token).catch(() => null)
+        const recs = Array.isArray(res) ? res : res?.records || []
+        return recs.some((r) => Number(r.teamNumber) === 27570 && r.drivetrainType === 'swerve')
+      },
+      { timeoutMs: 10000, label: 'Pit record #27570 persisted to backend before reload' }
+    )
+    await hostAPage.reload({ waitUntil: 'networkidle2', timeout: 30000 })
+    await waitForTransition(hostAPage, { strict: true })
+    await switchToTab(hostAPage, 'pit')
+    await hostAPage.waitForSelector('.pit-scout-view .team-roster-card', { visible: true, timeout: 15000 })
+    await hostAPage.waitForSelector('.pit-scout-view .pit-toolbar input', { visible: true, timeout: 10000 })
+    await setNumericInputValue(hostAPage, '.pit-scout-view .pit-toolbar input', '27570')
+    await waitForCondition(
+      () => hostAPage.evaluate(() => document.querySelectorAll('.pit-scout-view .team-roster-card').length === 1),
+      { timeoutMs: 8000, label: 'Pit search "27570" strictly narrows to 1 card' }
+    )
+    const filteredText = await hostAPage.evaluate(
+      () => document.querySelector('.pit-scout-view .team-roster-card')?.textContent || ''
+    )
+    assert.ok(filteredText.includes('27570') && !filteredText.includes('12345'), `Unexpected filtered pit card: ${filteredText}`)
+
+    // Clear search
+    await setNumericInputValue(hostAPage, '.pit-scout-view .pit-toolbar input', '')
+
+    // =========================================================================
+    // Scenario 4: Schedule CSV Import & Assigned Task Handoff
+    // =========================================================================
+    console.log('[Interactive-E2E] Scenario 4: Schedule CSV import & task handoff...')
+    await switchToTab(hostAPage, 'schedule')
+    const importBtnSel = '.schedule-manager .btn-empty-import, .schedule-manager .btn-tool.primary'
+    await hostAPage.waitForSelector(importBtnSel, { visible: true, timeout: 10000 })
+    await hostAPage.click(importBtnSel)
+    await hostAPage.waitForSelector('.schedule-import-modal', { visible: true, timeout: 10000 })
+
+    // Switch to CSV tab (2nd button in .import-tabs)
+    await hostAPage.evaluate(() => {
+      const tabs = document.querySelectorAll('.schedule-import-modal .import-tabs .tab-btn')
+      if (tabs.length < 2) throw new Error('Expected CSV tab in ScheduleImportModal')
+      tabs[1].click()
+    })
+    await hostAPage.waitForSelector('.schedule-import-modal .csv-textarea', { visible: true, timeout: 10000 })
+    await setNumericInputValue(
+      hostAPage,
+      '.schedule-import-modal .csv-textarea',
+      '1,27570,12345,54321,99999\n2,27570,54321,12345,99999\n5,12345,99999,27570,54321'
+    )
+    await hostAPage.waitForSelector('.schedule-import-modal .preview-table tbody tr', { visible: true, timeout: 8000 })
+    await hostAPage.click('.schedule-import-modal .csv-action-box .btn-primary-action')
+    await waitForCondition(
+      () =>
+        hostAPage.evaluate(
+          () => !document.querySelector('.schedule-import-modal') && document.querySelectorAll('.schedule-table tr.match-row').length >= 3
+        ),
+      { timeoutMs: 12000, label: 'Schedule CSV imported (>= 3 match rows)' }
+    )
+
+    // Assign Match 5 Red1 (#12345) to current logged-in Host user so nextPendingAssignment shows in ScoutingForm
+    const assignedOk = await hostAPage.evaluate((myUid) => {
+      const m5Row = document.querySelector('.schedule-table tr[data-match-num="5"]')
+      if (!m5Row) return false
+      const sel = m5Row.querySelector('.td-alliance.red-zone select.scout-select')
+      if (!sel) return false
+      sel.value = myUid
+      sel.dispatchEvent(new Event('change', { bubbles: true }))
+      return sel.value === myUid
+    }, hostSession.id)
+    assert.equal(assignedOk, true, 'Failed to assign Match 5 Red1 to self in ScheduleManager')
+
+    await switchToTab(hostAPage, 'scout')
+    await hostAPage.waitForSelector('.scouting-form .assigned-task-banner:not(.draft-restored-banner)', {
+      visible: true,
+      timeout: 10000,
+    })
+    await hostAPage.click('.scouting-form .assigned-task-banner .btn-load-task')
+    const loadedTaskValues = await hostAPage.evaluate(() => ({
+      matchVal: document.querySelector('.scouting-form input[placeholder="1-999"]')?.value,
+      teamVal: document.querySelector('.scouting-form input[placeholder="e.g. 12345"]')?.value,
+      redSelected: Boolean(document.querySelector('.scouting-form .spdt-switch.pos-red')),
+    }))
+    assert.equal(loadedTaskValues.matchVal, '5', `Loaded task match expected 5, got ${loadedTaskValues.matchVal}`)
+    assert.equal(loadedTaskValues.teamVal, '12345', `Loaded task team expected 12345, got ${loadedTaskValues.teamVal}`)
+    assert.equal(loadedTaskValues.redSelected, true, 'Loaded task should activate Red alliance on .scouting-form .spdt-switch.pos-red')
+
+    // =========================================================================
+    // Scenario 5: Custom Fields ("Defense Rating") -> Form Teleop Render -> Match 3 Persist
+    // =========================================================================
+    console.log('[Interactive-E2E] Scenario 5: Custom Fields ("Defense Rating") in teleop & Match 3 backend persistence...')
+    await switchToTab(hostAPage, 'scouts')
+    await hostAPage.waitForSelector('.event-scouts-panel', { visible: true, timeout: 10000 })
+    const openedCf = await hostAPage.evaluate(() => {
+      const btn = Array.from(document.querySelectorAll('.event-scouts-panel button')).find((b) =>
+        (b.querySelector('.material-icons')?.textContent || '').trim() === 'tune' ||
+        /custom fields|自定义字段/i.test(b.textContent || '')
+      )
+      if (!btn) return false
+      btn.click()
+      return true
+    })
+    assert.equal(openedCf, true, 'Custom fields button not found in EventScoutsPanel')
+    await hostAPage.waitForSelector('.cf-modal-card .btn-create-field', { visible: true, timeout: 10000 })
+    await hostAPage.click('.cf-modal-card .btn-create-field')
+    await hostAPage.waitForSelector('.field-builder-form input[type="text"]', { visible: true, timeout: 10000 })
+    await setNumericInputValue(hostAPage, '.field-builder-form input[type="text"]', 'Defense Rating')
+    await hostAPage.click('.field-builder-form .btn-save')
+    await waitForCondition(
+      () =>
+        hostAPage.evaluate(
+          () => !document.querySelector('.field-builder-form') && (document.querySelector('.cf-modal-card')?.textContent || '').includes('Defense Rating')
+        ),
+      { timeoutMs: 10000, label: 'Defense Rating custom field created' }
+    )
+    await hostAPage.click('.cf-modal-card .btn-close')
+    await waitForCondition(() => hostAPage.evaluate(() => !document.querySelector('.cf-modal-card')), {
+      timeoutMs: 10000,
+      label: 'CustomFieldsManagerModal closed cleanly',
+    })
+
+    // Go back to scout form, verify 'Defense Rating' renders inside .phase-teleop, enter 8, submit Match 3 (#12345)
+    await switchToTab(hostAPage, 'scout')
+    await waitForCondition(
+      () => hostAPage.evaluate(() => (document.querySelector('.scouting-form .phase-teleop')?.textContent || '').includes('Defense Rating')),
+      { timeoutMs: 10000, label: 'Defense Rating renders inside .scouting-form .phase-teleop' }
+    )
+    await hostAPage.evaluate(() => {
+      const teleop = document.querySelector('.scouting-form .phase-teleop')
+      const customInp = teleop?.querySelector('input[type="number"], input.num-input')
+      if (!customInp) throw new Error('Numeric input for Defense Rating not found inside .phase-teleop')
+      customInp.value = '8'
+      customInp.dispatchEvent(new Event('input', { bubbles: true }))
+      customInp.dispatchEvent(new Event('change', { bubbles: true }))
+    })
+    await submitMatchRecordViaUi(hostAPage, { matchNumber: 3, teamNumber: 12345, alliance: 'Blue' })
+    await hostAPage.evaluate(() => window.__sp27E2eBridge?.flushCrdtNow?.())
+
+    const backendRecsAfterMatch3 = await fetchBackendJson(PORT_HOST_A, `/api/records?eventId=${eventId}`, hostSession.token)
+    const match3Rec = backendRecsAfterMatch3.find((r) => Number(r.matchNumber) === 3 && Number(r.teamNumber) === 12345 && !r.isDeleted)
+    assert.ok(match3Rec, 'Match 3 record for #12345 not found in backend H2 DB')
+    const match3Raw = JSON.parse(match3Rec.rawData || '{}')
+    const customVals = Object.values(match3Raw.customFields || {})
+    assert.ok(customVals.some((v) => Number(v) === 8), `Expected Defense Rating = 8 in Match 3 rawData.customFields, got ${JSON.stringify(match3Raw.customFields)}`)
+
+    // =========================================================================
+    // Scenario 6: Rankings Sort Order Flip & TagPicker Lifecycle
+    // =========================================================================
+    console.log('[Interactive-E2E] Scenario 6: Rankings sort flip & TagPicker lifecycle...')
+    await switchToTab(hostAPage, 'rankings')
+    await waitForCondition(
+      () => hostAPage.evaluate(() => document.querySelectorAll('.rankings-panel tr.ranking-row').length >= 2),
+      { timeoutMs: 10000, label: 'At least 2 team rows in RankingsTable' }
+    )
+    const getRowOrder = () =>
+      hostAPage.evaluate(() =>
+        Array.from(document.querySelectorAll('.rankings-panel tr.ranking-row')).map((r) => r.getAttribute('data-team-row'))
+      )
+    await hostAPage.click('.rankings-panel th.team-col-th')
+    const orderFirstClick = await getRowOrder()
+    await hostAPage.click('.rankings-panel th.team-col-th')
+    const orderSecondClick = await getRowOrder()
+    assert.notDeepEqual(orderFirstClick, orderSecondClick, `Expected sorting team column twice to flip order, got ${JSON.stringify(orderFirstClick)} vs ${JSON.stringify(orderSecondClick)}`)
+
+    // Open TeamDetailView -> add purple tag -> reload -> verify -> delete -> reload -> stays gone
+    await hostAPage.click('tr[data-team-row="12345"] .team-cell')
+    await waitForCondition(
+      () => hostAPage.evaluate(() => Boolean(document.querySelector('.team-detail-view .btn-add-tag'))),
+      { timeoutMs: 12000, label: 'TeamDetailView mounted for #12345' }
+    )
+    await waitForTransition(hostAPage, { strict: true })
+    await hostAPage.click('.team-detail-view .btn-add-tag')
+    await hostAPage.waitForSelector('.team-detail-view .tag-input', { visible: true, timeout: 10000 })
+    await hostAPage.type('.team-detail-view .tag-input', 'sortpurpletag')
+    await hostAPage.click('.team-detail-view .color-dot.bg-purple')
+    await hostAPage.click('.team-detail-view .btn-confirm-add')
+    await waitForCondition(
+      () => hostAPage.evaluate(() => (document.querySelector('.team-detail-view .tag-badge.tag-purple')?.textContent || '').includes('sortpurpletag')),
+      { timeoutMs: 10000, label: 'Purple tag sortpurpletag created' }
+    )
+    await waitForCondition(
+      async () => {
+        await hostAPage.evaluate(() => window.__sp27E2eBridge?.flushCrdtNow?.())
+        const tags = await fetchBackendJson(PORT_HOST_A, `/api/events/${eventId}/tags`, hostSession.token).catch(() => [])
+        return Array.isArray(tags) && tags.some((t) => Number(t.teamNumber) === 12345 && t.tag === 'sortpurpletag')
+      },
+      { timeoutMs: 10000, label: 'sortpurpletag persisted to backend before reload' }
+    )
+    await hostAPage.reload({ waitUntil: 'networkidle2', timeout: 30000 })
+    await waitForTransition(hostAPage, { strict: true })
+    await hostAPage.waitForSelector('.team-detail-view .tag-badge.tag-purple', { visible: true, timeout: 12000 })
+    await hostAPage.click('.team-detail-view .tag-badge.tag-purple .btn-tag-remove')
+    await waitForCondition(
+      () => hostAPage.evaluate(() => document.querySelectorAll('.team-detail-view .tag-badge.tag-purple').length === 0),
+      { timeoutMs: 10000, label: 'sortpurpletag deleted' }
+    )
+    await waitForCondition(
+      async () => {
+        await hostAPage.evaluate(() => window.__sp27E2eBridge?.flushCrdtNow?.())
+        const tags = await fetchBackendJson(PORT_HOST_A, `/api/events/${eventId}/tags`, hostSession.token).catch(() => [])
+        return Array.isArray(tags) && !tags.some((t) => Number(t.teamNumber) === 12345 && t.tag === 'sortpurpletag')
+      },
+      { timeoutMs: 10000, label: 'sortpurpletag deletion persisted to backend before reload' }
+    )
+    await hostAPage.reload({ waitUntil: 'networkidle2', timeout: 30000 })
+    await waitForTransition(hostAPage, { strict: true })
+    await hostAPage.waitForSelector('.team-detail-view .match-card', { visible: true, timeout: 12000 })
+    const purpleTagsAfterDelReload = await hostAPage.evaluate(
+      () => document.querySelectorAll('.team-detail-view .tag-badge.tag-purple').length
+    )
+    assert.equal(purpleTagsAfterDelReload, 0, 'Deleted purple tag reappeared after reload')
+    await hostAPage.click('.team-detail-view .btn-close')
+    await waitForCondition(() => hostAPage.evaluate(() => !document.querySelector('.team-detail-view')), {
+      timeoutMs: 10000,
+      label: 'TeamDetailView closed after TagPicker scenario',
+    })
+
+    // =========================================================================
+    // Scenario 7: History Edit Persistence (' [E2E Verified]')
+    // =========================================================================
+    console.log('[Interactive-E2E] Scenario 7: History edit persistence...')
+    await switchToTab(hostAPage, 'history')
+    await hostAPage.waitForSelector('.history-card .btn-edit', { visible: true, timeout: 10000 })
+    const editedCardMeta = await hostAPage.evaluate(() => {
+      const card = document.querySelector('.history-card')
+      const title = card?.querySelector('.card-teams')?.textContent || ''
+      const mMatch = title.match(/#[QP](\d+)/)
+      const tMatch = title.match(/#(\d+)\s*$/)
+      return {
+        matchNumber: mMatch ? Number(mMatch[1]) : 3,
+        teamNumber: tMatch ? Number(tMatch[1]) : 12345,
+      }
+    })
+    await hostAPage.click('.history-card .btn-edit')
+    await waitForTransition(hostAPage, { strict: true })
+    await hostAPage.waitForSelector('.scouting-form textarea', { visible: true, timeout: 10000 })
+    const editedNotes = await hostAPage.evaluate(() => {
+      const ta = document.querySelector('.scouting-form textarea')
+      if (!ta) throw new Error('Notes textarea missing when editing record')
+      const next = (ta.value || '') + ' [E2E Verified]'
+      ta.value = next
+      ta.dispatchEvent(new Event('input', { bubbles: true }))
+      ta.dispatchEvent(new Event('change', { bubbles: true }))
+      return next
+    })
+    await hostAPage.click('.scouting-form .btn-submit')
+    await hostAPage.waitForSelector('.submit-status-msg', { timeout: 10000 })
+    await switchToTab(hostAPage, 'history')
+    await waitForCondition(
+      async () => {
+        await hostAPage.evaluate(() => window.__sp27E2eBridge?.flushCrdtNow?.())
+        const recs = await fetchBackendJson(PORT_HOST_A, `/api/records?eventId=${eventId}`, hostSession.token).catch(() => [])
+        return Array.isArray(recs) && recs.some((r) => !r.isDeleted && String(r.notes || '').includes(' [E2E Verified]'))
+      },
+      { timeoutMs: 10000, label: 'History edit [E2E Verified] flushed to backend before reload' }
+    )
+    await hostAPage.reload({ waitUntil: 'networkidle2', timeout: 30000 })
+    await waitForTransition(hostAPage, { strict: true })
+    // Verify in TeamDetailView visible DOM (.comments-section .comments-text) AND in backend H2 DB
+    await switchToTab(hostAPage, 'rankings')
+    await hostAPage.waitForSelector(`tr[data-team-row="${editedCardMeta.teamNumber}"] .team-cell`, { visible: true, timeout: 10000 })
+    await hostAPage.click(`tr[data-team-row="${editedCardMeta.teamNumber}"] .team-cell`)
+    await waitForCondition(
+      () => hostAPage.evaluate((txt) => (document.querySelector('.team-detail-view')?.textContent || '').includes(txt), ' [E2E Verified]'),
+      { timeoutMs: 12000, label: 'History edit [E2E Verified] persisted across reload in TeamDetailView DOM' }
+    )
+    await waitForTransition(hostAPage, { strict: true })
+    await hostAPage.evaluate(() => {
+      const btn = document.querySelector('.team-detail-view .btn-close')
+      if (!btn) throw new Error('Expected .team-detail-view .btn-close')
+      btn.click()
+    })
+    await waitForCondition(() => hostAPage.evaluate(() => !document.querySelector('.team-detail-view')), {
+      timeoutMs: 10000,
+      label: 'TeamDetailView closed after History edit verification',
+    })
+    await waitForTransition(hostAPage, { strict: true })
+    await hostAPage.evaluate(() => window.__sp27E2eBridge?.flushCrdtNow?.())
+    const recsAfterHistEdit = await fetchBackendJson(PORT_HOST_A, `/api/records?eventId=${eventId}`, hostSession.token)
+    assert.ok(
+      recsAfterHistEdit.some((r) => !r.isDeleted && String(r.notes || '').includes(' [E2E Verified]')),
+      `Expected backend H2 record notes containing "${editedNotes}"`
+    )
+
+    // =========================================================================
+    // Scenario 8 (Absorbed from motion-and-sheet): Backdrop Hit-Test, Drag Handle, Escape & Reduced Motion
+    // =========================================================================
+    console.log('[Interactive-E2E] Scenario 8: Backdrop hit-test, sheet dismissals & prefers-reduced-motion...')
+    const openDetail12345 = async () => {
+      await switchToTab(hostAPage, 'rankings')
+      await hostAPage.waitForSelector('tr[data-team-row="12345"] .team-cell', { visible: true, timeout: 10000 })
+      await hostAPage.click('tr[data-team-row="12345"] .team-cell')
+      await waitForCondition(
+        () => hostAPage.evaluate(() => Boolean(document.querySelector('.team-detail-view .btn-close'))),
+        { timeoutMs: 12000, label: 'TeamDetailView mounted for #12345' }
+      )
+      await waitForTransition(hostAPage, { strict: true })
     }
-  }, tabKey);
-  await waitForTransition(page);
-  await delay(400);
-}
 
-async function robustLogin(page, username, password = 'e2epassword123') {
-  await page.waitForSelector('#username', { visible: true, timeout: 10000 });
-  await page.type('#username', username);
+    await openDetail12345()
+    const backdropHitPoint = await hostAPage.evaluate(() => {
+      const bd = document.querySelector('.team-detail-backdrop')
+      const vw = document.querySelector('.team-detail-view')
+      if (!bd || !vw) return null
+      const bRect = bd.getBoundingClientRect()
+      const vRect = vw.getBoundingClientRect()
+      const hitX = Math.floor(bRect.left + Math.max(8, (vRect.left - bRect.left) / 2))
+      const hitY = Math.floor(bRect.top + bRect.height / 2)
+      const elAtPoint = document.elementFromPoint(hitX, hitY)
+      return {
+        hitX,
+        hitY,
+        outsideView: hitX < vRect.left,
+        hitsBackdrop: elAtPoint === bd,
+      }
+    })
+    assert.ok(
+      backdropHitPoint && backdropHitPoint.outsideView && backdropHitPoint.hitsBackdrop,
+      `Expected exposed backdrop point outside .team-detail-view, got ${JSON.stringify(backdropHitPoint)}`
+    )
+    await hostAPage.mouse.click(backdropHitPoint.hitX, backdropHitPoint.hitY)
+    await waitForCondition(
+      () => hostAPage.evaluate((id) => window.location.hash.includes(`/event/${id}`) && !document.querySelector('.team-detail-view'), eventId),
+      { timeoutMs: 12000, label: 'Backdrop mouse.click closed TeamDetailView' }
+    )
+    await waitForTransition(hostAPage, { strict: true })
 
-  await page.evaluate(() => {
-    const el = document.querySelector('#username');
-    if (el) el.dispatchEvent(new Event('blur'));
-  });
+    await openDetail12345()
+    await hostAPage.click('.team-detail-view .sheet-drag-handle')
+    await waitForCondition(
+      () => hostAPage.evaluate(() => !document.querySelector('.team-detail-view')),
+      { timeoutMs: 12000, label: '.sheet-drag-handle closed TeamDetailView' }
+    )
+    await waitForTransition(hostAPage, { strict: true })
 
-  await delay(1200);
+    await openDetail12345()
+    await hostAPage.keyboard.press('Escape')
+    await waitForCondition(
+      () => hostAPage.evaluate(() => !document.querySelector('.team-detail-view')),
+      { timeoutMs: 12000, label: 'Escape key closed TeamDetailView' }
+    )
+    await waitForTransition(hostAPage, { strict: true })
 
-  await page.waitForSelector('#password', { visible: true, timeout: 10000 });
-  await page.type('#password', password);
+    const baselineTabTransitionMs = await hostAPage.evaluate(() => {
+      const btn = document.querySelector('.tab-bar .tab-btn')
+      if (!btn) return NaN
+      const dur = getComputedStyle(btn).transitionDuration.split(',')[0].trim()
+      return dur.endsWith('ms') ? parseFloat(dur) : parseFloat(dur) * 1000
+    })
+    assert.ok(baselineTabTransitionMs >= 100, `Expected baseline .tab-btn transition >= 100ms, got ${baselineTabTransitionMs}`)
 
-  const confirmPasswordEl = await page.$('#confirmPassword');
-  if (confirmPasswordEl) {
-    await page.type('#confirmPassword', password);
-  }
-
-  await page.waitForFunction(() => {
-    const btn = document.querySelector('button[type="submit"]');
-    return btn && !btn.disabled;
-  }, { timeout: 10000 });
-
-  await page.click('button[type="submit"]');
-  await page.waitForSelector('.action-btn, .dashboard-view, .event-view', { timeout: 15000 });
-}
-
-async function runComprehensiveInteractiveE2E() {
-  console.log('==================================================================');
-  console.log('🚀 [E2E] Starting Full-Spectrum Interactive Scenarios E2E Test Suite');
-  console.log('==================================================================\n');
-
-  if (process.env.SKIP_BUILD !== '1') {
-    console.log('[1/4] Building frontend and preparing backend resources...');
     try {
-      execSync('npm run build', { cwd: path.join(__dirname, '..'), stdio: 'inherit' });
-      const mavenCmd = os.platform() === 'win32' ? 'mvn.cmd' : 'mvn';
-      execSync(`${mavenCmd} process-resources -DskipTests`, { cwd: path.join(__dirname, '../../Backend'), stdio: 'inherit' });
-    } catch (e) {
-      console.error('Build failed. Aborting test.', e);
-      process.exit(1);
-    }
-  } else {
-    console.log('[1/4] Skipping build step (SKIP_BUILD=1)');
-  }
+      await hostAPage.emulateMediaFeatures([{ name: 'prefers-reduced-motion', value: 'reduce' }])
+      const reducedCheck = await hostAPage.evaluate(() => {
+        const btn = document.querySelector('.tab-bar .tab-btn')
+        const dur = btn ? getComputedStyle(btn).transitionDuration.split(',')[0].trim() : ''
+        const ms = dur.endsWith('ms') ? parseFloat(dur) : parseFloat(dur) * 1000
+        return { matches: window.matchMedia('(prefers-reduced-motion: reduce)').matches, ms }
+      })
+      assert.equal(reducedCheck.matches, true, 'prefers-reduced-motion media query did not match')
+      assert.ok(reducedCheck.ms <= 1, `Expected reduced transitionDuration <= 1ms, got ${reducedCheck.ms}ms`)
 
-  console.log(`\n[2/4] Starting Java backend on isolated port ${PORT}...`);
-  const mavenCmd = os.platform() === 'win32' ? 'mvn.cmd' : 'mvn';
-  const backendProcess = spawn(mavenCmd, [
-    'exec:java', 
-    os.platform() === 'win32' ? '"-Dexec.mainClass=com.bear27570.app.Main"' : '-Dexec.mainClass=com.bear27570.app.Main', 
-    os.platform() === 'win32' ? '"-Dexec.args=--headless"' : '-Dexec.args=--headless',
-    '-DENABLE_TEST_CLEANUP=true',
-    '-DSKIP_FIREWALL_CHECK=true'
-  ], {
-    cwd: path.join(__dirname, '../../Backend'),
-    detached: os.platform() !== 'win32',
-    shell: os.platform() === 'win32',
-    env: { ...process.env, DEV_PORT: String(PORT), ENABLE_TEST_CLEANUP: 'true', SKIP_FIREWALL_CHECK: 'true' }
-  });
-
-  await new Promise((resolve, reject) => {
-    const timeout = setTimeout(() => reject(new Error("Backend failed to start")), 60000);
-    const onData = (data) => {
-      const s = data.toString();
-      if (s.includes('Listening on http://') || s.includes('Javalin')) {
-        clearTimeout(timeout);
-        console.log(`✅ Backend successfully running on http://localhost:${PORT}`);
-        resolve();
-      }
-    };
-    backendProcess.stdout.on('data', onData);
-    backendProcess.stderr.on('data', onData);
-  });
-
-  console.log('\n[3/4] Launching Puppeteer browser instances...');
-  const getLaunchOptions = (index) => ({
-    executablePath: CHROME_PATH,
-    headless: SHOW_UI ? false : 'new',
-    args: [
-      '--no-sandbox', 
-      '--disable-setuid-sandbox', 
-      '--window-size=1280,900',
-      ...(SHOW_UI ? [`--window-position=${index * 640},0`] : [])
-    ],
-    defaultViewport: { width: 1280, height: 900 }
-  });
-
-  let hostBrowser = null;
-  let scoutBrowser = null;
-  const checks = [];
-  const errors = [];
-
-  function recordCheck(desc, passed, detail = '') {
-    checks.push({ desc, passed, detail });
-    if (passed) {
-      console.log(`  ✅ [PASS] ${desc}${detail ? ` (${detail})` : ''}`);
-    } else {
-      console.error(`  ❌ [FAIL] ${desc}${detail ? ` - ${detail}` : ''}`);
-      errors.push(`${desc}: ${detail}`);
-    }
-  }
-
-  try {
-    hostBrowser = await puppeteer.launch(getLaunchOptions(0));
-    const hostPage = await hostBrowser.newPage();
-    hostPage.on('console', msg => {
-      console.log(`[Host Console] ${msg.type()}: ${msg.text()}`);
-    });
-    hostPage.on('requestfailed', req => {
-      console.log(`[Host Req Failed] ${req.url()}: ${req.failure()?.errorText}`);
-    });
-
-    const masterUser = `MasterScout_${Date.now()}`;
-    let eventInviteCode = '';
-    let eventId = '';
-
-    // ==================================================================
-    // SCENARIO 1: User Profile, Navigation & Event Creation Lifecycle
-    // ==================================================================
-    console.log('\n--- Scenario 1: User Profile & Event Creation Lifecycle ---');
-    await hostPage.goto(BASE_URL);
-    await robustLogin(hostPage, masterUser);
-    await waitForTransition(hostPage);
-    recordCheck('Host user successfully authenticated to Dashboard', true, masterUser);
-
-    // Profile rename test
-    await hostPage.waitForSelector('.user-profile-btn');
-    await hostPage.click('.user-profile-btn');
-    await hostPage.waitForSelector('.rename-modal input', { visible: true, timeout: 5000 });
-    await delay(500); // Wait for transition animation to fully settle
-
-    const renamedUser = `Scout_${Date.now().toString().slice(-4)}`;
-    await hostPage.click('.rename-modal input');
-    await hostPage.keyboard.down('Control');
-    await hostPage.keyboard.press('A');
-    await hostPage.keyboard.up('Control');
-    await hostPage.keyboard.press('Backspace');
-    await hostPage.type('.rename-modal input', renamedUser, { delay: 20 });
-    await delay(200);
-
-    const debugState = await hostPage.evaluate(() => {
-      const input = document.querySelector('.rename-modal input');
-      const btn = document.querySelector('.rename-modal .btn-primary');
-      return { val: input?.value, disabled: btn?.disabled };
-    });
-    console.log('Rename modal state before click:', debugState);
-
-    await hostPage.click('.rename-modal .btn-primary');
-    await delay(1200);
-
-    const alertMsg = await hostPage.evaluate(() => {
-      const alert = document.querySelector('.rename-modal .alert-banner');
-      return alert ? alert.textContent.trim() : null;
-    });
-    if (alertMsg) {
-      console.log(`[RenameModal Alert Banner]: ${alertMsg}`);
+      await openDetail12345()
+      await hostAPage.keyboard.press('Escape')
+      await waitForCondition(
+        () => hostAPage.evaluate(() => !document.querySelector('.team-detail-view')),
+        { timeoutMs: 10000, label: 'TeamDetailView closed cleanly under reduced-motion' }
+      )
+      await assertNoStuckTransition(hostAPage)
+    } finally {
+      await hostAPage.emulateMediaFeatures([{ name: 'prefers-reduced-motion', value: 'no-preference' }])
     }
 
-    await hostPage.waitForSelector('.rename-modal', { hidden: true, timeout: 5000 }).catch(() => {});
-    await waitForTransition(hostPage);
-    await delay(500);
-
-    const updatedNameOnTopbar = await hostPage.$eval('.user-profile-btn .username-text', el => el.textContent.trim());
-    recordCheck('User renamed profile and updated topbar reactively', updatedNameOnTopbar === renamedUser, updatedNameOnTopbar);
-
-    // Create Event
-    await hostPage.click('.action-btn.primary');
-    await hostPage.waitForSelector('.modal-card h3', { visible: true, timeout: 5000 });
-    const eventName = `E2E_CHAMPIONSHIP_${Date.now().toString().slice(-4)}`;
-    await hostPage.click('.modal-overlay .modal-card input');
-    await hostPage.type('.modal-overlay .modal-card input', eventName, { delay: 20 });
-    await delay(200);
-    await hostPage.click('.modal-actions .btn-confirm');
-
-    await hostPage.waitForSelector('.event-view', { timeout: 15000 });
-    await waitForTransition(hostPage);
-    
-    const eventUrl = hostPage.url();
-    const urlMatch = eventUrl.match(/\/event\/([a-zA-Z0-9_-]+)/);
-    eventId = urlMatch ? urlMatch[1] : '';
-    eventInviteCode = await hostPage.$eval('.event-code strong', el => el.textContent.trim());
-    
-    recordCheck('Event created and landed in EventView', Boolean(eventId && eventInviteCode), `ID: ${eventId}, Code: ${eventInviteCode}`);
-
-    // ==================================================================
-    // SCENARIO 2: Match Scouting Form, Dynamic Calculations & Draft Recovery
-    // ==================================================================
-    console.log('\n--- Scenario 2: Match Scouting Form, Maths & Draft Recovery ---');
-    await hostPage.waitForSelector('.scouting-form', { visible: true, timeout: 10000 });
-
-    // Step 2.1: Test Form Validation on empty team
-    console.log('Testing submit validation with empty team number...');
-    await hostPage.click('.btn-submit');
-    await delay(300);
-    const hasValidationError = await hostPage.evaluate(() => {
-      const errEl = document.querySelector('.submit-status-msg.error');
-      const invalidInput = document.querySelector('.invalid-field');
-      return Boolean(errEl || invalidInput);
-    });
-    recordCheck('Empty team number blocked submit with friendly validation', hasValidationError);
-
-    // Step 2.2: Fill valid inputs and verify dynamic scoring engine
-    console.log('Testing dynamic real-time score calculations...');
-    // Select Red Alliance
-    await hostPage.click('.spdt-labels span:first-child');
-    await delay(100);
-
-    const matchInput = await hostPage.$('input[placeholder="1-999"]');
-    if (matchInput) {
-      await hostPage.click('input[placeholder="1-999"]');
-      await hostPage.keyboard.down('Control');
-      await hostPage.keyboard.press('A');
-      await hostPage.keyboard.up('Control');
-      await hostPage.keyboard.press('Backspace');
-      await matchInput.type('1');
-    }
-
-    const teamInput = await hostPage.$('input[placeholder="e.g. 12345"]');
-    if (teamInput) {
-      await hostPage.click('input[placeholder="e.g. 12345"]');
-      await hostPage.keyboard.down('Control');
-      await hostPage.keyboard.press('A');
-      await hostPage.keyboard.up('Control');
-      await hostPage.keyboard.press('Backspace');
-      await teamInput.type('27570');
-    }
-
-    // Toggle Auto Leave (+3 pts) and Auto Park (+5 pts)
-    const autoCards = await hostPage.$$('.toggle-card');
-    if (autoCards.length >= 2) {
-      await autoCards[0].click(); // Auto Leave
-      await autoCards[1].click(); // Auto Park
-    }
-
-    // BIOBUZZ Endgame: Flower Nectars = 2 (+4 pts), Bottom Bonus = 1 (+5 pts), TeleOp Park = true (+5 pts)
-    await hostPage.evaluate(() => {
-      const nectarsCard = document.querySelector('.biobuzz-endgame-steppers .endgame-stepper-card:nth-child(1)');
-      const chip2 = nectarsCard
-        ? Array.from(nectarsCard.querySelectorAll('.quick-ball-btn')).find(b => b.textContent.trim() === '2')
-        : null;
-      if (chip2) chip2.click();
-    });
-    await delay(100);
-
-    await hostPage.evaluate(() => {
-      const bottomCard = document.querySelector('.biobuzz-endgame-steppers .endgame-stepper-card:nth-child(2)');
-      const chip1 = bottomCard
-        ? Array.from(bottomCard.querySelectorAll('.quick-ball-btn')).find(b => b.textContent.trim() === '1')
-        : null;
-      if (chip1 && !chip1.disabled) chip1.click();
-    });
-    await delay(100);
-
-    const teleopParkToggle = await hostPage.$('.form-section:has(.biobuzz-endgame-steppers) .biobuzz-toggles-grid .toggle-card:nth-child(1)');
-    if (teleopParkToggle) {
-      await teleopParkToggle.click();
-    }
-
-    await delay(200);
-    const dynamicTotal = await hostPage.$eval('.total-score-inline .total-value', el => Number(el.textContent.trim()));
-    // Expected: Auto Leave (3) + Auto Park (5) + 2 Flower Nectars (4) + 1 Bottom Bonus (5) + TeleOp Park (5) = 22 pts
-    recordCheck('Dynamic scoring calculation updated accurately in real-time', dynamicTotal === 22, `Total: ${dynamicTotal} pts`);
-
-    // Submit match 1
-    console.log('Submitting match 1 record...');
-    await hostPage.click('.btn-submit');
-    await hostPage.waitForSelector('.submit-status-msg:not(.error)', { visible: true, timeout: 6000 });
-    const submitOk = await hostPage.$eval('.submit-status-msg', el => el.textContent.trim());
-    recordCheck('Match 1 scouting record submitted successfully', submitOk.length > 0, submitOk);
-
-    // Verify form auto-reset and match number incremented to 2
-    await delay(500);
-    const nextMatchVal = await hostPage.$eval('input[placeholder="1-999"]', el => el.value);
-    const teamValAfterReset = await hostPage.$eval('input[placeholder="e.g. 12345"]', el => el.value);
-    recordCheck('Form automatically advanced match number and reset team', nextMatchVal === '2' && teamValAfterReset === '', `Next Match: ${nextMatchVal}`);
-
-    // Step 2.3: Test Screen Wake Lock status
-    const isWakeLockActive = await hostPage.evaluate(() => {
-      return 'wakeLock' in navigator;
-    });
-    recordCheck('Screen Wake Lock API supported/active in test browser', isWakeLockActive);
-
-    // Step 2.4: Test Draft Recovery on unexpected refresh
-    console.log('Testing draft persistence & recovery on page reload...');
-    // Select Blue Alliance
-    await hostPage.click('.spdt-labels span:last-child');
-    await delay(100);
-
-    const match2TeamInput = await hostPage.$('input[placeholder="e.g. 12345"]');
-    if (match2TeamInput) {
-      await hostPage.click('input[placeholder="e.g. 12345"]');
-      await hostPage.keyboard.down('Control');
-      await hostPage.keyboard.press('A');
-      await hostPage.keyboard.up('Control');
-      await hostPage.keyboard.press('Backspace');
-      await match2TeamInput.type('19827');
-    }
-    // Check auto leave for team 19827
-    const toggles = await hostPage.$$('.toggle-card');
-    if (toggles.length > 0) {
-      await toggles[0].click();
-    }
-    await delay(1200); // Wait for debounce draft autosave
-
-    // Reload page to simulate accidental navigation or screen lock kill
-    await hostPage.reload();
-    await hostPage.waitForSelector('.scouting-form', { visible: true, timeout: 15000 });
-    await waitForTransition(hostPage);
-
-    const draftBannerExists = await hostPage.$('.draft-restored-banner');
-    const restoredTeamNum = await hostPage.$eval('input[placeholder="e.g. 12345"]', el => el.value);
-    recordCheck('Draft auto-restored after unexpected page reload', Boolean(draftBannerExists && restoredTeamNum === '19827'), `Team: ${restoredTeamNum}`);
-
-    // Submit Match 2 from restored draft
-    await hostPage.click('.btn-submit');
-    await hostPage.waitForSelector('.submit-status-msg:not(.error)', { visible: true, timeout: 6000 });
-    await delay(500);
-    recordCheck('Match 2 submitted from restored draft', true);
-
-    // ==================================================================
-    // SCENARIO 3: Pit Scouting Roster, Robot Inspection & Filtering
-    // ==================================================================
-    console.log('\n--- Scenario 3: Pit Scouting Roster & Robot Inspection ---');
-    // Switch to Pit tab
-    await selectEventTab(hostPage, 'pit');
-    await hostPage.waitForSelector('.pit-scout-view', { visible: true, timeout: 10000 });
-    await waitForTransition(hostPage);
-
-    // Verify Team 27570 card exists in roster grid (auto-populated from match scouting!)
-    const team27570CardExists = await hostPage.evaluate(() => {
-      const cards = Array.from(document.querySelectorAll('.team-roster-card'));
-      return cards.some(c => c.textContent.includes('27570'));
-    });
-    recordCheck('Unified Team Roster auto-populated team from match scouting', team27570CardExists, 'Team #27570');
-
-    // Click on Team 27570 card to open PitScoutFormDrawer
-    console.log('Opening Pit Scouting Drawer for Team 27570...');
-    await hostPage.evaluate(() => {
-      const card = Array.from(document.querySelectorAll('.team-roster-card')).find(c => c.textContent.includes('27570'));
-      if (card) card.click();
-    });
-    await hostPage.waitForSelector('.drawer-panel', { visible: true, timeout: 10000 });
-    recordCheck('PitScoutFormDrawer opened for team inspection', true);
-
-    // Select Drivetrain 'swerve'
-    await hostPage.evaluate(() => {
-      const swerveBtn = Array.from(document.querySelectorAll('.drawer-panel .radio-btn')).find(b => b.textContent.includes('Swerve') || b.textContent.includes('舵轮'));
-      if (swerveBtn) swerveBtn.click();
-    });
-
-    // Save pit inspection record
-    console.log('Saving Pit Inspection Record...');
-    await delay(300);
-    await hostPage.waitForSelector('.drawer-footer .btn-primary', { visible: true, timeout: 6000 });
-    await hostPage.evaluate(() => {
-      const btn = document.querySelector('.drawer-footer .btn-primary');
-      if (btn) btn.click();
-    });
-    await hostPage.waitForSelector('.drawer-panel', { hidden: true, timeout: 6000 }).catch(() => {});
-    await delay(600);
-    recordCheck('Team card updated inspection status to Scouted', true);
-
-    // Test Pit Search Filter
-    console.log('Testing team search in Pit Roster...');
-    await hostPage.type('.search-box .search-input', '27570');
-    await delay(300);
-    const visibleCards = await hostPage.$$eval('.team-roster-card', els => els.length);
-    recordCheck('Pit roster filtered search query', visibleCards >= 1, `${visibleCards} visible cards`);
-
-    // Reset search filter
-    await hostPage.evaluate(() => {
-      const input = document.querySelector('.search-box .search-input');
-      if (input) input.value = '';
-      document.querySelector('.search-box .search-input')?.dispatchEvent(new Event('input'));
-    });
-    await delay(300);
-
-    // ==================================================================
-    // SCENARIO 4: Schedule Management, CSV Import & Linkage
-    // ==================================================================
-    console.log('\n--- Scenario 4: Schedule Management & CSV Import ---');
-    // Switch to Schedule tab
-    await selectEventTab(hostPage, 'schedule');
-    await hostPage.waitForSelector('.schedule-manager', { visible: true, timeout: 10000 });
-    await waitForTransition(hostPage);
-
-    // Open Schedule Import Modal
-    await hostPage.click('.toolbar-right .btn-tool.primary, .btn-empty-import');
-    await hostPage.waitForSelector('.schedule-import-modal', { visible: true, timeout: 6000 });
-    recordCheck('ScheduleImportModal opened', true);
-
-    // Switch to CSV tab
-    await hostPage.evaluate(() => {
-      const tabs = Array.from(document.querySelectorAll('.import-tabs .tab-btn'));
-      if (tabs.length >= 2) tabs[1].click();
-    });
-    await delay(300);
-
-    // Paste CSV match schedule
-    const csvContent = "1,27570,10001,20002,30003\n2,27570,10002,20001,30004\n3,10001,10002,27570,30004";
-    await hostPage.type('.csv-textarea', csvContent);
-    await delay(300);
-
-    // Click confirm import
-    await hostPage.click('.csv-action-box .btn-primary-action');
-    await delay(800);
-
-    // Verify matches rendered in schedule table
-    const matchRowCount = await hostPage.$$eval('.schedule-table .match-row', els => els.length);
-    recordCheck('Schedule CSV imported and rendered match rows', matchRowCount === 3, `${matchRowCount} matches`);
-
-    // Assign current user to Match 3 Red 1 via select (Match 1 was already scouted, so Match 3 is pending!)
-    console.log('Assigning scout to station in schedule...');
-    await hostPage.evaluate(() => {
-      const rows = document.querySelectorAll('.schedule-table .match-row');
-      const targetRow = rows[2] || rows[rows.length - 1]; // Match 3
-      const select = targetRow ? targetRow.querySelector('.scout-select') : document.querySelector('.scout-select');
-      if (select && select.options.length > 1) {
-        select.selectedIndex = 1;
-        select.dispatchEvent(new Event('change'));
-      }
-    });
-    await delay(500);
-    recordCheck('Station assigned to scout in schedule', true);
-
-    // Switch back to Scout tab and verify assignment banner appears
-    await selectEventTab(hostPage, 'scout');
-    await waitForTransition(hostPage);
-    await hostPage.waitForSelector('.assigned-task-banner', { visible: true, timeout: 8000 });
-    const assignedBanner = await hostPage.$('.assigned-task-banner');
-    recordCheck('Assigned task banner appeared on Scouting Form', Boolean(assignedBanner));
-
-    // ==================================================================
-    // SCENARIO 5: Dynamic Custom Fields Extension Lifecycle
-    // ==================================================================
-    console.log('\n--- Scenario 5: Dynamic Custom Fields Extension ---');
-    // Switch to Scouts tab
-    await selectEventTab(hostPage, 'scouts');
-    await hostPage.waitForSelector('.event-scouts-panel', { visible: true, timeout: 10000 });
-    await waitForTransition(hostPage);
-
-    // Open Custom Fields Modal
-    await hostPage.evaluate(() => {
-      const btn = Array.from(document.querySelectorAll('.settings-panel button')).find(b => 
-        b.textContent.includes('tune') || 
-        b.textContent.includes('Custom Fields') || 
-        b.textContent.includes('自定义字段')
-      );
-      if (btn) btn.click();
-    });
-    await hostPage.waitForSelector('.cf-modal-card', { visible: true, timeout: 8000 });
-    recordCheck('CustomFieldsManagerModal opened', true);
-
-    // Click Add Field
-    await hostPage.click('.btn-create-field');
-    await hostPage.waitForSelector('.field-builder-form input', { visible: true, timeout: 5000 });
-
-    // Fill Field Form: Name 'Defense Rating', Key 'defense_rating', Phase 'teleop', Type 'number'
-    await hostPage.type('.form-group.full-width input', 'Defense Rating');
-    await hostPage.type('.form-group:nth-child(2) input', 'defense_rating');
-    await hostPage.select('.form-group:nth-child(3) select', 'teleop');
-    await hostPage.click('.builder-actions .btn-save');
-    await delay(600);
-
-    // Close Custom Fields Modal
-    await hostPage.evaluate(() => {
-      const btn = document.querySelector('.cf-modal-header .btn-close');
-      if (btn) btn.click();
-    });
-    await delay(300);
-    recordCheck('New custom field created and saved', true, 'defense_rating');
-
-    // Switch back to Scout tab and verify field dynamically rendered
-    await selectEventTab(hostPage, 'scout');
-    await hostPage.waitForSelector('.scouting-form', { visible: true, timeout: 10000 });
-    await waitForTransition(hostPage);
-    await delay(500);
-
-    const hasCustomFieldRendered = await hostPage.evaluate(() => {
-      return document.body.textContent.includes('Defense Rating');
-    });
-    recordCheck('DynamicFieldsRenderer rendered new custom field in Scouting Form', hasCustomFieldRendered);
-
-    // ==================================================================
-    // SCENARIO 6: Rankings Table & Team Detail Deep-Dive & Tagging
-    // ==================================================================
-    console.log('\n--- Scenario 6: Rankings Table & Team Detail Deep-Dive ---');
-    // Switch to Rankings tab
-    await selectEventTab(hostPage, 'rankings');
-    await hostPage.waitForSelector('.rankings-panel', { visible: true, timeout: 10000 });
-    await waitForTransition(hostPage);
-
-    // Verify team rows exist
-    const rankingRowCount = await hostPage.$$eval('.rankings-panel table tbody tr', els => els.length);
-    recordCheck('Rankings table rendered aggregated team scores', rankingRowCount >= 2, `${rankingRowCount} teams`);
-
-    // Test First Column ("Advancement Points" / "晋级分") Header & Cells + Sorting
-    const hasAdvCol = await hostPage.evaluate(() => {
-      const th = document.querySelector('.rankings-panel table thead th:first-child');
-      const td = document.querySelector('.rankings-panel table tbody tr:first-child td:first-child');
-      return Boolean(
-        th &&
-        th.classList.contains('advancement-col-th') &&
-        td &&
-        td.classList.contains('advancement-cell')
-      );
-    });
-    recordCheck('Rankings first column renders Advancement Points header & cell', hasAdvCol);
-
-    console.log('Testing column sort toggles...');
-    await hostPage.evaluate(() => {
-      const th = document.querySelector('.rankings-panel table th');
-      if (th) th.click();
-    });
-    await delay(300);
-    recordCheck('Rankings column sort executed cleanly', true);
-
-    // Click on Team 27570 details to open TeamDetailView
-    console.log('Navigating to TeamDetailView for Team 27570...');
-    await hostPage.evaluate(() => {
-      const btn = document.querySelector('tr[data-team-row="27570"] .details-btn') ||
-                  document.querySelector('.rankings-panel .details-btn');
-      if (btn) btn.click();
-    });
-    await hostPage.waitForSelector('.team-detail-view', { visible: true, timeout: 12000 });
-    await waitForTransition(hostPage);
-    recordCheck('Navigated to TeamDetailView successfully', hostPage.url().includes('/team/27570'), hostPage.url());
-
-    // Add Tag to Team 27570 via TagPicker
-    console.log('Adding tactical tag via TagPicker...');
-    await hostPage.waitForSelector('.tag-picker-container', { visible: true, timeout: 8000 });
-    const tagAdded = await hostPage.evaluate(async () => {
-      const addBtn = document.querySelector('.btn-add-tag');
-      if (addBtn) addBtn.click();
-      await new Promise(r => setTimeout(r, 300));
-      const chip = document.querySelector('.preset-chip');
-      if (chip) {
-        chip.click();
-        return true;
-      }
-      return false;
-    });
-    await delay(500);
-    recordCheck('Team tactical tag selected and applied', tagAdded);
-
-    // Navigate back to EventView
-    await hostPage.evaluate(() => {
-      const btn = document.querySelector('.team-detail-view .btn-back') || document.querySelector('.btn-back');
-      if (btn) btn.click();
-    });
-    await hostPage.waitForSelector('.event-view', { visible: true, timeout: 12000 });
-    await waitForTransition(hostPage);
-    recordCheck('Navigated back to EventView cleanly', true);
-
-    // ==================================================================
-    // SCENARIO 7: History List, In-place Edit & Soft Deletion
-    // ==================================================================
-    console.log('\n--- Scenario 7: History List & In-Place Record Edit ---');
-    // Switch to History tab
-    await selectEventTab(hostPage, 'history');
-    await hostPage.waitForSelector('.history-panel', { visible: true, timeout: 10000 });
-    await waitForTransition(hostPage);
-
-    const historyCardCount = await hostPage.$$eval('.history-card', els => els.length);
-    recordCheck('History list rendered match records', historyCardCount >= 2, `${historyCardCount} records`);
-
-    // Click Edit on the first record
-    console.log('Testing in-place record edit flow...');
-    const canEdit = await hostPage.evaluate(() => {
-      const editBtn = document.querySelector('.history-card .btn-edit');
-      if (editBtn) {
-        editBtn.click();
-        return true;
-      }
-      return false;
-    });
-
-    if (canEdit) {
-      await hostPage.waitForSelector('.btn-edit-mode', { visible: true, timeout: 8000 });
-      recordCheck('Switched to ScoutingForm in Edit Mode', true);
-
-      // Modify note
-      const notesInput = await hostPage.$('.notes-input');
-      if (notesInput) {
-        await notesInput.type(' [E2E Verified]');
-      }
-
-      // Save edited record
-      await hostPage.evaluate(() => {
-        const btn = document.querySelector('.btn-submit');
-        if (btn) btn.click();
-      });
-      await delay(600);
-      recordCheck('Edited record saved successfully', true);
-    } else {
-      recordCheck('Record edit button verified (records already auto-synced)', true);
-    }
-
-    // ==================================================================
-    // SCENARIO 8: Multi-Client Real-Time P2P WebRTC Connection & Takeover
-    // ==================================================================
-    console.log('\n--- Scenario 8: Multi-Client WebRTC P2P Sync & Standby Takeover ---');
-    scoutBrowser = await puppeteer.launch(getLaunchOptions(1));
-    const scoutPage = await scoutBrowser.newPage();
-    const scoutUser = `ScoutGuest_${Date.now()}`;
-
-    // Scout opens direct join URL with ?join=CODE
-    const joinUrl = `${BASE_URL}#/?join=${eventInviteCode}&b=emqx`;
-    console.log(`Scout joining via URL: ${joinUrl}...`);
-    await scoutPage.goto(joinUrl);
-    await robustLogin(scoutPage, scoutUser);
-    await scoutPage.waitForSelector('.event-view', { timeout: 15000 });
-    await waitForTransition(scoutPage);
-    recordCheck('Scout auto-joined event via invite parameter', Boolean((eventId && scoutPage.url().includes(eventId)) || (eventInviteCode && scoutPage.url().includes(eventInviteCode))));
-
-    // Wait for connection status indicator and actual WebRTC P2P handshake completion
-    await hostPage.waitForSelector('.connection-status', { visible: true, timeout: 15000 });
-    await scoutPage.waitForSelector('.connection-status', { visible: true, timeout: 15000 });
-    await Promise.all([
-      hostPage.waitForSelector('.connection-status.connected', { timeout: 20000 }).catch(() => {}),
-      scoutPage.waitForSelector('.connection-status.connected', { timeout: 20000 }).catch(() => {})
-    ]);
-    recordCheck('Host and Scout both initialized WebRTC connection status widgets', true);
-
-    // Host closes browser to simulate Host drop / network severance
-    console.log('Host browser disconnects. Testing Standby Host Takeover...');
-    await hostBrowser.close();
-    hostBrowser = null;
-
-    // Scout client should autonomously detect host disconnection and show degraded or standby prompt
-    await delay(3500); // Allow application-layer DataChannel heartbeat / watchdog to trigger
-
-    const scoutStatusAfterDrop = await scoutPage.evaluate(() => {
-      const badge = document.querySelector('.connection-status');
-      return badge ? badge.textContent.trim() : '';
-    });
-    console.log('Scout Connection Status after host drop:', scoutStatusAfterDrop);
-    recordCheck('Scout detected host loss without hanging on zombie connection', true, scoutStatusAfterDrop);
-
-    // Test Takeover Host trigger if standby button or takeover modal exists
-    await scoutPage.evaluate(() => {
-      const btn = document.querySelector('.btn-takeover-host, .btn-takeover');
-      if (btn) {
-        btn.click();
-        return true;
-      }
-      return false;
-    });
-    await delay(500);
-    recordCheck('Takeover trigger executed on Scout client', true);
-
+    await manager.assertNoUnexpectedErrors([hostAPage], {
+      allowConsolePatterns: [/WakeLock/i],
+    })
+    console.log('[Interactive-E2E] ALL scenarios PASSED cleanly!')
   } catch (err) {
-    console.error('\n❌ Uncaught Exception during Comprehensive Interactive E2E:', err);
-    errors.push(err.message || String(err));
+    exitCode = 1
+    console.error('[Interactive-E2E] FAILED:', err)
   } finally {
-    console.log('\n[4/4] Tearing down browsers and backend process...');
-    if (hostBrowser) await hostBrowser.close().catch(() => {});
-    if (scoutBrowser) await scoutBrowser.close().catch(() => {});
-    killProcessTree(backendProcess.pid);
-  }
-
-  console.log('\n==================================================================');
-  console.log('📊 COMPREHENSIVE INTERACTIVE E2E RESULT SUMMARY');
-  console.log('==================================================================');
-  const passedCount = checks.filter(c => c.passed).length;
-  console.log(`Total Checks: ${checks.length} | Passed: ${passedCount} | Failed: ${errors.length}`);
-
-  if (errors.length === 0 && checks.length > 0) {
-    console.log('\n🎉 ALL FULL-SPECTRUM INTERACTIVE SCENARIOS PASSED WITH 100% SUCCESS!\n');
-    process.exit(0);
-  } else {
-    console.error('\n❌ COMPREHENSIVE INTERACTIVE E2E TEST FAILED:');
-    errors.forEach((e, idx) => console.error(`  ${idx + 1}. ${e}`));
-    process.exit(1);
+    await manager.cleanupAll({ assertDeleted: true })
+    for (const dbPath of rootDbPaths) {
+      if (!preExistingRootDbs.has(dbPath) && fs.existsSync(dbPath)) {
+        exitCode = 1
+        console.error(`[Interactive-E2E] ERROR: Repo-root H2 DB polluted at ${dbPath}`)
+      }
+    }
+    process.exit(exitCode)
   }
 }
 
-runComprehensiveInteractiveE2E();
+run()

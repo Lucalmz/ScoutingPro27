@@ -1,6 +1,6 @@
 import { setActivePinia, createPinia } from 'pinia'
-import { describe, it, expect, beforeEach, vi } from 'vitest'
-import { mount } from '@vue/test-utils'
+import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest'
+import { mount, VueWrapper } from '@vue/test-utils'
 import MobileBottomNav from '../components/common/MobileBottomNav.vue'
 import { useEventStore } from '../stores/events'
 
@@ -27,8 +27,21 @@ vi.mock('vue-i18n', async (importOriginal) => {
 })
 
 describe('MobileBottomNav.vue', () => {
+  const wrappers: VueWrapper[] = []
+  const track = (w: VueWrapper) => {
+    wrappers.push(w)
+    return w
+  }
+
   beforeEach(() => {
     setActivePinia(createPinia())
+    document.body.innerHTML = ''
+  })
+
+  afterEach(() => {
+    while (wrappers.length > 0) {
+      wrappers.pop()!.unmount()
+    }
     document.body.innerHTML = ''
   })
 
@@ -36,11 +49,11 @@ describe('MobileBottomNav.vue', () => {
     const eventStore = useEventStore()
     eventStore.currentEvent = { id: 'evt_1', name: 'Test Event', hostId: 'other_user' } as any
 
-    const wrapper = mount(MobileBottomNav, {
+    track(mount(MobileBottomNav, {
       props: {
         activeTab: 'scout'
       }
-    })
+    }))
 
     const teleportedNav = document.body.querySelector('.mobile-bottom-nav')
     expect(teleportedNav).not.toBeNull()
@@ -58,11 +71,11 @@ describe('MobileBottomNav.vue', () => {
     const eventStore = useEventStore()
     eventStore.currentEvent = { id: 'evt_1', name: 'Test Event', hostId: 'other_user' } as any
 
-    const wrapper = mount(MobileBottomNav, {
+    const wrapper = track(mount(MobileBottomNav, {
       props: {
         activeTab: 'scout'
       }
-    })
+    }))
 
     const teleportedNav = document.body.querySelector('.mobile-bottom-nav')
     const buttons = teleportedNav!.querySelectorAll('.nav-item-btn')
@@ -79,11 +92,11 @@ describe('MobileBottomNav.vue', () => {
     eventStore.currentEvent = { id: 'evt_1', name: 'Test Event', hostId: 'u1' } as any
     Object.defineProperty(eventStore, 'isHost', { get: () => true })
 
-    const wrapper = mount(MobileBottomNav, {
+    const wrapper = track(mount(MobileBottomNav, {
       props: {
         activeTab: 'rankings'
       }
-    })
+    }))
 
     const teleportedNav = document.body.querySelector('.mobile-bottom-nav')
     const buttons = teleportedNav!.querySelectorAll('.nav-item-btn')
@@ -106,17 +119,18 @@ describe('MobileBottomNav.vue', () => {
     await (sheetBtns[3] as HTMLButtonElement).click()
     expect(wrapper.emitted('update:activeTab')).toBeTruthy()
     expect(wrapper.emitted('update:activeTab')![0]).toEqual(['scouts'])
+    expect(document.body.querySelector('.more-sheet')).toBeNull()
   })
 
   it('dynamically displays active sub-tab on 5th button', () => {
     const eventStore = useEventStore()
     eventStore.currentEvent = { id: 'evt_1', name: 'Test Event', hostId: 'u1' } as any
 
-    mount(MobileBottomNav, {
+    track(mount(MobileBottomNav, {
       props: {
         activeTab: 'ai'
       }
-    })
+    }))
 
     const teleportedNav = document.body.querySelector('.mobile-bottom-nav')
     const buttons = teleportedNav!.querySelectorAll('.nav-item-btn')

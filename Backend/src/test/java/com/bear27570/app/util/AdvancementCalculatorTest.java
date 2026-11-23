@@ -254,14 +254,16 @@ public class AdvancementCalculatorTest {
         matches.add(semi);
 
         JsonArray advSemi = AdvancementCalculator.calculateAdvancement(rankings, new JsonArray(), new JsonArray(), matches, 4);
+        assertEquals(4, advSemi.size());
+        java.util.Map<Integer, JsonObject> semiByTeam = new java.util.HashMap<>();
         for (int i = 0; i < advSemi.size(); i++) {
             JsonObject obj = advSemi.get(i).getAsJsonObject();
-            if (obj.get("teamNumber").getAsInt() == 1001) {
-                assertEquals(20, obj.get("playoffPoints").getAsInt(), "Semifinal winner gets 20 playoff points, NOT 40");
-            } else if (obj.get("teamNumber").getAsInt() == 2001) {
-                assertEquals(5, obj.get("playoffPoints").getAsInt(), "Semifinal loser gets 5 playoff points, NOT 20");
-            }
+            semiByTeam.put(obj.get("teamNumber").getAsInt(), obj);
         }
+        assertNotNull(semiByTeam.get(1001));
+        assertNotNull(semiByTeam.get(2001));
+        assertEquals(20, semiByTeam.get(1001).get("playoffPoints").getAsInt(), "Semifinal winner gets 20 playoff points, NOT 40");
+        assertEquals(5, semiByTeam.get(2001).get("playoffPoints").getAsInt(), "Semifinal loser gets 5 playoff points, NOT 20");
 
         // 2. Finals match: Red (1001) beats Blue (1002) in Finals
         JsonObject finals = new JsonObject();
@@ -291,14 +293,16 @@ public class AdvancementCalculatorTest {
         matches.add(finals);
 
         JsonArray advFinals = AdvancementCalculator.calculateAdvancement(rankings, new JsonArray(), new JsonArray(), matches, 4);
+        assertEquals(4, advFinals.size());
+        java.util.Map<Integer, JsonObject> finalsByTeam = new java.util.HashMap<>();
         for (int i = 0; i < advFinals.size(); i++) {
             JsonObject obj = advFinals.get(i).getAsJsonObject();
-            if (obj.get("teamNumber").getAsInt() == 1001) {
-                assertEquals(40, obj.get("playoffPoints").getAsInt(), "Finals winner gets 40 playoff points");
-            } else if (obj.get("teamNumber").getAsInt() == 1002) {
-                assertEquals(20, obj.get("playoffPoints").getAsInt(), "Finals runner-up gets 20 playoff points");
-            }
+            finalsByTeam.put(obj.get("teamNumber").getAsInt(), obj);
         }
+        assertNotNull(finalsByTeam.get(1001));
+        assertNotNull(finalsByTeam.get(1002));
+        assertEquals(40, finalsByTeam.get(1001).get("playoffPoints").getAsInt(), "Finals winner gets 40 playoff points");
+        assertEquals(20, finalsByTeam.get(1002).get("playoffPoints").getAsInt(), "Finals runner-up gets 20 playoff points");
     }
 
     @Test
@@ -322,14 +326,16 @@ public class AdvancementCalculatorTest {
         matches.add(createPlayoffMatch(3, 3, "Finals 3", 1001, 1002, 160, 110));
 
         JsonArray adv = AdvancementCalculator.calculateAdvancement(rankings, new JsonArray(), new JsonArray(), matches, 2);
+        assertEquals(2, adv.size());
+        java.util.Map<Integer, JsonObject> byTeam = new java.util.HashMap<>();
         for (int i = 0; i < adv.size(); i++) {
             JsonObject obj = adv.get(i).getAsJsonObject();
-            if (obj.get("teamNumber").getAsInt() == 1001) {
-                assertEquals(40, obj.get("playoffPoints").getAsInt(), "Champion with 2 wins gets 40 playoff points");
-            } else if (obj.get("teamNumber").getAsInt() == 1002) {
-                assertEquals(20, obj.get("playoffPoints").getAsInt(), "Finalist runner-up with 1 win gets 20 playoff points, NOT 40");
-            }
+            byTeam.put(obj.get("teamNumber").getAsInt(), obj);
         }
+        assertNotNull(byTeam.get(1001));
+        assertNotNull(byTeam.get(1002));
+        assertEquals(40, byTeam.get(1001).get("playoffPoints").getAsInt(), "Champion with 2 wins gets 40 playoff points");
+        assertEquals(20, byTeam.get(1002).get("playoffPoints").getAsInt(), "Finalist runner-up with 1 win gets 20 playoff points, NOT 40");
     }
 
     @Test
@@ -358,16 +364,18 @@ public class AdvancementCalculatorTest {
         awards.add(aw2);
 
         JsonArray adv = AdvancementCalculator.calculateAdvancement(rankings, new JsonArray(), awards, new JsonArray(), 4);
+        assertEquals(2, adv.size());
+        java.util.Map<Integer, JsonObject> byTeam = new java.util.HashMap<>();
         for (int i = 0; i < adv.size(); i++) {
             JsonObject obj = adv.get(i).getAsJsonObject();
-            if (obj.get("teamNumber").getAsInt() == 8417) {
-                assertEquals(0, obj.get("playoffPoints").getAsInt(), "Think Award Winner must NOT grant 40 playoff points");
-                assertEquals(12, obj.get("awardPoints").getAsInt(), "Think Award Winner grants 12 judged award points");
-            } else if (obj.get("teamNumber").getAsInt() == 19600) {
-                assertEquals(0, obj.get("playoffPoints").getAsInt(), "Design Award Finalist must NOT grant 20 playoff points");
-                assertEquals(6, obj.get("awardPoints").getAsInt(), "Design Award Finalist grants 6 judged award points");
-            }
+            byTeam.put(obj.get("teamNumber").getAsInt(), obj);
         }
+        assertNotNull(byTeam.get(8417));
+        assertNotNull(byTeam.get(19600));
+        assertEquals(0, byTeam.get(8417).get("playoffPoints").getAsInt(), "Think Award Winner must NOT grant 40 playoff points");
+        assertEquals(12, byTeam.get(8417).get("awardPoints").getAsInt(), "Think Award Winner grants 12 judged award points");
+        assertEquals(0, byTeam.get(19600).get("playoffPoints").getAsInt(), "Design Award Finalist must NOT grant 20 playoff points");
+        assertEquals(6, byTeam.get(19600).get("awardPoints").getAsInt(), "Design Award Finalist grants 6 judged award points");
     }
 
     @Test
@@ -398,6 +406,7 @@ public class AdvancementCalculatorTest {
         matches.add(createPlayoffMatch(3, 1, "Finals 1", 1001, 1002, 150, 120));
 
         JsonArray adv = AdvancementCalculator.calculateAdvancement(rankings, new JsonArray(), new JsonArray(), matches, 4);
+        assertEquals(4, adv.size(), "All 4 playoff teams must be present in advancement output");
         for (int i = 0; i < adv.size(); i++) {
             JsonObject obj = adv.get(i).getAsJsonObject();
             int t = obj.get("teamNumber").getAsInt();
@@ -535,15 +544,20 @@ public class AdvancementCalculatorTest {
         matches.add(createPlayoffMatch(6, 1, "Final Bracket  Round 4 Match 6", 15215, 32920, 123, 54));
 
         JsonArray adv = AdvancementCalculator.calculateAdvancement(rankings, new JsonArray(), new JsonArray(), matches, 5);
+        assertEquals(8, adv.size());
+        java.util.Map<Integer, JsonObject> byTeam = new java.util.HashMap<>();
         for (int i = 0; i < adv.size(); i++) {
             JsonObject obj = adv.get(i).getAsJsonObject();
-            int t = obj.get("teamNumber").getAsInt();
-            int playoff = obj.get("playoffPoints").getAsInt();
-            if (t == 15215) assertEquals(40, playoff, "Final Bracket winner gets 40");
-            if (t == 32920) assertEquals(20, playoff, "Final Bracket loser gets 20");
-            if (t == 19584) assertEquals(10, playoff, "Lower Bracket Final loser gets 10 (NOT 40!)");
-            if (t == 24736) assertEquals(5, playoff, "Lower Bracket Round 2 loser gets 5 (NOT 20!)");
+            byTeam.put(obj.get("teamNumber").getAsInt(), obj);
         }
+        assertNotNull(byTeam.get(15215));
+        assertNotNull(byTeam.get(32920));
+        assertNotNull(byTeam.get(19584));
+        assertNotNull(byTeam.get(24736));
+        assertEquals(40, byTeam.get(15215).get("playoffPoints").getAsInt(), "Final Bracket winner gets 40");
+        assertEquals(20, byTeam.get(32920).get("playoffPoints").getAsInt(), "Final Bracket loser gets 20");
+        assertEquals(10, byTeam.get(19584).get("playoffPoints").getAsInt(), "Lower Bracket Final loser gets 10 (NOT 40!)");
+        assertEquals(5, byTeam.get(24736).get("playoffPoints").getAsInt(), "Lower Bracket Round 2 loser gets 5 (NOT 20!)");
     }
 
     @Test

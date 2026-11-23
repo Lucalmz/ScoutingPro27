@@ -24,6 +24,20 @@
   transform: translateX(0);
 }
 
+/* 宽屏桌面下为右侧停靠 AI Copilot 让出主舞台空间（绝不覆盖 AI 面板） */
+@media (min-width: 1120px) {
+  .drawer-overlay {
+    inset: 0 var(--ai-dock-right-offset, 0px) 0 0;
+    overflow: hidden;
+  }
+
+  .team-drawer {
+    right: var(--ai-dock-right-offset, 0px);
+    max-width: calc(100vw - var(--ai-dock-right-offset, 0px));
+    transition: right var(--motion-duration-fast) var(--motion-ease-out);
+  }
+}
+
 /* 移动端：底部 Sheet */
 @media (max-width: 768px) {
   .team-drawer {

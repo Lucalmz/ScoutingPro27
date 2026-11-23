@@ -3,7 +3,8 @@ import { ScreenWakeLockManager } from '../utils/wakeLock'
 
 describe('ScreenWakeLockManager', () => {
   let mockSentinel: any
-  let originalNavigator: any
+  const origNavigatorDesc = Object.getOwnPropertyDescriptor(global, 'navigator')
+  const origVisibilityDesc = Object.getOwnPropertyDescriptor(global.document, 'visibilityState')
 
   beforeEach(() => {
     mockSentinel = {
@@ -14,7 +15,6 @@ describe('ScreenWakeLockManager', () => {
       addEventListener: vi.fn()
     }
 
-    originalNavigator = global.navigator
     Object.defineProperty(global, 'navigator', {
       value: {
         wakeLock: {
@@ -33,11 +33,16 @@ describe('ScreenWakeLockManager', () => {
   })
 
   afterEach(() => {
-    Object.defineProperty(global, 'navigator', {
-      value: originalNavigator,
-      writable: true,
-      configurable: true
-    })
+    if (origNavigatorDesc) {
+      Object.defineProperty(global, 'navigator', origNavigatorDesc)
+    } else {
+      delete (global as any).navigator
+    }
+    if (origVisibilityDesc) {
+      Object.defineProperty(global.document, 'visibilityState', origVisibilityDesc)
+    } else {
+      delete (global.document as any).visibilityState
+    }
     vi.clearAllMocks()
   })
 

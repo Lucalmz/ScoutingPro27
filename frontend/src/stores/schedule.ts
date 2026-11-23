@@ -700,7 +700,7 @@ export const useScheduleStore = defineStore('schedule', () => {
 
   // --- WebRTC 直连隧道广播 ---
   function broadcastScheduleSync() {
-    if (currentEventId.value && isCrdtTransportActive(currentEventId.value)) return
+    if (currentEventId.value && (isCrdtTransportActive(currentEventId.value) || getExistingEventCrdt(currentEventId.value))) return
     const connStore = useConnectionStore()
     if (connStore.rtcService) {
       connStore.rtcService.sendMessage({
@@ -712,7 +712,7 @@ export const useScheduleStore = defineStore('schedule', () => {
   }
 
   function broadcastAssignmentUpdate(assignment: ScoutAssignment) {
-    if (currentEventId.value && isCrdtTransportActive(currentEventId.value)) return
+    if (currentEventId.value && (isCrdtTransportActive(currentEventId.value) || getExistingEventCrdt(currentEventId.value))) return
     const connStore = useConnectionStore()
     if (connStore.rtcService) {
       connStore.rtcService.sendMessage({

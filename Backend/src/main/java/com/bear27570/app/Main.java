@@ -28,6 +28,7 @@ import java.io.FileOutputStream;
 import java.io.IOException;
 import java.io.InputStream;
 import java.nio.file.Files;
+import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.concurrent.atomic.AtomicBoolean;
@@ -41,6 +42,7 @@ public class Main {
 
     private static java.nio.channels.FileLock heldProfileLock = null;
     private static java.nio.channels.FileChannel heldProfileChannel = null;
+    private static Path heldProfileDir = null;
     private static java.io.PrintStream originalSystemOut = null;
     private static java.io.PrintStream originalSystemErr = null;
     private static FileOutputStream activeLogFileStream = null;
@@ -228,7 +230,10 @@ public class Main {
     }
     /** 运行时优先使用内嵌的离线原生库，没有就退回 jcefmaven 默认联网下载 */
     private static File ensureJcefBundle() throws IOException {
-        File targetDir = new File(System.getProperty("user.home"), ".scoutingpro27/jcef-bundle");
+        return ensureJcefBundle(new File(System.getProperty("user.home"), ".scoutingpro27/jcef-bundle"));
+    }
+
+    static File ensureJcefBundle(File targetDir) throws IOException {
         File markerV3 = new File(targetDir, ".extracted_v3_ok");
         boolean isWindows = System.getProperty("os.name", "").toLowerCase().contains("win");
         boolean isMac = System.getProperty("os.name", "").toLowerCase().contains("mac");
@@ -361,6 +366,7 @@ public class Main {
             logger.info("连接 JDBI 并执行确定性用户 ID 校验...");
             Jdbi jdbi = JdbiConfig.create(dataSource);
             com.bear27570.app.service.CrdtProjectionService.ensureCrdtSchema(jdbi);
+            com.bear27570.app.routes.AiRoutes.ensureAiCopilotSchema(jdbi);
             com.bear27570.app.db.UserDeterministicIdMigrator.migrate(jdbi);
 
             // ==========================================
@@ -803,7 +809,7 @@ public class Main {
      *    既允许同机多开实例平稳并存（杜绝 Chromium/CEF lockfile 锁冲突导致 AbortError 崩溃），
      *    又为多开的实例赋予独立的设备身份与 LocalStorage。
      */
-    private static File resolveJcefProfileDir() {
+    static File resolveJcefProfileDir() {
         File baseDir = com.bear27570.app.db.AppConfig.resolveBaseDataDir();
         File primary = new File(baseDir, "jcef_profile");
         primary.mkdirs();
@@ -827,7 +833,24 @@ public class Main {
         return fallback;
     }
 
-    private static boolean tryAcquireProfileLock(File profileDir) {
+    private static Path normalizeProfilePath(File dir) {
+        Path rawPath = dir.toPath();
+        try {
+            return rawPath.toRealPath();
+        } catch (IOException e) {
+            return rawPath.toAbsolutePath().normalize();
+        }
+    }
+
+    static synchronized boolean tryAcquireProfileLock(File profileDir) {
+        if (profileDir == null) {
+            return false;
+        }
+        Path normalizedDir = normalizeProfilePath(profileDir);
+        if (heldProfileLock != null && heldProfileLock.isValid() && normalizedDir.equals(heldProfileDir)) {
+            return false;
+        }
+
         // 1. 探测 Chromium 自身的 lockfile 是否被其他活动进程独占
         File cefLock = new File(profileDir, "lockfile");
         if (cefLock.exists()) {
@@ -843,34 +866,53 @@ public class Main {
         }
 
         // 2. 探测并持有当前 Java 进程的应用级独占锁 (.instance.lock)
+        java.nio.channels.FileChannel channel = null;
         try {
             File lockFile = new File(profileDir, ".instance.lock");
-            java.nio.channels.FileChannel channel = java.nio.channels.FileChannel.open(
+            channel = java.nio.channels.FileChannel.open(
                     lockFile.toPath(),
                     java.nio.file.StandardOpenOption.CREATE,
                     java.nio.file.StandardOpenOption.WRITE);
             java.nio.channels.FileLock lock = channel.tryLock();
             if (lock != null) {
+                releaseProfileLock();
                 heldProfileChannel = channel;
                 heldProfileLock = lock;
+                heldProfileDir = normalizedDir;
                 return true;
             } else {
                 channel.close();
                 return false;
             }
         } catch (Throwable e) {
+            if (channel != null) {
+                try {
+                    channel.close();
+                } catch (Exception ignored) {}
+            }
             return false;
         }
     }
 
-    private static void releaseProfileLock() {
+    static synchronized void releaseProfileLock() {
         try {
             if (heldProfileLock != null && heldProfileLock.isValid()) {
                 heldProfileLock.release();
             }
-            if (heldProfileChannel != null && heldProfileChannel.isOpen()) {
-                heldProfileChannel.close();
+        } catch (Exception ignored) {
+        } finally {
+            heldProfileLock = null;
+            heldProfileDir = null;
+            if (heldProfileChannel != null) {
+                try {
+                    if (heldProfileChannel.isOpen()) {
+                        heldProfileChannel.close();
+                    }
+                } catch (Exception ignored) {
+                } finally {
+                    heldProfileChannel = null;
+                }
             }
-        } catch (Exception ignored) {}
+        }
     }
 }

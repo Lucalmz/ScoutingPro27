@@ -15,7 +15,7 @@ export type SasState = 'PENDING_VERIFICATION' | 'VERIFIED' | 'REJECTED'
 
 export type WebRtcCallbacks = {
   onStatusChange: (status: ConnectionStatus) => void
-  /** 返回真正被接受写入本地的记录，Host 用此打 hostSeq */
+  /** 返回真正被接受写入本地的记录 */
   onRecordsReceived: (records: ScoutingRecord[], senderId?: string) => Promise<ScoutingRecord[]>
   onAckReceived: (recordIds: string[], stampedRecords?: ScoutingRecord[], rejectedRecordIds?: string[]) => void
   /** sinceVersion: 0 或缺失表示全量请求；>0 表示增量请求 */
@@ -70,8 +70,6 @@ export type WebRtcCallbacks = {
   onHostDemoted?: (info?: { hostSessionId: string; hostDeviceId?: string }) => void
   onActiveHostLeft?: () => void
   onHostDisconnected?: () => void
-  onHostHandoffReceived?: (batch: import('@/types').WebRtcHostHandoffBatch) => Promise<number>
-  onHostHandoffAck?: (ack: import('@/types').WebRtcHostHandoffAck) => void
   onWitnessMetadataDiscovered?: (witness: EventEpochWitnessRecord) => void | Promise<void>
   onEpochWitnessUpdated?: (record: EventEpochWitnessRecord) => void
   onClockCalibrated?: (result: ClockSyncRunResult) => void
@@ -109,16 +107,12 @@ export interface WebRtcService {
     authCode?: string,
     senderUserId?: string,
     senderUserName?: string,
-    token?: string,
-    options?: { isHostTakeover?: boolean; clientMaxSeq?: number }
+    token?: string
   ) => void
   pushRecords: (records: ScoutingRecord[], targetId?: string) => Promise<void>
   ackRecords: (recordIds: string[], targetId?: string, stampedRecords?: ScoutingRecord[], rejectedRecordIds?: string[]) => Promise<void>
   sendMessage: (msg: WebRtcMessage, targetId?: string) => Promise<void>
   sendDirectMessage: (msg: WebRtcDirectMessage) => Promise<boolean>
-  sendHostHandoffBatch: (payload: Omit<import('@/types').WebRtcHostHandoffBatch, 'type'>, targetId?: string) => Promise<void>
-  sendHostHandoffAck: (ack: Omit<import('@/types').WebRtcHostHandoffAck, 'type'>, targetId?: string) => Promise<void>
-  getHostSeqCounter: () => number
   getCurrentHostSessionId: () => string
   broadcastTagUpdate: (tag: TeamTagItem, action: 'ADD' | 'REMOVE', targetId?: string) => Promise<void>
   sendTagsFullSync: (tags: TeamTagItem[], eventId: string, targetId?: string) => Promise<void>
@@ -131,8 +125,6 @@ export interface WebRtcService {
   pingPeer?: (timeoutMs?: number) => Promise<boolean>
   reconnectNow: (forceFreshSignaling?: boolean) => Promise<boolean>
   disconnect: () => void
-  initHostSeq: (maxDbSeq: number) => void
-  stampHostSeq: (records: ScoutingRecord[]) => ScoutingRecord[]
   confirmSas: (peerId?: string) => void
   rejectSas: (peerId?: string, reason?: string) => void
   retrySas: (peerId?: string) => Promise<void>

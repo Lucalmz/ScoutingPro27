@@ -29,6 +29,9 @@ import {
   shouldAllowTurnForAttempt,
   shouldForceRelayForAttempt,
   SILENT_UPGRADE,
+  isPrivateIpv4Address,
+  optimizeSdpCandidates,
+  classifyCandidatePair,
   getSilentUpgradeDelayMs
 } from '@/services/webrtc/connectivity'
 import { PeerConnectionManager, type PeerConnectionFactoryOptions } from '@/services/webrtc/peerManager'
@@ -47,7 +50,12 @@ describe('Parallel Dual-Stack ICE & Non-Locking Hole Punching Architecture', () 
     vi.useFakeTimers()
   })
 
+  const origRtcpc = global.RTCPeerConnection
+  const origFetch = global.fetch
+
   afterEach(() => {
+    global.RTCPeerConnection = origRtcpc
+    global.fetch = origFetch
     delete (globalThis as any).__TEST_ALLOW_NIC_PROBE__
     vi.useRealTimers()
   })
@@ -969,5 +977,229 @@ describe('Parallel Dual-Stack ICE & Non-Locking Hole Punching Architecture', () 
       expect(isIpv6Address('[]:8080')).toBe(false)
       expect(isIpv6Address('[   ]:8080')).toBe(false)
     })
+  })
+
+  describe('IPv6 Priority, SDP Optimization & Parsing Robustness', () => {
+    it('configures literal IPv6/IPv4 STUNs as primary, followed by high-availability dual-stack domain STUNs', () => {
+      const iceServers = STUN_SERVERS.iceServers || []
+      expect(iceServers.length).toBeGreaterThanOrEqual(2)
+      const firstServer = iceServers[0]
+      expect(firstServer.urls).toEqual([
+        'stun:[2409:8c50:e00::3]:3478',
+        'stun:[2409:8c50:e00::1]:3478',
+        'stun:[2409:8c50:e00::4]:3478',
+        'stun:[2606:4700:49::]:3478',
+        'stun:[2001:4860:4864:5:8000::1]:19302',
+        'stun:[2a01:4f8:1c1e:d769::1]:3478',
+        'stun:111.8.3.78:3478',
+        'stun:74.125.250.129:19302'
+      ])
+      // Secondary domain STUNs
+      expect(iceServers[1].urls).toEqual([
+        'stun:stun.miwifi.com:3478',
+        'stun:stun.qq.com:3478',
+        'stun:stun.hitv.com:3478',
+        'stun:stun.cloudflare.com:3478',
+        'stun:stun.l.google.com:19302'
+      ])
+  
+      // Flatten all configured STUN URLs to verify presence of HiTV and literal IPv6
+      const allUrls = iceServers.flatMap((server) =>
+        Array.isArray(server.urls) ? server.urls : [server.urls]
+      )
+  
+      expect(allUrls).toContain('stun:stun.hitv.com:3478')
+      expect(allUrls).toContain('stun:[2409:8c50:e00::1]:3478')
+      expect(allUrls).toContain('stun:[2409:8c50:e00::4]:3478')
+      expect(allUrls).toContain('stun:[2606:4700:49::]:3478')
+    })
+
+    it('correctly validates Global Unicast IPv6 addresses and rejects local/private addresses', () => {
+      // China Telecom IPv6
+      expect(isGlobalIpv6Address('240e:398:3241:880:c0de::1')).toBe(true)
+      // China Unicom IPv6
+      expect(isGlobalIpv6Address('2408:8207:7852:12::1')).toBe(true)
+      // China Mobile IPv6
+      expect(isGlobalIpv6Address('2409:8a00:1000::1')).toBe(true)
+      // Cloudflare IPv6
+      expect(isGlobalIpv6Address('2606:4700:49::1')).toBe(true)
+      // Google IPv6 DNS (valid GUA)
+      expect(isGlobalIpv6Address('2001:4860:4860::8888')).toBe(true)
+  
+      // Link-local (fe80::/10)
+      expect(isGlobalIpv6Address('fe80::1ff:fe00:3a60')).toBe(false)
+      expect(isGlobalIpv6Address('fe80:0:0:0:200:f8ff:fe21:67cf')).toBe(false)
+      // Unique local ULA (fc00::/7)
+      expect(isGlobalIpv6Address('fc00::1')).toBe(false)
+      expect(isGlobalIpv6Address('fd12:3456:789a::1')).toBe(false)
+      // Multicast (ff00::/8)
+      expect(isGlobalIpv6Address('ff02::1')).toBe(false)
+      // Teredo tunneling (2001:0000::/32)
+      expect(isGlobalIpv6Address('2001:0:4136:e378:8000:63bf:3fff:fdd2')).toBe(false)
+      expect(isGlobalIpv6Address('2001::1')).toBe(false)
+      // Documentation prefix (2001:db8::/32)
+      expect(isGlobalIpv6Address('2001:db8:85a3::8a2e:370:7334')).toBe(false)
+      expect(isGlobalIpv6Address('2001:0db8::1')).toBe(false)
+      // 6to4 transition prefix (2002::/16)
+      expect(isGlobalIpv6Address('2002:cb00:7100:1::1')).toBe(false)
+      // NAT64 well-known prefix (64:ff9b::/96)
+      expect(isGlobalIpv6Address('64:ff9b::192.0.2.128')).toBe(false)
+      // IPv4-mapped (::ffff:0:0/96)
+      expect(isGlobalIpv6Address('::ffff:192.0.2.1')).toBe(false)
+      // Discard prefix (100::/64)
+      expect(isGlobalIpv6Address('100::1')).toBe(false)
+      // Loopback
+      expect(isGlobalIpv6Address('::1')).toBe(false)
+      // Empty / unspecified
+      expect(isGlobalIpv6Address('::')).toBe(false)
+      // IPv4
+      expect(isGlobalIpv6Address('192.168.1.1')).toBe(false)
+      expect(isGlobalIpv6Address('')).toBe(false)
+    })
+
+    it('identifies valid IPv6 and private IPv4 addresses', () => {
+      expect(isIpv6Address('240e:398::1')).toBe(true)
+      expect(isIpv6Address('fe80::1')).toBe(true)
+      expect(isIpv6Address('192.168.1.1')).toBe(false)
+  
+      expect(isPrivateIpv4Address('192.168.1.50')).toBe(true)
+      expect(isPrivateIpv4Address('10.0.0.1')).toBe(true)
+      expect(isPrivateIpv4Address('172.16.0.1')).toBe(true)
+      expect(isPrivateIpv4Address('172.31.255.254')).toBe(true)
+      expect(isPrivateIpv4Address('127.0.0.1')).toBe(true)
+      expect(isPrivateIpv4Address('1.1.1.1')).toBe(false)
+      expect(isPrivateIpv4Address('114.114.114.114')).toBe(false)
+    })
+
+    it('optimizes candidate priority according to RFC 8445 prioritizing LAN host, followed by IPv6 and IPv4 STUN, suppressing relay', () => {
+      // 1. LAN host candidate (type-pref 126, component 1, local-pref boosted to 65535)
+      // priority = 126*16777216 + 65535*256 + 255 = 2130706431 (HIGHEST)
+      const ipv4HostCand = 'candidate:1003 1 udp 2122260223 192.168.1.100 54323 typ host generation 0'
+      const optimizedLanHost = optimizeCandidatePriority(ipv4HostCand)
+      expect(optimizedLanHost).toContain('candidate:1003 1 udp 2130706431 192.168.1.100 54323 typ host generation 0')
+  
+      // 2. IPv6 host candidate (type-pref 120, component 1, local-pref boosted to 65535)
+      // priority = 120*16777216 + 65535*256 + 255 = 2030043135
+      const ipv6HostCand = 'candidate:1001 1 udp 2122260223 240e:398:3241:880:c0de::1 54321 typ host generation 0'
+      const optimizedIpv6Host = optimizeCandidatePriority(ipv6HostCand)
+      expect(optimizedIpv6Host).toContain('candidate:1001 1 udp 2030043135 240e:398:3241:880:c0de::1 54321 typ host generation 0')
+  
+      // 3. IPv6 srflx candidate (type-pref 100, component 1, local-pref boosted to 65535)
+      // priority = 100*16777216 + 65535*256 + 255 = 1694498815
+      const ipv6SrflxCand = 'candidate:1002 1 udp 1686052607 2408:8207:7852:12::1 54322 typ srflx raddr :: rport 0 generation 0'
+      const optimizedSrflx = optimizeCandidatePriority(ipv6SrflxCand)
+      expect(optimizedSrflx).toContain('candidate:1002 1 udp 1694498815 2408:8207:7852:12::1 54322 typ srflx raddr :: rport 0 generation 0')
+  
+      // 4. IPv4 srflx candidate (type-pref 90, component 1, local-pref 32768)
+      // priority = 90*16777216 + 32768*256 + 255 = 1518338303
+      const ipv4SrflxCand = 'candidate:1005 1 udp 1686052607 114.114.114.114 54325 typ srflx raddr 192.168.1.100 rport 54323 generation 0'
+      const optimizedIpv4Srflx = optimizeCandidatePriority(ipv4SrflxCand)
+      expect(optimizedIpv4Srflx).toContain('candidate:1005 1 udp 1518338303 114.114.114.114 54325 typ srflx raddr 192.168.1.100 rport 54323 generation 0')
+  
+      // 5. TURN relay candidate (type-pref 0, component 1, local-pref 0)
+      // priority = 0*16777216 + 0*256 + 255 = 255 (LOWEST)
+      const relayCand = 'candidate:1006 1 udp 1000 162.159.207.1 54326 typ relay raddr 114.114.114.114 rport 54325 generation 0'
+      const optimizedRelay = optimizeCandidatePriority(relayCand)
+      expect(optimizedRelay).toContain('candidate:1006 1 udp 255 162.159.207.1 54326 typ relay raddr 114.114.114.114 rport 54325 generation 0')
+  
+      // IPv6 Link-local candidate remains unchanged
+      const fe80Cand = 'candidate:1004 1 udp 2122260223 fe80::1 54324 typ host generation 0'
+      expect(optimizeCandidatePriority(fe80Cand)).toBe(fe80Cand)
+    })
+
+    it('optimizes SDP by rewriting candidate lines prioritizing LAN host, then IPv6 host and srflx', () => {
+      const sdp = [
+        'v=0',
+        'o=- 12345 2 IN IP4 127.0.0.1',
+        's=-',
+        't=0 0',
+        'a=candidate:1 1 udp 2122260223 192.168.1.10 50000 typ host',
+        'a=candidate:2 1 udp 2122260223 240e:398:1::1 50001 typ host',
+        'a=candidate:3 1 udp 1686052607 240e:398:1::1 50002 typ srflx raddr :: rport 0',
+        'a=end-of-candidates'
+      ].join('\r\n')
+  
+      const optimized = optimizeSdpCandidates(sdp)
+      const lines = optimized.split('\r\n')
+  
+      expect(lines[0]).toBe('v=0')
+      // LAN host line priority boosted to 2130706431 (highest)
+      expect(lines[4]).toBe('a=candidate:1 1 udp 2130706431 192.168.1.10 50000 typ host')
+      // IPv6 host line priority boosted to 2030043135
+      expect(lines[5]).toBe('a=candidate:2 1 udp 2030043135 240e:398:1::1 50001 typ host')
+      // IPv6 srflx line priority boosted to 1694498815
+      expect(lines[6]).toBe('a=candidate:3 1 udp 1694498815 240e:398:1::1 50002 typ srflx raddr :: rport 0')
+      expect(lines[7]).toBe('a=end-of-candidates')
+    })
+
+    it('sorts candidates placing LAN host first, then IPv6, then IPv4 srflx, with TURN relay as last resort', () => {
+      const list = [
+        { candidate: 'candidate:1 1 udp 2122260223 192.168.1.10 50000 typ host' },
+        { candidate: 'candidate:2 1 udp 1000 1.2.3.4 50001 typ relay' },
+        { candidate: 'candidate:3 1 udp 1686052607 240e:398::1 50002 typ srflx raddr :: rport 0' },
+        { candidate: 'candidate:4 1 udp 2122260223 240e:398::1 50003 typ host' },
+        { candidate: 'candidate:5 1 udp 1686052607 114.114.114.114 50004 typ srflx raddr 192.168.1.10 rport 50000' }
+      ]
+  
+      const sorted = sortCandidatesPreferIpv6(list)
+      expect(sorted[0].candidate).toContain('192.168.1.10 50000 typ host')
+      expect(sorted[1].candidate).toContain('240e:398::1 50003 typ host')
+      expect(sorted[2].candidate).toContain('240e:398::1 50002 typ srflx')
+      expect(sorted[3].candidate).toContain('114.114.114.114 50004 typ srflx')
+      expect(sorted[4].candidate).toContain('typ relay')
+    })
+
+    it('accurately classifies connection transport type', () => {
+      // IPv6 Global Unicast Direct
+      expect(classifyCandidatePair('host', 'host', '240e:398::1', '2408:8207::2')).toBe('ipv6_p2p')
+      expect(classifyCandidatePair('srflx', 'host', '240e:398::1', '192.168.1.1')).toBe('ipv6_p2p')
+  
+      // LAN Direct
+      expect(classifyCandidatePair('host', 'host', '192.168.1.100', '192.168.1.101')).toBe('lan_p2p')
+      expect(classifyCandidatePair('host', 'host', '10.0.0.2', '10.0.0.3')).toBe('lan_p2p')
+  
+      // NAT hole punched
+      expect(classifyCandidatePair('srflx', 'srflx', '114.114.114.114', '223.5.5.5')).toBe('nat_p2p')
+      expect(classifyCandidatePair('host', 'srflx', '192.168.1.100', '223.5.5.5')).toBe('nat_p2p')
+  
+      // Relay
+      expect(classifyCandidatePair('relay', 'host', '162.159.207.1', '192.168.1.100')).toBe('relay')
+      expect(classifyCandidatePair('host', 'relay', '240e:398::1', '162.159.207.1')).toBe('relay')
+    })
+
+    it('gracefully handles malformed candidate and SDP strings without throwing (defensive rewriting)', () => {
+      // Malformed candidate strings
+      expect(optimizeCandidatePriority('')).toBe('')
+      expect(optimizeCandidatePriority('candidate:invalid')).toBe('candidate:invalid')
+      expect(optimizeCandidatePriority(null as any)).toBe(null)
+  
+      // Malformed / non-standard SDP
+      expect(optimizeSdpCandidates('')).toBe('')
+      expect(optimizeSdpCandidates('corrupted sdp string without candidates')).toBe('corrupted sdp string without candidates')
+      expect(optimizeSdpCandidates(null as any)).toBe(null)
+    })
+
+  describe('IPv6 parsing & optimization robustness', () => {
+    it('correctly identifies bracketed IPv6 and scope IDs', () => {
+      expect(isGlobalIpv6Address('2409:8100:1896:8851:e8ae:f5ff:fe4c:139e')).toBe(true)
+      expect(isGlobalIpv6Address('[2409:8100:1896:8851:e8ae:f5ff:fe4c:139e]')).toBe(true)
+      expect(isGlobalIpv6Address('[2409:8100:1896:8851:e8ae:f5ff:fe4c:139e]:49030')).toBe(true)
+      expect(isIpv6Address('[2409:8100:1896:8851:e8ae:f5ff:fe4c:139e]')).toBe(true)
+      expect(isGlobalIpv6Address('fe80::1')).toBe(false)
+      expect(isGlobalIpv6Address('[fe80::1]')).toBe(false)
+      expect(isGlobalIpv6Address('fdfe:dcba:9876::1')).toBe(false) // ULA
+      expect(isGlobalIpv6Address('192.168.1.1')).toBe(false)
+    })
+
+    it('classifies bracketed candidate pairs as ipv6_p2p', () => {
+      const transport = classifyCandidatePair(
+        'host',
+        'host',
+        '[2409:8100:1896:8851:e8ae:f5ff:fe4c:139e]',
+        '[2409:8a00:1852:5bf6:1111:2222:3333:4444]'
+      )
+      expect(transport).toBe('ipv6_p2p')
+    })
+  })
   })
 })

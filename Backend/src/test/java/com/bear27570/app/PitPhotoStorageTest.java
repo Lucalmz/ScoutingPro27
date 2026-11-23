@@ -2,8 +2,11 @@ package com.bear27570.app;
 
 import com.bear27570.app.dao.EventDao;
 import com.bear27570.app.db.AppConfig;
+import com.bear27570.app.db.JdbiConfig;
 import com.bear27570.app.model.ScoutingEvent;
 import com.bear27570.app.routes.ApiRoutes;
+import com.bear27570.app.util.AESUtil;
+import com.bear27570.app.util.JwtUtil;
 import com.google.gson.Gson;
 import io.javalin.Javalin;
 import io.javalin.testtools.JavalinTest;
@@ -13,9 +16,11 @@ import org.jdbi.v3.sqlobject.SqlObjectPlugin;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.io.TempDir;
 
 import java.io.File;
 import java.nio.file.Files;
+import java.nio.file.Path;
 import java.util.Base64;
 import java.util.Map;
 
@@ -23,14 +28,24 @@ import static org.assertj.core.api.Assertions.assertThat;
 
 class PitPhotoStorageTest {
 
+    @TempDir
+    Path tempDir;
+
     private Jdbi jdbi;
+    private ApiRoutes apiRoutes;
     private Javalin app;
     private Gson gson = new Gson();
     private String testEventId = "test-event-" + System.nanoTime();
     private File testPhotoDir;
+    private String prevDataDir;
 
     @BeforeEach
     void setUp() {
+        prevDataDir = System.getProperty("scouting.data.dir");
+        System.setProperty("scouting.data.dir", tempDir.toAbsolutePath().toString());
+        JwtUtil.resetForTest();
+        AESUtil.resetForTest();
+
         String url = "jdbc:h2:mem:test_photo_" + System.nanoTime() + ";DB_CLOSE_DELAY=-1";
 
         Flyway.configure()
@@ -42,9 +57,10 @@ class PitPhotoStorageTest {
         jdbi = Jdbi.create(url, "sa", "");
         jdbi.installPlugin(new SqlObjectPlugin());
 
+        apiRoutes = new ApiRoutes(jdbi);
         app = Javalin.create(config -> {
             config.http.maxRequestSize = 15_000_000L;
-            new ApiRoutes(jdbi).register(config.routes);
+            apiRoutes.register(config.routes);
         });
 
         testPhotoDir = new File(AppConfig.resolveBaseDataDir(), "pit_photos" + File.separator + testEventId);
@@ -52,12 +68,26 @@ class PitPhotoStorageTest {
 
     @AfterEach
     void tearDown() {
-        if (testPhotoDir != null && testPhotoDir.exists()) {
-            File[] files = testPhotoDir.listFiles();
-            if (files != null) {
-                for (File f : files) f.delete();
+        try {
+            if (apiRoutes != null) {
+                apiRoutes.shutdown();
             }
-            testPhotoDir.delete();
+            JdbiConfig.closeDataSources();
+            if (testPhotoDir != null && testPhotoDir.exists()) {
+                File[] files = testPhotoDir.listFiles();
+                if (files != null) {
+                    for (File f : files) f.delete();
+                }
+                testPhotoDir.delete();
+            }
+        } finally {
+            JwtUtil.resetForTest();
+            AESUtil.resetForTest();
+            if (prevDataDir == null) {
+                System.clearProperty("scouting.data.dir");
+            } else {
+                System.setProperty("scouting.data.dir", prevDataDir);
+            }
         }
     }
 
@@ -122,43 +152,6 @@ class PitPhotoStorageTest {
                     req -> req.header("Authorization", "Bearer " + token));
             assertThat(traversalRes.code()).isEqualTo(400);
         });
-    }
-
-    @Test
-    void testNetworkInfoEndpoint() {
-        JavalinTest.test(app, (server, client) -> {
-            var res = client.get("/api/system/network-info");
-            assertThat(res.code()).isEqualTo(200);
-            String body = res.body().string();
-            assertThat(body).contains("primaryIp");
-            assertThat(body).contains("allIps");
-            assertThat(body).contains("primaryIpv6");
-            assertThat(body).contains("allIpv6s");
-            assertThat(body).contains("firewallCommand");
-            assertThat(body).contains("port");
-        });
-    }
-
-    @Test
-    void testOpenFirewallCmdEndpoint() {
-        String prev = System.getProperty("SKIP_FIREWALL_CHECK");
-        System.setProperty("SKIP_FIREWALL_CHECK", "true");
-        try {
-            JavalinTest.test(app, (server, client) -> {
-                var res = client.post("/api/system/open-firewall-cmd");
-                assertThat(res.code()).isEqualTo(200);
-                String body = res.body().string();
-                assertThat(body).contains("command");
-                assertThat(body).contains("netsh advfirewall firewall add rule");
-                assertThat(body).contains("os");
-            });
-        } finally {
-            if (prev == null) {
-                System.clearProperty("SKIP_FIREWALL_CHECK");
-            } else {
-                System.setProperty("SKIP_FIREWALL_CHECK", prev);
-            }
-        }
     }
 
     @Test

@@ -1,5 +1,5 @@
-﻿import { mount } from '@vue/test-utils'
-import { describe, it, expect, beforeEach, vi } from 'vitest'
+﻿import { mount, type VueWrapper } from '@vue/test-utils'
+import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest'
 import { setActivePinia, createPinia } from 'pinia'
 import ConnectionStatus from '../components/common/ConnectionStatus.vue'
 import { useConnectionStore } from '../stores/connection'
@@ -20,9 +20,19 @@ vi.mock('vue-i18n', () => ({
 }))
 
 describe('ConnectionStatus.vue Badges Visibility', () => {
+  const wrappers: VueWrapper<any>[] = []
+  const track = <T extends VueWrapper<any>>(w: T): T => {
+    wrappers.push(w)
+    return w
+  }
+
   beforeEach(() => {
     setActivePinia(createPinia())
     vi.clearAllMocks()
+  })
+
+  afterEach(() => {
+    while (wrappers.length) wrappers.pop()!.unmount()
   })
 
   it('hides 1-to-1 transport and fingerprint badges on active Host view', () => {
@@ -46,7 +56,7 @@ describe('ConnectionStatus.vue Badges Visibility', () => {
     connStore.setRtcService(mockRtc)
     connStore.setStandbyHost(false)
 
-    const wrapper = mount(ConnectionStatus)
+    const wrapper = track(mount(ConnectionStatus))
 
     // Host status is displayed
     expect(wrapper.find('.connection-status').exists()).toBe(true)
@@ -76,7 +86,7 @@ describe('ConnectionStatus.vue Badges Visibility', () => {
     connStore.setRtcService(mockRtc)
     connStore.setStandbyHost(false)
 
-    const wrapper = mount(ConnectionStatus)
+    const wrapper = track(mount(ConnectionStatus))
 
     // On Client, 1-to-1 transport and fingerprint badges MUST be rendered!
     expect(wrapper.find('.transport-badge').exists()).toBe(true)
@@ -100,7 +110,7 @@ describe('ConnectionStatus.vue Badges Visibility', () => {
       isVirtualTunnel: true,
       rttMs: 42
     }
-    const vdcWrapper = mount(ConnectionStatus)
+    const vdcWrapper = track(mount(ConnectionStatus))
     expect(vdcWrapper.find('.transport-text').text()).toBe('connection.transport_virtual_tunnel')
 
     connStore.transportInfo = {
@@ -110,7 +120,7 @@ describe('ConnectionStatus.vue Badges Visibility', () => {
       protocol: 'TCP',
       rttMs: 110
     }
-    const turnWrapper = mount(ConnectionStatus)
+    const turnWrapper = track(mount(ConnectionStatus))
     expect(turnWrapper.find('.transport-text').text()).toBe('connection.transport_relay')
   })
 })

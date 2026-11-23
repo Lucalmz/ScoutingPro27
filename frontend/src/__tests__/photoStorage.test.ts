@@ -2,6 +2,11 @@ import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
 import * as api from '../services/api'
 import * as mobileCache from '../services/mobilePhotoCache'
 import {
+  savePitPhoto as saveIdbPitPhoto,
+  getPitPhoto as getIdbPitPhoto,
+  deletePitPhoto as deleteIdbPitPhoto
+} from '../services/indexedDb'
+import {
   isDesktopHost,
   savePhoto,
   getPhotoUrl,
@@ -16,16 +21,25 @@ vi.mock('../services/api', () => ({
 
 describe('photoStorage Service', () => {
   const originalLocation = window.location
+  const origOnLineDesc = Object.getOwnPropertyDescriptor(window.navigator, 'onLine')
 
   beforeEach(() => {
     vi.clearAllMocks()
+    vi.mocked(api.uploadPitPhoto).mockResolvedValue({ status: 'ok', key: 'test_key' } as any)
+    vi.mocked(api.deletePitPhoto).mockResolvedValue({ success: true } as any)
   })
 
   afterEach(() => {
+    vi.restoreAllMocks()
     Object.defineProperty(window, 'location', {
       writable: true,
       value: originalLocation
     })
+    if (origOnLineDesc) {
+      Object.defineProperty(window.navigator, 'onLine', origOnLineDesc)
+    } else {
+      delete (window.navigator as any).onLine
+    }
   })
 
   function setHostname(hostname: string) {
@@ -218,6 +232,48 @@ describe('photoStorage Service', () => {
       const cached = await mobileCache.getMobileCachedPhoto(key)
       expect(cached).toBeNull()
       expect(api.deletePitPhoto).toHaveBeenCalledWith(eventId, key)
+    })
+
+    it('flushOfflinePhotos prevents concurrent duplicate flushes deterministically', async () => {
+      let resolvePending!: (val: any[]) => void
+      const pendingPromise = new Promise<any[]>((resolve) => {
+        resolvePending = resolve
+      })
+      vi.spyOn(mobileCache, 'getPendingMobilePhotos').mockReturnValueOnce(pendingPromise as any)
+
+      const flushFirst = flushOfflinePhotos('evt-concurrent')
+      const flushDuplicate = flushOfflinePhotos('evt-concurrent')
+
+      expect(await flushDuplicate).toBe(0)
+
+      resolvePending([
+        {
+          key: 'photo-concurrent-1',
+          dataUrl: 'data:image/webp;base64,AAA...',
+          eventId: 'evt-concurrent',
+          status: 'PENDING'
+        }
+      ])
+
+      expect(await flushFirst).toBe(1)
+      expect(api.uploadPitPhoto).toHaveBeenCalledTimes(1)
+    })
+  })
+
+  describe('IndexedDB Photo Storage Service', () => {
+    it('saves, retrieves, and deletes photos via memory fallback / indexeddb', async () => {
+      const key = 'photo_test_1'
+      const dataUrl = 'data:image/webp;base64,UklGRkAAAABXRUJQVlA4IDQAAADwAQCdASoBAAEAAQAcJaACdLoAAP7/2QAA'
+
+      const savedKey = await saveIdbPitPhoto(key, dataUrl)
+      expect(savedKey).toBe(key)
+
+      const retrieved = await getIdbPitPhoto(key)
+      expect(retrieved).toBe(dataUrl)
+
+      await deleteIdbPitPhoto(key)
+      const afterDelete = await getIdbPitPhoto(key)
+      expect(afterDelete).toBeNull()
     })
   })
 })

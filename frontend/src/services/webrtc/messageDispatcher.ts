@@ -4,9 +4,7 @@ import type {
   ConnectionStatus,
   WebRtcDirectMessage,
   TeamTagItem,
-  ScoutingEvent,
-  WebRtcHostHandoffBatch,
-  WebRtcHostHandoffAck
+  ScoutingEvent
 } from '@/types'
 import { DataChannelSender } from '@/services/dataChannelSender'
 import type { ClientEntry } from './types'
@@ -44,8 +42,6 @@ export interface MessageDispatcherContext {
   setLocalUserId: (id: string | undefined) => void
   getLocalUserName: () => string | undefined
   setLocalUserName: (name: string | undefined) => void
-  getHostSeqCounter: () => number
-  setHostSeqCounter: (seq: number) => void
   onClientConnected?: (userId: string, username: string) => void
   onRequestSync?: (sinceVersion: number, clientId: string) => void
 }
@@ -232,8 +228,7 @@ export function createMessageDispatcher(ctx: MessageDispatcherContext) {
     authCode?: string,
     senderUserId?: string,
     senderUserName?: string,
-    token?: string,
-    options?: { isHostTakeover?: boolean; clientMaxSeq?: number }
+    token?: string
   ) {
     if (senderUserId) ctx.setLocalUserId(senderUserId)
     if (senderUserName) ctx.setLocalUserName(senderUserName)
@@ -247,9 +242,7 @@ export function createMessageDispatcher(ctx: MessageDispatcherContext) {
       senderUserId,
       senderUserName,
       token: authToken,
-      hostSessionId: ctx.isHostMode() ? ctx.getHostSessionId() : undefined,
-      isHostTakeover: options?.isHostTakeover,
-      clientMaxSeq: options?.clientMaxSeq
+      hostSessionId: ctx.isHostMode() ? ctx.getHostSessionId() : undefined
     })
   }
 
@@ -398,56 +391,6 @@ export function createMessageDispatcher(ctx: MessageDispatcherContext) {
     }
   }
 
-  function initHostSeq(maxSeq: number) {
-    ctx.setHostSeqCounter(maxSeq)
-  }
-
-  function stampHostSeq(records: ScoutingRecord[]): ScoutingRecord[] {
-    let nextSeq = ctx.getHostSeqCounter()
-    for (const r of records) {
-      if (typeof r.hostSeq === 'number' && r.hostSeq > 0) {
-        // 保留原主机权威打号，单调递增推进本地时钟
-        if (r.hostSeq > nextSeq) {
-          nextSeq = r.hostSeq
-        }
-      } else {
-        r.hostSeq = ++nextSeq
-      }
-    }
-    ctx.setHostSeqCounter(nextSeq)
-    return records
-  }
-
-  function sendHostHandoffBatch(
-    payload: Omit<WebRtcHostHandoffBatch, 'type'>,
-    targetId?: string
-  ): Promise<void> {
-    return sendMessage(
-      {
-        type: 'HOST_HANDOFF_BATCH',
-        ...payload,
-        authCode: payload.authCode || ctx.getCurrentInviteCode(),
-        hostSessionId: ctx.getHostSessionId()
-      },
-      targetId
-    )
-  }
-
-  function sendHostHandoffAck(
-    ack: Omit<WebRtcHostHandoffAck, 'type'>,
-    targetId?: string
-  ): Promise<void> {
-    return sendMessage(
-      {
-        type: 'HOST_HANDOFF_ACK',
-        ...ack,
-        authCode: ack.authCode || ctx.getCurrentInviteCode(),
-        hostSessionId: ctx.getHostSessionId()
-      },
-      targetId
-    )
-  }
-
   function broadcastTagUpdate(tag: TeamTagItem, action: 'ADD' | 'REMOVE', targetId?: string) {
     const isHost = ctx.isHostMode()
     const authToken = isHost ? undefined : getLocalAuthToken()
@@ -542,10 +485,6 @@ export function createMessageDispatcher(ctx: MessageDispatcherContext) {
     requestTagsSync,
     requestTakeover,
     sendTakeoverDecision,
-    sendIdentityMigration,
-    initHostSeq,
-    stampHostSeq,
-    sendHostHandoffBatch,
-    sendHostHandoffAck
+    sendIdentityMigration
   }
 }

@@ -1,5 +1,6 @@
-import { describe, it, expect, beforeEach, vi } from 'vitest'
-import { mount } from '@vue/test-utils'
+import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest'
+import { nextTick } from 'vue'
+import { mount, type VueWrapper } from '@vue/test-utils'
 import { setActivePinia, createPinia } from 'pinia'
 import MobileStatusPill from '../components/common/MobileStatusPill.vue'
 import { useConnectionStore } from '../stores/connection'
@@ -37,8 +38,20 @@ vi.mock('vue-i18n', async (importOriginal) => {
 })
 
 describe('MobileStatusPill.vue', () => {
+  const wrappers: VueWrapper<any>[] = []
+  const track = <T extends VueWrapper<any>>(w: T): T => {
+    wrappers.push(w)
+    return w
+  }
+
   beforeEach(() => {
     setActivePinia(createPinia())
+    document.body.innerHTML = ''
+  })
+
+  afterEach(() => {
+    while (wrappers.length) wrappers.pop()!.unmount()
+    vi.restoreAllMocks()
     document.body.innerHTML = ''
   })
 
@@ -46,13 +59,13 @@ describe('MobileStatusPill.vue', () => {
     const connStore = useConnectionStore()
     connStore.status = 'connected'
 
-    const wrapper = mount(MobileStatusPill, {
+    const wrapper = track(mount(MobileStatusPill, {
       props: {
         eventName: 'FTC Qualifying 2026',
         inviteCode: 'ABCD12',
         isHost: false
       }
-    })
+    }))
 
     const pill = wrapper.find('.status-pill')
     expect(pill.exists()).toBe(true)
@@ -66,12 +79,12 @@ describe('MobileStatusPill.vue', () => {
     const connStore = useConnectionStore()
     connStore.status = 'connected'
 
-    const wrapper = mount(MobileStatusPill, {
+    const wrapper = track(mount(MobileStatusPill, {
       props: {
         eventName: 'Championship Event',
         inviteCode: 'CHAMP1'
       }
-    })
+    }))
 
     // Initially HUD is not mounted in body
     expect(document.body.querySelector('.hud-popover')).toBeNull()
@@ -95,21 +108,27 @@ describe('MobileStatusPill.vue', () => {
   it('does not render standby badge or takeover controls on mobile', async () => {
     const connStore = useConnectionStore()
     connStore.status = 'connected'
+    connStore.setStandbyHost(true, { hostSessionId: 'active-h1' })
+    expect(connStore.isStandbyHost).toBe(true)
 
-    const wrapper = mount(MobileStatusPill, {
+    const wrapper = track(mount(MobileStatusPill, {
       props: {
         eventName: 'Standby Event',
         inviteCode: 'STAND1'
       }
-    })
+    }))
 
-    // Pill does not show standby badge
+    // Pill is rendered and does not show standby badge
+    expect(wrapper.find('.status-pill').exists()).toBe(true)
     expect(wrapper.find('.pill-standby-badge').exists()).toBe(false)
 
-    // Open HUD
+    // Open HUD and positively verify popover mounted before asserting absence of takeover button
     await wrapper.find('.status-pill').trigger('click')
 
-    const takeoverBtn = document.body.querySelector('.btn-hud-takeover')
+    const popover = document.body.querySelector('.hud-popover')
+    expect(popover).not.toBeNull()
+    expect(popover?.textContent).toContain('Standby Event')
+    const takeoverBtn = popover?.querySelector('.btn-hud-takeover') ?? null
     expect(takeoverBtn).toBeNull()
   })
 
@@ -126,12 +145,12 @@ describe('MobileStatusPill.vue', () => {
       rttMs: 303
     })
 
-    const wrapper = mount(MobileStatusPill, {
+    const wrapper = track(mount(MobileStatusPill, {
       props: {
         eventName: 'Quals 26',
         inviteCode: 'BUZZ26'
       }
-    })
+    }))
 
     await wrapper.find('.status-pill').trigger('click')
 
@@ -153,12 +172,12 @@ describe('MobileStatusPill.vue', () => {
       rttMs: 4
     })
 
-    const wrapper = mount(MobileStatusPill, {
+    const wrapper = track(mount(MobileStatusPill, {
       props: {
         eventName: 'LAN Event',
         inviteCode: 'LAN001'
       }
-    })
+    }))
 
     await wrapper.find('.status-pill').trigger('click')
 
@@ -181,12 +200,12 @@ describe('MobileStatusPill.vue', () => {
       rttMs: 45
     })
 
-    const vdcWrapper = mount(MobileStatusPill, {
+    const vdcWrapper = track(mount(MobileStatusPill, {
       props: {
         eventName: 'Virtual Event',
         inviteCode: 'VIRT01'
       }
-    })
+    }))
     await vdcWrapper.find('.status-pill').trigger('click')
     const vdcPopover = document.body.querySelector('.hud-popover')
     expect(vdcPopover!.textContent).toContain('connection.transport_virtual_tunnel')
@@ -200,16 +219,15 @@ describe('MobileStatusPill.vue', () => {
       protocol: 'TCP',
       rttMs: 135
     })
-    const turnWrapper = mount(MobileStatusPill, {
+    const turnWrapper = track(mount(MobileStatusPill, {
       props: {
         eventName: 'Turn Event',
         inviteCode: 'TURN01'
       }
-    })
+    }))
     await turnWrapper.find('.status-pill').trigger('click')
     const turnPopover = document.body.querySelector('.hud-popover')
     expect(turnPopover!.textContent).toContain('Relay')
-    turnWrapper.unmount()
   })
 
   it('renders connection mode and RTT directly on the floating status pill surface without opening HUD', async () => {
@@ -225,12 +243,12 @@ describe('MobileStatusPill.vue', () => {
       rttMs: 19
     })
 
-    const wrapper = mount(MobileStatusPill, {
+    const wrapper = track(mount(MobileStatusPill, {
       props: {
         eventName: 'Mobile Direct Test',
         inviteCode: 'BUZZ26'
       }
-    })
+    }))
 
     const pill = wrapper.find('.status-pill')
     expect(pill.find('.pill-transport-badge').exists()).toBe(true)
@@ -248,7 +266,7 @@ describe('MobileStatusPill.vue', () => {
       isVirtualTunnel: true,
       rttMs: 45
     })
-    await wrapper.vm.$nextTick()
+    await nextTick()
 
     expect(pill.find('.pill-transport-badge.virtual-tunnel').exists()).toBe(true)
     expect(pill.text()).toContain('connection.transport_virtual_tunnel')

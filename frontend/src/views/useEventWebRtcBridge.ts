@@ -69,13 +69,6 @@ export function useEventWebRtcBridge({
   const customFieldsStore = useCustomFieldsStore()
   const toastStore = useToastStore()
 
-  // Client 端：持久化最后一次从 Host 收到的最大 hostSeq，用于重连后增量请求
-  // 按 eventId 分筒，避免不同赛事之间混淆
-  const lastHostSeqKey = computed(() => `sp27_lastHostSeq_${eventId.value}`)
-  const lastHostSeq = ref<number>(0)
-  watch(lastHostSeq, (v) => localStorage.setItem(lastHostSeqKey.value, String(v)))
-  const lastConnectedHostSessionId = ref<string>('')
-  const wasActiveHostBeforeDemotion = ref<boolean>(false)
   const syncedMemberIds = new Set<string>()
   let lastSyncPipelineTriggeredAt = 0
   let isPromotingToHost = false
@@ -85,6 +78,13 @@ export function useEventWebRtcBridge({
   let crdtUnbind: (() => void) | null = null
   let crdtHub: WebRtcCrdtSynchronizerHub | null = null
   const openCrdtPeers = new Set<string>()
+
+  function bindCrdtSyncTrigger(): void {
+    connStore.setCrdtSyncTrigger(async (peerId = 'host') => {
+      if (!crdtHub) return false
+      return await crdtHub.triggerFullSyncWithPeer(peerId)
+    })
+  }
 
   function createHubForHandle(handle: EventCrdtHandle): WebRtcCrdtSynchronizerHub {
     return createWebRtcCrdtSynchronizerHub({
@@ -204,6 +204,8 @@ export function useEventWebRtcBridge({
     }
 
     if (activeCrdtEventId && activeCrdtEventId !== eid) {
+      openCrdtPeers.clear()
+      setCrdtTransportActive(activeCrdtEventId, false)
       crdtUnbind?.()
       crdtUnbind = null
       if (crdtHub) {
@@ -227,6 +229,7 @@ export function useEventWebRtcBridge({
       await crdtHub.destroy()
     }
     crdtHub = createHubForHandle(session.handle)
+    bindCrdtSyncTrigger()
     publishE2eBridge()
     return session.handle
   }
@@ -252,25 +255,38 @@ export function useEventWebRtcBridge({
         if (!h) return null
         return {
           scoutingRecords: readScoutingRecordsFromCrdt(h.store, eid)
-            .map((r) => ({
-              id: r.id,
-              eventId: r.eventId,
-              scoutId: r.scoutId,
-              matchNumber: r.matchNumber,
-              teamNumber: r.teamNumber,
-              autoScore: r.autoScore,
-              teleopScore: r.teleopScore,
-              endgameScore: r.endgameScore,
-              totalScore: r.totalScore,
-              notes: r.notes,
-              isDeleted: Boolean(r.isDeleted),
-              authorPubKey: r.authorPubKey || ''
-            }))
+            .map((r) => {
+              let tournamentLevel = 'QUALIFICATION'
+              try {
+                const parsed = r.rawData ? JSON.parse(r.rawData) : null
+                if (typeof parsed?.tournamentLevel === 'string' && parsed.tournamentLevel) {
+                  tournamentLevel = parsed.tournamentLevel.toUpperCase()
+                }
+              } catch {}
+              return {
+                id: r.id,
+                eventId: r.eventId,
+                scoutId: r.scoutId,
+                matchNumber: r.matchNumber,
+                teamNumber: r.teamNumber,
+                tournamentLevel,
+                autoScore: r.autoScore,
+                teleopScore: r.teleopScore,
+                endgameScore: r.endgameScore,
+                totalScore: r.totalScore,
+                notes: r.notes,
+                isBroken: Boolean(r.isBroken),
+                version: r.version || 1,
+                isDeleted: Boolean(r.isDeleted),
+                authorPubKey: r.authorPubKey || ''
+              }
+            })
             .sort((a, b) => a.id.localeCompare(b.id)),
           pitRecords: readPitRecordsFromCrdt(h.store, eid)
             .map((p) => ({
               teamNumber: p.teamNumber,
               robotName: p.robotName || '',
+              drivetrainType: p.drivetrainType || 'mecanum',
               weightLbs: p.weightLbs || 0,
               launcherType: p.launcherType || '',
               photoKeys: [...(p.photoKeys || [])].sort(),
@@ -308,6 +324,9 @@ export function useEventWebRtcBridge({
           conflicts: Array.from(recordStore.conflictCoords).sort()
         }
       },
+      softDeleteOwnRecord: async (recordId: string) => await recordStore.deleteRecord(recordId),
+      getOwnRecordIdByMatch: (matchNumber: number) =>
+        recordStore.activeRecords.find((r) => r.matchNumber === Number(matchNumber) && r.scoutId === userStore.userId)?.id || null,
       updatePitFields: async (teamNumber: number, patch: Record<string, any>) => {
         const eid = activeCrdtEventId || eventId.value
         pitStore.currentEventId = eid
@@ -385,10 +404,12 @@ export function useEventWebRtcBridge({
         await scheduleStore.assignStation(eid, Number(matchNumber), station, scoutId, scoutName, true, 'QUALIFICATION')
       },
       exportOfflineSyncPackage: async () => {
-        const { createSyncPackage } = await import('@/utils/offlineSync')
+        const { createSyncPackage, buildClientExportCrdtSnapshot } = await import('@/utils/offlineSync')
         const evt = event.value || eventStore.currentEvent
         const eid = activeCrdtEventId || eventId.value
         const h = getExistingEventCrdt(eid)
+        const rawCrdt = h?.store.getMergeableContent()
+        const eventRecords = recordStore.records.filter((r) => r.eventId === eid)
         return createSyncPackage({
           packetType: eventStore.isHost ? 'HOST_BROADCAST' : 'CLIENT_PUSH',
           eventId: eid,
@@ -401,17 +422,31 @@ export function useEventWebRtcBridge({
           target: {
             recipientType: eventStore.isHost ? 'ALL_SCOUTS' : 'HOST'
           },
-          records: recordStore.records.filter((r) => r.eventId === eid),
-          teamTags: recordStore.teamTags.filter((tg) => tg.eventId === eid),
-          fromHostSeq: 0,
-          toHostSeq: 0,
-          crdtSnapshot: h?.store.getMergeableContent()
+          records: eventStore.isHost ? eventRecords : eventRecords.filter((r) => r.scoutId === userStore.userId),
+          teamTags: eventStore.isHost ? recordStore.teamTags.filter((tg) => tg.eventId === eid) : undefined,
+          crdtSnapshot: eventStore.isHost
+            ? rawCrdt
+            : buildClientExportCrdtSnapshot(rawCrdt, userStore.userId, eid)
         })
       },
       importOfflineSyncPackage: async (rawText: string, fileName = 'sync.info') => {
         const { scanFilesAndFolders, executeBatchSyncImport } = await import('@/utils/offlineSync')
         const { getOrCreateEventCrdt } = await import('@/services/crdt')
         const eid = activeCrdtEventId || eventId.value
+        const existingRecordOwners = new Map<string, string>()
+        for (const r of recordStore.records) {
+          if (r.id && r.scoutId && (!eid || !r.eventId || r.eventId === eid)) {
+            existingRecordOwners.set(r.id, r.scoutId)
+          }
+        }
+        const existingCrdt = eid ? getExistingEventCrdt(eid) : undefined
+        if (existingCrdt) {
+          for (const [rid, row] of Object.entries(existingCrdt.store.getTable('scouting_records'))) {
+            if (typeof row?.scoutId === 'string' && row.scoutId) {
+              existingRecordOwners.set(rid, row.scoutId)
+            }
+          }
+        }
         const file = new File([rawText], fileName, { type: 'application/json' })
         const scanResult = await scanFilesAndFolders([file], eid)
         return await executeBatchSyncImport({
@@ -419,6 +454,8 @@ export function useEventWebRtcBridge({
           targetEventId: eid,
           isHost: Boolean(eventStore.isHost && !connStore.isStandbyHost),
           events: eventStore.events,
+          expectedHostUserId: (event.value || eventStore.currentEvent)?.hostId,
+          existingRecordOwners,
           bulkSync: recordStore.bulkSync,
           persistRecordsToDb: async (recs) => {
             if (!eventStore.isHost || connStore.isStandbyHost) return
@@ -428,7 +465,8 @@ export function useEventWebRtcBridge({
           applyTagsFullSync: recordStore.applyTagsFullSync,
           applyScheduleFullSync: scheduleStore.applyScheduleFullSync,
           syncExternalEvent: eventStore.syncExternal,
-          applyCrdtSnapshot: (snap) => getOrCreateEventCrdt(eid).persistence.applyMergeableSnapshot(snap, true)
+          applyCrdtSnapshot: (snap, snapshotEventId) =>
+            getOrCreateEventCrdt(snapshotEventId || eid).persistence.applyMergeableSnapshot(snap, true)
         })
       },
       sendPoisonedFutureHlcFrame: async (futureYears = 10) => {
@@ -588,6 +626,7 @@ export function useEventWebRtcBridge({
     activeCrdtEventId = newId
     crdtUnbind = session.unbind
     crdtHub = createHubForHandle(session.handle)
+    bindCrdtSyncTrigger()
     publishE2eBridge()
     if (wasOpen.length > 0) {
       setCrdtTransportActive(newId, true)
@@ -600,6 +639,7 @@ export function useEventWebRtcBridge({
   async function disposeEventCrdtSession(): Promise<void> {
     const eid = activeCrdtEventId || eventId.value
     openCrdtPeers.clear()
+    connStore.setCrdtSyncTrigger(null)
     crdtUnbind?.()
     crdtUnbind = null
     if (crdtHub) {
@@ -708,34 +748,6 @@ export function useEventWebRtcBridge({
     }
   }
 
-  function advanceLastHostSeq(incomingRecords: ScoutingRecord[]) {
-    const validSeqs = incomingRecords
-      .map((r) => r.hostSeq)
-      .filter((s): s is number => typeof s === 'number' && Number.isFinite(s) && s > 0)
-    if (validSeqs.length > 0) {
-      const maxIncoming = validSeqs.reduce((max, s) => Math.max(max, s), 0)
-      if (maxIncoming > lastHostSeq.value) {
-        lastHostSeq.value = maxIncoming
-      }
-    }
-  }
-
-  function initHostSeqCounter() {
-    // 计算数据库和内存中已持久化记录的最大 hostSeq（限定当前赛事）
-    const dbMaxSeq = recordStore.records
-      .filter((r) => r.eventId === eventId.value)
-      .reduce((m, r) => Math.max(m, r.hostSeq || 0), 0)
-
-    // Host：从已持久化记录的最大 hostSeq 恢复计数器，保证重启后单调递增
-    if (eventStore.isHost) {
-      connStore.initHostSeq(dbMaxSeq)
-    } else {
-      // Client：多层兜底初始化 lastHostSeq，防止本地缓存缺失导致游标归零
-      const localStored = parseInt(localStorage.getItem(lastHostSeqKey.value) ?? '0') || 0
-      lastHostSeq.value = Math.max(dbMaxSeq, localStored)
-    }
-  }
-
   async function setupWebRTC() {
     if (!userStore.isLoggedIn || !userStore.user?.token) {
       router.replace('/')
@@ -749,6 +761,7 @@ export function useEventWebRtcBridge({
       if (existingHandle) {
         activeCrdtEventId = evt.id
         crdtHub = createHubForHandle(existingHandle)
+        bindCrdtSyncTrigger()
       }
     }
 
@@ -780,14 +793,22 @@ export function useEventWebRtcBridge({
         }
         void crdtHub?.detachPeer(peerId)
       },
-      onStatusChange: (s) => connStore.setStatus(s),
+      onStatusChange: (s) => {
+        connStore.setStatus(s)
+        if (
+          (!eventStore.isHost || connStore.isStandbyHost) &&
+          (s === 'offline' || s === 'long_offline' || s === 'degraded')
+        ) {
+          openCrdtPeers.clear()
+          const crdtEid = activeCrdtEventId || eventId.value
+          if (crdtEid) {
+            setCrdtTransportActive(crdtEid, false)
+          }
+        }
+      },
 
-      // 返回真正被接受的记录，Host 端用此打 hostSeq + 广播
       onRecordsReceived: async (records: ScoutingRecord[], senderId?: string): Promise<ScoutingRecord[]> => {
         const accepted = await recordStore.bulkSync(records)
-        if (!eventStore.isHost || connStore.isStandbyHost) {
-          advanceLastHostSeq(records)
-        }
         if (accepted.length > 0) {
           const first = accepted[0]
           if (accepted.length === 1 && first) {
@@ -810,40 +831,17 @@ export function useEventWebRtcBridge({
         return accepted
       },
 
-      // Host 回传的 ACK 内含 stamped 记录，Client 用此更新本地 hostSeq + lastHostSeq
-      onAckReceived: (ids: string[], stampedRecords?: ScoutingRecord[], rejectedRecordIds?: string[]) => {
+      onAckReceived: (ids: string[], _stampedRecords?: ScoutingRecord[], rejectedRecordIds?: string[]) => {
         const rejectedSet = new Set(rejectedRecordIds || [])
         const acceptedIds = ids.filter((id) => !rejectedSet.has(id))
         if (acceptedIds.length > 0) {
-          recordStore.markSynced(acceptedIds)
-        }
-        if (stampedRecords && stampedRecords.length > 0 && (!eventStore.isHost || connStore.isStandbyHost)) {
-          for (const stamped of stampedRecords) {
-            const local = recordStore.records.find((r) => r.id === stamped.id)
-            if (local && stamped.hostSeq) {
-              local.hostSeq = stamped.hostSeq
-            }
-          }
-          advanceLastHostSeq(stampedRecords)
-          syncRecords(stampedRecords).catch((err) => {
-            console.warn('[EventView] Failed to persist ack stamped records to local DB:', err)
-          })
+          void recordStore.markSynced(acceptedIds)
         }
       },
 
-      // Host 收到增量请求，根据 sinceVersion 过滤记录（严格限定当前赛事）
-      onRequestSync: (sinceVersion: number, senderId?: string) => {
-        if (isCrdtTransportActive(activeCrdtEventId || eventId.value)) {
-          return
-        }
-        const eventRecords = recordStore.records.filter((r) => r.eventId === eventId.value)
-        const recordsToSync =
-          sinceVersion > 0
-            ? eventRecords.filter((r) => (r.hostSeq || 0) > sinceVersion)
-            : eventRecords // sinceVersion=0 → 全量同步当前赛事记录
-        if (recordsToSync.length > 0) {
-          connStore.pushRecords(recordsToSync, senderId)
-        }
+      onRequestSync: (_sinceVersion: number, _senderId?: string) => {
+        // Data sync is handled exclusively by TinyBase CRDT synchronizer;
+        // REQUEST_SYNC only performs peer identity binding & outbox flush.
       },
 
       onTagUpdateReceived: (tag, action, eventIdVal) => {
@@ -1156,15 +1154,6 @@ export function useEventWebRtcBridge({
           console.log(`[EventView] Migrating temporary event ID "${currentRouteEventId}" to authoritative UUID "${actualEvent.id}"`)
           await migrateEventScopedState(currentRouteEventId, actualEvent.id, upperInviteCode)
           try {
-            const oldSeq = parseInt(localStorage.getItem(`sp27_lastHostSeq_${currentRouteEventId}`) ?? '0', 10) || 0
-            const newSeq = parseInt(localStorage.getItem(`sp27_lastHostSeq_${actualEvent.id}`) ?? '0', 10) || 0
-            const mergedSeq = Math.max(lastHostSeq.value, oldSeq, newSeq)
-            if (mergedSeq > 0) {
-              localStorage.setItem(`sp27_lastHostSeq_${actualEvent.id}`, String(mergedSeq))
-              lastHostSeq.value = mergedSeq
-            }
-          } catch {}
-          try {
             const { migrateMobilePhotosEventId } = await import('@/services/mobilePhotoCache')
             await migrateMobilePhotosEventId(currentRouteEventId, actualEvent.id)
           } catch {}
@@ -1172,12 +1161,12 @@ export function useEventWebRtcBridge({
             path: `/event/${actualEvent.id}`,
             query: router.currentRoute.value.query
           })
-          // 若刚在 2 秒内执行过首次连接同步流水线，仅需针对新权威 UUID 刷新自定义字段与标签，避免重复拉取全量比赛记录
+          // 若刚在 2 秒内执行过首次连接同步流水线，仅需刷新自定义字段并触发 CRDT 增量同步
           if (Date.now() - lastSyncPipelineTriggeredAt < 2000) {
             customFieldsStore.fetchFields(actualEvent.id).catch(() => {})
-            connStore.rtcService?.requestTagsSync(actualEvent.id).catch(() => {})
+            void crdtHub?.triggerFullSyncWithPeer('host')
           } else {
-            void triggerClientSyncPipeline(false)
+            void triggerClientSyncPipeline()
           }
         }
       },
@@ -1228,90 +1217,12 @@ export function useEventWebRtcBridge({
 
       onHostPromoted: () => {
         connStore.setStandbyHost(false)
-        wasActiveHostBeforeDemotion.value = false
-        const dbMaxSeq = recordStore.records
-          .filter((r) => r.eventId === eventId.value)
-          .reduce((m, r) => Math.max(m, r.hostSeq || 0), 0)
-        connStore.initHostSeq(Math.max(dbMaxSeq, lastHostSeq.value))
-
-        // 升迁为主机后，若 CRDT 传输未激活，按旧通道向所有 Peer 广播最新排班、标签与自定义字段基准包
-        const promotedEvId = eventStore.currentEvent?.id || ''
-        if (
-          connStore.rtcService &&
-          promotedEvId &&
-          !isCrdtTransportActive(promotedEvId) &&
-          connStore.rtcService.getDataChannel()?.readyState === 'open'
-        ) {
-          const evId = promotedEvId
-          const allSchedules = scheduleStore.schedules
-          const allAssignments = Object.values(scheduleStore.assignments)
-          const CHUNK_SIZE = 20
-          if (allSchedules.length <= CHUNK_SIZE) {
-            connStore.rtcService.sendMessage({
-              type: 'SCHEDULE_FULL_SYNC',
-              schedules: allSchedules,
-              assignments: allAssignments
-            })
-          } else {
-            const totalBatches = Math.ceil(allSchedules.length / CHUNK_SIZE)
-            const syncId = `sched-${Date.now()}`
-            const allMatchNums = new Set(allSchedules.map((s) => Number(s.matchNumber)))
-            for (let i = 0; i < totalBatches; i++) {
-              const batchSchedules = allSchedules.slice(i * CHUNK_SIZE, (i + 1) * CHUNK_SIZE)
-              const batchMatchNums = new Set(batchSchedules.map((s) => Number(s.matchNumber)))
-              const batchAssignments =
-                i === totalBatches - 1
-                  ? allAssignments.filter(
-                      (a) => batchMatchNums.has(Number(a.matchNumber)) || !allMatchNums.has(Number(a.matchNumber))
-                    )
-                  : allAssignments.filter((a) => batchMatchNums.has(Number(a.matchNumber)))
-
-              connStore.rtcService.sendMessage({
-                type: 'SCHEDULE_BATCH_SYNC',
-                batchIndex: i,
-                totalBatches,
-                schedules: batchSchedules,
-                assignments: batchAssignments,
-                syncId
-              })
-            }
-          }
-          connStore.rtcService.sendTagsFullSync(recordStore.teamTags, evId)
-          connStore.rtcService.sendMessage({
-            type: 'CUSTOM_FIELDS_FULL_SYNC',
-            eventId: evId,
-            fields: customFieldsStore.getFields(evId)
-          })
-        }
         toastStore.showToast(t('event.host_activated'), 'success')
       },
 
       onHostDemoted: (info?: { hostSessionId: string; hostDeviceId?: string }) => {
         connStore.setStandbyHost(true, info)
-        wasActiveHostBeforeDemotion.value = true
         toastStore.showToast(t('event.demoted_to_standby'), 'warning')
-      },
-
-      onHostHandoffReceived: async (batch) => {
-        console.log(`[EventView] Processing onHostHandoffReceived: ${batch.records?.length || 0} records`)
-        if (Array.isArray(batch.schedules) && Array.isArray(batch.assignments)) {
-          scheduleStore.applyScheduleFullSync(batch.schedules, batch.assignments)
-        }
-        if (Array.isArray(batch.pitRecords)) {
-          pitStore.applyFullSync(batch.pitRecords)
-        }
-        if (Array.isArray(batch.teamTags) && batch.eventId) {
-          recordStore.applyTagsFullSync(batch.teamTags)
-        }
-        if (Array.isArray(batch.customFields) && batch.eventId) {
-          customFieldsStore.applyFullSync(batch.eventId, batch.customFields)
-        }
-        toastStore.showToast(t('event.handoff_received_toast'), 'success')
-        return batch.records?.length || 0
-      },
-
-      onHostHandoffAck: (ack) => {
-        console.log('[EventView] Host handoff acknowledged by active host:', ack)
       },
 
       onActiveHostLeft: () => {
@@ -1349,11 +1260,6 @@ export function useEventWebRtcBridge({
     // 若当前已有存活且处于活动连接态的 rtcService（如从队伍详情等同赛事子页面返回），保持长连接无需重建
     if (isServiceAlive && connStore.rtcService) {
       connStore.rtcService.updateCallbacks?.(rtcCallbacks)
-      if (typeof window !== 'undefined') {
-        ;(window as any).__sendDirectMessage = (targetId: string, title: string, body: string) => {
-          return inboxStore.sendDirectMessage({ targetId, title, body }, connStore.rtcService!)
-        }
-      }
       publishE2eBridge()
       return
     }
@@ -1364,11 +1270,6 @@ export function useEventWebRtcBridge({
 
     const rtc = createWebRtcService(rtcCallbacks)
     connStore.setRtcService(rtc)
-    if (typeof window !== 'undefined') {
-      ;(window as any).__sendDirectMessage = (targetId: string, title: string, body: string) => {
-        return inboxStore.sendDirectMessage({ targetId, title, body }, rtc)
-      }
-    }
     publishE2eBridge()
 
     try {
@@ -1405,55 +1306,13 @@ export function useEventWebRtcBridge({
           inboxStore.flushOutbox(connStore.rtcService)
         }
 
-        if (connStore.isStandbyHost && wasActiveHostBeforeDemotion.value) {
-          if (isCrdtTransportActive(evt.id) || getExistingEventCrdt(evt.id)) {
-            console.log('[EventView] Standby host reconnected to new host; CRDT synchronizer handles delta merge.')
-            wasActiveHostBeforeDemotion.value = false
-          } else {
-            // 旧主控降级后连通新主控（仅兼容旧协议）：主动触发全量资产交接 (HOST_HANDOFF_BATCH)
-            console.log('[EventView] Standby host reconnected to new host, initiating HOST_HANDOFF_BATCH...')
-            const eventRecords = recordStore.records.filter((r) => r.eventId === evt.id)
-            const maxDbSeq = eventRecords.reduce((m, r) => Math.max(m, r.hostSeq || 0), 0)
-            const curCounter = connStore.rtcService?.getHostSeqCounter?.() || 0
-            const outgoingMaxSeq = Math.max(maxDbSeq, curCounter, lastHostSeq.value)
-
-            await connStore.rtcService?.sendHostHandoffBatch({
-              eventId: evt.id,
-              incomingMaxSeq: outgoingMaxSeq,
-              hostEpoch: 0,
-              records: eventRecords,
-              schedules: scheduleStore.schedules,
-              assignments: Object.values(scheduleStore.assignments),
-              pitRecords: pitStore.records.filter((r) => r.eventId === evt.id),
-              teamTags: recordStore.teamTags.filter((t) => t.eventId === evt.id),
-              customFields: customFieldsStore.getFields(evt.id),
-              senderUserId: userStore.userId
-            })
-            wasActiveHostBeforeDemotion.value = false
-            toastStore.showToast(t('event.handoff_sent_toast'), 'info')
-          }
-        }
-
-        if (!eventStore.isHost) {
-          const curHostSessionId =
-            connStore.rtcService?.getCurrentHostSessionId?.() ||
-            connStore.standbyHostInfo?.hostSessionId ||
-            ''
-          const isHostTakeover = Boolean(
-            lastConnectedHostSessionId.value &&
-              curHostSessionId &&
-              curHostSessionId !== lastConnectedHostSessionId.value
-          )
-          if (curHostSessionId) {
-            lastConnectedHostSessionId.value = curHostSessionId
-          }
-
+        if (!eventStore.isHost || connStore.isStandbyHost) {
           if (connStore.sessionConflict) {
             console.warn('[EventView] Connected but session conflict is active; suspending auto-sync pipeline until resolved.')
             return
           }
 
-          await triggerClientSyncPipeline(isHostTakeover)
+          await triggerClientSyncPipeline()
         } else {
           // Host 连通或恢复后，同样主动巡检照片队列
           flushOfflinePhotos(evt.id)
@@ -1462,44 +1321,27 @@ export function useEventWebRtcBridge({
     }
   )
 
-  async function triggerClientSyncPipeline(isHostTakeover = false) {
+  async function triggerClientSyncPipeline() {
     const evt = eventStore.currentEvent
-    if (!evt || eventStore.isHost) return
+    if (!evt || (eventStore.isHost && !connStore.isStandbyHost)) return
     if (connStore.sessionConflict) {
       console.warn('[EventView] Connected but session conflict is active; suspending auto-sync pipeline until resolved.')
       return
     }
     const now = Date.now()
-    if (!isHostTakeover && now - lastSyncPipelineTriggeredAt < 1200) {
+    if (now - lastSyncPipelineTriggeredAt < 1200) {
       return
     }
     lastSyncPipelineTriggeredAt = now
 
-    // Client 连接／重连：按序发起同步流水线，避免并发数据风暴
+    // Client / Standby Host 连接／重连：注册身份与刷新私信队列，业务数据完全交由 TinyBase CRDT 增量同步
     connStore.requestSync(
-      isHostTakeover ? 0 : lastHostSeq.value,
+      0,
       undefined,
       userStore.userId,
       userStore.username,
-      userStore.token,
-      { isHostTakeover, clientMaxSeq: lastHostSeq.value }
+      userStore.token
     )
-
-    if (!isCrdtTransportActive(evt.id)) {
-      // 核心自愈（仅兼容旧协议）：若发生主机切换，即使此前已标记为 SYNCED 也重推属于自己的记录，确保新主机不漏历史打分；常规重连推送 PENDING 及未获 Host 签发的未打号记录
-      const myRecs = recordStore.records.filter(
-        (r) =>
-          r.eventId === evt.id &&
-          r.scoutId === userStore.userId &&
-          (isHostTakeover || r.syncStatus === 'PENDING' || !r.hostSeq)
-      )
-      if (myRecs.length > 0) {
-        console.log(`[EventView] Auto self-healing: pushing ${myRecs.length} unconfirmed/pending records to host...`)
-        await connStore.pushRecords(myRecs).catch((err) => {
-          console.warn('[EventView] Failed to auto-push pending records:', err)
-        })
-      }
-    }
 
     // 移动端重连核心自愈 1：主动出清离线期间录入的 Pit 展位记录
     try {
@@ -1511,41 +1353,8 @@ export function useEventWebRtcBridge({
     // 移动端重连核心自愈 2：主动出清离线照片队列，确保特写照片落盘到 Host
     flushOfflinePhotos(evt.id)
 
-    // 顺序向 Host 请求最新的赛程与排班、展位侦察记录、以及战队标签
-    // （当 CRDT 同步通道激活时由 TinyBase 增量协议接管，仅在旧连接兼容模式下发 Legacy REQUEST_* 包）
-    if (connStore.rtcService) {
-      if (isCrdtTransportActive(evt.id) && crdtHub) {
-        void crdtHub.triggerFullSyncWithPeer('host')
-      } else {
-        try {
-          await connStore.rtcService.sendMessage({
-            type: 'REQUEST_SCHEDULE_SYNC'
-          })
-        } catch (e) {
-          console.warn('[EventView] Failed to request schedule sync:', e)
-        }
-        try {
-          await connStore.rtcService.sendMessage({
-            type: 'REQUEST_PIT_SYNC'
-          })
-        } catch (e) {
-          console.warn('[EventView] Failed to request pit sync:', e)
-        }
-        try {
-          await connStore.rtcService.sendMessage({
-            type: 'REQUEST_CUSTOM_FIELDS_SYNC',
-            eventId: evt.id
-          })
-        } catch (e) {
-          console.warn('[EventView] Failed to request custom fields sync:', e)
-        }
-        customFieldsStore.fetchFields(evt.id).catch((e: any) => {
-          console.warn('[EventView] Failed to fetch custom fields:', e)
-        })
-        connStore.rtcService.requestTagsSync(evt.id).catch((e: any) => {
-          console.warn('[EventView] Failed to request tags sync:', e)
-        })
-      }
+    if (connStore.rtcService && crdtHub) {
+      void crdtHub.triggerFullSyncWithPeer('host')
     }
   }
 
@@ -1553,9 +1362,9 @@ export function useEventWebRtcBridge({
     () => connStore.sessionConflict,
     async (conflict, oldConflict) => {
       // 当冲突被解决（从存在冲突变为 null）且当前已连通时，唤醒此前暂停的同步流水线
-      if (oldConflict && !conflict && connStore.status === 'connected' && !eventStore.isHost) {
+      if (oldConflict && !conflict && connStore.status === 'connected' && (!eventStore.isHost || connStore.isStandbyHost)) {
         console.log('[EventView] Session conflict resolved, resuming auto-sync pipeline...')
-        await triggerClientSyncPipeline(false)
+        await triggerClientSyncPipeline()
       }
     }
   )
@@ -1563,6 +1372,7 @@ export function useEventWebRtcBridge({
   function cleanupWebRTC() {
     rtcStartedAsHost = false
     openCrdtPeers.clear()
+    connStore.setCrdtSyncTrigger(null)
     const crdtEid = activeCrdtEventId || eventId.value
     if (crdtEid) {
       setCrdtTransportActive(crdtEid, false)
@@ -1575,8 +1385,6 @@ export function useEventWebRtcBridge({
     connStore.setRtcService(null)
     connStore.clearConnectedScouts()
     connStore.setStandbyHost(false)
-    wasActiveHostBeforeDemotion.value = false
-    lastConnectedHostSessionId.value = ''
     connStore.setStatus('offline')
     syncedMemberIds.clear()
   }
@@ -1588,9 +1396,6 @@ export function useEventWebRtcBridge({
   }
 
   return {
-    lastHostSeq,
-    advanceLastHostSeq,
-    initHostSeqCounter,
     initEventCrdt,
     disposeEventCrdtSession,
     setupWebRTC,

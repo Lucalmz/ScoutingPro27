@@ -1,5 +1,5 @@
 import { setActivePinia, createPinia } from 'pinia'
-import { describe, it, expect, vi, beforeEach } from 'vitest'
+import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
 import { useRecordStore } from '../stores/records'
 import * as api from '../services/api'
 import type { ScoutingRecord } from '../types'
@@ -43,8 +43,15 @@ const createDummyRecord = (
 
 describe('Records Store', () => {
   beforeEach(() => {
+    localStorage.clear()
     setActivePinia(createPinia())
     vi.clearAllMocks()
+    vi.mocked(api.isStaticCloudHost).mockReturnValue(false)
+  })
+
+  afterEach(() => {
+    localStorage.clear()
+    vi.restoreAllMocks()
   })
 
   it('rankings computation with allianceColor and splitting logic', () => {
@@ -81,7 +88,7 @@ describe('Records Store', () => {
     expect(success).toBe(true)
     expect(store.records).toHaveLength(1)
     expect(store.records[0].syncStatus).toBe('PENDING')
-    expect(store.records[0].hostSeq).toBeUndefined()
+    expect('hostSeq' in store.records[0]).toBe(false)
   })
 
   it('addRecord on authoritative host marks record as SYNCED', async () => {
@@ -381,8 +388,8 @@ describe('Records Store', () => {
   it('fetchRecords preserves in-memory peer records and newer unpushed local records (guarded 3-way merge)', async () => {
     const store = useRecordStore()
     // Pre-existing in memory / localStorage:
-    // 1. Peer stamped record received via WebRTC
-    const peerStamped = { ...createDummyRecord('r_peer_stamped', 27570, 30, 30, 10, 'peer_scout'), hostSeq: 5, version: 1 }
+    // 1. Peer signed record received via WebRTC
+    const peerStamped = { ...createDummyRecord('r_peer_stamped', 27570, 30, 30, 10, 'peer_scout'), authorPubKey: 'pub_peer', authorSig: 'sig_peer', version: 1 }
     // 2. Local edited record awaiting sync (version 2, PENDING)
     const localEdited = { ...createDummyRecord('r_local_edit', 27570, 40, 40, 20, 's1', 'PENDING'), version: 2 }
 
@@ -402,7 +409,7 @@ describe('Records Store', () => {
     // peerStamped must NOT be wiped!
     const foundPeer = store.records.find(r => r.id === 'r_peer_stamped')
     expect(foundPeer).toBeDefined()
-    expect(foundPeer!.hostSeq).toBe(5)
+    expect(foundPeer!.authorSig).toBe('sig_peer')
 
     // localEdited with higher version wins over backend older version!
     const foundLocal = store.records.find(r => r.id === 'r_local_edit')
@@ -415,17 +422,17 @@ describe('Records Store', () => {
     expect(foundOther).toBeDefined()
   })
 
-  it('bulkSync on client persists stamped peer records (hostSeq > 0) to local DB', async () => {
+  it('bulkSync on client persists signed peer records (authorPubKey && authorSig) to local DB', async () => {
     const store = useRecordStore()
     const { useUserStore } = await import('../stores/user')
     const userStore = useUserStore()
     userStore.user = { id: 'scout_local', username: 'LocalScout', token: 'fake_jwt' }
 
-    const peerStamped = { ...createDummyRecord('r_stamped_1', 27570, 20, 20, 10, 'peer_scout'), hostSeq: 42, version: 1 }
+    const peerStamped = { ...createDummyRecord('r_stamped_1', 27570, 20, 20, 10, 'peer_scout'), authorPubKey: 'pub_peer', authorSig: 'sig_peer', version: 1 }
     await store.bulkSync([peerStamped])
 
     expect(api.syncRecords).toHaveBeenCalledWith(expect.arrayContaining([
-      expect.objectContaining({ id: 'r_stamped_1', hostSeq: 42 })
+      expect.objectContaining({ id: 'r_stamped_1', authorPubKey: 'pub_peer', authorSig: 'sig_peer' })
     ]))
   })
 
@@ -514,11 +521,10 @@ describe('Records Store', () => {
     expect(saved?.syncStatus).toBe('PENDING')
   })
 
-  it('bulkSync absorbs SYNCED status when incoming has equal version and equal hostSeq', () => {
+  it('bulkSync absorbs SYNCED status when incoming has equal version and equal updatedAt', async () => {
     const store = useRecordStore()
     const local = createDummyRecord('r_sync_1', 12345, 10, 20, 30, 's1', 'PENDING')
     local.version = 2
-    local.hostSeq = 5
     local.updatedAt = '2026-09-09T10:00:00Z'
     store.records = [local]
 
@@ -528,7 +534,7 @@ describe('Records Store', () => {
       updatedAt: '2026-09-09T10:00:00Z'
     }
 
-    store.bulkSync([incoming])
+    await store.bulkSync([incoming])
     const found = store.records.find((r) => r.id === 'r_sync_1')
     expect(found?.syncStatus).toBe('SYNCED')
   })
@@ -569,6 +575,30 @@ describe('Records Store', () => {
     expect(recPhoneAfter?.scoutId).toBe('alice_main_id')
     expect(recPhoneAfter?.isConflict).toBe(false)
     expect(recMainAfter?.isConflict).toBe(false)
+  })
+
+  it('migrateEventId migrates currentEventId, records, and tags to real UUID', () => {
+    const store = useRecordStore()
+    store.currentEventId = 'evt-K9X2B4'
+    store.records.push({
+      ...createDummyRecord('rec-local-1', 27570, 30, 60, 20, 'scout-1', 'PENDING'),
+      eventId: 'evt-K9X2B4'
+    })
+    store.teamTags.push({
+      id: 'tag-1',
+      eventId: 'evt-K9X2B4',
+      teamNumber: 27570,
+      tag: 'Reliable Auto',
+      createdAt: new Date().toISOString(),
+      createdBy: 'scout-1'
+    })
+
+    store.migrateEventId('evt-K9X2B4', '550e8400-e29b-41d4-a716-446655440000')
+
+    expect(store.currentEventId).toBe('550e8400-e29b-41d4-a716-446655440000')
+    expect(store.records[0]?.eventId).toBe('550e8400-e29b-41d4-a716-446655440000')
+    expect(store.teamTags[0]?.eventId).toBe('550e8400-e29b-41d4-a716-446655440000')
+    expect(store.currentRecords).toHaveLength(1)
   })
 })
 

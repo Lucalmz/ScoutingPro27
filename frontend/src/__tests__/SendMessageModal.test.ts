@@ -1,6 +1,6 @@
 import { setActivePinia, createPinia } from 'pinia'
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest'
-import { mount, flushPromises } from '@vue/test-utils'
+import { mount, flushPromises, type VueWrapper } from '@vue/test-utils'
 import SendMessageModal from '../components/scouting/SendMessageModal.vue'
 import { useInboxStore } from '../stores/inbox'
 import { useConnectionStore } from '../stores/connection'
@@ -35,6 +35,12 @@ vi.mock('vue-i18n', async (importOriginal) => {
 })
 
 describe('SendMessageModal.vue', () => {
+  const wrappers: VueWrapper<any>[] = []
+  const track = <T extends VueWrapper<any>>(w: T): T => {
+    wrappers.push(w)
+    return w
+  }
+
   beforeEach(() => {
     setActivePinia(createPinia())
     vi.clearAllMocks()
@@ -42,18 +48,20 @@ describe('SendMessageModal.vue', () => {
   })
 
   afterEach(() => {
+    while (wrappers.length) wrappers.pop()!.unmount()
+    vi.restoreAllMocks()
     document.body.innerHTML = ''
   })
 
   it('renders modal when visible is true with recipient name and online status', async () => {
-    const wrapper = mount(SendMessageModal, {
+    const wrapper = track(mount(SendMessageModal, {
       props: {
         visible: true,
         targetScoutId: 'scout-123',
         targetScoutName: 'Bob Builder',
         isOnline: true
       }
-    })
+    }))
     await flushPromises()
 
     const card = document.body.querySelector('.send-msg-card')
@@ -67,13 +75,13 @@ describe('SendMessageModal.vue', () => {
   })
 
   it('keeps send button disabled when input is empty or whitespace', async () => {
-    const wrapper = mount(SendMessageModal, {
+    const wrapper = track(mount(SendMessageModal, {
       props: {
         visible: true,
         targetScoutId: 'scout-123',
         targetScoutName: 'Bob'
       }
-    })
+    }))
     await flushPromises()
 
     const sendBtn = document.body.querySelector('.btn-send-action') as HTMLButtonElement
@@ -105,14 +113,14 @@ describe('SendMessageModal.vue', () => {
     const toastStore = useToastStore()
     const toastSpy = vi.spyOn(toastStore, 'showToast')
 
-    const wrapper = mount(SendMessageModal, {
+    const wrapper = track(mount(SendMessageModal, {
       props: {
         visible: true,
         targetScoutId: 'scout-123',
         targetScoutName: 'Bob',
         isOnline: true
       }
-    })
+    }))
     await flushPromises()
 
     const textarea = document.body.querySelector('textarea') as HTMLTextAreaElement
@@ -134,7 +142,7 @@ describe('SendMessageModal.vue', () => {
       mockRtcService
     )
     expect(toastSpy).toHaveBeenCalledWith('Message sent successfully', 'success')
-    expect(wrapper.emitted('sent')).toBeTruthy()
+    expect(wrapper.emitted('sent')).toHaveLength(1)
     expect(wrapper.emitted('update:visible')?.[0]).toEqual([false])
 
     wrapper.unmount()
@@ -149,18 +157,20 @@ describe('SendMessageModal.vue', () => {
     const toastStore = useToastStore()
     const toastSpy = vi.spyOn(toastStore, 'showToast')
 
-    const wrapper = mount(SendMessageModal, {
+    const wrapper = track(mount(SendMessageModal, {
       props: {
         visible: true,
         targetScoutId: 'scout-456',
         targetScoutName: 'Charlie',
         isOnline: false
       }
-    })
+    }))
     await flushPromises()
 
     // Shows offline notice
-    expect(document.body.querySelector('.send-msg-notice')).toBeTruthy()
+    const notice = document.body.querySelector('.send-msg-notice')
+    expect(notice).not.toBeNull()
+    expect(notice?.textContent).toContain('Direct messaging not ready. Queued to outbox.')
 
     const textarea = document.body.querySelector('textarea') as HTMLTextAreaElement
     textarea.value = 'Queued note'
@@ -189,13 +199,13 @@ describe('SendMessageModal.vue', () => {
     const inboxStore = useInboxStore()
     const sendSpy = vi.spyOn(inboxStore, 'sendDirectMessage')
 
-    const wrapper = mount(SendMessageModal, {
+    const wrapper = track(mount(SendMessageModal, {
       props: {
         visible: true,
         targetScoutId: 'scout-123',
         targetScoutName: 'Bob'
       }
-    })
+    }))
     await flushPromises()
 
     const textarea = document.body.querySelector('textarea') as HTMLTextAreaElement
@@ -216,13 +226,13 @@ describe('SendMessageModal.vue', () => {
     const inboxStore = useInboxStore()
     const sendSpy = vi.spyOn(inboxStore, 'sendDirectMessage')
 
-    const wrapper = mount(SendMessageModal, {
+    const wrapper = track(mount(SendMessageModal, {
       props: {
         visible: true,
         targetScoutId: 'scout-123',
         targetScoutName: 'Bob'
       }
-    })
+    }))
     await flushPromises()
 
     const textarea = document.body.querySelector('textarea') as HTMLTextAreaElement
@@ -239,13 +249,13 @@ describe('SendMessageModal.vue', () => {
   })
 
   it('emits update:visible false when clicking cancel or close button', async () => {
-    const wrapper = mount(SendMessageModal, {
+    const wrapper = track(mount(SendMessageModal, {
       props: {
         visible: true,
         targetScoutId: 'scout-123',
         targetScoutName: 'Bob'
       }
-    })
+    }))
     await flushPromises()
 
     const closeBtn = document.body.querySelector('.btn-close') as HTMLButtonElement

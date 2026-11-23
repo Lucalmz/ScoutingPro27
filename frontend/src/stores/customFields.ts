@@ -129,7 +129,7 @@ export const useCustomFieldsStore = defineStore('customFields', () => {
     field: CustomFieldDefinition,
     action: 'CREATE' | 'UPDATE' | 'DELETE'
   ) {
-    if (isCrdtTransportActive(eventId)) return
+    if (isCrdtTransportActive(eventId) || getExistingEventCrdt(eventId)) return
     const connStore = useConnectionStore()
     const eventStore = useEventStore()
     if (eventStore.isHost && connStore.rtcService) {

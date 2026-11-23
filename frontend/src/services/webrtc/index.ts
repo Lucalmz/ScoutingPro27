@@ -105,8 +105,6 @@ export function createWebRtcService(callbacks: WebRtcCallbacks): WebRtcService {
     return callbacks.getCurrentUser?.()?.username || currentUsername || localUserName || ''
   }
 
-  let hostSeqCounter = 0
-
   function enqueueHostTask(sender: string, task: () => Promise<void>): Promise<void> {
     const q = hostQueues.get(sender) || Promise.resolve()
     const nextQ = q.then(task).catch(console.error)
@@ -265,10 +263,6 @@ export function createWebRtcService(callbacks: WebRtcCallbacks): WebRtcService {
     setLocalUserName: (name) => {
       localUserName = name
     },
-    getHostSeqCounter: () => hostSeqCounter,
-    setHostSeqCounter: (seq) => {
-      hostSeqCounter = seq
-    },
     onClientConnected: callbacks.onClientConnected,
     onRequestSync: (sinceVersion, clientId) => callbacks.onRequestSync(sinceVersion, clientId)
   })
@@ -285,11 +279,7 @@ export function createWebRtcService(callbacks: WebRtcCallbacks): WebRtcService {
     requestTagsSync,
     requestTakeover,
     sendTakeoverDecision,
-    sendIdentityMigration,
-    initHostSeq,
-    stampHostSeq,
-    sendHostHandoffBatch,
-    sendHostHandoffAck
+    sendIdentityMigration
   } = dispatcher
 
   const pendingMergeRequests = new Map<
@@ -391,11 +381,6 @@ export function createWebRtcService(callbacks: WebRtcCallbacks): WebRtcService {
       preOfferCandidates.delete(peerId)
       cleanupPeerIdentityAndNotify(peerId)
     },
-    stampHostSeq,
-    getHostSeqCounter: () => hostSeqCounter,
-    setHostSeqCounter: (n: number) => {
-      hostSeqCounter = n
-    },
     closeClient: () => {
       if (clientDc) {
         clientDc.onclose = null
@@ -408,9 +393,6 @@ export function createWebRtcService(callbacks: WebRtcCallbacks): WebRtcService {
       }
     },
     setStatus,
-    isTakeoverReconciling: () => electionCtrl.isTakeoverReconciling,
-    waitForTakeoverReconciliation: () => electionCtrl.waitForTakeoverReconciliation(),
-    finishTakeoverReconciliation: (reason?: string) => electionCtrl.finishTakeoverReconciliation(reason),
     getUsername: () => currentUsername,
     getUserId: () => currentUserId,
     onPongReceived: (ts: number) => clientSession.handlePong(ts),
@@ -952,80 +934,100 @@ export function createWebRtcService(callbacks: WebRtcCallbacks): WebRtcService {
     })
   }
 
+  let activeReconnectPromise: Promise<boolean> | null = null
+  let activeReconnectForceFresh = false
+
   async function reconnectNow(forceFreshSignaling = false): Promise<boolean> {
-    isExplicitlyClosed = false
-    if (!isHostMode && sas.clientSasState === 'REJECTED') {
-      log.warn('Circuit breaker active: SAS verification was rejected. Suppressing automatic reconnection.')
-      return false
-    }
-    if (isHostMode) {
-      if (signaling && signaling.isConnected() && (status === 'connected' || status === 'waiting')) {
-        return true
-      }
-      if (currentInviteCode) {
-        await host(currentInviteCode, currentEventMetadata || undefined, currentUsername || undefined, currentUserId || undefined)
-        return true
-      }
-      return false
+    if (activeReconnectPromise && (!forceFreshSignaling || activeReconnectForceFresh)) {
+      return activeReconnectPromise
     }
 
-    if (
-      !forceFreshSignaling &&
-      status === 'connected' &&
-      clientDc?.readyState === 'open' &&
-      ((clientDc as any)?.isVirtual || clientPc?.connectionState === 'connected')
-    ) {
-      return true
-    }
-
-    // 关键硬复位：重连时彻底清除 forceRelay 锁死状态与所有残留旧信道
-    clientForceRelay = false
-    clientSession.hardResetChannels()
-    clientSession.resetReconnectAttempts()
-    setStatus('connecting')
-
-    const needsFreshSignaling = forceFreshSignaling || !signaling || !signaling.isConnected()
-
-    if (needsFreshSignaling) {
-      if (signaling) {
-        try { signaling.close() } catch (_) {}
-        signaling = null
+    const currentPromise = (async () => {
+      isExplicitlyClosed = false
+      if (!isHostMode && sas.clientSasState === 'REJECTED') {
+        log.warn('Circuit breaker active: SAS verification was rejected. Suppressing automatic reconnection.')
+        return false
       }
-      signaling = new SignalingChannel(currentInviteCode, resolveTargetSignalingEndpoint())
-      await signaling.initTopic()
-      signaling.connect({
-        onConnect: async () => {
-          if (localEcdhPubHex) {
-            signaling!.send({ type: 'client_hello', ecdhPublicKey: localEcdhPubHex, deviceId: localDeviceId })
-          }
-          const isHandshakeActive =
-            !forceFreshSignaling &&
-            (((clientPc &&
-              (clientPc.connectionState === 'connected' ||
-                clientPc.connectionState === 'connecting' ||
-                clientPc.iceConnectionState === 'checking')) ||
-              (clientDc && clientDc.readyState === 'open')))
-          if (!isHandshakeActive) {
-            await clientSession.setupClientConnection(false)
-          }
-        },
-        onError: () => {
-          if (status !== 'connected' && (!clientPc || clientPc.connectionState !== 'connected')) {
-            setStatus('offline')
-          }
-        },
-        onEpochBeacon: handleClientEpochBeacon,
-        onMessage: async (data: any) => {
-          await clientSession.handleClientSignalingMessage(data)
+      if (isHostMode) {
+        if (signaling && signaling.isConnected() && (status === 'connected' || status === 'waiting')) {
+          return true
         }
-      })
-    } else {
-      if (signaling && localEcdhPubHex) {
-        signaling.send({ type: 'client_hello', ecdhPublicKey: localEcdhPubHex, deviceId: localDeviceId })
+        if (currentInviteCode) {
+          await host(currentInviteCode, currentEventMetadata || undefined, currentUsername || undefined, currentUserId || undefined)
+          return true
+        }
+        return false
       }
-      await clientSession.setupClientConnection(false)
+
+      if (
+        !forceFreshSignaling &&
+        status === 'connected' &&
+        clientDc?.readyState === 'open' &&
+        ((clientDc as any)?.isVirtual || clientPc?.connectionState === 'connected')
+      ) {
+        return true
+      }
+
+      // 关键硬复位：重连时彻底清除 forceRelay 锁死状态与所有残留旧信道
+      clientForceRelay = false
+      clientSession.hardResetChannels()
+      clientSession.resetReconnectAttempts()
+      setStatus('connecting')
+
+      const needsFreshSignaling = forceFreshSignaling || !signaling || !signaling.isConnected()
+
+      if (needsFreshSignaling) {
+        if (signaling) {
+          try { signaling.close() } catch (_) {}
+          signaling = null
+        }
+        signaling = new SignalingChannel(currentInviteCode, resolveTargetSignalingEndpoint())
+        await signaling.initTopic()
+        signaling.connect({
+          onConnect: async () => {
+            if (localEcdhPubHex) {
+              signaling!.send({ type: 'client_hello', ecdhPublicKey: localEcdhPubHex, deviceId: localDeviceId })
+            }
+            const isHandshakeActive =
+              !forceFreshSignaling &&
+              (((clientPc &&
+                (clientPc.connectionState === 'connected' ||
+                  clientPc.connectionState === 'connecting' ||
+                  clientPc.iceConnectionState === 'checking')) ||
+                (clientDc && clientDc.readyState === 'open')))
+            if (!isHandshakeActive) {
+              await clientSession.setupClientConnection(false)
+            }
+          },
+          onError: () => {
+            if (status !== 'connected' && (!clientPc || clientPc.connectionState !== 'connected')) {
+              setStatus('offline')
+            }
+          },
+          onEpochBeacon: handleClientEpochBeacon,
+          onMessage: async (data: any) => {
+            await clientSession.handleClientSignalingMessage(data)
+          }
+        })
+      } else {
+        if (signaling && localEcdhPubHex) {
+          signaling.send({ type: 'client_hello', ecdhPublicKey: localEcdhPubHex, deviceId: localDeviceId })
+        }
+        await clientSession.setupClientConnection(false)
+      }
+      return true
+    })()
+
+    activeReconnectPromise = currentPromise
+    activeReconnectForceFresh = forceFreshSignaling
+    try {
+      return await currentPromise
+    } finally {
+      if (activeReconnectPromise === currentPromise) {
+        activeReconnectPromise = null
+        activeReconnectForceFresh = false
+      }
     }
-    return true
   }
 
   const selfHealing = setupSelfHealing({
@@ -1094,6 +1096,8 @@ export function createWebRtcService(callbacks: WebRtcCallbacks): WebRtcService {
 
   function disconnect() {
     isExplicitlyClosed = true
+    activeReconnectPromise = null
+    activeReconnectForceFresh = false
     clockSyncDriver.cancelPending()
     selfHealing.dispose()
     clientSession.clearReconnectTimer()
@@ -1149,7 +1153,6 @@ export function createWebRtcService(callbacks: WebRtcCallbacks): WebRtcService {
       pendingTakeovers.forEach((p) => clearTimeout(p.timeoutTimer))
       pendingTakeovers.clear()
       takeoverCooldowns.clear()
-      electionCtrl.finishTakeoverReconciliation('closed')
     } else {
       callbacks.onPeerDataChannelClose?.('host')
       if (clientSender) {
@@ -1201,16 +1204,11 @@ export function createWebRtcService(callbacks: WebRtcCallbacks): WebRtcService {
     sendTakeoverDecision,
     sendIdentityMigration,
     takeoverHost: () => electionCtrl.takeoverHost(),
-    sendHostHandoffBatch,
-    sendHostHandoffAck,
-    getHostSeqCounter: () => hostSeqCounter,
     getCurrentHostSessionId: () => currentHostSessionId,
     isStandbyHost: () => electionCtrl.isStandbyHostMode,
     pingPeer: async (timeoutMs?: number) => (isHostMode ? true : clientSession.pingHost(timeoutMs ?? 800)),
     reconnectNow,
     disconnect,
-    initHostSeq,
-    stampHostSeq,
     confirmSas,
     rejectSas,
     retrySas,

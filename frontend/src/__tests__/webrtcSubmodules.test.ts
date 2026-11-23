@@ -1,4 +1,9 @@
-import { describe, it, expect, beforeEach, vi } from 'vitest'
+import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest'
+import { createPinia, setActivePinia } from 'pinia'
+import { createChannelMessageHandler } from '@/services/webrtc/channelMessageHandler'
+import { createMessageDispatcher } from '@/services/webrtc/messageDispatcher'
+import { useConnectionStore } from '@/stores/connection'
+import { useUserStore } from '@/stores/user'
 import {
   cleanIpAddress,
   isGlobalIpv6Address,
@@ -205,6 +210,458 @@ describe('WebRTC Decoupled Submodules Unit Suite', () => {
         global.RTCPeerConnection = origRtcpc
         vi.useRealTimers()
       }
+    })
+  })
+
+  describe('Account Conflict, Quarantine & Takeover Messaging', () => {
+    beforeEach(() => {
+      setActivePinia(createPinia())
+      vi.clearAllMocks()
+    })
+
+    afterEach(() => {
+      vi.restoreAllMocks()
+    })
+
+    it('triggers onTakeoverSuccess and clears session conflict when TAKEOVER_SUCCESS is received', async () => {
+      const connStore = useConnectionStore()
+      connStore.setSessionConflict({
+        conflictingUsername: 'Alice',
+        conflictingUserId: 'alice_1',
+        conflictType: 'SAME_USER'
+      })
+      expect(connStore.sessionConflict).not.toBeNull()
+
+      const onTakeoverSuccess = vi.fn(() => {
+        connStore.clearSessionConflict()
+      })
+
+      const handler = createChannelMessageHandler({
+        isHostMode: () => false,
+        currentInviteCode: () => 'ABC123',
+        getHostSessionId: () => 'h1',
+        getCurrentHostSessionId: () => 'h1',
+        setCurrentHostSessionId: () => {},
+        callbacks: {
+          onStatusChange: vi.fn(),
+          onRecordsReceived: vi.fn(),
+          onAckReceived: vi.fn(),
+          onRequestSync: vi.fn(),
+          onTakeoverSuccess
+        },
+        clients: new Map(),
+        stagedClients: new Map(),
+        scoutIdToClientIds: new Map(),
+        clientIdToScoutId: new Map(),
+        clientIdToScoutName: new Map(),
+        pendingTakeovers: new Map(),
+        takeoverCooldowns: new Map(),
+        offlineMessages: {} as any,
+        sendMessage: vi.fn(),
+        promoteTakeover: vi.fn(),
+        enqueueHostTask: vi.fn(),
+        cleanupPeerResources: vi.fn(),
+        closeClient: vi.fn(),
+        setStatus: vi.fn()
+      })
+
+      await handler({ data: JSON.stringify({ type: 'TAKEOVER_SUCCESS', authCode: 'ABC123' }) } as MessageEvent, 'host')
+
+      expect(onTakeoverSuccess).toHaveBeenCalled()
+      expect(connStore.sessionConflict).toBeNull()
+    })
+
+    it('uses real eventId UUID rather than 6-char inviteCode when processing MERGE_ACCOUNT_REQUEST', async () => {
+      const api = await import('@/services/api')
+      const loginSpy = vi.spyOn(api, 'login').mockResolvedValueOnce({
+        id: 'target_id_123',
+        username: 'TargetAlice',
+        token: 'valid_token'
+      })
+      const onIdentityMigration = vi.fn().mockResolvedValue(undefined)
+      const sendMessage = vi.fn()
+      const realEventUuid = '550e8400-e29b-41d4-a716-446655440000'
+      const sixCharInviteCode = 'K9X2B4'
+
+      const handler = createChannelMessageHandler({
+        isHostMode: () => true,
+        currentInviteCode: () => sixCharInviteCode,
+        getCurrentEventId: () => realEventUuid,
+        getHostSessionId: () => 'h1',
+        getCurrentHostSessionId: () => 'h1',
+        setCurrentHostSessionId: () => {},
+        callbacks: {
+          onStatusChange: vi.fn(),
+          onRecordsReceived: vi.fn(),
+          onAckReceived: vi.fn(),
+          onRequestSync: vi.fn(),
+          onIdentityMigration
+        },
+        clients: new Map(),
+        stagedClients: new Map(),
+        scoutIdToClientIds: new Map(),
+        clientIdToScoutId: new Map(),
+        clientIdToScoutName: new Map(),
+        pendingTakeovers: new Map(),
+        takeoverCooldowns: new Map(),
+        offlineMessages: {} as any,
+        sendMessage,
+        promoteTakeover: vi.fn(),
+        enqueueHostTask: async (_id, task) => { await task() },
+        cleanupPeerResources: vi.fn(),
+        closeClient: vi.fn(),
+        setStatus: vi.fn()
+      })
+
+      await handler({
+        data: JSON.stringify({
+          type: 'MERGE_ACCOUNT_REQUEST',
+          requestId: 'req-1',
+          targetUsername: 'TargetAlice',
+          targetPassword: 'password123',
+          sourceUserId: 'source_id_456',
+          sourceUsername: 'SourceAlice'
+        })
+      } as MessageEvent, 'client_1')
+
+      expect(loginSpy).toHaveBeenCalledWith({ username: 'TargetAlice', password: 'password123' })
+      expect(onIdentityMigration).toHaveBeenCalledTimes(1)
+      expect(onIdentityMigration).toHaveBeenCalledWith(
+        realEventUuid,
+        'source_id_456',
+        'target_id_123',
+        'TargetAlice'
+      )
+      expect(onIdentityMigration).not.toHaveBeenCalledWith(
+        sixCharInviteCode,
+        expect.anything(),
+        expect.anything(),
+        expect.anything()
+      )
+      expect(sendMessage).toHaveBeenCalledWith(
+        expect.objectContaining({
+          type: 'MERGE_ACCOUNT_RESPONSE',
+          requestId: 'req-1',
+          success: true,
+          newId: 'target_id_123',
+          newUsername: 'TargetAlice',
+          token: 'valid_token'
+        }),
+        'client_1'
+      )
+    })
+
+    it('trims password and handles self-merge properly without deleting mapping in MERGE_ACCOUNT_REQUEST', async () => {
+      const api = await import('@/services/api')
+      const loginSpy = vi.spyOn(api, 'login').mockResolvedValue({
+        id: 'target_id_123',
+        username: 'TargetAlice',
+        token: 'valid_token'
+      })
+
+      const scoutIdToClientIds = new Map<string, Set<string>>()
+      scoutIdToClientIds.set('target_id_123', new Set(['client_1']))
+      const sendMessage = vi.fn()
+
+      const handler = createChannelMessageHandler({
+        isHostMode: () => true,
+        currentInviteCode: () => 'K9X2B4',
+        getCurrentEventId: () => 'uuid-event-1',
+        getHostSessionId: () => 'h1',
+        getCurrentHostSessionId: () => 'h1',
+        setCurrentHostSessionId: () => {},
+        callbacks: {},
+        clients: new Map([
+          ['client_1', { pc: {} as any, dc: { readyState: 'open' } as any }]
+        ]),
+        stagedClients: new Map(),
+        scoutIdToClientIds,
+        clientIdToScoutId: new Map(),
+        clientIdToScoutName: new Map(),
+        pendingTakeovers: new Map(),
+        takeoverCooldowns: new Map(),
+        offlineMessages: {} as any,
+        sendMessage,
+        promoteTakeover: vi.fn(),
+        enqueueHostTask: async (_id, task) => { await task() },
+        cleanupPeerResources: vi.fn(),
+        closeClient: vi.fn(),
+        setStatus: vi.fn()
+      })
+
+      await handler({
+        data: JSON.stringify({
+          type: 'MERGE_ACCOUNT_REQUEST',
+          requestId: 'req-trim-1',
+          targetUsername: ' TargetAlice ',
+          targetPassword: ' password123 \n ',
+          sourceUserId: 'target_id_123',
+          sourceUsername: 'TargetAlice'
+        })
+      } as MessageEvent, 'client_1')
+
+      expect(loginSpy).toHaveBeenCalledWith({
+        username: 'TargetAlice',
+        password: 'password123'
+      })
+
+      expect(scoutIdToClientIds.get('target_id_123')).toBeDefined()
+      expect(scoutIdToClientIds.get('target_id_123')?.has('client_1')).toBe(true)
+
+      expect(sendMessage).toHaveBeenCalledWith(
+        expect.objectContaining({
+          type: 'MERGE_ACCOUNT_RESPONSE',
+          requestId: 'req-trim-1',
+          success: true,
+          newId: 'target_id_123'
+        }),
+        'client_1'
+      )
+    })
+
+    it('Host messageDispatcher sends SESSION_CONFLICT to stagedClients before promotion', async () => {
+      const mockDc = {
+        readyState: 'open',
+        send: vi.fn(),
+        addEventListener: vi.fn(),
+        removeEventListener: vi.fn(),
+        bufferedAmount: 0,
+        bufferedAmountLowThreshold: 0
+      } as any
+
+      const stagedClients = new Map()
+      stagedClients.set('staged_client_phone', {
+        pc: {} as any,
+        dc: mockDc,
+        pendingCandidates: []
+      })
+
+      const dispatcher = createMessageDispatcher({
+        isHostMode: () => true,
+        getCurrentInviteCode: () => 'ABC123',
+        getHostSessionId: () => 'host-sess',
+        clients: new Map(),
+        stagedClients,
+        scoutIdToClientIds: new Map(),
+        offlineMessages: {} as any,
+        sas: {
+          clientSasStates: new Map(),
+          hostPendingOutgoing: new Map()
+        } as any,
+        getClientDc: () => null,
+        getClientSender: () => null,
+        setClientSender: () => {},
+        setStatus: () => {},
+        getLocalUserId: () => 'host-user',
+        setLocalUserId: () => {},
+        getLocalUserName: () => 'Host',
+        setLocalUserName: () => {},
+      })
+
+      await dispatcher.sendMessage(
+        {
+          type: 'SESSION_CONFLICT',
+          conflictingUsername: 'Alice',
+          conflictingUserId: 'alice_1',
+          conflictType: 'SAME_USER'
+        },
+        'staged_client_phone'
+      )
+
+      expect(mockDc.send).toHaveBeenCalledTimes(1)
+      expect(mockDc.send).toHaveBeenCalledWith(expect.stringContaining('"type":"SESSION_CONFLICT"'))
+    })
+
+    it('strictly quarantines conflicting client: suppresses sync requests and SYNC_DATA, frees peer on merge', async () => {
+      const userStore = useUserStore()
+      userStore.user = {
+        id: 'host_alice_uuid',
+        username: 'Alice',
+        token: 'host_token'
+      }
+
+      const onRequestSync = vi.fn()
+      const onRequestScheduleSync = vi.fn()
+      const onRequestPitSync = vi.fn()
+      const onRequestTagsSync = vi.fn()
+      const onRequestCustomFieldsSync = vi.fn()
+      const onRecordsReceived = vi.fn().mockResolvedValue([])
+      const onCrdtSyncMessage = vi.fn()
+      const sendMessage = vi.fn()
+
+      const handler = createChannelMessageHandler({
+        isHostMode: () => true,
+        currentInviteCode: () => 'ROOM99',
+        getCurrentEventId: () => 'evt-uuid-1',
+        getHostSessionId: () => 'host-sess-1',
+        getCurrentHostSessionId: () => 'host-sess-1',
+        setCurrentHostSessionId: () => {},
+        callbacks: {
+          onRequestSync,
+          onRequestScheduleSync,
+          onRequestPitSync,
+          onRequestTagsSync,
+          onRequestCustomFieldsSync,
+          onRecordsReceived,
+          onCrdtSyncMessage
+        },
+        clients: new Map([
+          ['client_conflict', { pc: {} as any, dc: { readyState: 'open', send: vi.fn() } as any }],
+          ['client_normal', { pc: {} as any, dc: { readyState: 'open', send: vi.fn() } as any }]
+        ]),
+        stagedClients: new Map(),
+        scoutIdToClientIds: new Map(),
+        clientIdToScoutId: new Map(),
+        clientIdToScoutName: new Map(),
+        pendingTakeovers: new Map(),
+        takeoverCooldowns: new Map(),
+        offlineMessages: { flush: vi.fn().mockReturnValue([]) } as any,
+        sendMessage,
+        promoteTakeover: vi.fn(),
+        enqueueHostTask: async (_id, task) => { await task() },
+        cleanupPeerResources: vi.fn(),
+        closeClient: vi.fn(),
+        setStatus: vi.fn()
+      })
+
+      await handler({
+        data: JSON.stringify({
+          type: 'REQUEST_SYNC',
+          senderUserId: 'bob_uuid',
+          senderUserName: 'Bob',
+          authCode: 'ROOM99'
+        })
+      } as MessageEvent, 'client_normal')
+
+      expect(handler.isQuarantinedPeer('client_normal')).toBe(false)
+      expect(onRequestSync).toHaveBeenCalledWith(0, 'client_normal')
+      onRequestSync.mockClear()
+
+      await handler({
+        data: JSON.stringify({
+          type: 'REQUEST_SYNC',
+          senderUserId: 'phone_alice_diff_uuid',
+          senderUserName: 'Alice',
+          authCode: 'ROOM99'
+        })
+      } as MessageEvent, 'client_conflict')
+
+      expect(handler.isQuarantinedPeer('client_conflict')).toBe(true)
+      expect(sendMessage).toHaveBeenCalledWith(
+        expect.objectContaining({
+          type: 'SESSION_CONFLICT',
+          conflictType: 'DUPLICATE_NAME',
+          conflictingUsername: 'Alice',
+          conflictingUserId: 'host_alice_uuid'
+        }),
+        'client_conflict'
+      )
+      expect(onRequestSync).not.toHaveBeenCalled()
+
+      await handler({ data: JSON.stringify({ type: 'REQUEST_SCHEDULE_SYNC', authCode: 'ROOM99' }) } as MessageEvent, 'client_conflict')
+      expect(onRequestScheduleSync).not.toHaveBeenCalled()
+
+      await handler({ data: JSON.stringify({ type: 'REQUEST_PIT_SYNC', authCode: 'ROOM99' }) } as MessageEvent, 'client_conflict')
+      expect(onRequestPitSync).not.toHaveBeenCalled()
+
+      await handler({ data: JSON.stringify({ type: 'REQUEST_TAGS_SYNC', authCode: 'ROOM99' }) } as MessageEvent, 'client_conflict')
+      expect(onRequestTagsSync).not.toHaveBeenCalled()
+
+      await handler({ data: JSON.stringify({ type: 'REQUEST_CUSTOM_FIELDS_SYNC', authCode: 'ROOM99' }) } as MessageEvent, 'client_conflict')
+      expect(onRequestCustomFieldsSync).not.toHaveBeenCalled()
+
+      await handler({
+        data: JSON.stringify({
+          type: 'SYNC_DATA',
+          records: [{ id: 'rec-1', eventId: 'evt-uuid-1', scoutId: 'phone_alice_diff_uuid' }],
+          authCode: 'ROOM99'
+        })
+      } as MessageEvent, 'client_conflict')
+      expect(onRecordsReceived).not.toHaveBeenCalled()
+
+      await handler({
+        data: JSON.stringify({
+          type: 'CRDT_SYNC_MSG',
+          fromClientId: 'client_conflict',
+          toClientId: 'host',
+          requestId: null,
+          message: 1,
+          body: [],
+          authCode: 'ROOM99'
+        })
+      } as MessageEvent, 'client_conflict')
+      expect(onCrdtSyncMessage).not.toHaveBeenCalled()
+
+      await handler({ data: JSON.stringify({ type: 'REQUEST_SCHEDULE_SYNC', authCode: 'ROOM99' }) } as MessageEvent, 'client_normal')
+      expect(onRequestScheduleSync).toHaveBeenCalledWith('client_normal')
+
+      const api = await import('@/services/api')
+      vi.spyOn(api, 'login').mockResolvedValueOnce({
+        id: 'host_alice_uuid',
+        username: 'Alice',
+        token: 'merged_token'
+      })
+
+      await handler({
+        data: JSON.stringify({
+          type: 'MERGE_ACCOUNT_REQUEST',
+          requestId: 'req-merge-ok',
+          targetUsername: 'Alice',
+          targetPassword: 'correct_password',
+          sourceUserId: 'phone_alice_diff_uuid',
+          sourceUsername: 'Alice',
+          authCode: 'ROOM99'
+        })
+      } as MessageEvent, 'client_conflict')
+
+      expect(handler.isQuarantinedPeer('client_conflict')).toBe(false)
+
+      await handler({ data: JSON.stringify({ type: 'REQUEST_SCHEDULE_SYNC', authCode: 'ROOM99' }) } as MessageEvent, 'client_conflict')
+      expect(onRequestScheduleSync).toHaveBeenCalledWith('client_conflict')
+    })
+
+    it('Host sends PIT_SCOUT_ACK on PIT_SCOUT_BATCH_SYNC and Client dispatches PIT_SCOUT_ACK to onPitScoutAckReceived', async () => {
+      const sentMessages: Array<{ msg: any; targetId?: string }> = []
+      const hostCtx: any = {
+        isHostMode: () => true,
+        currentInviteCode: () => 'K9X2B4',
+        callbacks: {
+          onPitScoutBatchSyncReceived: vi.fn()
+        },
+        clients: new Map(),
+        sendMessage: vi.fn().mockImplementation((msg, targetId) => {
+          sentMessages.push({ msg, targetId })
+        })
+      }
+
+      const hostHandler = createChannelMessageHandler(hostCtx)
+      const batchMsg = {
+        type: 'PIT_SCOUT_BATCH_SYNC',
+        records: [
+          { teamNumber: 27570, drivetrain: 'Mecanum' },
+          { teamNumber: 12345, drivetrain: 'Tank' }
+        ]
+      }
+      await hostHandler({ data: JSON.stringify(batchMsg) } as MessageEvent, 'client-sender-1')
+
+      expect(hostCtx.callbacks.onPitScoutBatchSyncReceived).toHaveBeenCalledWith(batchMsg.records, 'client-sender-1')
+      const ack = sentMessages.find((s) => s.msg.type === 'PIT_SCOUT_ACK')
+      expect(ack).toBeDefined()
+      expect(ack?.targetId).toBe('client-sender-1')
+      expect(ack?.msg.teamNumbers).toEqual([27570, 12345])
+
+      const onPitScoutAckReceived = vi.fn()
+      const clientHandler = createChannelMessageHandler({
+        isHostMode: () => false,
+        currentInviteCode: () => 'K9X2B4',
+        callbacks: { onPitScoutAckReceived },
+        clients: new Map(),
+        sendMessage: vi.fn()
+      } as any)
+
+      await clientHandler({ data: JSON.stringify({ type: 'PIT_SCOUT_ACK', teamNumbers: [27570, 12345] }) } as MessageEvent, 'host-sender')
+      expect(onPitScoutAckReceived).toHaveBeenCalledTimes(1)
+      expect(onPitScoutAckReceived).toHaveBeenCalledWith([27570, 12345])
     })
   })
 })

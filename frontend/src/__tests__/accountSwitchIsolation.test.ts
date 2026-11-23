@@ -126,6 +126,7 @@ describe('Device ECDSA Identity, Safe Logout Isolation & Dual-Entry Host Device 
     delete (globalThis as any).__TEST_ENABLE_ROOM_DISCOVERY__
     clearBeforeLogoutHooksForTesting()
     await clearSecurityStoreForTesting()
+    localStorage.clear()
     vi.restoreAllMocks()
   })
 
@@ -199,7 +200,6 @@ describe('Device ECDSA Identity, Safe Logout Isolation & Dual-Entry Host Device 
       getClockAnchorKey('uuid-1'),
       JSON.stringify({ lastHlcPt: 1_760_000_000_000, savedCalibratedMs: 1_760_000_000_000, savedWallMs: 1_760_000_000_000, calibratedByHost: true, updatedAtWallMs: 1_760_000_000_000 })
     )
-    localStorage.setItem('sp27_lastHostSeq_uuid-1', '14')
     localStorage.setItem('sp27_records_uuid-1', JSON.stringify([{ id: 'rec-1' }]))
     localStorage.setItem('scoutingpro27_schedule_uuid-1', JSON.stringify([{ matchNumber: 1 }]))
     recordStore.records = [{ id: 'rec-1', eventId: 'uuid-1' } as any]
@@ -231,7 +231,6 @@ describe('Device ECDSA Identity, Safe Logout Isolation & Dual-Entry Host Device 
     // Event-scoped / fencing / clock keys PRESERVED on account switch
     expect(localStorage.getItem(getEpochStorageKey('ABC123'))).not.toBeNull()
     expect(localStorage.getItem(getClockAnchorKey('uuid-1'))).not.toBeNull()
-    expect(localStorage.getItem('sp27_lastHostSeq_uuid-1')).toBe('14')
     expect(localStorage.getItem('sp27_records_uuid-1')).not.toBeNull()
     expect(localStorage.getItem('scoutingpro27_schedule_uuid-1')).not.toBeNull()
 
@@ -239,7 +238,6 @@ describe('Device ECDSA Identity, Safe Logout Isolation & Dual-Entry Host Device 
     eventStore.clearAllLocalCache()
     expect(localStorage.getItem(getEpochStorageKey('ABC123'))).toBeNull()
     expect(localStorage.getItem(getClockAnchorKey('uuid-1'))).toBeNull()
-    expect(localStorage.getItem('sp27_lastHostSeq_uuid-1')).toBeNull()
     expect(localStorage.getItem('sp27_records_uuid-1')).toBeNull()
     expect(localStorage.getItem('scoutingpro27_schedule_uuid-1')).toBeNull()
   })

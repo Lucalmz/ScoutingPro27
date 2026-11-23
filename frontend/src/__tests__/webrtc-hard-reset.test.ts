@@ -1,9 +1,12 @@
-import { describe, it, expect, vi, beforeEach } from 'vitest'
+import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
 import {
   createWebRtcService,
   optimizeCandidatePriority
 } from '../services/webrtc'
+import * as api from '../services/api'
 import mqtt from 'mqtt'
+
+const origRTCPeerConnection = global.RTCPeerConnection
 
 vi.mock('mqtt', () => {
   return {
@@ -27,6 +30,10 @@ describe('WebRTC Hard Reset & Channel Teardown Architecture', () => {
   beforeEach(() => {
     (globalThis as any).__TEST_ALLOW_UNSIGNED_SIGNALING__ = true
     closedPcs = []
+    vi.mocked(api.syncRecords).mockResolvedValue(undefined as any)
+    vi.mocked(api.createWebRtcTicket).mockResolvedValue({ ticket: 'test_ticket', expiresIn: 180 })
+    vi.mocked(api.verifyWebRtcTicket).mockResolvedValue({ valid: true, userId: 'scout_test', username: 'Tester' })
+    vi.mocked(api.verifyToken).mockResolvedValue({ valid: true, userId: 'host_test', username: 'Host' })
     mockMqttClient = {
       on: vi.fn(),
       subscribe: vi.fn(),
@@ -66,6 +73,13 @@ describe('WebRTC Hard Reset & Channel Teardown Architecture', () => {
     }) as any
   })
 
+  afterEach(() => {
+    vi.useRealTimers()
+    delete (globalThis as any).__TEST_ALLOW_UNSIGNED_SIGNALING__
+    global.RTCPeerConnection = origRTCPeerConnection
+    vi.restoreAllMocks()
+  })
+
   it('optimizeCandidatePriority correctly ranks IPv4 srflx and prflx above TURN relay', () => {
     const ipv4Srflx = 'candidate:1 1 udp 1694498815 111.8.3.78 3478 typ srflx raddr 192.168.1.5 rport 50000'
     const ipv4Prflx = 'candidate:2 1 udp 1694498815 111.8.3.78 3479 typ prflx raddr 192.168.1.5 rport 50001'
@@ -86,21 +100,76 @@ describe('WebRTC Hard Reset & Channel Teardown Architecture', () => {
   })
 
   it('reconnectNow resets clientForceRelay from true back to false', async () => {
-    const callbacks = {
-      onStatusChange: vi.fn()
+    vi.useFakeTimers()
+    try {
+      global.RTCPeerConnection = vi.fn().mockImplementation((config: any) => {
+        const pcObj: any = {
+          config,
+          close: vi.fn().mockImplementation(function (this: any) {
+            closedPcs.push(this)
+          }),
+          createDataChannel: vi.fn().mockReturnValue({
+            send: vi.fn(),
+            readyState: 'connecting',
+            close: vi.fn(),
+            addEventListener: vi.fn(),
+            removeEventListener: vi.fn()
+          }),
+          createOffer: vi.fn().mockResolvedValue({ type: 'offer', sdp: 'v=0\r\no=- 123 2 IN IP4 127.0.0.1\r\ns=-\r\nt=0 0\r\n' }),
+          createAnswer: vi.fn().mockResolvedValue({ type: 'answer', sdp: 'v=0\r\no=- 123 2 IN IP4 127.0.0.1\r\ns=-\r\nt=0 0\r\n' }),
+          setLocalDescription: vi.fn().mockResolvedValue(undefined),
+          setRemoteDescription: vi.fn().mockResolvedValue(undefined),
+          addIceCandidate: vi.fn().mockResolvedValue(undefined),
+          connectionState: 'new',
+          iceConnectionState: 'new',
+          onicecandidate: null,
+          oniceconnectionstatechange: null,
+          onconnectionstatechange: null,
+          ondatachannel: null
+        }
+        return pcObj
+      }) as any
+
+      const service = createWebRtcService({
+        onStatusChange: vi.fn(),
+        onRecordsReceived: vi.fn().mockResolvedValue([]),
+        onAckReceived: vi.fn(),
+        onRequestSync: vi.fn()
+      })
+      await service.join('reset-relay-test')
+
+      const connectCb = mockMqttClient.on.mock.calls.find((c: any) => c[0] === 'connect')?.[1]
+      expect(connectCb).toBeDefined()
+      await connectCb()
+
+      const pcMock = vi.mocked(global.RTCPeerConnection)
+      expect(pcMock).toHaveBeenCalledTimes(1)
+      expect(pcMock.mock.results[0].value.config.iceTransportPolicy).toBe('all')
+
+      // Drive native connect watchdog + exponential retry backoff through Attempt 4 (shouldForceRelayForAttempt(4) === true):
+      // Attempt 0 watchdog (15s) -> delay 1s -> Attempt 1 watchdog (15s) -> delay 2s -> Attempt 2 watchdog (15s) -> delay 4s -> Attempt 3 watchdog (15s) -> delay 8s -> Attempt 4 (relay)
+      const stepDelays = [15000 + 1000, 15000 + 2000, 15000 + 4000, 15000 + 8000]
+      for (const ms of stepDelays) {
+        await vi.advanceTimersByTimeAsync(ms)
+      }
+
+      const relayResults = pcMock.mock.results
+      const relayPc = relayResults[relayResults.length - 1].value
+      expect(relayPc.config.iceTransportPolicy).toBe('relay')
+      expect(JSON.stringify(relayPc.config.iceServers)).toContain('turn:')
+
+      // Manual reconnectNow() must hard-reset clientForceRelay and reconnectAttempts back to P2P-first ('all', zero TURN)
+      await service.reconnectNow()
+
+      const latestResults = pcMock.mock.results
+      expect(latestResults.length).toBeGreaterThan(relayResults.length)
+      const latestPc = latestResults[latestResults.length - 1].value
+      expect(latestPc.config.iceTransportPolicy).toBe('all')
+      expect(JSON.stringify(latestPc.config.iceServers)).not.toContain('turn:')
+      service.disconnect()
+    } finally {
+      vi.useRealTimers()
     }
-    const service = createWebRtcService(callbacks)
-    await service.join('reset-relay-test')
-
-    // Simulate relay downgrade triggered by 8s stall watchdog
-    const clientSession = (service as any)._clientSession
-    // Set forceRelay through internal context or reconnect
-    await service.reconnectNow()
-
-    const createdPcs = vi.mocked(global.RTCPeerConnection).mock.results
-    const latestPc = createdPcs[createdPcs.length - 1].value
-    expect(latestPc.config.iceTransportPolicy).not.toBe('relay')
-    service.disconnect()
   })
 
   it('Host tears down previous active connection immediately when receiving a new Offer from same peer', async () => {
@@ -141,10 +210,11 @@ describe('WebRTC Hard Reset & Channel Teardown Architecture', () => {
       }
     }
     await messageCall('scoutingpro27/signal/test', new TextEncoder().encode(JSON.stringify(offerPayload2)))
-    await new Promise((resolve) => setTimeout(resolve, 20))
 
     // Verify: The first PC was explicitly closed and dismantled
-    expect(closedPcs).toContain(firstPc)
+    await vi.waitFor(() => {
+      expect(closedPcs).toContain(firstPc)
+    })
 
     // Verify: The second PC was created and is active
     expect(vi.mocked(global.RTCPeerConnection).mock.results.length).toBeGreaterThanOrEqual(2)

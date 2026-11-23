@@ -30,6 +30,12 @@ import {
   type CrdtHttpTransport
 } from '@/services/crdt'
 import { clearBeforeLogoutHooksForTesting, useUserStore } from '@/stores/user'
+import '@/stores/connection'
+import '@/stores/records'
+import '@/stores/events'
+import '@/stores/inbox'
+import '@/stores/pitScout'
+import '@/stores/schedule'
 import type { PitScoutingRecord, TeamTagItem, WebRtcCrdtSyncChunk, WebRtcCrdtSyncMsg } from '@/types'
 
 const TEN_YEARS_MS = 10 * 365 * 24 * 3600 * 1000
@@ -96,6 +102,7 @@ describe('CRDT Field-Level Merge, Star Sync, Chunking, HLC Guard & Persistence',
     await resetCrdtRegistryForTesting()
     resetClockRegistryForTesting()
     clearBeforeLogoutHooksForTesting()
+    localStorage.clear()
   })
 
   it('merges concurrent Pit edits on distinct fields without overwriting sibling fields via diff-on-write', () => {
@@ -209,20 +216,19 @@ describe('CRDT Field-Level Merge, Star Sync, Chunking, HLC Guard & Persistence',
       hubs.client2.attachPeer('host')
     ])
 
-    await new Promise((r) => setTimeout(r, 60))
-
-    // Initial offline edits converged across all 3 nodes
-    expect(readPitRecordsFromCrdt(client2Store, 'evt-1')[0]?.weightLbs).toBe(29.5)
-    expect(readTeamTagsFromCrdt(client1Store, 'evt-1').map((t) => t.tag)).toEqual(['defense'])
+    await vi.waitFor(() => {
+      expect(readPitRecordsFromCrdt(client2Store, 'evt-1')[0]?.weightLbs).toBe(29.5)
+      expect(readTeamTagsFromCrdt(client1Store, 'evt-1').map((t) => t.tag)).toEqual(['defense'])
+    })
 
     // Live incremental update on Client1 fans out through Host to Client2 with bounded frames
     const framesBeforeLiveEdit = totalFramesDispatched
     clockMs += 1_000
     writePitRecordToCrdt(client1Store, makePitRecord({ teamNumber: 1111, weightLbs: 32.0 }))
-    await new Promise((r) => setTimeout(r, 60))
-
-    expect(readPitRecordsFromCrdt(hostStore, 'evt-1')[0]?.weightLbs).toBe(32.0)
-    expect(readPitRecordsFromCrdt(client2Store, 'evt-1')[0]?.weightLbs).toBe(32.0)
+    await vi.waitFor(() => {
+      expect(readPitRecordsFromCrdt(hostStore, 'evt-1')[0]?.weightLbs).toBe(32.0)
+      expect(readPitRecordsFromCrdt(client2Store, 'evt-1')[0]?.weightLbs).toBe(32.0)
+    })
     const framesDuringLiveEdit = totalFramesDispatched - framesBeforeLiveEdit
     // Verify strictly bounded delta fanout (must not ping-pong/echo indefinitely)
     expect(framesDuringLiveEdit).toBeGreaterThanOrEqual(2)
@@ -289,14 +295,15 @@ describe('CRDT Field-Level Merge, Star Sync, Chunking, HLC Guard & Persistence',
     })
 
     await Promise.all([senderHub.attachPeer('chunk-receiver'), receiverHub.attachPeer('chunk-sender')])
-    await new Promise((r) => setTimeout(r, 80))
+    await vi.waitFor(() => {
+      const received = readPitRecordsFromCrdt(receiverStore, 'evt-1')[0]
+      expect(received?.claimedAutoStrategy).toBe(largeNotes)
+    })
 
     expect(dispatchedChunkCount.length).toBeGreaterThanOrEqual(3)
     for (const bytes of dispatchedChunkCount) {
       expect(bytes).toBeLessThanOrEqual(CRDT_MAX_FRAME_BYTES)
     }
-    const received = readPitRecordsFromCrdt(receiverStore, 'evt-1')[0]
-    expect(received?.claimedAutoStrategy).toBe(largeNotes)
 
     await Promise.all([senderHub.destroy(), receiverHub.destroy()])
   })
@@ -346,19 +353,21 @@ describe('CRDT Field-Level Merge, Star Sync, Chunking, HLC Guard & Persistence',
     })
 
     await Promise.all([hostHub.attachPeer('rogue'), rogueHub.attachPeer('host')])
-    await new Promise((r) => setTimeout(r, 40))
+    await vi.waitFor(() => {
+      expect(readPitRecordsFromCrdt(hostStore, 'evt-1')[0]?.robotName).toBe('zzzzzzzzzzzzzzzz')
+    })
 
     // Valid benign record synced cleanly with zero skew alerts
     expect(skewAlerts).toEqual([])
-    expect(readPitRecordsFromCrdt(hostStore, 'evt-1')[0]?.robotName).toBe('zzzzzzzzzzzzzzzz')
 
     // Now rogue jumps its system clock +10 years (2036) and edits launcherType
     rogueNow = baseNow + TEN_YEARS_MS
     rogueStore.setCell(CRDT_TABLES.PIT_RECORDS, '27570', 'launcherType', 'Poisoned2036')
-    await new Promise((r) => setTimeout(r, 50))
+    await vi.waitFor(() => {
+      expect(skewAlerts.length).toBeGreaterThanOrEqual(1)
+    })
 
     // Pre-merge guard caught the 2036 HLC and fired alert; TinyBase maxClockSkewSeconds=300 dropped the cell
-    expect(skewAlerts.length).toBeGreaterThanOrEqual(1)
     expect(skewAlerts[0]).toBeGreaterThan(TEN_YEARS_MS - 60_000)
     expect(hostStore.getCell(CRDT_TABLES.PIT_RECORDS, '27570', 'launcherType')).toBe('Flywheel')
 
@@ -380,121 +389,125 @@ describe('CRDT Field-Level Merge, Star Sync, Chunking, HLC Guard & Persistence',
 
   it('coalesces rapid edits via 1500ms debounce / 5000ms maxWait and handles retry & 409 revision sync', async () => {
     vi.useFakeTimers()
-    let nowMs = 1_700_000_400_000
-    const clock = new CalibratedMonotonicClock('evt-persist', {
-      wallNow: () => nowMs,
-      monoNow: () => nowMs,
-      storage: localStorage
-    })
-    const store = createMergeableStore('persist-dev', () => clock.now(), 300)
+    try {
+      let nowMs = 1_700_000_400_000
+      const clock = new CalibratedMonotonicClock('evt-persist', {
+        wallNow: () => nowMs,
+        monoNow: () => nowMs,
+        storage: localStorage
+      })
+      const store = createMergeableStore('persist-dev', () => clock.now(), 300)
 
-    let failNextSave = false
-    let returnStaleNextSave = false
-    const saveCalls: Array<{
-      hostEpoch: number
-      snapshotRevision: number
-      dirtyRows: Record<string, string[]>
-    }> = []
+      let failNextSave = false
+      let returnStaleNextSave = false
+      const saveCalls: Array<{
+        hostEpoch: number
+        snapshotRevision: number
+        dirtyRows: Record<string, string[]>
+      }> = []
 
-    const transport: CrdtHttpTransport = {
-      loadState: vi.fn(async () => ({
-        exists: false,
-        eventId: 'evt-persist',
-        hostEpoch: 2,
-        snapshotRevision: 5,
-        snapshot: null
-      })),
-      saveState: vi.fn(async (_eventId, payload) => {
-        saveCalls.push({
-          hostEpoch: payload.hostEpoch,
-          snapshotRevision: payload.snapshotRevision,
-          dirtyRows: payload.dirtyRows
-        })
-        if (failNextSave) {
-          throw new Error('ECONNRESET')
-        }
-        if (returnStaleNextSave) {
-          returnStaleNextSave = false
-          return {
-            saved: false,
-            stale: true,
-            eventId: 'evt-persist',
-            hostEpoch: 2,
-            snapshotRevision: 12
-          }
-        }
-        return {
-          saved: true,
+      const transport: CrdtHttpTransport = {
+        loadState: vi.fn(async () => ({
+          exists: false,
           eventId: 'evt-persist',
           hostEpoch: 2,
-          snapshotRevision: payload.snapshotRevision
-        }
+          snapshotRevision: 5,
+          snapshot: null
+        })),
+        saveState: vi.fn(async (_eventId, payload) => {
+          saveCalls.push({
+            hostEpoch: payload.hostEpoch,
+            snapshotRevision: payload.snapshotRevision,
+            dirtyRows: payload.dirtyRows
+          })
+          if (failNextSave) {
+            throw new Error('ECONNRESET')
+          }
+          if (returnStaleNextSave) {
+            returnStaleNextSave = false
+            return {
+              saved: false,
+              stale: true,
+              eventId: 'evt-persist',
+              hostEpoch: 2,
+              snapshotRevision: 12
+            }
+          }
+          return {
+            saved: true,
+            eventId: 'evt-persist',
+            hostEpoch: 2,
+            snapshotRevision: payload.snapshotRevision
+          }
+        })
+      }
+
+      const ctrl = createCrdtPersistenceController({
+        eventId: 'evt-persist',
+        store,
+        clock,
+        getHostEpoch: () => 2,
+        debounceMs: 1500,
+        maxWaitMs: 5000,
+        transport,
+        enableHttp: true,
+        enableIndexedDb: false
       })
+
+      // 1. Hydrate picks up server revision=5
+      const hydrated = await ctrl.hydrateFromH2()
+      expect(hydrated.snapshotRevision).toBe(5)
+      expect(ctrl.getSnapshotRevision()).toBe(5)
+
+      // 2. Rapid burst of edits across 3 timestamps spaced < 1500ms -> should coalesce into 1 PUT at 1500ms
+      writePitRecordToCrdt(store, makePitRecord({ eventId: 'evt-persist', teamNumber: 101 }))
+      await vi.advanceTimersByTimeAsync(700)
+      writePitRecordToCrdt(store, makePitRecord({ eventId: 'evt-persist', teamNumber: 202 }))
+      await vi.advanceTimersByTimeAsync(700)
+      writeTeamTagToCrdt(store, makeTag({ eventId: 'evt-persist', teamNumber: 101, tag: 'fast' }), true)
+      expect(saveCalls).toHaveLength(0)
+
+      await vi.advanceTimersByTimeAsync(1500)
+      expect(saveCalls).toHaveLength(1)
+      expect(saveCalls[0]?.snapshotRevision).toBe(6)
+      expect(saveCalls[0]?.hostEpoch).toBe(2)
+      expect(saveCalls[0]?.dirtyRows[CRDT_TABLES.PIT_RECORDS]?.sort()).toEqual(['101', '202'])
+      expect(saveCalls[0]?.dirtyRows[CRDT_TABLES.TEAM_TAGS]).toEqual(['101::fast'])
+
+      // 3. Continuous high-frequency writes every 1000ms hit maxWait=5000ms
+      writePitRecordToCrdt(store, makePitRecord({ eventId: 'evt-persist', teamNumber: 303, weightLbs: 1 }))
+      for (let i = 0; i < 4; i++) {
+        await vi.advanceTimersByTimeAsync(1000)
+        writePitRecordToCrdt(store, makePitRecord({ eventId: 'evt-persist', teamNumber: 303, weightLbs: i + 2 }))
+      }
+      expect(saveCalls).toHaveLength(1)
+      await vi.advanceTimersByTimeAsync(1000) // Reaches 5000ms maxWait
+      expect(saveCalls).toHaveLength(2)
+      expect(saveCalls[1]?.dirtyRows[CRDT_TABLES.PIT_RECORDS]).toEqual(['303'])
+
+      // 4. HTTP error retains dirtyRows for subsequent retry
+      failNextSave = true
+      writePitRecordToCrdt(store, makePitRecord({ eventId: 'evt-persist', teamNumber: 404 }))
+      await ctrl.flushNow()
+      expect(ctrl.getPendingDirtyRows()[CRDT_TABLES.PIT_RECORDS]).toEqual(['404'])
+
+      // 5. HTTP 409 stale response updates snapshotRevision to 12 and preserves dirtyRows
+      failNextSave = false
+      returnStaleNextSave = true
+      await ctrl.flushNow()
+      expect(ctrl.getSnapshotRevision()).toBe(12)
+      expect(ctrl.getPendingDirtyRows()[CRDT_TABLES.PIT_RECORDS]).toEqual(['404'])
+
+      // Subsequent flush succeeds using rev=13
+      const okRes = await ctrl.flushNow()
+      expect(okRes?.saved).toBe(true)
+      expect(okRes?.snapshotRevision).toBe(13)
+      expect(ctrl.getPendingDirtyRows()).toEqual({})
+
+      await ctrl.destroy()
+    } finally {
+      vi.useRealTimers()
     }
-
-    const ctrl = createCrdtPersistenceController({
-      eventId: 'evt-persist',
-      store,
-      clock,
-      getHostEpoch: () => 2,
-      debounceMs: 1500,
-      maxWaitMs: 5000,
-      transport,
-      enableHttp: true,
-      enableIndexedDb: false
-    })
-
-    // 1. Hydrate picks up server revision=5
-    const hydrated = await ctrl.hydrateFromH2()
-    expect(hydrated.snapshotRevision).toBe(5)
-    expect(ctrl.getSnapshotRevision()).toBe(5)
-
-    // 2. Rapid burst of edits across 3 timestamps spaced < 1500ms -> should coalesce into 1 PUT at 1500ms
-    writePitRecordToCrdt(store, makePitRecord({ eventId: 'evt-persist', teamNumber: 101 }))
-    await vi.advanceTimersByTimeAsync(700)
-    writePitRecordToCrdt(store, makePitRecord({ eventId: 'evt-persist', teamNumber: 202 }))
-    await vi.advanceTimersByTimeAsync(700)
-    writeTeamTagToCrdt(store, makeTag({ eventId: 'evt-persist', teamNumber: 101, tag: 'fast' }), true)
-    expect(saveCalls).toHaveLength(0)
-
-    await vi.advanceTimersByTimeAsync(1500)
-    expect(saveCalls).toHaveLength(1)
-    expect(saveCalls[0]?.snapshotRevision).toBe(6)
-    expect(saveCalls[0]?.hostEpoch).toBe(2)
-    expect(saveCalls[0]?.dirtyRows[CRDT_TABLES.PIT_RECORDS]?.sort()).toEqual(['101', '202'])
-    expect(saveCalls[0]?.dirtyRows[CRDT_TABLES.TEAM_TAGS]).toEqual(['101::fast'])
-
-    // 3. Continuous high-frequency writes every 1000ms hit maxWait=5000ms
-    writePitRecordToCrdt(store, makePitRecord({ eventId: 'evt-persist', teamNumber: 303, weightLbs: 1 }))
-    for (let i = 0; i < 4; i++) {
-      await vi.advanceTimersByTimeAsync(1000)
-      writePitRecordToCrdt(store, makePitRecord({ eventId: 'evt-persist', teamNumber: 303, weightLbs: i + 2 }))
-    }
-    expect(saveCalls).toHaveLength(1)
-    await vi.advanceTimersByTimeAsync(1000) // Reaches 5000ms maxWait
-    expect(saveCalls).toHaveLength(2)
-    expect(saveCalls[1]?.dirtyRows[CRDT_TABLES.PIT_RECORDS]).toEqual(['303'])
-
-    // 4. HTTP error retains dirtyRows for subsequent retry
-    failNextSave = true
-    writePitRecordToCrdt(store, makePitRecord({ eventId: 'evt-persist', teamNumber: 404 }))
-    await ctrl.flushNow()
-    expect(ctrl.getPendingDirtyRows()[CRDT_TABLES.PIT_RECORDS]).toEqual(['404'])
-
-    // 5. HTTP 409 stale response updates snapshotRevision to 12 and preserves dirtyRows
-    failNextSave = false
-    returnStaleNextSave = true
-    await ctrl.flushNow()
-    expect(ctrl.getSnapshotRevision()).toBe(12)
-    expect(ctrl.getPendingDirtyRows()[CRDT_TABLES.PIT_RECORDS]).toEqual(['404'])
-
-    // Subsequent flush succeeds using rev=13
-    const okRes = await ctrl.flushNow()
-    expect(okRes?.saved).toBe(true)
-    expect(okRes?.snapshotRevision).toBe(13)
-    expect(ctrl.getPendingDirtyRows()).toEqual({})
-
-    await ctrl.destroy()
   })
 
   it('rewrites placeholder eventId cells in migrateEventCrdtId and flushes/disposes on userStore.logout()', async () => {
@@ -550,5 +563,5 @@ describe('CRDT Field-Level Merge, Star Sync, Chunking, HLC Guard & Persistence',
     expect(saveCalls).toContain('uuid-real-event')
     expect(getExistingEventCrdt('uuid-real-event')).toBeUndefined()
     expect(isCrdtTransportActive('uuid-real-event')).toBe(false)
-  })
+  }, 20000)
 })

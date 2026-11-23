@@ -1,5 +1,5 @@
-import { mount } from '@vue/test-utils'
-import { describe, it, expect, vi, beforeEach } from 'vitest'
+import { mount, type VueWrapper } from '@vue/test-utils'
+import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
 import { setActivePinia, createPinia } from 'pinia'
 import TagPicker from '../components/common/TagPicker.vue'
 import { useRecordStore } from '../stores/records'
@@ -14,11 +14,21 @@ vi.mock('vue-i18n', () => ({
 }))
 
 describe('TagPicker.vue', () => {
+  const wrappers: VueWrapper<any>[] = []
+  const track = <T extends VueWrapper<any>>(w: T): T => {
+    wrappers.push(w)
+    return w
+  }
   let pinia: any
 
   beforeEach(() => {
     pinia = createPinia()
     setActivePinia(pinia)
+  })
+
+  afterEach(() => {
+    while (wrappers.length) wrappers.pop()!.unmount()
+    vi.restoreAllMocks()
   })
 
   it('renders existing tags for the team', () => {
@@ -29,9 +39,9 @@ describe('TagPicker.vue', () => {
       { id: 't3', eventId: 'e1', teamNumber: 19600, tag: 'other_team_tag', color: 'red', isPreset: false }
     ]
 
-    const wrapper = mount(TagPicker, {
+    const wrapper = track(mount(TagPicker, {
       props: { eventId: 'e1', teamNumber: 27570 }
-    })
+    }))
 
     const badges = wrapper.findAll('.tag-badge')
     expect(badges).toHaveLength(2)
@@ -44,9 +54,9 @@ describe('TagPicker.vue', () => {
       tag: { id: 't1', eventId: 'e1', teamNumber: 27570, tag: 'aluminum_lift', color: 'orange', isPreset: false }
     })
 
-    const wrapper = mount(TagPicker, {
+    const wrapper = track(mount(TagPicker, {
       props: { eventId: 'e1', teamNumber: 27570 }
-    })
+    }))
 
     // Open add panel
     await wrapper.find('.btn-add-tag').trigger('click')
@@ -72,9 +82,9 @@ describe('TagPicker.vue', () => {
     ]
     vi.spyOn(recordStore, 'removeTag').mockResolvedValue({ success: true })
 
-    const wrapper = mount(TagPicker, {
+    const wrapper = track(mount(TagPicker, {
       props: { eventId: 'e1', teamNumber: 27570 }
-    })
+    }))
 
     const removeBtn = wrapper.find('.btn-tag-remove')
     await removeBtn.trigger('click')
@@ -91,9 +101,9 @@ describe('TagPicker.vue', () => {
       tag: { id: 't1', eventId: 'e1', teamNumber: 27570, tag: 'intake_v2', color: 'green', isPreset: false }
     })
 
-    const wrapper = mount(TagPicker, {
+    const wrapper = track(mount(TagPicker, {
       props: { eventId: 'e1', teamNumber: 27570 }
-    })
+    }))
 
     await wrapper.find('.btn-add-tag').trigger('click')
 
@@ -112,8 +122,6 @@ describe('TagPicker.vue', () => {
 
   it('enforces maximum 15 tags per team limit (V14)', async () => {
     const recordStore = useRecordStore()
-    const toastStore = useToastStore()
-    const toastSpy = vi.spyOn(toastStore, 'showToast')
 
     recordStore.teamTags = Array.from({ length: 15 }, (_, i) => ({
       id: `tag-${i}`,
@@ -124,13 +132,16 @@ describe('TagPicker.vue', () => {
       isPreset: false
     }))
 
-    const wrapper = mount(TagPicker, {
+    const wrapper = track(mount(TagPicker, {
       props: { eventId: 'e1', teamNumber: 27570 }
-    })
+    }))
 
-    // The add button should be disabled
+    expect(wrapper.findAll('.tag-badge')).toHaveLength(15)
+    // The add button must be disabled and clicking it must not open the edit panel
     const addBtn = wrapper.find('.btn-add-tag')
-    expect(addBtn.attributes('disabled')).toBeDefined()
+    expect((addBtn.element as HTMLButtonElement).disabled).toBe(true)
+    await addBtn.trigger('click')
+    expect(wrapper.find('.tag-edit-panel').exists()).toBe(false)
   })
 
   it('renders the 5 BIOBUZZ preset tags and allows 1-click addition', async () => {
@@ -140,9 +151,9 @@ describe('TagPicker.vue', () => {
       tag: { id: 'p1', eventId: 'e1', teamNumber: 27570, tag: '#易超持', color: 'orange', isPreset: false }
     })
 
-    const wrapper = mount(TagPicker, {
+    const wrapper = track(mount(TagPicker, {
       props: { eventId: 'e1', teamNumber: 27570 }
-    })
+    }))
 
     await wrapper.find('.btn-add-tag').trigger('click')
     const presetChips = wrapper.findAll('.preset-chip')
@@ -166,14 +177,17 @@ describe('TagPicker.vue', () => {
       { id: 't-exist', eventId: 'e1', teamNumber: 27570, tag: '#控制对方大球', color: 'red', isPreset: false }
     ]
 
-    const wrapper = mount(TagPicker, {
+    const wrapper = track(mount(TagPicker, {
       props: { eventId: 'e1', teamNumber: 27570 }
-    })
+    }))
 
     await wrapper.find('.btn-add-tag').trigger('click')
-    const opponentTagChip = wrapper.findAll('.preset-chip').find(c => c.text() === '#控制对方大球')
+    const chips = wrapper.findAll('.preset-chip')
+    const opponentTagChip = chips.find(c => c.text() === '#控制对方大球')
+    const inactiveChip = chips.find(c => c.text() === '#易超持')
     expect(opponentTagChip).toBeDefined()
-    expect(opponentTagChip?.attributes('disabled')).toBeDefined()
+    expect((opponentTagChip!.element as HTMLButtonElement).disabled).toBe(true)
+    expect((inactiveChip!.element as HTMLButtonElement).disabled).toBe(false)
   })
 })
 

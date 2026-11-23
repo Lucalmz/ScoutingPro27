@@ -1,6 +1,6 @@
-import { describe, it, expect, beforeEach, afterEach } from 'vitest'
-import { mount } from '@vue/test-utils'
-import { defineComponent } from 'vue'
+import { describe, it, expect, afterEach } from 'vitest'
+import { mount, type VueWrapper } from '@vue/test-utils'
+import { defineComponent, nextTick } from 'vue'
 import { useIsMobile } from '../composables/useIsMobile'
 
 const TestComponent = defineComponent({
@@ -12,14 +12,25 @@ const TestComponent = defineComponent({
 })
 
 describe('useIsMobile composable', () => {
-  const originalInnerWidth = window.innerWidth
+  const origInnerWidthDesc = Object.getOwnPropertyDescriptor(window, 'innerWidth')
+  const origUserAgentDesc = Object.getOwnPropertyDescriptor(navigator, 'userAgent')
+  const mountedWrappers: VueWrapper<any>[] = []
+
+  const track = <T extends VueWrapper<any>>(w: T): T => {
+    mountedWrappers.push(w)
+    return w
+  }
 
   afterEach(() => {
-    Object.defineProperty(window, 'innerWidth', {
-      writable: true,
-      configurable: true,
-      value: originalInnerWidth
-    })
+    while (mountedWrappers.length > 0) {
+      mountedWrappers.pop()?.unmount()
+    }
+    if (origInnerWidthDesc) {
+      Object.defineProperty(window, 'innerWidth', origInnerWidthDesc)
+    }
+    if (origUserAgentDesc) {
+      Object.defineProperty(navigator, 'userAgent', origUserAgentDesc)
+    }
   })
 
   it('detects mobile viewport when innerWidth <= breakpoint', () => {
@@ -29,7 +40,7 @@ describe('useIsMobile composable', () => {
       value: 500
     })
 
-    const wrapper = mount(TestComponent)
+    const wrapper = track(mount(TestComponent))
     expect(wrapper.text()).toBe('true')
   })
 
@@ -40,7 +51,7 @@ describe('useIsMobile composable', () => {
       value: 1024
     })
 
-    const wrapper = mount(TestComponent)
+    const wrapper = track(mount(TestComponent))
     expect(wrapper.text()).toBe('false')
   })
 
@@ -51,7 +62,7 @@ describe('useIsMobile composable', () => {
       value: 1024
     })
 
-    const wrapper = mount(TestComponent)
+    const wrapper = track(mount(TestComponent))
     expect(wrapper.text()).toBe('false')
 
     // Resize to mobile
@@ -62,7 +73,7 @@ describe('useIsMobile composable', () => {
     })
     window.dispatchEvent(new Event('resize'))
 
-    await wrapper.vm.$nextTick()
+    await nextTick()
     expect(wrapper.text()).toBe('true')
   })
 

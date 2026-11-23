@@ -4,6 +4,7 @@ import { useRouter } from 'vue-router'
 import { useI18n } from 'vue-i18n'
 import { useRecordStore } from '@/stores/records'
 import { useNavigationStore } from '@/stores/navigation'
+import { useAiStore } from '@/stores/ai'
 import TagPicker from '@/components/common/TagPicker.vue'
 import type { RankingRow, ScoutingRecord } from '@/types'
 import { sortRecordsChronologically, getMatchLevelPrefix } from '@/utils/tournament'
@@ -21,9 +22,15 @@ const emit = defineEmits<{
 }>()
 
 const router = useRouter()
-const { t } = useI18n()
+const { t, locale } = useI18n()
 const recordStore = useRecordStore()
 const navStore = useNavigationStore()
+const aiStore = useAiStore()
+
+function askAiAboutTeam() {
+  if (props.teamNumber === null) return
+  void aiStore.openCopilotForTeam(props.eventId, props.teamNumber, undefined, locale.value)
+}
 
 // ── 抽屉可见性 ──
 const isVisible = computed(() => props.teamNumber !== null)
@@ -158,6 +165,15 @@ onUnmounted(() => {
             <span>{{ t('team_drawer.title', { team: teamNumber }) }}</span>
           </div>
           <div class="drawer-actions">
+            <button
+              v-if="teamNumber !== null"
+              type="button"
+              class="btn-icon btn-ask-ai"
+              @click="askAiAboutTeam"
+              :title="t('ai.ask_ai_about_team')"
+            >
+              <span class="material-icons">auto_awesome</span>
+            </button>
             <button class="btn-icon" @click="goFullDetail" :title="t('team_drawer.full_detail')">
               <span class="material-icons">open_in_full</span>
             </button>

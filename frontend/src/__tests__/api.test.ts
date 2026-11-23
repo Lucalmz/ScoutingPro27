@@ -2,12 +2,15 @@ import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
 import { checkUserExists, renameUser, listEvents, LocalApiTimeoutError } from '../services/api'
 
 describe('api service timeout and error handling', () => {
+  const origFetch = global.fetch
+
   beforeEach(() => {
     vi.restoreAllMocks()
     localStorage.clear()
   })
 
   afterEach(() => {
+    global.fetch = origFetch
     vi.restoreAllMocks()
     localStorage.clear()
   })

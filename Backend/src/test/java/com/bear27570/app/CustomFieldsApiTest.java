@@ -4,30 +4,46 @@ import com.bear27570.app.dao.CustomFieldDao;
 import com.bear27570.app.dao.EventDao;
 import com.bear27570.app.dao.PitScoutDao;
 import com.bear27570.app.dao.UserDao;
+import com.bear27570.app.db.JdbiConfig;
 import com.bear27570.app.model.CustomFieldDefinition;
 import com.bear27570.app.model.PitScoutingRecord;
 import com.bear27570.app.model.ScoutingEvent;
 import com.bear27570.app.model.User;
 import com.bear27570.app.routes.ApiRoutes;
+import com.bear27570.app.util.AESUtil;
+import com.bear27570.app.util.JwtUtil;
 import io.javalin.Javalin;
 import io.javalin.testtools.JavalinTest;
 import org.flywaydb.core.Flyway;
 import org.jdbi.v3.core.Jdbi;
 import org.jdbi.v3.sqlobject.SqlObjectPlugin;
+import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.io.TempDir;
 
+import java.nio.file.Path;
 import java.util.List;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
 class CustomFieldsApiTest {
 
+    @TempDir
+    Path tempDir;
+
     private Jdbi jdbi;
+    private ApiRoutes apiRoutes;
     private Javalin app;
+    private String prevDataDir;
 
     @BeforeEach
     void setUp() {
+        prevDataDir = System.getProperty("scouting.data.dir");
+        System.setProperty("scouting.data.dir", tempDir.toAbsolutePath().toString());
+        JwtUtil.resetForTest();
+        AESUtil.resetForTest();
+
         String url = "jdbc:h2:mem:test_custom_fields_" + System.nanoTime() + ";DB_CLOSE_DELAY=-1";
 
         Flyway.configure()
@@ -39,9 +55,26 @@ class CustomFieldsApiTest {
         jdbi = Jdbi.create(url, "sa", "");
         jdbi.installPlugin(new SqlObjectPlugin());
 
-        app = Javalin.create(config -> {
-            new ApiRoutes(jdbi).register(config.routes);
-        });
+        apiRoutes = new ApiRoutes(jdbi);
+        app = Javalin.create(config -> apiRoutes.register(config.routes));
+    }
+
+    @AfterEach
+    void tearDown() {
+        try {
+            if (apiRoutes != null) {
+                apiRoutes.shutdown();
+            }
+            JdbiConfig.closeDataSources();
+        } finally {
+            JwtUtil.resetForTest();
+            AESUtil.resetForTest();
+            if (prevDataDir == null) {
+                System.clearProperty("scouting.data.dir");
+            } else {
+                System.setProperty("scouting.data.dir", prevDataDir);
+            }
+        }
     }
 
     @Test

@@ -1,6 +1,9 @@
 package com.bear27570.app;
 
+import com.bear27570.app.db.JdbiConfig;
 import com.bear27570.app.routes.ApiRoutes;
+import com.bear27570.app.util.AESUtil;
+import com.bear27570.app.util.JwtUtil;
 import com.google.gson.Gson;
 import io.javalin.Javalin;
 import io.javalin.testtools.JavalinTest;
@@ -10,7 +13,9 @@ import org.jdbi.v3.sqlobject.SqlObjectPlugin;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.io.TempDir;
 
+import java.nio.file.Path;
 import java.util.List;
 import java.util.Map;
 
@@ -18,12 +23,22 @@ import static org.assertj.core.api.Assertions.assertThat;
 
 public class EventMemberLifecycleTest {
 
+    @TempDir
+    Path tempDir;
+
     private Jdbi jdbi;
+    private ApiRoutes apiRoutes;
     private Javalin app;
+    private String prevDataDir;
     private final Gson gson = new Gson();
 
     @BeforeEach
     void setUp() {
+        prevDataDir = System.getProperty("scouting.data.dir");
+        System.setProperty("scouting.data.dir", tempDir.toAbsolutePath().toString());
+        JwtUtil.resetForTest();
+        AESUtil.resetForTest();
+
         String url = "jdbc:h2:mem:test_members_" + System.nanoTime() + ";DB_CLOSE_DELAY=-1";
 
         Flyway.configure()
@@ -35,25 +50,41 @@ public class EventMemberLifecycleTest {
         jdbi = Jdbi.create(url, "sa", "");
         jdbi.installPlugin(new SqlObjectPlugin());
 
-        app = Javalin.create(config -> {
-            new ApiRoutes(jdbi).register(config.routes);
-        });
+        apiRoutes = new ApiRoutes(jdbi);
+        app = Javalin.create(config -> apiRoutes.register(config.routes));
     }
 
     @AfterEach
     void tearDown() {
-        if (jdbi != null) {
-            jdbi.useHandle(handle -> {
-                handle.execute("DELETE FROM event_users");
-                handle.execute("DELETE FROM events");
-                handle.execute("DELETE FROM users");
-            });
-            int remainingUsers = jdbi.withHandle(h -> h.createQuery("SELECT COUNT(*) FROM users").mapTo(Integer.class).one());
-            int remainingEvents = jdbi.withHandle(h -> h.createQuery("SELECT COUNT(*) FROM events").mapTo(Integer.class).one());
-            int remainingMembers = jdbi.withHandle(h -> h.createQuery("SELECT COUNT(*) FROM event_users").mapTo(Integer.class).one());
-            assertThat(remainingUsers).isZero();
-            assertThat(remainingEvents).isZero();
-            assertThat(remainingMembers).isZero();
+        try {
+            if (jdbi != null) {
+                jdbi.useHandle(handle -> {
+                    handle.execute("DELETE FROM event_users");
+                    handle.execute("DELETE FROM events");
+                    handle.execute("DELETE FROM users");
+                });
+                int remainingUsers = jdbi.withHandle(h -> h.createQuery("SELECT COUNT(*) FROM users").mapTo(Integer.class).one());
+                int remainingEvents = jdbi.withHandle(h -> h.createQuery("SELECT COUNT(*) FROM events").mapTo(Integer.class).one());
+                int remainingMembers = jdbi.withHandle(h -> h.createQuery("SELECT COUNT(*) FROM event_users").mapTo(Integer.class).one());
+                assertThat(remainingUsers).isZero();
+                assertThat(remainingEvents).isZero();
+                assertThat(remainingMembers).isZero();
+            }
+        } finally {
+            try {
+                if (apiRoutes != null) {
+                    apiRoutes.shutdown();
+                }
+                JdbiConfig.closeDataSources();
+            } finally {
+                JwtUtil.resetForTest();
+                AESUtil.resetForTest();
+                if (prevDataDir == null) {
+                    System.clearProperty("scouting.data.dir");
+                } else {
+                    System.setProperty("scouting.data.dir", prevDataDir);
+                }
+            }
         }
     }
 

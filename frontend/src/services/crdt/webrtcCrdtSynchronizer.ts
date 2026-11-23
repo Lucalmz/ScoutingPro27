@@ -38,7 +38,7 @@ export interface WebRtcCrdtSynchronizerHub {
   attachPeer: (peerId: string, options?: { awaitInitialSync?: boolean }) => Promise<void>
   detachPeer: (peerId: string) => Promise<void>
   handleIncomingMessage: (senderPeerId: string, msg: WebRtcCrdtSyncMsg | WebRtcCrdtSyncChunk) => void
-  triggerFullSyncWithPeer: (peerId: string) => Promise<void>
+  triggerFullSyncWithPeer: (peerId: string) => Promise<boolean>
   getAttachedPeers: () => string[]
   destroy: () => Promise<void>
 }
@@ -256,17 +256,24 @@ export function createWebRtcCrdtSynchronizerHub(opts: WebRtcCrdtHubOptions): Web
     }
   }
 
-  async function triggerFullSyncWithPeer(peerId: string): Promise<void> {
+  async function triggerFullSyncWithPeer(peerId: string): Promise<boolean> {
+    if (destroyed || !peerId) return false
     const entry = peers.get(peerId)
     if (!entry) {
       await attachPeer(peerId)
-      return
+      return !destroyed && peers.has(peerId)
     }
     try {
       await entry.synchronizer.load()
       await entry.synchronizer.save()
+      if (!destroyed && peers.has(peerId)) {
+        onPeerSyncSettled?.(peerId)
+        return true
+      }
+      return false
     } catch (err) {
       onIgnoredError?.(err)
+      return false
     }
   }
 

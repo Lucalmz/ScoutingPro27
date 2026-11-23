@@ -20,8 +20,6 @@ public class ScoutingRecord {
     private boolean isDeleted;
     /** 记录级逻辑版本号，每次编辑 +1，用于 LWW 冲突解决 */
     private int version;
-    /** Host 分配的全局序列号，用于 Client 增量同步请求 */
-    private Integer hostSeq;
     private String authorPubKey;
     private String authorSig;
     private String hostSig;
@@ -66,9 +64,6 @@ public class ScoutingRecord {
     public void setDeleted(boolean deleted) { this.isDeleted = deleted; }
     public int getVersion() { return version; }
     public void setVersion(int version) { this.version = version; }
-    /** hostSeq 以 Host 最新分配为准，允许覆盖 */
-    public Integer getHostSeq() { return hostSeq; }
-    public void setHostSeq(Integer hostSeq) { this.hostSeq = hostSeq; }
     public String getAuthorPubKey() { return authorPubKey; }
     public void setAuthorPubKey(String authorPubKey) { this.authorPubKey = authorPubKey; }
     public String getAuthorSig() { return authorSig; }

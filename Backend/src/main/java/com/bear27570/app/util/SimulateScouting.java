@@ -64,6 +64,7 @@ public class SimulateScouting {
         flyway.migrate();
 
         Jdbi jdbi = JdbiConfig.create(dataSource);
+        com.bear27570.app.routes.AiRoutes.ensureAiCopilotSchema(jdbi);
 
         // 执行用户确定性 ID 迁移与重名归并，确保底层用户模型架构大一统
         UserDeterministicIdMigrator.migrate(jdbi);
@@ -114,6 +115,7 @@ public class SimulateScouting {
                 handle.execute("DELETE FROM team_tags WHERE event_id = ?", eventId);
                 handle.execute("DELETE FROM banned_teams WHERE event_id = ?", eventId);
                 handle.execute("DELETE FROM ai_chat_sessions WHERE event_id = ?", eventId);
+                handle.execute("DELETE FROM ai_chat_threads WHERE event_id = ?", eventId);
                 handle.execute("DELETE FROM event_official_teams WHERE event_id = ?", eventId);
                 handle.execute("DELETE FROM event_custom_fields WHERE event_id = ?", eventId);
 
@@ -277,7 +279,7 @@ public class SimulateScouting {
                             claimed_teleop_park, claimed_flower_nectars, claimed_flower_bottom_bonus, claimed_flower_pollens, claimed_garden_balls,
                             claimed_endgame_score,
                             claimed_auto_score, claimed_teleop_score, claimed_total_score,
-                            photo_keys, version, host_seq, is_deleted, raw_data, created_at, updated_at
+                            photo_keys, version, is_deleted, raw_data, created_at, updated_at
                         ) VALUES (
                             ?, ?, ?, ?, ?, ?,
                             ?, ?, ?, ?,
@@ -287,7 +289,7 @@ public class SimulateScouting {
                             ?, ?, ?, ?, ?,
                             ?,
                             ?, ?, ?,
-                            '[]', 1, ?, FALSE, ?, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP
+                            '[]', 1, FALSE, ?, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP
                         )
                     """)
                     .bind(0, UUID.randomUUID().toString())
@@ -317,8 +319,7 @@ public class SimulateScouting {
                     .bind(24, claimedAuto)
                     .bind(25, claimedTeleop)
                     .bind(26, claimedTotal)
-                    .bind(27, pitIndex)
-                    .bind(28, pitRawJson.toString())
+                    .bind(27, pitRawJson.toString())
                     .execute();
                 }
 
@@ -459,13 +460,13 @@ public class SimulateScouting {
                                 match_number, team_number,
                                 auto_score, teleop_score, endgame_score, total_score,
                                 notes, raw_data, sync_status, is_broken, is_deleted,
-                                created_at, updated_at, version, host_seq
+                                created_at, updated_at, version
                             ) VALUES (
                                 ?, ?, ?, ?,
                                 ?, ?,
                                 ?, ?, ?, ?,
                                 ?, ?, 'SYNCED', ?, FALSE,
-                                CURRENT_TIMESTAMP, CURRENT_TIMESTAMP, 1, ?
+                                CURRENT_TIMESTAMP, CURRENT_TIMESTAMP, 1
                             )
                         """)
                         .bind(0, UUID.randomUUID().toString())
@@ -481,7 +482,6 @@ public class SimulateScouting {
                         .bind(10, "2026 BIOBUZZ Match " + matchNum + " 现场打分 (轮次: " + cycleCount + ", 出球: " + totalBalls + ")")
                         .bind(11, rawJson.toString())
                         .bind(12, isBroken)
-                        .bind(13, recordCount + 1)
                         .execute();
 
                         recordCount++;

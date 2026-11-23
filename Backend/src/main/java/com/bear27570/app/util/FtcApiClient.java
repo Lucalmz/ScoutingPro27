@@ -11,6 +11,7 @@ import java.net.http.HttpClient;
 import java.net.http.HttpRequest;
 import java.net.http.HttpResponse;
 import java.nio.charset.StandardCharsets;
+import java.time.Clock;
 import java.time.Duration;
 import java.util.*;
 import java.util.concurrent.ConcurrentHashMap;
@@ -29,6 +30,8 @@ public class FtcApiClient {
     private final String baseUrl;
     private final String basicAuthHeader;
     private final HttpClient httpClient;
+    private final long cacheTtlMs;
+    private final Clock clock;
     private final Gson gson = new Gson();
 
     private static class CacheEntry {
@@ -36,16 +39,18 @@ public class FtcApiClient {
         final String lastModified;
         final String etag;
         final JsonElement data;
+        private final Clock clock;
 
-        CacheEntry(long ttlMs, String lastModified, String etag, JsonElement data) {
-            this.expiresAt = System.currentTimeMillis() + ttlMs;
+        CacheEntry(Clock clock, long ttlMs, String lastModified, String etag, JsonElement data) {
+            this.clock = clock;
+            this.expiresAt = clock.millis() + ttlMs;
             this.lastModified = lastModified;
             this.etag = etag;
             this.data = data;
         }
 
         boolean isExpired() {
-            return System.currentTimeMillis() > expiresAt;
+            return clock.millis() > expiresAt;
         }
     }
 
@@ -56,11 +61,17 @@ public class FtcApiClient {
     }
 
     public FtcApiClient(String baseUrl, String user, String token) {
+        this(baseUrl, user, token, CACHE_TTL_MS, Clock.systemUTC());
+    }
+
+    FtcApiClient(String baseUrl, String user, String token, long cacheTtlMs, Clock clock) {
         this.baseUrl = (baseUrl != null && !baseUrl.isBlank()) ? baseUrl.replaceAll("/+$", "") : DEFAULT_BASE_URL;
         String resolvedUser = (user != null && !user.isBlank()) ? user : DEFAULT_USER;
         String resolvedToken = (token != null && !token.isBlank()) ? token : DEFAULT_TOKEN;
         String userToken = resolvedUser + ":" + resolvedToken;
         this.basicAuthHeader = "Basic " + Base64.getEncoder().encodeToString(userToken.getBytes(StandardCharsets.UTF_8));
+        this.cacheTtlMs = cacheTtlMs;
+        this.clock = Objects.requireNonNull(clock, "clock must not be null");
         this.httpClient = HttpClient.newBuilder()
                 .followRedirects(HttpClient.Redirect.ALWAYS)
                 .connectTimeout(Duration.ofSeconds(10))
@@ -574,7 +585,7 @@ public class FtcApiClient {
 
         if (response.statusCode() == 304 && cached != null) {
             // 304 Not Modified: 刷新缓存有效期并返回
-            cache.put(path, new CacheEntry(CACHE_TTL_MS, cached.lastModified, cached.etag, cached.data));
+            cache.put(path, new CacheEntry(clock, cacheTtlMs, cached.lastModified, cached.etag, cached.data));
             return (cached.data != null && cached.data.isJsonObject()) ? cached.data.getAsJsonObject() : new JsonObject();
         }
 
@@ -584,7 +595,7 @@ public class FtcApiClient {
             String lastModified = response.headers().firstValue("Last-Modified").orElse(null);
             String etag = response.headers().firstValue("ETag").orElse(null);
 
-            cache.put(path, new CacheEntry(CACHE_TTL_MS, lastModified, etag, parsed));
+            cache.put(path, new CacheEntry(clock, cacheTtlMs, lastModified, etag, parsed));
             return parsed.isJsonObject() ? parsed.getAsJsonObject() : new JsonObject();
         }
 

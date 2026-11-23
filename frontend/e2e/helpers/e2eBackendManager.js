@@ -1,6 +1,7 @@
-import puppeteer from 'puppeteer-core';
+import puppeteer from 'puppeteer';
 import { spawn, execSync } from 'child_process';
 import http from 'http';
+import net from 'net';
 import path from 'path';
 import os from 'os';
 import fs from 'fs';
@@ -14,6 +15,38 @@ const __dirname = path.dirname(__filename);
 export const REPO_ROOT = path.resolve(__dirname, '../../..');
 export const BACKEND_JAR_PATH = path.join(REPO_ROOT, 'Backend', 'target', 'ScoutingPro27.jar');
 export const STATIC_PUBLIC_DIR = path.join(REPO_ROOT, 'Backend', 'src', 'main', 'resources', 'public');
+
+export async function allocateFreePorts(count, host = '127.0.0.1') {
+  const servers = [];
+  const ports = [];
+  try {
+    for (let i = 0; i < count; i++) {
+      const srv = net.createServer();
+      await new Promise((resolve, reject) => {
+        srv.once('error', reject);
+        srv.listen(0, host, () => resolve());
+      });
+      servers.push(srv);
+      const addr = srv.address();
+      ports.push(typeof addr === 'object' && addr ? addr.port : 0);
+    }
+  } finally {
+    await Promise.all(
+      servers.map(
+        (srv) =>
+          new Promise((resolve) => {
+            srv.close(() => resolve());
+          })
+      )
+    );
+  }
+  return ports;
+}
+
+export async function allocateFreePort(host = '127.0.0.1') {
+  const [port] = await allocateFreePorts(1, host);
+  return port;
+}
 
 const MIME_TYPES = {
   '.html': 'text/html; charset=utf-8',
@@ -36,9 +69,22 @@ export function getChromeExecutablePath() {
     return process.env.CHROME_PATH;
   }
   const platform = os.platform();
-  if (platform === 'win32') return 'C:\\Program Files\\Google\\Chrome\\Application\\chrome.exe';
-  if (platform === 'darwin') return '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome';
-  return '/usr/bin/google-chrome';
+  const candidates =
+    platform === 'win32'
+      ? [
+          'C:\\Program Files\\Google\\Chrome\\Application\\chrome.exe',
+          'C:\\Program Files (x86)\\Google\\Chrome\\Application\\chrome.exe'
+        ]
+      : platform === 'darwin'
+        ? ['/Applications/Google Chrome.app/Contents/MacOS/Google Chrome']
+        : ['/usr/bin/google-chrome', '/usr/bin/chromium', '/usr/bin/chromium-browser'];
+  const found = candidates.find((p) => fs.existsSync(p));
+  if (found) return found;
+  if (typeof puppeteer.executablePath === 'function') {
+    const bundled = puppeteer.executablePath();
+    if (bundled && fs.existsSync(bundled)) return bundled;
+  }
+  throw new Error(`No Chrome/Chromium executable found. Checked: ${candidates.join(', ')}`);
 }
 
 export function delay(ms) {
@@ -62,9 +108,15 @@ export function killProcessTree(pid) {
   }
 }
 
-export async function injectE2ePageHooks(page, initialClockOffsetMs = 0, mqttBrokerUrl = null) {
-  await page.evaluateOnNewDocument(({ initOffset, brokerUrl }) => {
-    window.__TEST_FORCE_ALLOW_TURN__ = true;
+export async function injectE2ePageHooks(
+  page,
+  initialClockOffsetMs = 0,
+  mqttBrokerUrl = null,
+  { forceTurnRelay = process.env.FORCE_TURN_RELAY === '1' } = {}
+) {
+  await page.evaluateOnNewDocument(({ initOffset, brokerUrl, useForceTurn }) => {
+    window.__TEST_FORCE_ALLOW_TURN__ = Boolean(useForceTurn);
+    window.__SP27_E2E_FORCE_TURN_RELAY__ = Boolean(useForceTurn);
 
     if (brokerUrl) {
       try {
@@ -85,45 +137,47 @@ export async function injectE2ePageHooks(page, initialClockOffsetMs = 0, mqttBro
       }
     } catch {}
 
-    const FALLBACK_TURN_SERVERS = [
-      {
-        urls: 'turn:global.relay.metered.ca:80',
-        username: 'ac2f17ce5be760e70209a1da',
-        credential: 'hnCbsBr54qxItqgo'
-      },
-      {
-        urls: 'turn:global.relay.metered.ca:80?transport=tcp',
-        username: 'ac2f17ce5be760e70209a1da',
-        credential: 'hnCbsBr54qxItqgo'
-      },
-      {
-        urls: 'turn:global.relay.metered.ca:443',
-        username: 'ac2f17ce5be760e70209a1da',
-        credential: 'hnCbsBr54qxItqgo'
-      },
-      {
-        urls: 'turns:global.relay.metered.ca:443?transport=tcp',
-        username: 'ac2f17ce5be760e70209a1da',
-        credential: 'hnCbsBr54qxItqgo'
-      }
-    ];
-    const OriginalRTCPeerConnection = window.RTCPeerConnection;
-    window.RTCPeerConnection = function (config) {
-      if (config) {
-        config.iceTransportPolicy = 'relay';
-        const existing = Array.isArray(config.iceServers) ? config.iceServers : [];
-        const hasTurn = existing.some((s) => {
-          const u = Array.isArray(s.urls) ? s.urls.join(',') : String(s.urls || '');
-          return u.includes('turn:') || u.includes('turns:');
-        });
-        if (!hasTurn) {
-          config.iceServers = [...existing, ...FALLBACK_TURN_SERVERS];
+    if (useForceTurn) {
+      const FALLBACK_TURN_SERVERS = [
+        {
+          urls: 'turn:global.relay.metered.ca:80',
+          username: 'ac2f17ce5be760e70209a1da',
+          credential: 'hnCbsBr54qxItqgo'
+        },
+        {
+          urls: 'turn:global.relay.metered.ca:80?transport=tcp',
+          username: 'ac2f17ce5be760e70209a1da',
+          credential: 'hnCbsBr54qxItqgo'
+        },
+        {
+          urls: 'turn:global.relay.metered.ca:443',
+          username: 'ac2f17ce5be760e70209a1da',
+          credential: 'hnCbsBr54qxItqgo'
+        },
+        {
+          urls: 'turns:global.relay.metered.ca:443?transport=tcp',
+          username: 'ac2f17ce5be760e70209a1da',
+          credential: 'hnCbsBr54qxItqgo'
         }
-      }
-      return new OriginalRTCPeerConnection(config);
-    };
-    window.RTCPeerConnection.prototype = OriginalRTCPeerConnection.prototype;
-  }, { initOffset: initialClockOffsetMs, brokerUrl: mqttBrokerUrl });
+      ];
+      const OriginalRTCPeerConnection = window.RTCPeerConnection;
+      window.RTCPeerConnection = function (config) {
+        if (config) {
+          config.iceTransportPolicy = 'relay';
+          const existing = Array.isArray(config.iceServers) ? config.iceServers : [];
+          const hasTurn = existing.some((s) => {
+            const u = Array.isArray(s.urls) ? s.urls.join(',') : String(s.urls || '');
+            return u.includes('turn:') || u.includes('turns:');
+          });
+          if (!hasTurn) {
+            config.iceServers = [...existing, ...FALLBACK_TURN_SERVERS];
+          }
+        }
+        return new OriginalRTCPeerConnection(config);
+      };
+      window.RTCPeerConnection.prototype = OriginalRTCPeerConnection.prototype;
+    }
+  }, { initOffset: initialClockOffsetMs, brokerUrl: mqttBrokerUrl, useForceTurn: forceTurnRelay });
 }
 
 export class E2EClusterManager {
@@ -267,7 +321,7 @@ export class E2EClusterManager {
     await delay(350);
   }
 
-  async startStaticClientServer(port = 7079, host = '127.0.0.2') {
+  async startStaticClientServer(port = 0, host = '127.0.0.2') {
     if (!fs.existsSync(STATIC_PUBLIC_DIR)) {
       throw new Error(`Frontend dist missing at ${STATIC_PUBLIC_DIR}. Run npm run build first.`);
     }
@@ -304,12 +358,60 @@ export class E2EClusterManager {
       server.listen(port, host, () => resolve());
     });
     this.staticServer = server;
-    const baseUrl = `http://${host}:${port}`;
+    const addr = server.address();
+    const actualPort = typeof addr === 'object' && addr ? addr.port : port;
+    const baseUrl = `http://${host}:${actualPort}`;
     console.log(`[Cluster] Static client PWA server listening at ${baseUrl}`);
     return baseUrl;
   }
 
-  async launchBrowser({ name, index = 0, userDataDir, showUi = false, extraSecureOrigin, initialClockOffsetMs = 0 }) {
+  clearPageErrors(pages = Array.from(this.trackedPages)) {
+    for (const p of pages) {
+      if (!p) continue;
+      p.__sp27PageErrors = [];
+      p.__sp27ConsoleErrors = [];
+      p.__sp27Http5xx = [];
+      p.__sp27FailedRequests = [];
+    }
+  }
+
+  assertNoUnexpectedErrors(
+    pages = Array.from(this.trackedPages),
+    { allowConsolePatterns = [], allowPageErrorPatterns = [], allowHttp5xx = false } = {}
+  ) {
+    const matchesAny = (text, patterns) =>
+      patterns.some((pat) => (pat instanceof RegExp ? pat.test(text) : String(text).includes(String(pat))));
+
+    const failures = [];
+    for (const p of pages) {
+      if (!p) continue;
+      const label = p.__sp27Name || 'page';
+      for (const msg of p.__sp27PageErrors || []) {
+        if (!matchesAny(msg, allowPageErrorPatterns)) {
+          failures.push(`[${label}] uncaught pageerror: ${msg}`);
+        }
+      }
+      for (const msg of p.__sp27ConsoleErrors || []) {
+        const isExpectedStaticPwaFallback =
+          p.__sp27IsStaticPwa &&
+          (/the server responded with a status of 404 \(Not Found\)/i.test(msg) ||
+            /WebSocket connection to 'ws:\/\/127\.0\.0\.2:/i.test(msg));
+        if (!isExpectedStaticPwaFallback && !matchesAny(msg, allowConsolePatterns)) {
+          failures.push(`[${label}] console.error: ${msg}`);
+        }
+      }
+      if (!allowHttp5xx) {
+        for (const item of p.__sp27Http5xx || []) {
+          failures.push(`[${label}] HTTP ${item.status} on ${item.url}`);
+        }
+      }
+    }
+    if (failures.length > 0) {
+      throw new Error(`Unexpected browser/server runtime errors (${failures.length}):\n  - ${failures.join('\n  - ')}`);
+    }
+  }
+
+  async launchBrowser({ name, index = 0, userDataDir, showUi = false, extraSecureOrigin, initialClockOffsetMs = 0, forceTurnRelay }) {
     const width = 1280;
     const height = 860;
     const x = (index % 3) * 420;
@@ -334,6 +436,12 @@ export class E2EClusterManager {
     this.browsers.set(name, { browser, userDataDir });
     const page = await browser.newPage();
     this.trackedPages.add(page);
+    page.__sp27Name = name;
+    page.__sp27IsStaticPwa = Boolean(extraSecureOrigin);
+    page.__sp27PageErrors = [];
+    page.__sp27ConsoleErrors = [];
+    page.__sp27Http5xx = [];
+    page.__sp27FailedRequests = [];
     const pendingRequests = new Set();
     page.__sp27PendingRequests = pendingRequests;
     page.on('request', (req) => {
@@ -344,10 +452,22 @@ export class E2EClusterManager {
     });
     page.on('requestfailed', (req) => {
       pendingRequests.delete(req.url());
+      page.__sp27FailedRequests.push({
+        url: req.url(),
+        errorText: req.failure()?.errorText || 'failed'
+      });
+    });
+    page.on('response', (res) => {
+      if (res.status() >= 500) {
+        page.__sp27Http5xx.push({ url: res.url(), status: res.status() });
+      }
     });
     page.on('console', (msg) => {
       const text = msg.text();
       const type = msg.type();
+      if (type === 'error') {
+        page.__sp27ConsoleErrors.push(text);
+      }
       const isHeartbeatChatter =
         text.includes('PING') || text.includes('PONG') || text.includes('host_heartbeat');
       if (isHeartbeatChatter && type !== 'error' && type !== 'warning') {
@@ -372,9 +492,10 @@ export class E2EClusterManager {
       }
     });
     page.on('pageerror', (err) => {
+      page.__sp27PageErrors.push(err?.message || String(err));
       console.error(`[${name}:PageError] ${err.message}`);
     });
-    await injectE2ePageHooks(page, initialClockOffsetMs, this.mqttBroker?.url || null);
+    await injectE2ePageHooks(page, initialClockOffsetMs, this.mqttBroker?.url || null, { forceTurnRelay });
     return { browser, page };
   }
 

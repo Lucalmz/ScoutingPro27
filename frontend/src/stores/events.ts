@@ -388,7 +388,6 @@ export const useEventStore = defineStore('events', () => {
         localStorage.removeItem(`sp27_custom_fields_${eventId}`)
         localStorage.removeItem(`sp27_team_tags_${eventId}`)
         localStorage.removeItem(`sp27_known_scouts_${eventId}`)
-        localStorage.removeItem(`sp27_lastHostSeq_${eventId}`)
         // 同步清理全局合并存储中属于该赛事的记录与标签
         try {
           const rawRecs = localStorage.getItem('scoutingpro_records')

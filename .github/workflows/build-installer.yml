@@ -41,12 +41,14 @@ jobs:
         working-directory: frontend
         run: |
           npm ci
+          npm run type-check
+          npm test
           npm run build
 
       # ---------- 第一次打包：只为了拿到能跑的 jar 去预热 JCEF ----------
       - name: Build fat jar (pass 1, for prewarm)
         working-directory: Backend
-        run: mvn -B clean package -DskipTests
+        run: mvn -B clean package
 
       - name: Prewarm JCEF native bundle (real download for this OS)
         working-directory: Backend

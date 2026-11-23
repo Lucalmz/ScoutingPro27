@@ -8,6 +8,13 @@
   pointer-events: auto;
 }
 
+@media (min-width: 1120px) {
+  .drawer-overlay {
+    inset: 0 var(--ai-dock-right-offset, 0px) 0 0;
+    overflow: hidden;
+  }
+}
+
 .drawer-panel {
   width: 100%;
   max-width: 540px;

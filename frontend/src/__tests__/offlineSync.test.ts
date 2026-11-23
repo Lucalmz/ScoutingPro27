@@ -1,4 +1,30 @@
-import { describe, it, expect } from 'vitest'
+import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest'
+import { createPinia, setActivePinia } from 'pinia'
+import { createMergeableStore } from 'tinybase'
+import {
+  hydrateAndBindEventCrdt,
+  readAssignmentsFromCrdt,
+  readCustomFieldsFromCrdt,
+  readMemberIdentitiesFromCrdt,
+  readPitRecordsFromCrdt,
+  readSchedulesFromCrdt,
+  readScoutingRecordsFromCrdt,
+  readTeamTagsFromCrdt,
+  resetCrdtRegistryForTesting,
+  setPitPhotoKeyActive,
+  signScoutingRecordWithDeviceKey,
+  writeAssignmentToCrdt,
+  writeCustomFieldToCrdt,
+  writeMemberIdentityToCrdt,
+  writePitRecordToCrdt,
+  writeScheduleToCrdt,
+  writeScoutingRecordToCrdt,
+  writeTeamTagToCrdt
+} from '@/services/crdt'
+import { useCustomFieldsStore } from '@/stores/customFields'
+import { usePitScoutStore } from '@/stores/pitScout'
+import { useRecordStore } from '@/stores/records'
+import { useScheduleStore } from '@/stores/schedule'
 import {
   sanitizeFileSegment,
   formatDateTag,
@@ -8,13 +34,26 @@ import {
   parseEventPackage,
   createSyncPackage,
   parseSyncPackage,
+  buildClientExportCrdtSnapshot,
   validateSyncPackageSecurity,
   scanFilesAndFolders,
   executeBatchSyncImport
 } from '@/utils/offlineSync'
-import type { ScoutingEvent, ScoutingRecord } from '@/types'
+import type { PitScoutingRecord, ScoutingEvent, ScoutingRecord } from '@/types'
 
 describe('offlineSync Utility', () => {
+  beforeEach(async () => {
+    setActivePinia(createPinia())
+    localStorage.clear()
+    await resetCrdtRegistryForTesting()
+  })
+
+  afterEach(async () => {
+    await resetCrdtRegistryForTesting()
+    localStorage.clear()
+    vi.restoreAllMocks()
+  })
+
   const dummyEvent: ScoutingEvent = {
     id: 'evt_2025_cnc',
     name: '2025 FTC China Championship',
@@ -62,8 +101,7 @@ describe('offlineSync Utility', () => {
     createdAt: '2026-09-06T10:02:00.000Z',
     updatedAt: '2026-09-06T10:06:00.000Z',
     isBroken: false,
-    version: 1,
-    hostSeq: 5
+    version: 1
   }
 
   it('sanitizes filename segments safely', () => {
@@ -106,12 +144,10 @@ describe('offlineSync Utility', () => {
       senderName: 'HostAdmin',
       isHost: true,
       targetName: 'ALL',
-      fromSeq: 0,
-      toSeq: 35,
       recordCount: 35,
       exportedAt: fixedDate
     })
-    expect(hostToAllFileName).toMatch(/^CNCMPLB_HOST_to_ALL_v0_to_v35_20260906_/)
+    expect(hostToAllFileName).toMatch(/^CNCMPLB_HOST_to_ALL_r35_20260906_/)
     expect(hostToAllFileName.endsWith('.info')).toBe(true)
 
     // Host -> Specific Scout
@@ -120,12 +156,10 @@ describe('offlineSync Utility', () => {
       senderName: 'HostAdmin',
       isHost: true,
       targetName: 'Bob',
-      fromSeq: 12,
-      toSeq: 35,
       recordCount: 23,
       exportedAt: fixedDate
     })
-    expect(hostToScoutFileName).toMatch(/^CNCMPLB_HOST_to_Bob_v12_to_v35_20260906_/)
+    expect(hostToScoutFileName).toMatch(/^CNCMPLB_HOST_to_Bob_r23_20260906_/)
     expect(hostToScoutFileName.endsWith('.info')).toBe(true)
   })
 
@@ -153,15 +187,14 @@ describe('offlineSync Utility', () => {
       eventName: dummyEvent.name,
       sender: { userId: 'usr_alice', username: 'Alice', role: 'SCOUT' },
       target: { recipientType: 'HOST' },
-      records: [dummyRecord1],
-      fromHostSeq: 0,
-      toHostSeq: 0
+      records: [dummyRecord1]
     })
 
     const parsed = parseSyncPackage(jsonStr)
     expect(parsed.format).toBe('SCOUTING_PRO_27_SYNC')
     expect(parsed.packetType).toBe('CLIENT_PUSH')
     expect(parsed.syncRange.recordCount).toBe(1)
+    expect((parsed.syncRange as any).fromHostSeq).toBeUndefined()
     expect(parsed.payload.records).toHaveLength(1)
     expect(parsed.payload.records[0].id).toBe('rec_1')
 
@@ -255,7 +288,7 @@ describe('offlineSync Utility', () => {
     expect(result.totalRecords).toBe(1)
   })
 
-  it('executes batch import for Host (merges, stamps hostSeq, persists to DB, handles events)', async () => {
+  it('executes batch import for Host (merges CRDT/records, blocks forged snapshots, persists to DB, handles events)', async () => {
     const eventJson = createEventPackage(dummyEvent, {
       userId: 'usr_host',
       username: 'Lucalmz',
@@ -276,7 +309,6 @@ describe('offlineSync Utility', () => {
     const scanRes = await scanFilesAndFolders([eventFile, fileAlice], dummyEvent.id)
     const eventsList: ScoutingEvent[] = []
     const syncedRecords: ScoutingRecord[] = []
-    let stampedCalled = false
     let dbPersistedCalled = false
     let externalSyncedEvt: ScoutingEvent | null = null
 
@@ -289,11 +321,7 @@ describe('offlineSync Utility', () => {
         syncedRecords.push(...recs)
         return recs
       },
-      stampHostSeq: (recs) => {
-        stampedCalled = true
-        recs.forEach((r, idx) => { r.hostSeq = idx + 1 })
-      },
-      persistRecordsToDb: async (recs) => {
+      persistRecordsToDb: async () => {
         dbPersistedCalled = true
       },
       syncExternalEvent: async (evt) => {
@@ -307,15 +335,97 @@ describe('offlineSync Utility', () => {
     expect(importRes.importedEventId).toBe(dummyEvent.id)
     expect(eventsList).toHaveLength(1)
     expect(syncedRecords).toHaveLength(1)
-    expect(stampedCalled).toBe(true)
     expect(dbPersistedCalled).toBe(true)
     expect(externalSyncedEvt).toEqual(dummyEvent)
+
+    // 1. Malformed crdtSnapshot attached to an otherwise valid CLIENT_PUSH (only Alice's own record!) must be rejected
+    const malformedSnapSync = createSyncPackage({
+      packetType: 'CLIENT_PUSH',
+      eventId: dummyEvent.id,
+      eventName: dummyEvent.name,
+      sender: { userId: 'usr_alice', username: 'Alice', role: 'SCOUT' },
+      target: { recipientType: 'HOST' },
+      records: [dummyRecord1],
+      crdtSnapshot: [{}, '', 1]
+    })
+    const malformedScan = await scanFilesAndFolders([new File([malformedSnapSync], 'malformed.info')], dummyEvent.id)
+    let snapshotApplied = false
+    const malformedRes = await executeBatchSyncImport({
+      scanResult: malformedScan,
+      targetEventId: dummyEvent.id,
+      isHost: true,
+      events: eventsList,
+      bulkSync: async (recs) => recs,
+      applyCrdtSnapshot: () => {
+        snapshotApplied = true
+        return true
+      }
+    })
+    expect(malformedRes.totalDropped).toBe(1)
+    expect(snapshotApplied).toBe(false)
+
+    // 2. Forged TinyBase crdtSnapshot containing another scout's row (even with records: []!) must be rejected
+    const evilStore = createMergeableStore('dev-alice')
+    writeScoutingRecordToCrdt(evilStore, {
+      ...dummyRecord2,
+      id: 'rec_forged_in_crdt_only',
+      scoutId: 'usr_eve'
+    })
+    const crdtOnlyForgedSync = createSyncPackage({
+      packetType: 'CLIENT_PUSH',
+      eventId: dummyEvent.id,
+      eventName: dummyEvent.name,
+      sender: { userId: 'usr_alice', username: 'Alice', role: 'SCOUT' },
+      target: { recipientType: 'HOST' },
+      records: [],
+      crdtSnapshot: evilStore.getMergeableContent()
+    })
+    const crdtOnlyForgedScan = await scanFilesAndFolders([new File([crdtOnlyForgedSync], 'forged_crdt.info')], dummyEvent.id)
+    const crdtOnlyForgedRes = await executeBatchSyncImport({
+      scanResult: crdtOnlyForgedScan,
+      targetEventId: dummyEvent.id,
+      isHost: true,
+      events: eventsList,
+      bulkSync: async (recs) => recs,
+      applyCrdtSnapshot: () => {
+        snapshotApplied = true
+        return true
+      }
+    })
+    expect(crdtOnlyForgedRes.totalDropped).toBe(1)
+    expect(snapshotApplied).toBe(false)
+
+    // 3. Valid TinyBase crdtSnapshot containing ONLY Alice's own record IS applied on Host
+    const legitimateClientStore = createMergeableStore('dev-alice')
+    writeScoutingRecordToCrdt(legitimateClientStore, dummyRecord1)
+    const validSnapSync = createSyncPackage({
+      packetType: 'CLIENT_PUSH',
+      eventId: dummyEvent.id,
+      eventName: dummyEvent.name,
+      sender: { userId: 'usr_alice', username: 'Alice', role: 'SCOUT' },
+      target: { recipientType: 'HOST' },
+      records: [dummyRecord1],
+      crdtSnapshot: legitimateClientStore.getMergeableContent()
+    })
+    const validSnapScan = await scanFilesAndFolders([new File([validSnapSync], 'valid_crdt.info')], dummyEvent.id)
+    const validSnapRes = await executeBatchSyncImport({
+      scanResult: validSnapScan,
+      targetEventId: dummyEvent.id,
+      isHost: true,
+      events: eventsList,
+      bulkSync: async (recs) => recs,
+      applyCrdtSnapshot: () => {
+        snapshotApplied = true
+        return true
+      }
+    })
+    expect(validSnapRes.totalDropped).toBe(0)
+    expect(snapshotApplied).toBe(true)
   })
 
-  it('executes batch import for Client (marks confirmed records as SYNCED, applies tags)', async () => {
+  it('executes batch import for Client (marks HOST_BROADCAST records as SYNCED without hostSeq, applies tags)', async () => {
     const hostRecord: ScoutingRecord = {
-      ...dummyRecord2,
-      hostSeq: 10
+      ...dummyRecord2
     }
     const hostSyncJson = createSyncPackage({
       packetType: 'HOST_BROADCAST',
@@ -324,9 +434,7 @@ describe('offlineSync Utility', () => {
       sender: { userId: 'usr_host', username: 'HostAdmin', role: 'HOST' },
       target: { recipientType: 'ALL_SCOUTS' },
       records: [hostRecord],
-      teamTags: [{ teamNumber: 27570, tags: ['AutoHigh'], lastUpdated: new Date().toISOString() }],
-      fromHostSeq: 0,
-      toHostSeq: 10
+      teamTags: [{ id: 'tag-1', eventId: dummyEvent.id, teamNumber: 27570, tag: 'AutoHigh', color: 'blue', isPreset: false }]
     })
     const hostFile = new File([hostSyncJson], 'host.info')
     const scanRes = await scanFilesAndFolders([hostFile], dummyEvent.id)
@@ -349,6 +457,353 @@ describe('offlineSync Utility', () => {
     expect(markedSyncedIds).toContain('rec_2')
     expect(appliedTags).toHaveLength(1)
     expect(appliedTags[0].teamNumber).toBe(27570)
+  })
+
+  it('buildClientExportCrdtSnapshot strips teammate rows & host-only tables so legitimate client push imports cleanly with totalDropped === 0', async () => {
+    const clientStore = createMergeableStore('dev-alice')
+    const aliceRec = { ...dummyRecord1 }
+    const bobRec = { ...dummyRecord2 }
+    const pitRec: PitScoutingRecord = {
+      id: 'evt_2025_cnc_pit_27570',
+      eventId: dummyEvent.id,
+      teamNumber: 27570,
+      scoutId: 'usr_alice',
+      scoutName: 'Alice',
+      robotName: 'Polaris',
+      drivetrainType: 'mecanum',
+      weightLbs: 32,
+      ballCompatibility: 'universal',
+      launcherType: 'Flywheel',
+      flowerMechanism: 'Arm',
+      hasColorSensor: false,
+      hasDescoreMech: false,
+      hasApriltagVision: false,
+      odometryType: 'none',
+      claimedAutoStrategy: '',
+      claimedAutoScore: 10,
+      claimedTeleopCycles: 5,
+      claimedTeleopScore: 20,
+      claimedTeleopPark: false,
+      claimedFlowerNectars: 0,
+      claimedFlowerBottomBonus: 0,
+      claimedFlowerPollens: 0,
+      claimedGardenBalls: 0,
+      claimedEndgameScore: 0,
+      claimedTotalScore: 30,
+      photoKeys: ['photo_alice_1'],
+      version: 1,
+      isDeleted: false,
+      syncStatus: 'PENDING'
+    }
+
+    writeScoutingRecordToCrdt(clientStore, aliceRec)
+    writeScoutingRecordToCrdt(clientStore, bobRec)
+    writeMemberIdentityToCrdt(clientStore, {
+      eventId: dummyEvent.id,
+      userId: 'usr_alice',
+      deviceId: 'dev-alice',
+      signingPubKeyHex: 'pub_alice',
+      trustedAt: 1000
+    })
+    writeMemberIdentityToCrdt(clientStore, {
+      eventId: dummyEvent.id,
+      userId: 'usr_host',
+      deviceId: 'dev-host',
+      signingPubKeyHex: 'pub_host',
+      trustedAt: 900
+    })
+    writePitRecordToCrdt(clientStore, pitRec)
+    setPitPhotoKeyActive(clientStore, 27570, 'photo_alice_1', true, 'usr_alice')
+    writeTeamTagToCrdt(
+      clientStore,
+      { id: 'tag-a', eventId: dummyEvent.id, teamNumber: 27570, tag: 'fast', color: 'green', isPreset: false },
+      true
+    )
+    writeScheduleToCrdt(clientStore, {
+      id: 'sched-1',
+      eventId: dummyEvent.id,
+      matchNumber: 1,
+      tournamentLevel: 'QUALIFICATION',
+      red1: 27570,
+      red2: 118,
+      blue1: 254,
+      blue2: 1678
+    })
+    writeCustomFieldToCrdt(clientStore, {
+      id: 'cf-1',
+      eventId: dummyEvent.id,
+      target: 'MATCH',
+      phase: 'teleop',
+      name: 'Defense',
+      fieldKey: 'defense',
+      fieldType: 'number',
+      required: false,
+      orderSeq: 1,
+      isActive: true
+    })
+    writeAssignmentToCrdt(clientStore, {
+      id: 'assign-1',
+      eventId: dummyEvent.id,
+      matchNumber: 1,
+      tournamentLevel: 'QUALIFICATION',
+      station: 'red1',
+      teamNumber: 27570,
+      scoutId: 'usr_alice',
+      scoutName: 'Alice'
+    })
+
+    const filteredSnapshot = buildClientExportCrdtSnapshot(clientStore.getMergeableContent(), 'usr_alice', dummyEvent.id)
+    expect(filteredSnapshot).toBeDefined()
+
+    const pkgJson = createSyncPackage({
+      packetType: 'CLIENT_PUSH',
+      eventId: dummyEvent.id,
+      eventName: dummyEvent.name,
+      sender: { userId: 'usr_alice', username: 'Alice', role: 'SCOUT' },
+      target: { recipientType: 'HOST' },
+      records: [aliceRec],
+      crdtSnapshot: filteredSnapshot
+    })
+
+    const hostStore = createMergeableStore('dev-host')
+    writeScheduleToCrdt(hostStore, {
+      id: 'sched-host',
+      eventId: dummyEvent.id,
+      matchNumber: 2,
+      tournamentLevel: 'QUALIFICATION',
+      red1: 111,
+      red2: 222,
+      blue1: 333,
+      blue2: 444
+    })
+
+    const scanRes = await scanFilesAndFolders([new File([pkgJson], 'alice_clean.info')], dummyEvent.id)
+    let appliedToHost = false
+    const importRes = await executeBatchSyncImport({
+      scanResult: scanRes,
+      targetEventId: dummyEvent.id,
+      isHost: true,
+      events: [],
+      expectedHostUserId: 'usr_host',
+      bulkSync: async (recs) => recs,
+      applyCrdtSnapshot: (snap) => {
+        hostStore.applyMergeableChanges([
+          (snap as any)[0],
+          (snap as any)[1],
+          1
+        ] as any)
+        appliedToHost = true
+        return true
+      }
+    })
+
+    expect(importRes.totalDropped).toBe(0)
+    expect(importRes.totalAccepted).toBe(1)
+    expect(appliedToHost).toBe(true)
+    expect(readScoutingRecordsFromCrdt(hostStore, dummyEvent.id).map((r) => r.id)).toEqual(['rec_1'])
+    expect(readMemberIdentitiesFromCrdt(hostStore, dummyEvent.id).map((m) => m.userId)).toEqual(['usr_alice'])
+    expect(readPitRecordsFromCrdt(hostStore, dummyEvent.id).map((p) => p.teamNumber)).toEqual([27570])
+    expect(readTeamTagsFromCrdt(hostStore, dummyEvent.id).map((t) => t.tag)).toEqual(['fast'])
+    expect(readSchedulesFromCrdt(hostStore, dummyEvent.id).map((s) => s.matchNumber)).toEqual([2])
+    expect(readCustomFieldsFromCrdt(hostStore, dummyEvent.id)).toEqual([])
+    expect(readAssignmentsFromCrdt(hostStore, dummyEvent.id)).toEqual({})
+  })
+
+  it('blocks spoofed HOST_BROADCAST, HLC downgrade record hijacking, and forbidden client CRDT tables/values', async () => {
+    const existingOwners = new Map<string, string>([['rec_bob_existing', 'usr_bob']])
+
+    // Bypass A: Spoofed packetType=HOST_BROADCAST + role=HOST without expectedHostUserId (and with forged other-scout record)
+    const spoofedBroadcast = JSON.parse(
+      createSyncPackage({
+        packetType: 'HOST_BROADCAST',
+        eventId: dummyEvent.id,
+        eventName: dummyEvent.name,
+        sender: { userId: 'usr_eve', username: 'FakeHost', role: 'HOST' },
+        target: { recipientType: 'ALL_SCOUTS' },
+        records: [{ ...dummyRecord2, id: 'rec_bob_forged' }]
+      })
+    )
+    const secA1 = validateSyncPackageSecurity(spoofedBroadcast, dummyEvent.id, true, {
+      expectedHostUserId: 'usr_real_host',
+      existingRecordOwners: existingOwners
+    })
+    expect(secA1.legitimateRecords).toHaveLength(0)
+    expect(secA1.droppedRecordIds).toContain('rec_bob_forged')
+
+    // Even if sender.userId claims real hostId, unsigned other-scout record in HOST_BROADCAST is rejected by executeBatchSyncImport
+    const spoofedSenderHost = createSyncPackage({
+      packetType: 'HOST_BROADCAST',
+      eventId: dummyEvent.id,
+      eventName: dummyEvent.name,
+      sender: { userId: 'usr_real_host', username: 'RealHost', role: 'HOST' },
+      target: { recipientType: 'ALL_SCOUTS' },
+      records: [{ ...dummyRecord2, id: 'rec_unsigned_bob' }]
+    })
+    const scanA2 = await scanFilesAndFolders([new File([spoofedSenderHost], 'spoof_host.info')], dummyEvent.id)
+    const resA2 = await executeBatchSyncImport({
+      scanResult: scanA2,
+      targetEventId: dummyEvent.id,
+      isHost: true,
+      events: [],
+      expectedHostUserId: 'usr_real_host',
+      bulkSync: async (recs) => recs
+    })
+    expect(resA2.totalAccepted).toBe(0)
+    expect(resA2.totalDropped).toBe(1)
+
+    // Bypass B: Cell-level HLC downgrade / ownership hijack on existing Bob record rec_bob_existing
+    const hijackStore = createMergeableStore('dev-alice')
+    writeScoutingRecordToCrdt(hijackStore, {
+      ...dummyRecord2,
+      id: 'rec_bob_existing',
+      scoutId: 'usr_alice',
+      totalScore: 999
+    })
+    const hijackPkg = JSON.parse(
+      createSyncPackage({
+        packetType: 'CLIENT_PUSH',
+        eventId: dummyEvent.id,
+        eventName: dummyEvent.name,
+        sender: { userId: 'usr_alice', username: 'Alice', role: 'SCOUT' },
+        target: { recipientType: 'HOST' },
+        records: [{ ...dummyRecord2, id: 'rec_bob_existing', scoutId: 'usr_alice', version: 99 }],
+        crdtSnapshot: hijackStore.getMergeableContent()
+      })
+    )
+    const secB = validateSyncPackageSecurity(hijackPkg, dummyEvent.id, true, {
+      expectedHostUserId: 'usr_real_host',
+      existingRecordOwners: existingOwners
+    })
+    expect(secB.legitimateRecords).toHaveLength(0)
+    expect(secB.droppedRecordIds).toContain('rec_bob_existing')
+
+    // Bypass C: Forbidden tables (schedules/custom_fields/assignments), non-empty valuesStamp, cross-event rows, and table tombstone
+    const crossEventStore = createMergeableStore('dev-alice')
+    writeScoutingRecordToCrdt(crossEventStore, { ...dummyRecord1, eventId: 'other_event_id' })
+    const rawCrossSnap = crossEventStore.getMergeableContent() as any
+
+    const forbiddenSnapshots: unknown[] = [
+      // Forbidden schedule table
+      [
+        [{ schedules: [{ m1: [{ matchNumber: [1, 'H1'] }, 'H1'] }, 'H1'] }, 'H1'],
+        [{}, '']
+      ],
+      // Non-empty valuesStamp
+      [
+        [{}, ''],
+        [{ rogueVal: [1, 'H1'] }, 'H1']
+      ],
+      // Cross-event row inside CRDT
+      rawCrossSnap,
+      // Empty table deletion tombstone with HLC
+      [
+        [{ scouting_records: [{}, 'FutureHlcTombstone1'] }, ''],
+        [{}, '']
+      ]
+    ]
+
+    for (let i = 0; i < forbiddenSnapshots.length; i++) {
+      const pkg = JSON.parse(
+        createSyncPackage({
+          packetType: 'CLIENT_PUSH',
+          eventId: dummyEvent.id,
+          eventName: dummyEvent.name,
+          sender: { userId: 'usr_alice', username: 'Alice', role: 'SCOUT' },
+          target: { recipientType: 'HOST' },
+          records: [],
+          crdtSnapshot: forbiddenSnapshots[i]
+        })
+      )
+      const secC = validateSyncPackageSecurity(pkg, dummyEvent.id, true, {
+        expectedHostUserId: 'usr_real_host'
+      })
+      expect(secC.droppedRecordIds.length).toBeGreaterThan(0)
+    }
+  })
+
+  it('persists new records to DB and updates pitStore even when CLIENT_PUSH also carries crdtSnapshot with live CRDT bridge (Bug 2 regression)', async () => {
+    const pitStore = usePitScoutStore()
+    const scheduleStore = useScheduleStore()
+    const customFieldsStore = useCustomFieldsStore()
+    const recordStore = useRecordStore()
+
+    const session = await hydrateAndBindEventCrdt({
+      eventId: dummyEvent.id,
+      deviceId: 'dev-host-bridge',
+      enableHttp: false,
+      enableIndexedDb: false,
+      stores: { pitStore, scheduleStore, customFieldsStore, recordStore }
+    })
+
+    const clientStore = createMergeableStore('dev-alice-bridge')
+    const aliceRec: ScoutingRecord = { ...dummyRecord1 }
+    await signScoutingRecordWithDeviceKey(aliceRec)
+    writeScoutingRecordToCrdt(clientStore, aliceRec)
+    writePitRecordToCrdt(clientStore, {
+      id: `${dummyEvent.id}_pit_27570`,
+      eventId: dummyEvent.id,
+      teamNumber: 27570,
+      scoutId: 'usr_alice',
+      scoutName: 'Alice',
+      robotName: 'BridgeBot',
+      drivetrainType: 'swerve',
+      weightLbs: 29.5,
+      ballCompatibility: 'universal',
+      launcherType: 'Turret',
+      flowerMechanism: 'Lift',
+      hasColorSensor: true,
+      hasDescoreMech: false,
+      hasApriltagVision: true,
+      odometryType: 'pinpoint',
+      claimedAutoStrategy: '',
+      claimedAutoScore: 20,
+      claimedTeleopCycles: 5,
+      claimedTeleopScore: 40,
+      claimedTeleopPark: true,
+      claimedFlowerNectars: 2,
+      claimedFlowerBottomBonus: 1,
+      claimedFlowerPollens: 2,
+      claimedGardenBalls: 1,
+      claimedEndgameScore: 15,
+      claimedTotalScore: 75,
+      photoKeys: [],
+      version: 1,
+      isDeleted: false,
+      syncStatus: 'PENDING'
+    })
+
+    const pkgJson = createSyncPackage({
+      packetType: 'CLIENT_PUSH',
+      eventId: dummyEvent.id,
+      eventName: dummyEvent.name,
+      sender: { userId: 'usr_alice', username: 'Alice', role: 'SCOUT' },
+      target: { recipientType: 'HOST' },
+      records: [aliceRec],
+      crdtSnapshot: buildClientExportCrdtSnapshot(clientStore.getMergeableContent(), 'usr_alice', dummyEvent.id)
+    })
+
+    const persistedToDb: ScoutingRecord[] = []
+    const scanRes = await scanFilesAndFolders([new File([pkgJson], 'bridge.info')], dummyEvent.id)
+    const importRes = await executeBatchSyncImport({
+      scanResult: scanRes,
+      targetEventId: dummyEvent.id,
+      isHost: true,
+      events: [],
+      expectedHostUserId: 'usr_host',
+      bulkSync: recordStore.bulkSync,
+      persistRecordsToDb: async (recs) => {
+        persistedToDb.push(...recs)
+      },
+      applyCrdtSnapshot: (snap) => session.handle.persistence.applyMergeableSnapshot(snap, true)
+    })
+
+    expect(importRes.totalDropped).toBe(0)
+    expect(importRes.totalAccepted).toBe(1)
+    expect(persistedToDb.map((r) => r.id)).toEqual(['rec_1'])
+    expect(recordStore.records.find((r) => r.id === 'rec_1')?.totalScore).toBe(65)
+    expect(pitStore.records.find((p) => p.teamNumber === 27570)?.robotName).toBe('BridgeBot')
+
+    session.unbind()
   })
 })
 

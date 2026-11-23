@@ -52,13 +52,9 @@ export function usePhaseCycleTracker(options: UsePhaseCycleTrackerOptions) {
     if (!emitTimestampsValue) return
     const current = getTimestampsValue?.()
     if (!Array.isArray(current) || current.length === 0) return
-    const next = [...current]
-    if (next.length > targetLength) {
-      next.length = Math.max(0, targetLength)
-    } else {
-      next.pop()
-    }
-    emitTimestampsValue(next)
+    const safeTarget = Math.max(0, targetLength)
+    if (current.length <= safeTarget) return
+    emitTimestampsValue(current.slice(0, safeTarget))
   }
 
   const { bump, getBumpClass, clearBump } = useBumpAnimation()

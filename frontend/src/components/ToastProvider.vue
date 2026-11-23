@@ -54,7 +54,7 @@ function resolveIcon(toast: Toast): string {
 }
 
 .toast-pill {
-  pointer-events: auto;
+  pointer-events: none;
   display: inline-flex;
   align-items: center;
   gap: 10px;

@@ -1,6 +1,8 @@
-import { mount } from '@vue/test-utils'
-import { describe, it, expect, vi, beforeEach } from 'vitest'
+import { flushPromises, mount, type VueWrapper } from '@vue/test-utils'
+import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
+import { nextTick } from 'vue'
 import { setActivePinia, createPinia } from 'pinia'
+import jsQR from 'jsqr'
 import QrScannerModal from '@/components/common/QrScannerModal.vue'
 
 vi.mock('vue-i18n', () => ({
@@ -19,8 +21,15 @@ vi.mock('jsqr', () => ({
 }))
 
 describe('QrScannerModal.vue', () => {
+  let activeWrapper: VueWrapper<any> | null = null
+  const origImage = global.Image
+  const origMediaDevicesDesc = Object.getOwnPropertyDescriptor(navigator, 'mediaDevices')
+  const origCreateObjectUrlDesc = Object.getOwnPropertyDescriptor(global.URL, 'createObjectURL')
+  const origRevokeObjectUrlDesc = Object.getOwnPropertyDescriptor(global.URL, 'revokeObjectURL')
+
   beforeEach(() => {
     document.body.innerHTML = ''
+    sessionStorage.clear()
     setActivePinia(createPinia())
     vi.clearAllMocks()
 
@@ -47,118 +56,145 @@ describe('QrScannerModal.vue', () => {
     })
   })
 
+  afterEach(() => {
+    activeWrapper?.unmount()
+    activeWrapper = null
+    global.Image = origImage
+    if (origMediaDevicesDesc) {
+      Object.defineProperty(navigator, 'mediaDevices', origMediaDevicesDesc)
+    } else {
+      delete (navigator as any).mediaDevices
+    }
+    if (origCreateObjectUrlDesc) {
+      Object.defineProperty(global.URL, 'createObjectURL', origCreateObjectUrlDesc)
+    } else {
+      delete (global.URL as any).createObjectURL
+    }
+    if (origRevokeObjectUrlDesc) {
+      Object.defineProperty(global.URL, 'revokeObjectURL', origRevokeObjectUrlDesc)
+    } else {
+      delete (global.URL as any).revokeObjectURL
+    }
+    sessionStorage.clear()
+    vi.restoreAllMocks()
+    document.body.innerHTML = ''
+  })
+
   it('renders modal dialog and header when modelValue is true', async () => {
-    const wrapper = mount(QrScannerModal, {
+    activeWrapper = mount(QrScannerModal, {
       props: {
         modelValue: true
       }
     })
 
-    await wrapper.vm.$nextTick()
-    await new Promise((r) => setTimeout(r, 20))
+    await flushPromises()
 
     const dialog = document.body.querySelector('.scanner-modal-dialog')
-    expect(dialog).toBeTruthy()
+    expect(dialog).not.toBeNull()
 
     const title = document.body.querySelector('.scanner-title-group h3')
     expect(title?.textContent).toBe('qr_scanner.title')
   })
 
   it('emits update:modelValue false when close button is clicked', async () => {
-    const wrapper = mount(QrScannerModal, {
+    activeWrapper = mount(QrScannerModal, {
       props: {
         modelValue: true
       }
     })
 
-    await wrapper.vm.$nextTick()
-    await new Promise((r) => setTimeout(r, 20))
+    await flushPromises()
 
     const closeBtn = document.body.querySelector('.scanner-header .close-btn') as HTMLButtonElement
-    expect(closeBtn).toBeTruthy()
+    expect(closeBtn).not.toBeNull()
     closeBtn.click()
 
-    expect(wrapper.emitted('update:modelValue')?.[0]).toEqual([false])
+    expect(activeWrapper.emitted('update:modelValue')?.[0]).toEqual([false])
   })
 
-  it('renders album upload button in footer', async () => {
-    const wrapper = mount(QrScannerModal, {
+  it('renders album upload button in footer with translated label and hidden file input', async () => {
+    activeWrapper = mount(QrScannerModal, {
       props: {
         modelValue: true
       }
     })
 
-    await wrapper.vm.$nextTick()
-    const albumBtn = document.body.querySelector('.btn-upload-album')
-    expect(albumBtn).toBeTruthy()
+    await nextTick()
+    const albumBtn = document.body.querySelector('.scanner-footer .btn-upload-album')
+    const fileInput = document.body.querySelector('.scanner-footer input[type="file"]') as HTMLInputElement | null
+    expect(albumBtn).not.toBeNull()
+    expect(albumBtn?.textContent).toContain('qr_scanner.upload_photo')
+    expect(fileInput).not.toBeNull()
+    expect(fileInput?.getAttribute('accept')).toBe('image/*')
   })
 
-  it('correctly extracts invite code from URLs, hashes, and raw codes', () => {
-    // Test the regex/url parsing logic used in QrScannerModal
-    function extractInviteCode(raw: string): string | null {
-      const trimmed = raw.trim()
-      if (!trimmed) return null
-
-      // Direct code
-      if (/^[a-zA-Z0-9_-]{4,10}$/.test(trimmed)) {
-        return trimmed.toUpperCase()
-      }
-
-      // URL search params
-      try {
-        const url = new URL(trimmed, 'https://dummy.local')
-        const joinParam = url.searchParams.get('join') || url.searchParams.get('code')
-        if (joinParam) return joinParam.trim().toUpperCase()
-
-        if (url.hash.includes('join=')) {
-          const hashQuery = url.hash.split('?')[1]
-          if (hashQuery) {
-            const hashParams = new URLSearchParams(hashQuery)
-            const code = hashParams.get('join') || hashParams.get('code')
-            if (code) return code.trim().toUpperCase()
-          }
-        }
-      } catch {}
-
-      const match = trimmed.match(/[?&#](?:join|code)=([a-zA-Z0-9_-]{4,10})/i)
-      if (match && match[1]) {
-        return match[1].toUpperCase()
-      }
-
-      return null
+  it('decodes QR from uploaded album image via real QrScannerModal component and extracts inviteCode + broker', async () => {
+    if (!global.URL.createObjectURL) {
+      global.URL.createObjectURL = vi.fn(() => 'blob:qr-test')
+      global.URL.revokeObjectURL = vi.fn()
+    } else {
+      vi.spyOn(global.URL, 'createObjectURL').mockReturnValue('blob:qr-test')
+      vi.spyOn(global.URL, 'revokeObjectURL').mockImplementation(() => {})
     }
 
-    expect(extractInviteCode('https://lucalmz.github.io/ScoutingPro27/#/?join=BEAR27')).toBe('BEAR27')
-    expect(extractInviteCode('https://example.com/join?code=XYZ789')).toBe('XYZ789')
-    expect(extractInviteCode('ROBOT1')).toBe('ROBOT1')
-    expect(extractInviteCode('https://not-an-event.com/home')).toBeNull()
-  })
-
-  it('correctly extracts broker parameter in regex fallback and hash modes', () => {
-    sessionStorage.clear()
-
-    function parseBroker(raw: string) {
-      const trimmed = raw.trim()
-      try {
-        const url = new URL(trimmed, 'https://dummy.local')
-        const hashQuery = url.hash.split('?')[1]
-        if (hashQuery) {
-          const hashParams = new URLSearchParams(hashQuery)
-          const hashBroker = hashParams.get('b') || hashParams.get('broker')
-          if (hashBroker) sessionStorage.setItem('sp27-active-broker', hashBroker)
-        }
-      } catch {}
-
-      const brokerMatch = trimmed.match(/[?&#](?:b|broker)=([a-zA-Z0-9_.:/-]+)/i)
-      if (brokerMatch && brokerMatch[1]) {
-        sessionStorage.setItem('sp27-active-broker', brokerMatch[1])
+    global.Image = class {
+      naturalWidth = 200
+      naturalHeight = 200
+      onload: (() => void) | null = null
+      onerror: ((err: any) => void) | null = null
+      set src(_val: string) {
+        setTimeout(() => this.onload?.(), 0)
       }
+    } as any
+
+    vi.spyOn(HTMLCanvasElement.prototype, 'getContext').mockReturnValue({
+      drawImage: vi.fn(),
+      getImageData: vi.fn(() => ({
+        data: new Uint8ClampedArray(200 * 200 * 4),
+        width: 200,
+        height: 200
+      }))
+    } as any)
+
+    activeWrapper = mount(QrScannerModal, {
+      props: { modelValue: true }
+    })
+    await nextTick()
+
+    const fileInput = document.body.querySelector('.scanner-footer input[type="file"]') as HTMLInputElement
+    expect(fileInput).not.toBeNull()
+
+    const triggerUploadWithQr = async (qrPayload: string) => {
+      const nextCallCount = vi.mocked(jsQR).mock.calls.length + 1
+      const nextEmitCount = (activeWrapper!.emitted('scan')?.length ?? 0) + 1
+      vi.mocked(jsQR).mockReturnValueOnce({ data: qrPayload } as any)
+      const file = new File(['qr'], 'qr.png', { type: 'image/png' })
+      Object.defineProperty(fileInput, 'files', { value: [file], configurable: true })
+      fileInput.dispatchEvent(new Event('change'))
+      await vi.waitFor(() => {
+        expect(vi.mocked(jsQR)).toHaveBeenCalledTimes(nextCallCount)
+        expect(activeWrapper!.emitted('scan')?.length).toBe(nextEmitCount)
+      }, { timeout: 1000 })
     }
 
-    parseBroker('?join=BEAR27&b=emqx')
+    // 1. Hash URL with ?join=BEAR27&b=emqx
+    await triggerUploadWithQr('https://lucalmz.github.io/ScoutingPro27/#/?join=bear27&b=emqx')
+    expect(activeWrapper.emitted('scan')?.[0]).toEqual([
+      'BEAR27',
+      'https://lucalmz.github.io/ScoutingPro27/#/?join=bear27&b=emqx'
+    ])
     expect(sessionStorage.getItem('sp27-active-broker')).toBe('emqx')
 
-    parseBroker('custom-app://join?code=XYZ789&broker=fallback')
+    // 2. Query URL with ?code=xyz789&broker=fallback
+    await triggerUploadWithQr('https://example.com/join?code=xyz789&broker=fallback')
+    expect(activeWrapper.emitted('scan')?.[1]).toEqual([
+      'XYZ789',
+      'https://example.com/join?code=xyz789&broker=fallback'
+    ])
     expect(sessionStorage.getItem('sp27-active-broker')).toBe('fallback')
+
+    // 3. Raw 6-char invite code
+    await triggerUploadWithQr('  robot1  ')
+    expect(activeWrapper.emitted('scan')?.[2]).toEqual(['ROBOT1', '  robot1  '])
   })
 })

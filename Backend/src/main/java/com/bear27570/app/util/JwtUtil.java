@@ -10,7 +10,7 @@ import java.io.File;
 import java.io.IOException;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
-import java.nio.file.Paths;
+import java.nio.file.Path;
 import java.security.MessageDigest;
 import java.security.NoSuchAlgorithmException;
 import java.security.SecureRandom;
@@ -19,41 +19,62 @@ import com.bear27570.app.db.AppConfig;
 import java.util.Date;
 
 public class JwtUtil {
-    private static final String SECRET_FILE_PATH = resolveSecretPath();
     private static final long EXPIRATION_TIME_MS = 7L * 24 * 3600 * 1000; // 7 days
     public static final long HANDSHAKE_TICKET_EXPIRATION_MS = 3 * 60 * 1000; // 3 minutes
-    private static Algorithm ALGORITHM;
+    private record LoadedSecret(Path path, Algorithm algorithm) {}
+    private static volatile LoadedSecret loadedSecret;
 
     public static File getSecretFile() {
         return AppConfig.resolveJwtSecretFile();
     }
 
-    private static String resolveSecretPath() {
-        return getSecretFile().getAbsolutePath();
+    private static Path normalizeSecretPath(File secretFile) {
+        return secretFile.toPath().toAbsolutePath().normalize();
     }
 
-    static {
+    public static synchronized void initSecret() {
         try {
-            File secretFile = new File(SECRET_FILE_PATH);
+            File secretFile = getSecretFile();
+            Path currentPath = normalizeSecretPath(secretFile);
             File parent = secretFile.getParentFile();
             if (parent != null && !parent.exists()) {
                 parent.mkdirs();
             }
 
             String secret;
-            if (secretFile.exists()) {
-                secret = new String(Files.readAllBytes(Paths.get(SECRET_FILE_PATH)));
+            if (secretFile.exists() && secretFile.length() > 0) {
+                secret = new String(Files.readAllBytes(secretFile.toPath()), StandardCharsets.UTF_8);
             } else {
                 byte[] randomBytes = new byte[32];
                 new SecureRandom().nextBytes(randomBytes);
                 secret = Base64.getEncoder().encodeToString(randomBytes);
-                Files.write(Paths.get(SECRET_FILE_PATH), secret.getBytes());
+                Files.write(secretFile.toPath(), secret.getBytes(StandardCharsets.UTF_8));
             }
-            ALGORITHM = Algorithm.HMAC256(secret);
+            loadedSecret = new LoadedSecret(currentPath, Algorithm.HMAC256(secret));
         } catch (IOException e) {
             System.err.println("Failed to initialize JWT secret: " + e.getMessage());
             throw new RuntimeException("Failed to initialize JWT secret", e);
         }
+    }
+
+    public static synchronized void resetForTest() {
+        loadedSecret = null;
+    }
+
+    private static Algorithm getAlgorithm() {
+        Path currentPath = normalizeSecretPath(getSecretFile());
+        LoadedSecret state = loadedSecret;
+        if (state == null || !currentPath.equals(state.path())) {
+            synchronized (JwtUtil.class) {
+                currentPath = normalizeSecretPath(getSecretFile());
+                state = loadedSecret;
+                if (state == null || !currentPath.equals(state.path())) {
+                    initSecret();
+                    state = loadedSecret;
+                }
+            }
+        }
+        return state.algorithm();
     }
 
     public static String generateToken(String userId, String username) {
@@ -63,7 +84,7 @@ public class JwtUtil {
                 .withClaim("userId", userId)
                 .withClaim("username", username)
                 .withExpiresAt(new Date(System.currentTimeMillis() + EXPIRATION_TIME_MS))
-                .sign(ALGORITHM);
+                .sign(getAlgorithm());
     }
 
     public static class TokenClaims {
@@ -81,7 +102,7 @@ public class JwtUtil {
 
     public static TokenClaims verifyTokenClaims(String token) {
         try {
-            JWTVerifier verifier = JWT.require(ALGORITHM)
+            JWTVerifier verifier = JWT.require(getAlgorithm())
                     .withIssuer("ScoutingPro27")
                     .build();
             DecodedJWT jwt = verifier.verify(token);
@@ -131,7 +152,7 @@ public class JwtUtil {
                 .withClaim("eventId", eventId)
                 .withClaim("pkHash", pkHash)
                 .withExpiresAt(new Date(System.currentTimeMillis() + HANDSHAKE_TICKET_EXPIRATION_MS))
-                .sign(ALGORITHM);
+                .sign(getAlgorithm());
     }
 
     public static class WebRtcTicketValidation {
@@ -158,7 +179,7 @@ public class JwtUtil {
 
     public static WebRtcTicketValidation verifyWebRtcTicket(String ticket, String expectedEventId, String actualEcdhPublicKey) {
         try {
-            JWTVerifier verifier = JWT.require(ALGORITHM)
+            JWTVerifier verifier = JWT.require(getAlgorithm())
                     .withIssuer("ScoutingPro27")
                     .withSubject("WEBRTC_HANDSHAKE")
                     .build();

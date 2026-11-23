@@ -1,5 +1,5 @@
 import { setActivePinia, createPinia } from 'pinia'
-import { describe, it, expect, vi, beforeEach } from 'vitest'
+import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
 import { usePitScoutStore } from '../stores/pitScout'
 import { useScheduleStore } from '../stores/schedule'
 import { useRecordStore } from '../stores/records'
@@ -42,6 +42,11 @@ describe('PitScout Store & Unified Team Roster', () => {
     setActivePinia(createPinia())
     localStorage.clear()
     vi.clearAllMocks()
+  })
+
+  afterEach(() => {
+    localStorage.clear()
+    vi.restoreAllMocks()
   })
 
   it('aggregates and deduplicates teams from official roster, schedule, records, and pit records', () => {
@@ -670,6 +675,42 @@ describe('PitScout Store & Unified Team Roster', () => {
     expect(found.hasApriltagVision).toBe(true)
     expect(found.claimedTeleopPark).toBe(true)
     expect(found.claimedFlowerNectars).toBe(4)
+  })
+
+  it('migrateEventId migrates currentEventId and pit records', () => {
+    const pitStore = usePitScoutStore()
+    pitStore.currentEventId = 'evt-K9X2B4'
+    pitStore.records.push(
+      createMockPitRecord({
+        eventId: 'evt-K9X2B4',
+        teamNumber: 27570,
+        scoutId: 'scout-1',
+        scoutName: 'ScoutOne',
+        syncStatus: 'PENDING',
+        version: 1
+      })
+    )
+
+    pitStore.migrateEventId('evt-K9X2B4', '550e8400-e29b-41d4-a716-446655440000')
+
+    expect(pitStore.currentEventId).toBe('550e8400-e29b-41d4-a716-446655440000')
+    expect(pitStore.records[0]?.eventId).toBe('550e8400-e29b-41d4-a716-446655440000')
+  })
+
+  it('markSynced transitions matching teamNumbers to SYNCED while leaving others PENDING', () => {
+    const pitStore = usePitScoutStore()
+    pitStore.currentEventId = 'evt-1'
+    pitStore.records = [
+      createMockPitRecord({ id: 'p-1', eventId: 'evt-1', teamNumber: 27570, syncStatus: 'PENDING' }),
+      createMockPitRecord({ id: 'p-2', eventId: 'evt-1', teamNumber: 12345, syncStatus: 'PENDING' }),
+      createMockPitRecord({ id: 'p-3', eventId: 'evt-1', teamNumber: 99999, syncStatus: 'PENDING' })
+    ]
+
+    pitStore.markSynced([27570, 12345])
+
+    expect(pitStore.records.find((r) => r.teamNumber === 27570)?.syncStatus).toBe('SYNCED')
+    expect(pitStore.records.find((r) => r.teamNumber === 12345)?.syncStatus).toBe('SYNCED')
+    expect(pitStore.records.find((r) => r.teamNumber === 99999)?.syncStatus).toBe('PENDING')
   })
 })
 

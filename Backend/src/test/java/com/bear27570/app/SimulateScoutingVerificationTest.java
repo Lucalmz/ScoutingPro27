@@ -6,9 +6,12 @@ import com.google.gson.JsonArray;
 import com.google.gson.JsonObject;
 import com.google.gson.JsonParser;
 import org.jdbi.v3.core.Jdbi;
+import org.junit.jupiter.api.AfterEach;
+import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.io.TempDir;
 
-import java.io.File;
+import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.HashMap;
@@ -18,6 +21,36 @@ import java.util.Map;
 import static org.assertj.core.api.Assertions.assertThat;
 
 class SimulateScoutingVerificationTest {
+
+    @TempDir
+    Path tempDir;
+
+    private String prevDataDir;
+    private String prevNoAutoServer;
+
+    @BeforeEach
+    void setUp() {
+        prevDataDir = System.getProperty("scouting.data.dir");
+        prevNoAutoServer = System.getProperty("scouting.noAutoServer");
+        System.setProperty("scouting.data.dir", tempDir.toAbsolutePath().toString());
+        System.setProperty("scouting.noAutoServer", "true");
+        JdbiConfig.closeDataSources();
+    }
+
+    @AfterEach
+    void tearDown() {
+        JdbiConfig.closeDataSources();
+        if (prevDataDir == null) {
+            System.clearProperty("scouting.data.dir");
+        } else {
+            System.setProperty("scouting.data.dir", prevDataDir);
+        }
+        if (prevNoAutoServer == null) {
+            System.clearProperty("scouting.noAutoServer");
+        } else {
+            System.setProperty("scouting.noAutoServer", prevNoAutoServer);
+        }
+    }
 
     @Test
     void testSimulatedRecordsAndTagsIntegrity() {
@@ -49,14 +82,6 @@ class SimulateScoutingVerificationTest {
             assertThat(event.get().get("ftc_year")).isNull();
             assertThat(event.get().get("ftc_event_code")).isNull();
             assertThat(event.get().get("invite_code")).isEqualTo("BUZZ26");
-
-            // 1b. Verify that BIOBUZZ26 is not an official FTC event code and cannot be validated
-            try {
-                com.bear27570.app.util.FtcApiClient ftcApiClient = new com.bear27570.app.util.FtcApiClient();
-                assertThat(ftcApiClient.eventExists(2026, "BIOBUZZ26")).isFalse();
-            } catch (Exception e) {
-                // If offline or network error, it still doesn't exist
-            }
 
             // 2. Verify Pit Scouting Records (16 teams) & hardware-vs-claim invariants first so match checks can cross-verify
             List<Map<String, Object>> pitRecords = handle.createQuery("SELECT * FROM pit_scouting_records WHERE event_id = 'EVENT_BIOBUZZ26'").mapToMap().list();
@@ -126,7 +151,6 @@ class SimulateScoutingVerificationTest {
                 int claimedTotal = ((Number) pit.get("claimed_total_score")).intValue();
                 assertThat(claimedTotal).isEqualTo(claimedAuto + claimedTeleop + claimedEndgame);
                 assertThat(pit.get("raw_data")).isNotNull();
-                assertThat(((Number) pit.get("host_seq")).intValue()).isGreaterThan(0);
             }
             assertThat(pitByTeam).hasSize(16);
             assertThat(teamsWithoutFlowerMech).isGreaterThan(0);
@@ -283,7 +307,8 @@ class SimulateScoutingVerificationTest {
             assertThat(unqualifiedCycleMatches).isGreaterThan(0);
             assertThat(descoreMatches).isGreaterThan(0);
 
-            // Verify pit_scouting_records contains only BIOBUZZ columns and NO legacy columns
+            // Verify pit_scouting_records contains BIOBUZZ columns and NO legacy pre-Biobuzz columns
+            // (Note: V3 Flyway migration retains immutable DDL column HOST_SEQ, unused by app DAOs/models)
             List<String> cols = handle.createQuery("SELECT COLUMN_NAME FROM INFORMATION_SCHEMA.COLUMNS WHERE TABLE_NAME = 'PIT_SCOUTING_RECORDS'")
                     .mapTo(String.class).list();
             List<String> upperCols = cols.stream().map(String::toUpperCase).toList();
@@ -293,7 +318,7 @@ class SimulateScoutingVerificationTest {
                     "CLAIMED_AUTO_STRATEGY", "CLAIMED_TELEOP_CYCLES",
                     "CLAIMED_TELEOP_PARK", "CLAIMED_FLOWER_NECTARS", "CLAIMED_FLOWER_BOTTOM_BONUS",
                     "CLAIMED_FLOWER_POLLENS", "CLAIMED_GARDEN_BALLS",
-                    "CLAIMED_ENDGAME_SCORE", "RAW_DATA", "HOST_SEQ"
+                    "CLAIMED_ENDGAME_SCORE", "RAW_DATA"
             );
             assertThat(upperCols).doesNotContain(
                     "SIZING_PASSED", "MECHANISM_TYPE", "HANG_TYPE", "CLAIMED_AUTO_PIECES",
@@ -379,17 +404,5 @@ class SimulateScoutingVerificationTest {
         );
         // Valid intervals: [5.0, 7.0, 9.0, 10.0, 11.0] -> drop 5.0 -> avg(7, 9, 10, 11) = 9.25 -> 9.3
         assertThat(SimulateScouting.computePredictCycleTimeSec(tsWithArtifacts)).isEqualTo(9.3);
-    }
-
-    @Test
-    void testDatabasePathResolutionDev() {
-        File resolved = JdbiConfig.resolveAppDbFile();
-        assertThat(resolved).isNotNull();
-        // Dev resolution points to project root app_data
-        File canonical = resolved.getAbsoluteFile();
-        assertThat(canonical.getName()).isEqualTo("app_data");
-        // Must resolve within active project workspace root (contains Backend/pom.xml), not user.home
-        assertThat(canonical.getAbsolutePath()).doesNotContain(".scoutingpro27");
-        assertThat(new File(canonical.getParentFile(), "Backend/pom.xml")).isFile();
     }
 }

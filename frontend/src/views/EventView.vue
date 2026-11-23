@@ -18,6 +18,9 @@ import PitScoutView from '@/components/pit/PitScoutView.vue'
 import RankingsTable from '@/components/rankings/RankingsTable.vue'
 import HistoryList from '@/components/history/HistoryList.vue'
 import AiChatView from '@/components/ai/AiChatView.vue'
+import AiCopilotDock from '@/components/ai/AiCopilotDock.vue'
+import AiSettingsModal from '@/components/ai/AiSettingsModal.vue'
+import { useAiStore } from '@/stores/ai'
 import EventScoutsPanel from '@/components/scouting/EventScoutsPanel.vue'
 import ScheduleManager from '@/components/schedule/ScheduleManager.vue'
 import TacticalWhiteboardView from '@/components/whiteboard/TacticalWhiteboardView.vue'
@@ -33,8 +36,6 @@ import MobilePhaseWizardForm from '@/components/scouting/mobile/MobilePhaseWizar
 import { useIsMobile, isMobileDevice } from '@/composables/useIsMobile'
 import { useUserProfileTransition } from '@/composables/useUserProfileTransition'
 import { hasDesktopTitleBar } from '@/utils/desktopShell'
-import { syncRecords } from '@/services/api'
-import { getExistingEventCrdt, isCrdtTransportActive } from '@/services/crdt'
 import { transitionState } from '@/utils/transitionState'
 import { useToastStore } from '@/stores/toast'
 import { useEventWebRtcBridge } from './useEventWebRtcBridge'
@@ -67,6 +68,7 @@ const navStore = useNavigationStore()
 const inboxStore = useInboxStore()
 const pitStore = usePitScoutStore()
 const scheduleStore = useScheduleStore()
+const aiStore = useAiStore()
 const { t } = useI18n()
 
 const showRenameModal = ref(false)
@@ -105,7 +107,6 @@ const state = reactive({
 })
 
 const {
-  initHostSeqCounter,
   initEventCrdt,
   disposeEventCrdtSession,
   setupWebRTC,
@@ -129,8 +130,30 @@ const {
   router,
   eventId,
   contentRef,
+  isMobile,
   t
 })
+
+const workspaceRef = ref<HTMLElement | null>(null)
+
+function syncWorkspaceTopOffset() {
+  if (typeof document === 'undefined' || !workspaceRef.value) return
+  const topPx = Math.max(0, Math.round(workspaceRef.value.getBoundingClientRect().top))
+  document.documentElement.style.setProperty('--ai-dock-top-offset', `${topPx}px`)
+}
+
+function handleCopilotHotkeys(e: KeyboardEvent) {
+  if (isMobile.value) return
+  if (e.altKey && (e.key === 'i' || e.key === 'I')) {
+    e.preventDefault()
+    aiStore.toggleDock()
+  }
+}
+
+function handleAiBeforeUnload() {
+  void aiStore.flushPendingSaves(undefined, true)
+  handleBeforeUnload()
+}
 
 onMounted(async () => {
   if (!userStore.isLoggedIn) {
@@ -183,8 +206,6 @@ onMounted(async () => {
     ])
   }
 
-  initHostSeqCounter()
-
   await initEventCrdt()
 
   const savedPos = navStore.getEventPosition(eventId.value)
@@ -193,7 +214,12 @@ onMounted(async () => {
   } else if (route.query.tab) {
     const tabQuery = route.query.tab as string
     if (['scout', 'pit', 'schedule', 'whiteboard', 'rankings', 'history', 'scouts', 'ai'].includes(tabQuery)) {
-      activeTab.value = tabQuery as EventTab
+      if (tabQuery === 'ai' && !isMobile.value) {
+        aiStore.setDockOpen(true)
+        activeTab.value = 'rankings'
+      } else {
+        activeTab.value = tabQuery as EventTab
+      }
     }
   }
 
@@ -205,13 +231,21 @@ onMounted(async () => {
     flushOfflinePhotos(evt.id)
   }
 
-  window.addEventListener('beforeunload', handleBeforeUnload)
+  window.addEventListener('beforeunload', handleAiBeforeUnload)
+  window.addEventListener('keydown', handleCopilotHotkeys)
+  window.addEventListener('resize', syncWorkspaceTopOffset)
+  syncWorkspaceTopOffset()
+  void aiStore.fetchProfiles()
 })
 
 let navigatingToTeamDetail = false
 
 onUnmounted(() => {
-  window.removeEventListener('beforeunload', handleBeforeUnload)
+  window.removeEventListener('beforeunload', handleAiBeforeUnload)
+  window.removeEventListener('keydown', handleCopilotHotkeys)
+  window.removeEventListener('resize', syncWorkspaceTopOffset)
+  document.documentElement.style.setProperty('--ai-dock-right-offset', '0px')
+  void aiStore.flushPendingSaves()
   if (!navigatingToTeamDetail) {
     cleanupWebRTC()
     void disposeEventCrdtSession()
@@ -222,8 +256,19 @@ watch(
   () => route.query,
   (newQuery) => {
     if (newQuery.tab && ['scout', 'pit', 'schedule', 'whiteboard', 'rankings', 'history', 'scouts', 'ai'].includes(newQuery.tab as string)) {
-      activeTab.value = newQuery.tab as EventTab
+      if (newQuery.tab === 'ai' && !isMobile.value) {
+        aiStore.setDockOpen(true)
+      } else {
+        activeTab.value = newQuery.tab as EventTab
+      }
     }
+  }
+)
+
+watch(
+  [() => connStore.isCongested, () => connStore.isStandbyHost],
+  () => {
+    setTimeout(syncWorkspaceTopOffset, 0)
   }
 )
 
@@ -282,45 +327,10 @@ async function goBack() {
 async function onRecordSubmitted(recordOrRecords: ScoutingRecord | ScoutingRecord[]) {
   const records = Array.isArray(recordOrRecords) ? recordOrRecords : [recordOrRecords]
 
-  let anyOk = false
-  const allToPush: ScoutingRecord[] = []
-
   for (const rec of records) {
-    const { success, recordsToPush } = await recordStore.addRecord(rec)
-    if (success) anyOk = true
-    if (recordsToPush && recordsToPush.length > 0) {
-      allToPush.push(...recordsToPush)
-    }
+    await recordStore.addRecord(rec)
   }
 
-  if (anyOk && allToPush.length > 0) {
-    const crdtManaged = Boolean(
-      eventId.value && (isCrdtTransportActive(eventId.value) || getExistingEventCrdt(eventId.value))
-    )
-    if (!crdtManaged) {
-      // 按 id 严格去重，避免重复引用导致同一条记录多次自增 hostSeq
-      const deduplicatedRecords = Array.from(new Map(allToPush.map((r) => [r.id, r])).values())
-      // Host 本地写入也要打 hostSeq 并持久化落库，确保重启后单调递增及 Client 重连能增量同步（Standby 备用端不打序号，由主控端统一处理）
-      if (eventStore.isHost && !connStore.isStandbyHost) {
-        for (const r of deduplicatedRecords) {
-          r.hostSeq = undefined
-        }
-        connStore.stampHostSeq(deduplicatedRecords)
-        try {
-          await syncRecords(deduplicatedRecords)
-        } catch (e) {
-          console.error('[EventView] Failed to sync stamped records to DB:', e)
-        }
-        connStore.pushIfNeeded(deduplicatedRecords)
-      } else {
-        // 非主机客户端：只推送属于自己的记录！绝不越权推送其他人被 reassessConflicts 影响的记录
-        const myOnlyRecords = deduplicatedRecords.filter((r) => r.scoutId === userStore.userId)
-        if (myOnlyRecords.length > 0) {
-          connStore.pushIfNeeded(myOnlyRecords)
-        }
-      }
-    }
-  }
   editingRecord.value = null // clear edit state after submit
 }
 
@@ -418,6 +428,29 @@ async function handleTakeoverHost() {
           >{{ userStore.username }}</span>
           <span class="material-icons edit-icon" style="font-size: 14px; margin-left: 4px;">edit</span>
         </button>
+
+        <!-- JetBrains-style Copilot & Config Capsule -->
+        <div class="copilot-topbar-group" :class="{ active: aiStore.isDockOpen }">
+          <button
+            type="button"
+            class="copilot-topbar-btn"
+            @click="aiStore.toggleDock()"
+            :title="`${t('ai.copilot_btn')} (Alt+I)`"
+          >
+            <span class="material-icons" style="font-size: 17px;">auto_awesome</span>
+            <span class="topbar-btn-text">{{ t('ai.copilot_btn') }}</span>
+            <span v-if="!aiStore.isDockOpen && aiStore.isAnyStreaming" class="copilot-stream-dot"></span>
+          </button>
+          <button
+            type="button"
+            class="copilot-settings-btn"
+            @click="aiStore.openSettingsModal()"
+            :title="t('ai.config_title')"
+          >
+            <span class="material-icons" style="font-size: 16px;">settings</span>
+          </button>
+        </div>
+
         <ConnectionStatus />
       </div>
     </header>
@@ -442,84 +475,92 @@ async function handleTakeoverHost() {
       </button>
     </div>
 
-    <!-- Tab Bar -->
-    <nav ref="tabBarRef" class="tab-bar" :style="{ '--indicator-width': 100 / tabs.length + '%', viewTransitionName: 'event-tabs' }">
-      <div 
-        class="tab-indicator"
-        :style="{ transform: `translateX(${tabs.findIndex((t) => t.key === activeTab) * 100}%)` }"
-      ></div>
-      <button
-        v-for="tab in tabs"
-        :key="tab.key"
-        :data-tab="tab.key"
-        class="tab-btn"
-        :class="{ active: activeTab === tab.key }"
-        @click="switchTab(tab.key)"
-      >
-        {{ tab.label }}
-      </button>
-    </nav>
+    <!-- Workspace Split: Left Main Stage + Right Persistent AI Copilot Dock -->
+    <div ref="workspaceRef" class="event-workspace">
+      <div class="event-main-stage">
+        <!-- Tab Bar -->
+        <nav ref="tabBarRef" class="tab-bar" :style="{ '--indicator-width': 100 / tabs.length + '%', viewTransitionName: 'event-tabs' }">
+          <div 
+            class="tab-indicator"
+            :style="{ transform: `translateX(${tabs.findIndex((t) => t.key === activeTab) * 100}%)` }"
+          ></div>
+          <button
+            v-for="tab in tabs"
+            :key="tab.key"
+            :data-tab="tab.key"
+            class="tab-btn"
+            :class="{ active: activeTab === tab.key }"
+            @click="switchTab(tab.key)"
+          >
+            {{ tab.label }}
+          </button>
+        </nav>
 
-    <!-- Tab Content -->
-    <main ref="contentRef" class="tab-content" :style="{ viewTransitionName: 'event-content' }">
-      <Transition 
-        name="tab-brush" 
-        mode="out-in"
-      >
-        <template v-if="activeTab === 'scout'">
-          <MobilePhaseWizardForm
-            v-if="isMobile"
-            :event-id="eventId"
-            :scout-id="userStore.userId"
-            :scout-name="userStore.username"
-            :edit-record="editingRecord"
-            :assigned-task="activeScoutTask"
-            @submit="onRecordSubmitted"
-            @cancelEdit="editingRecord = null"
-          />
-          <ScoutingForm
-            v-else
-            :event-id="eventId"
-            :scout-id="userStore.userId"
-            :scout-name="userStore.username"
-            :edit-record="editingRecord"
-            :assigned-task="activeScoutTask"
-            @submit="onRecordSubmitted"
-            @cancelEdit="editingRecord = null"
-          />
-        </template>
-        <PitScoutView
-          v-else-if="activeTab === 'pit'"
-          :event-id="eventId"
-        />
-        <ScheduleManager
-          v-else-if="activeTab === 'schedule'"
-          :event="event"
-          :is-host="isHost"
-          @startScouting="handleStartScouting"
-          @openWhiteboard="handleOpenWhiteboard"
-        />
-        <TacticalWhiteboardView
-          v-else-if="activeTab === 'whiteboard'"
-          :event-id="eventId"
-          :initial-match="activeWhiteboardMatch"
-        />
-        <RankingsTable
-          v-else-if="activeTab === 'rankings'"
-          :rankings="recordStore.rankings"
-          :loading="recordStore.loading"
-        />
-        <HistoryList
-          v-else-if="activeTab === 'history'"
-          :records="eventStore.isHost ? recordStore.activeRecords : recordStore.myRecords(userStore.userId)"
-          :loading="recordStore.loading"
-          @editRecord="handleEditRecord"
-        />
-        <AiChatView v-else-if="activeTab === 'ai'" :event-id="route.params.eventId as string" />
-        <EventScoutsPanel v-else-if="activeTab === 'scouts'" :event="event" />
-      </Transition>
-    </main>
+        <!-- Tab Content -->
+        <main ref="contentRef" class="tab-content" :style="{ viewTransitionName: 'event-content' }">
+          <Transition 
+            name="tab-brush" 
+            mode="out-in"
+          >
+            <template v-if="activeTab === 'scout'">
+              <MobilePhaseWizardForm
+                v-if="isMobile"
+                :event-id="eventId"
+                :scout-id="userStore.userId"
+                :scout-name="userStore.username"
+                :edit-record="editingRecord"
+                :assigned-task="activeScoutTask"
+                @submit="onRecordSubmitted"
+                @cancelEdit="editingRecord = null"
+              />
+              <ScoutingForm
+                v-else
+                :event-id="eventId"
+                :scout-id="userStore.userId"
+                :scout-name="userStore.username"
+                :edit-record="editingRecord"
+                :assigned-task="activeScoutTask"
+                @submit="onRecordSubmitted"
+                @cancelEdit="editingRecord = null"
+              />
+            </template>
+            <PitScoutView
+              v-else-if="activeTab === 'pit'"
+              :event-id="eventId"
+            />
+            <ScheduleManager
+              v-else-if="activeTab === 'schedule'"
+              :event="event"
+              :is-host="isHost"
+              @startScouting="handleStartScouting"
+              @openWhiteboard="handleOpenWhiteboard"
+            />
+            <TacticalWhiteboardView
+              v-else-if="activeTab === 'whiteboard'"
+              :event-id="eventId"
+              :initial-match="activeWhiteboardMatch"
+            />
+            <RankingsTable
+              v-else-if="activeTab === 'rankings'"
+              :rankings="recordStore.rankings"
+              :loading="recordStore.loading"
+            />
+            <HistoryList
+              v-else-if="activeTab === 'history'"
+              :records="eventStore.isHost ? recordStore.activeRecords : recordStore.myRecords(userStore.userId)"
+              :loading="recordStore.loading"
+              @editRecord="handleEditRecord"
+            />
+            <AiChatView v-else-if="activeTab === 'ai'" :event-id="route.params.eventId as string" />
+            <EventScoutsPanel v-else-if="activeTab === 'scouts'" :event="event" />
+          </Transition>
+        </main>
+      </div>
 
+      <AiCopilotDock v-if="!isMobile && eventId" :event-id="eventId" />
+    </div>
+
+    <AiSettingsModal />
     <SasVerificationModal />
     <SessionConflictModal />
     <TakeoverPromptModal />

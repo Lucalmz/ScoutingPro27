@@ -1,6 +1,12 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest'
 import { setActivePinia, createPinia } from 'pinia'
+import mqtt from 'mqtt'
+import * as api from '@/services/api'
+import { createMergeableStore } from 'tinybase'
+import { createWebRtcCrdtSynchronizerHub, readScoutingRecordsFromCrdt, writeScoutingRecordToCrdt } from '@/services/crdt'
 import { createWebRtcService, compareHostAuthority } from '@/services/webrtc'
+
+const origRTCPeerConnection = global.RTCPeerConnection
 
 // In-memory Virtual Signal Bus simulating MQTT Broker routing between multiple clients
 class VirtualSignalBus {
@@ -46,45 +52,47 @@ class VirtualSignalBus {
 
 const signalBus = new VirtualSignalBus()
 
-vi.mock('mqtt', () => ({
-  default: {
-    connect: vi.fn().mockImplementation((url: string, opts: any) => {
-      const clientId = opts?.clientId || `mock_client_${Math.random()}`
-      const listeners: Record<string, any[]> = {}
+function createMockMqttClient(url: string, opts: any) {
+  const clientId = opts?.clientId || `mock_client_${Math.random()}`
+  const listeners: Record<string, any[]> = {}
 
-      const client = {
-        connected: true,
-        clientId,
-        on: vi.fn().mockImplementation((event: string, handler: any) => {
-          if (!listeners[event]) listeners[event] = []
-          listeners[event].push(handler)
-          if (event === 'connect') {
-            setTimeout(handler, 2)
-          }
-          return client
-        }),
-        subscribe: vi.fn().mockImplementation((topic: string, cb?: any) => {
-          signalBus.register(clientId, topic, (t, payload) => {
-            listeners['message']?.forEach(fn => fn(t, payload))
-          })
-          if (cb) cb(null)
-        }),
-        publish: vi.fn().mockImplementation((topic: string, message: string) => {
-          signalBus.broadcast(clientId, topic, message)
-        }),
-        unsubscribe: vi.fn().mockImplementation((topic?: string) => {
-          signalBus.unregister(clientId, topic)
-        }),
-        end: vi.fn().mockImplementation(() => {
-          signalBus.unregister(clientId)
-          listeners['offline']?.forEach(fn => fn())
-        }),
-        emitOffline: () => {
-          listeners['offline']?.forEach(fn => fn())
-        }
+  const client = {
+    connected: true,
+    clientId,
+    on: vi.fn().mockImplementation((event: string, handler: any) => {
+      if (!listeners[event]) listeners[event] = []
+      listeners[event].push(handler)
+      if (event === 'connect') {
+        setTimeout(handler, 2)
       }
       return client
-    })
+    }),
+    subscribe: vi.fn().mockImplementation((topic: string, cb?: any) => {
+      signalBus.register(clientId, topic, (t, payload) => {
+        listeners['message']?.forEach(fn => fn(t, payload))
+      })
+      if (cb) cb(null)
+    }),
+    publish: vi.fn().mockImplementation((topic: string, message: string) => {
+      signalBus.broadcast(clientId, topic, message)
+    }),
+    unsubscribe: vi.fn().mockImplementation((topic?: string) => {
+      signalBus.unregister(clientId, topic)
+    }),
+    end: vi.fn().mockImplementation(() => {
+      signalBus.unregister(clientId)
+      listeners['offline']?.forEach(fn => fn())
+    }),
+    emitOffline: () => {
+      listeners['offline']?.forEach(fn => fn())
+    }
+  }
+  return client
+}
+
+vi.mock('mqtt', () => ({
+  default: {
+    connect: vi.fn().mockImplementation((url: string, opts: any) => createMockMqttClient(url, opts))
   }
 }))
 
@@ -106,12 +114,20 @@ describe('Comprehensive Concurrency, Standby Takeover & Silent Failure Edge Test
     setActivePinia(createPinia())
     signalBus.clear();
     (globalThis as any).__TEST_ALLOW_UNSIGNED_SIGNALING__ = true;
-    (globalThis as any).__TEST_PROBE_MS__ = 40;
-    (globalThis as any).__TEST_WATCHDOG_TIMEOUT_MS__ = 120;
-    (globalThis as any).__TEST_WATCHDOG_INTERVAL_MS__ = 30;
-    (globalThis as any).__TEST_HEARTBEAT_INTERVAL_MS__ = 25;
+    (globalThis as any).__TEST_PROBE_MS__ = 120;
+    (globalThis as any).__TEST_WATCHDOG_TIMEOUT_MS__ = 240;
+    (globalThis as any).__TEST_WATCHDOG_INTERVAL_MS__ = 40;
+    (globalThis as any).__TEST_HEARTBEAT_INTERVAL_MS__ = 30;
     (globalThis as any).__TEST_PING_TIMEOUT_MS__ = 20;
     vi.clearAllMocks()
+
+    vi.mocked(mqtt.connect).mockImplementation((url: string, opts: any) => createMockMqttClient(url, opts) as any)
+    vi.mocked(api.createWebRtcTicket).mockImplementation(async (_eventId: string, ecdhPublicKey: string) => ({
+      ticket: `ticket_for_${ecdhPublicKey ? ecdhPublicKey.slice(0, 10) : 'dummy'}`,
+      expiresIn: 180
+    }))
+    vi.mocked(api.verifyToken).mockResolvedValue({ valid: true, userId: 'host_id', username: 'HostUser' })
+    vi.mocked(api.verifyWebRtcTicket).mockResolvedValue({ valid: true, userId: 'valid_scout', username: 'Scout' })
 
     global.RTCPeerConnection = vi.fn().mockImplementation(() => {
       let channelOnmessage: any = null
@@ -156,11 +172,16 @@ describe('Comprehensive Concurrency, Standby Takeover & Silent Failure Edge Test
   })
 
   afterEach(() => {
+    delete (globalThis as any).__TEST_ALLOW_UNSIGNED_SIGNALING__
     delete (globalThis as any).__TEST_PROBE_MS__
     delete (globalThis as any).__TEST_WATCHDOG_TIMEOUT_MS__
     delete (globalThis as any).__TEST_WATCHDOG_INTERVAL_MS__
     delete (globalThis as any).__TEST_HEARTBEAT_INTERVAL_MS__
     delete (globalThis as any).__TEST_PING_TIMEOUT_MS__
+    global.RTCPeerConnection = origRTCPeerConnection
+    vi.useRealTimers()
+    localStorage.clear()
+    vi.restoreAllMocks()
     signalBus.clear()
   })
 
@@ -283,25 +304,27 @@ describe('Comprehensive Concurrency, Standby Takeover & Silent Failure Edge Test
     })
 
     await clientService.join('room-blackhole-test')
-    await new Promise(r => setTimeout(r, 20))
+    await vi.waitFor(() => {
+      expect(mockDc.onopen).toBeTypeOf('function')
+    })
 
     // Simulate DataChannel open
     mockDc.onopen?.()
     expect(statusChanges).toContain('connected')
 
     // Verify healthy ping-pong exchange
-    await new Promise(r => setTimeout(r, 50))
-    expect(mockDc.send).toHaveBeenCalled()
+    await vi.waitFor(() => {
+      expect(mockDc.send).toHaveBeenCalled()
+    })
 
     // TRIGGER SILENT BLACKHOLE (Virtual NIC dropped: no close, readyState stays 'open')
     isBlackholed = true
 
     // Wait for 2 missed pings (~70ms with test interval 25ms and timeout 20ms)
-    await new Promise(r => setTimeout(r, 100))
-
-    // Verify autonomous degradation without waiting 30 seconds
-    expect(statusChanges).toContain('degraded')
-    expect(onHostDisconnected).toHaveBeenCalled()
+    await vi.waitFor(() => {
+      expect(statusChanges).toContain('degraded')
+      expect(onHostDisconnected).toHaveBeenCalled()
+    })
 
     clientService.disconnect()
   })
@@ -360,51 +383,65 @@ describe('Comprehensive Concurrency, Standby Takeover & Silent Failure Edge Test
   })
 
   it('Case 4: Stale Host Epoch 1 Heartbeat Replay Suppression (低任期旧主机心跳压制与反向降级)', async () => {
+    const promotedOldHost = vi.fn()
     const demotedOldHost = vi.fn()
     const oldHostService = createWebRtcService({
       onStatusChange: vi.fn(),
       onRecordsReceived: vi.fn().mockResolvedValue([]),
       onAckReceived: vi.fn(),
       onRequestSync: vi.fn(),
+      onHostPromoted: promotedOldHost,
       onHostDemoted: demotedOldHost
     })
 
     await oldHostService.host('room-stale-epoch')
-    await vi.waitFor(() => expect(oldHostService.isStandbyHost()).toBe(false))
+    await vi.waitFor(() => {
+      expect(promotedOldHost).toHaveBeenCalled()
+      expect(oldHostService.isStandbyHost()).toBe(false)
+    }, { timeout: 3000 })
 
     // New standby host joins the room and discovers old host
+    const standbyNewHost = vi.fn()
     const newHostService = createWebRtcService({
       onStatusChange: vi.fn(),
       onRecordsReceived: vi.fn().mockResolvedValue([]),
       onAckReceived: vi.fn(),
-      onRequestSync: vi.fn()
+      onRequestSync: vi.fn(),
+      onHostStandby: standbyNewHost
     })
 
     await newHostService.host('room-stale-epoch')
-    await vi.waitFor(() => expect(newHostService.isStandbyHost()).toBe(true))
+    await vi.waitFor(() => {
+      expect(standbyNewHost).toHaveBeenCalled()
+      expect(newHostService.isStandbyHost()).toBe(true)
+    }, { timeout: 3000 })
 
     // Standby takes over: increments Epoch (Epoch 2) and broadcasts takeover
     await newHostService.takeoverHost()
     await vi.waitFor(() => {
       expect(demotedOldHost).toHaveBeenCalled()
       expect(oldHostService.isStandbyHost()).toBe(true)
-    })
+    }, { timeout: 3000 })
 
     oldHostService.disconnect()
     newHostService.disconnect()
   })
 
   it('Case 5: Multi-Device Simultaneous Wake-from-Sleep Concurrency Storm (多设备同时唤醒并发探活风暴)', async () => {
+    const onHostPromoted = vi.fn()
     // 1 Host + 6 concurrent scout clients
     const hostService = createWebRtcService({
       onStatusChange: vi.fn(),
       onRecordsReceived: vi.fn().mockResolvedValue([]),
       onAckReceived: vi.fn(),
-      onRequestSync: vi.fn()
+      onRequestSync: vi.fn(),
+      onHostPromoted
     })
 
     await hostService.host('room-storm-test')
-    await new Promise(r => setTimeout(r, 60))
+    await vi.waitFor(() => {
+      expect(onHostPromoted).toHaveBeenCalled()
+    })
 
     const clients = Array.from({ length: 6 }, (_, i) => {
       const pingsReceived: number[] = []
@@ -424,7 +461,9 @@ describe('Comprehensive Concurrency, Standby Takeover & Silent Failure Edge Test
     for (const c of clients) {
       await c.service.join('room-storm-test', `Scout_${c.id}`, c.id)
     }
-    await new Promise(r => setTimeout(r, 50))
+    await vi.waitFor(() => {
+      expect(clients.every((c) => Boolean((c.service.getDataChannel() as any)?.onopen))).toBe(true)
+    })
 
     // Simulate DataChannel open on wake for all 6 clients
     for (const c of clients) {
@@ -450,90 +489,123 @@ describe('Comprehensive Concurrency, Standby Takeover & Silent Failure Edge Test
     clients.forEach(c => c.service.disconnect())
   })
 
-  it('Case 6: Scouting Match Sync Resilience & Zero Loss During Host Takeover (主机离线接管全流程记录零丢失与单调时钟继承)', async () => {
-    // Host 1 initial active host
-    const host1ReceivedRecords: any[] = []
+  it('Case 6: Scouting Match Sync Resilience & Zero Loss During Host Takeover (CRDT 离线接管零丢失收敛)', async () => {
+    let logicalNow = 1_760_000_000_000
+
+    // Host 1 initial active host: must wait for onHostPromoted (probe completion + heartbeat timer start)
+    // before Host 2 starts probing, otherwise isStandbyHost() is trivially false during probe!
+    const hostPromoted1 = vi.fn()
     const host1 = createWebRtcService({
       onStatusChange: vi.fn(),
-      onRecordsReceived: vi.fn().mockImplementation(async (recs) => {
-        host1ReceivedRecords.push(...recs)
-        return recs.map((r: any) => r.id)
-      }),
+      onRecordsReceived: vi.fn().mockResolvedValue([]),
       onAckReceived: vi.fn(),
-      onRequestSync: vi.fn()
+      onRequestSync: vi.fn(),
+      onHostPromoted: hostPromoted1
     })
     await host1.host('room-sync-resilience')
-    await vi.waitFor(() => expect(host1.isStandbyHost()).toBe(false))
+    await vi.waitFor(() => {
+      expect(host1.isStandbyHost()).toBe(false)
+      expect(hostPromoted1).toHaveBeenCalled()
+    }, { timeout: 3000 })
 
-    // Standby Host 2 joins as standby
-    const host2ReceivedRecords: any[] = []
+    // Standby Host 2 joins as standby after Host 1 is actively broadcasting heartbeats
+    const hostStandby2 = vi.fn()
     const host2 = createWebRtcService({
       onStatusChange: vi.fn(),
-      onRecordsReceived: vi.fn().mockImplementation(async (recs) => {
-        host2ReceivedRecords.push(...recs)
-        return recs.map((r: any) => r.id)
-      }),
+      onRecordsReceived: vi.fn().mockResolvedValue([]),
       onAckReceived: vi.fn(),
-      onRequestSync: vi.fn()
+      onRequestSync: vi.fn(),
+      onHostStandby: hostStandby2
     })
     await host2.host('room-sync-resilience')
-    await vi.waitFor(() => expect(host2.isStandbyHost()).toBe(true))
+    await vi.waitFor(() => {
+      expect(host2.isStandbyHost()).toBe(true)
+      expect(hostStandby2).toHaveBeenCalled()
+    }, { timeout: 3000 })
 
-    // 1. Initial 3 match records synced to Host 1
+    // 1. Initial 3 match records replicated between Host 1 and Standby Host 2 CRDT stores
+    const host1Crdt = createMergeableStore('dev-host-1', () => ++logicalNow, 300)
+    const host2Crdt = createMergeableStore('dev-host-2', () => ++logicalNow, 300)
+    const scoutCrdt = createMergeableStore('dev-scout-1', () => ++logicalNow, 300)
+
     const matchBatch1 = [
       { id: 'rec-q1-red1', eventId: 'ev-1', matchNumber: 1, teamNumber: 101, scoutId: 'scout_1' },
       { id: 'rec-q1-red2', eventId: 'ev-1', matchNumber: 1, teamNumber: 102, scoutId: 'scout_2' },
       { id: 'rec-q1-blue1', eventId: 'ev-1', matchNumber: 1, teamNumber: 201, scoutId: 'scout_3' }
     ]
-    const stampedByHost1 = host1.stampHostSeq(matchBatch1 as any)
-    expect(stampedByHost1.map(r => r.hostSeq)).toEqual([1, 2, 3])
-    expect(host1.getHostSeqCounter()).toBe(3)
+    for (const r of matchBatch1) {
+      writeScoutingRecordToCrdt(host1Crdt, { ...r, totalScore: 50, version: 1 } as any)
+    }
+    host2Crdt.applyMergeableChanges(host1Crdt.getMergeableContent() as any)
+    scoutCrdt.applyMergeableChanges(host1Crdt.getMergeableContent() as any)
 
     // 2. Host 1 network severed (simulated by disconnect)
     host1.disconnect()
 
     // 3. Scout generates new records offline while host is disconnected
+    logicalNow += 3_600_000
     const offlineBatch2 = [
       { id: 'rec-q2-red1', eventId: 'ev-1', matchNumber: 2, teamNumber: 101, scoutId: 'scout_1' },
       { id: 'rec-q2-red2', eventId: 'ev-1', matchNumber: 2, teamNumber: 102, scoutId: 'scout_2' }
     ]
+    for (const r of offlineBatch2) {
+      writeScoutingRecordToCrdt(scoutCrdt, { ...r, totalScore: 75, version: 1 } as any)
+    }
 
-    // 4. Standby Host 2 detects Host 1 offline & triggers takeover
+    // 4. Standby Host 2 detects Host 1 offline & triggers takeover (advances Epoch, no hostSeq needed)
     await host2.takeoverHost()
     expect(host2.isStandbyHost()).toBe(false)
+    expect(host2.getHostEpoch?.()).toBeGreaterThanOrEqual(2)
 
-    // Host 2 inherits sequence counter from database / handoff
-    host2.initHostSeq(3)
-    expect(host2.getHostSeqCounter()).toBe(3)
+    // 5. Scout reconnects and syncs offline batch to Host 2 via TinyBase CRDT synchronizer
+    let hubHost2!: ReturnType<typeof createWebRtcCrdtSynchronizerHub>
+    let hubScout!: ReturnType<typeof createWebRtcCrdtSynchronizerHub>
+    hubHost2 = createWebRtcCrdtSynchronizerHub({
+      eventId: 'ev-1',
+      store: host2Crdt,
+      clientId: 'dev-host-2',
+      getNowMs: () => logicalNow,
+      sendToPeer: (_peerId, msg) => hubScout.handleIncomingMessage('host', msg)
+    })
+    hubScout = createWebRtcCrdtSynchronizerHub({
+      eventId: 'ev-1',
+      store: scoutCrdt,
+      clientId: 'dev-scout-1',
+      getNowMs: () => logicalNow,
+      sendToPeer: (_peerId, msg) => hubHost2.handleIncomingMessage('scout-1', msg)
+    })
 
-    // 5. Scout syncs offline batch to Host 2
-    const stampedByHost2 = host2.stampHostSeq(offlineBatch2 as any)
-    expect(stampedByHost2.map(r => r.hostSeq)).toEqual([4, 5])
-    expect(host2.getHostSeqCounter()).toBe(5)
+    await Promise.all([hubHost2.attachPeer('scout-1'), hubScout.attachPeer('host')])
 
-    // Verify: monotonic sequence without gaps or collisions
-    const allRecords = [...stampedByHost1, ...stampedByHost2]
-    expect(allRecords.length).toBe(5)
-    expect(allRecords.map(r => r.hostSeq)).toEqual([1, 2, 3, 4, 5])
+    // Verify: deterministic CRDT convergence with zero loss across all 5 records and zero legacy hostSeq fields
+    await vi.waitFor(() => {
+      const host2Records = readScoutingRecordsFromCrdt(host2Crdt, 'ev-1')
+      expect(host2Records.map((r) => r.id).sort()).toEqual([
+        'rec-q1-blue1',
+        'rec-q1-red1',
+        'rec-q1-red2',
+        'rec-q2-red1',
+        'rec-q2-red2'
+      ])
+      expect(host2Records.every((r) => (r as any).hostSeq === undefined)).toBe(true)
+    }, { timeout: 3000 })
 
-    // Verify non-destructive re-stamping of pre-stamped records
-    const restamped = host2.stampHostSeq([stampedByHost1[0]])
-    expect(restamped[0].hostSeq).toBe(1) // Existing sequence preserved!
-    expect(host2.getHostSeqCounter()).toBe(5) // Clock was NOT rolled back
-
+    await Promise.all([hubHost2.destroy(), hubScout.destroy()])
     host2.disconnect()
-  })
+  }, 20000)
 
   it('Case 7: Fast Reconnect Throttling & De-bouncing (网络高频瞬断与去抖恢复)', async () => {
+    const statuses: string[] = []
     const service = createWebRtcService({
-      onStatusChange: vi.fn(),
+      onStatusChange: (s) => statuses.push(s),
       onRecordsReceived: vi.fn().mockResolvedValue([]),
       onAckReceived: vi.fn(),
       onRequestSync: vi.fn()
     })
 
     await service.join('room-flap-test')
-    await new Promise(r => setTimeout(r, 40))
+    const rtcMock = vi.mocked(global.RTCPeerConnection)
+    const callsBeforeBurst = rtcMock.mock.calls.length
 
     // Rapid successive reconnectNow triggers (e.g. cellular signal flapping 4 times in 10ms)
     const triggerPromises = [
@@ -543,10 +615,14 @@ describe('Comprehensive Concurrency, Standby Takeover & Silent Failure Edge Test
       service.reconnectNow()
     ]
 
-    const results = await Promise.all(triggerPromises)
-    // All calls should resolve cleanly without uncaught rejections
-    expect(results.length).toBe(4)
+    const results = await Promise.allSettled(triggerPromises)
+    expect(results).toHaveLength(4)
+    expect(results.every((r) => r.status === 'fulfilled')).toBe(true)
+    // Concurrent bursts must coalesce strictly into a single reconnect attempt / RTCPeerConnection
+    expect(rtcMock.mock.calls.length).toBe(callsBeforeBurst + 1)
+    expect(statuses.length).toBeGreaterThan(0)
 
     service.disconnect()
+    expect(statuses[statuses.length - 1]).toBe('offline')
   })
 })

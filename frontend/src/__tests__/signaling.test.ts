@@ -25,7 +25,9 @@ describe('SignalingChannel Multi-Broker & LAN WebSocket', () => {
   })
 
   afterEach(() => {
-    (globalThis as any).__TEST_ALLOW_UNSIGNED_SIGNALING__ = false
+    delete (globalThis as any).__TEST_ALLOW_UNSIGNED_SIGNALING__
+    delete (globalThis as any).__TEST_ENABLE_MQTT_SUBACK_TIMER__
+    vi.useRealTimers()
     vi.clearAllMocks()
   })
 
@@ -42,6 +44,7 @@ describe('SignalingChannel Multi-Broker & LAN WebSocket', () => {
       expect.objectContaining({ connectTimeout: 8000 })
     )
     expect(channel.isLanMode()).toBe(false)
+    channel.close()
   })
 
   it('identifies and connects to Native LAN WebSocket endpoint', async () => {
@@ -62,7 +65,7 @@ describe('SignalingChannel Multi-Broker & LAN WebSocket', () => {
 
       constructor(public url: string) {
         wsInstance = this
-        setTimeout(() => this.onopen?.(), 10)
+        queueMicrotask(() => this.onopen?.())
       }
     }
 
@@ -83,8 +86,9 @@ describe('SignalingChannel Multi-Broker & LAN WebSocket', () => {
       expect(wsInstance.url).toBe('ws://192.168.1.100:8080/ws/signal/test-room-lan')
 
       // Wait for connect
-      await new Promise(r => setTimeout(r, 20))
-      expect(onConnect).toHaveBeenCalled()
+      await vi.waitFor(() => {
+        expect(onConnect).toHaveBeenCalled()
+      })
 
       // Send payload over LAN WS
       await channel.send({ type: 'host_hello', ecdhPublicKey: 'pub-test' })
@@ -109,6 +113,7 @@ describe('SignalingChannel Multi-Broker & LAN WebSocket', () => {
       'wss://my-private-broker.com:8884/mqtt',
       expect.anything()
     )
+    channel.close()
   })
 
   it('correctly maps broker ID "emqx" to official EMQX WebSocket URL', async () => {
@@ -124,6 +129,7 @@ describe('SignalingChannel Multi-Broker & LAN WebSocket', () => {
       expect.anything()
     )
     expect(channel.isLanMode()).toBe(false)
+    channel.close()
   })
 
   it('resolveBrokerUrl maps broker IDs, lan shortcut, and fallbacks properly', async () => {
@@ -161,7 +167,7 @@ describe('SignalingChannel Multi-Broker & LAN WebSocket', () => {
       await vi.advanceTimersByTimeAsync(250)
       expect(onConnect).not.toHaveBeenCalled()
     } finally {
-      ;(globalThis as any).__TEST_ENABLE_MQTT_SUBACK_TIMER__ = false
+      delete (globalThis as any).__TEST_ENABLE_MQTT_SUBACK_TIMER__
       vi.useRealTimers()
     }
   })
@@ -186,6 +192,7 @@ describe('SignalingChannel Multi-Broker & LAN WebSocket', () => {
       expect.objectContaining({ connectTimeout: 8000 })
     )
     expect(channel.isLanMode()).toBe(false)
+    channel.close()
   })
 
   it('does not failover to BUILTIN_BROKERS when sp27-custom-broker is configured in localStorage', async () => {

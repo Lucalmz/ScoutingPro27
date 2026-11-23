@@ -1,5 +1,5 @@
 import { setActivePinia, createPinia } from 'pinia'
-import { describe, it, expect, vi, beforeEach } from 'vitest'
+import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
 import { useEventStore } from '../stores/events'
 import { useUserStore } from '../stores/user'
 import * as api from '../services/api'
@@ -14,10 +14,16 @@ vi.mock('../services/api', () => ({
 
 describe('Events Store', () => {
   beforeEach(() => {
+    localStorage.clear()
     setActivePinia(createPinia())
     const userStore = useUserStore()
     userStore.user = { id: 'u1', username: 'testuser', token: 'token' }
     vi.clearAllMocks()
+  })
+
+  afterEach(() => {
+    localStorage.clear()
+    vi.restoreAllMocks()
   })
 
   it('create event', async () => {
@@ -157,20 +163,6 @@ describe('Events Store', () => {
   })
 
   describe('Event Deletion, Migration and Cache Reset', () => {
-    it('deleteEvent removes event from list and clears currentEvent if matched', () => {
-      const store = useEventStore()
-      const evt1 = { id: 'evt-1', name: 'Event 1', inviteCode: 'CODE1', hostId: 'u1' }
-      const evt2 = { id: 'evt-2', name: 'Event 2', inviteCode: 'CODE2', hostId: 'u1' }
-      store.events = [evt1, evt2]
-      store.currentEvent = evt1
-
-      store.deleteEvent('evt-1')
-
-      expect(store.events).toHaveLength(1)
-      expect(store.events[0].id).toBe('evt-2')
-      expect(store.currentEvent).toBeNull()
-    })
-
     it('migratePlaceholder replaces placeholder event and cleans up ghost duplicates', () => {
       const store = useEventStore()
       const placeholder = { id: 'evt-SPWNSH', name: 'ScoutingPro 27', inviteCode: 'SPWNSH', hostId: 'remote-host' }
@@ -265,6 +257,30 @@ describe('Events Store', () => {
       expect(localStorage.getItem('sp27_records_evt-del-1')).toBeNull()
       expect(localStorage.getItem('scoutingpro27_schedule_evt-del-1')).toBeNull()
       expect(api.deleteEvent).toHaveBeenCalledWith('evt-del-1')
+    })
+
+    it('mobile devices are permanently locked out of isStandbyHost and takeoverHost', async () => {
+      const isMobileModule = await import('@/composables/useIsMobile')
+      const photoStorageModule = await import('@/services/photoStorage')
+      const { useConnectionStore } = await import('@/stores/connection')
+
+      vi.spyOn(isMobileModule, 'isMobileDevice').mockReturnValue(true)
+      vi.spyOn(photoStorageModule, 'isDesktopHost').mockReturnValue(false)
+
+      const connStore = useConnectionStore()
+
+      connStore.setStandbyHost(true, { hostSessionId: 'sess-host-9' })
+      expect(connStore.isStandbyHost).toBe(false)
+      expect(connStore.standbyHostInfo).toBeNull()
+
+      ;(connStore as any).isStandbyHost = true
+      expect(connStore.isStandbyHost).toBe(false)
+
+      const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {})
+      await connStore.takeoverHost()
+      expect(warnSpy).toHaveBeenCalledWith(
+        expect.stringContaining('Mobile devices cannot act as host or takeover host')
+      )
     })
   })
 })

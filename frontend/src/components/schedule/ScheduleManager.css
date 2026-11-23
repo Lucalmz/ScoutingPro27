@@ -501,6 +501,35 @@
   background: var(--status-success-bg);
 }
 
+.match-action-pills {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.btn-match-ai {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 26px;
+  height: 22px;
+  padding: 0;
+  border-radius: 5px;
+  border: 1px solid var(--status-ai-border);
+  background: var(--status-ai-bg);
+  color: var(--status-ai);
+  cursor: pointer;
+}
+
+.btn-match-ai .material-icons {
+  font-size: 14px;
+}
+
+.btn-match-ai:hover {
+  border-color: var(--status-ai);
+  transform: translateY(-1px);
+}
+
 .th-score,
 .td-score {
   width: 110px;

@@ -62,6 +62,10 @@ export {
 let lastSuccessfulProbeTime = 0
 const PROBE_THROTTLE_MS = 20000 // 20秒节流窗口，避免高频 online/visibilitychange 频繁新建探测 WebSocket 增加公共 Broker 负担
 
+export function resetConnectivityProbeCacheForTesting(): void {
+  lastSuccessfulProbeTime = 0
+}
+
 export async function probePublicConnectivity(timeoutMs = 2500, bypassThrottle = false): Promise<boolean> {
   const now = Date.now()
   if (!bypassThrottle && now - lastSuccessfulProbeTime < PROBE_THROTTLE_MS) {

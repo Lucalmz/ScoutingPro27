@@ -1,6 +1,10 @@
-import { describe, it, expect, beforeEach, afterEach } from 'vitest'
+import { createPinia, setActivePinia } from 'pinia'
+import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest'
 import { calculateBragIndex } from '../utils/bragIndex'
-import { switchLanguage } from '../i18n'
+import { i18n, switchLanguage } from '../i18n'
+import { usePitScoutStore } from '../stores/pitScout'
+import { useRecordStore } from '../stores/records'
+import * as api from '../services/api'
 import type { PitScoutingRecord, ScoutingRecord } from '../types'
 
 const createDummyMatch = (
@@ -67,13 +71,18 @@ const createClaimedRecord = (
 })
 
 describe('Brag Index Calculator (BIOBUZZ 2026-2027)', () => {
+  const origLocale = i18n.global.locale.value
+
   beforeEach(() => {
+    setActivePinia(createPinia())
     localStorage.clear()
     switchLanguage('en')
   })
 
   afterEach(() => {
-    switchLanguage('en')
+    localStorage.clear()
+    switchLanguage(origLocale as 'zh' | 'en')
+    vi.restoreAllMocks()
   })
 
   it('returns undefined if no claimed pit record', () => {
@@ -219,5 +228,64 @@ describe('Brag Index Calculator (BIOBUZZ 2026-2027)', () => {
     switchLanguage('zh')
     const zhRes = calculateBragIndex(claimed, matches)
     expect(zhRes?.label).toContain('自述待补充')
+  })
+
+  it('integrates PitScoutStore claims and RecordStore match observations through pending -> overclaimed -> flowerVerified', async () => {
+    vi.spyOn(api, 'isStaticCloudHost').mockReturnValue(false)
+    vi.spyOn(api, 'saveRecord').mockResolvedValue(undefined as any)
+
+    const eventId = 'evt_brag_integration'
+    const pitStore = usePitScoutStore()
+    const recordStore = useRecordStore()
+    pitStore.currentEventId = eventId
+    recordStore.currentEventId = eventId
+
+    const pitRecord = createClaimedRecord(60, 90, 30, 180, {
+      id: 'pit_27570_001',
+      eventId,
+      teamNumber: 27570,
+      scoutId: 'scout_alice_id',
+      scoutName: 'Alice'
+    })
+    vi.spyOn(api, 'savePitRecord').mockResolvedValue({ success: true, record: pitRecord } as any)
+
+    await pitStore.saveRecord(pitRecord)
+    const storedPit = pitStore.getUnifiedTeam(27570)?.pitRecord
+    expect(storedPit?.claimedTotalScore).toBe(180)
+
+    const initialBrag = calculateBragIndex(storedPit, [])
+    expect(initialBrag?.tier).toBe('pending')
+    expect(initialBrag?.label).toContain('Pending')
+
+    await recordStore.addRecord(
+      createDummyMatch(1, 35, 50, 15, { allianceColor: 'red' }, { id: 'rec_m1', eventId, syncStatus: 'PENDING' })
+    )
+    expect(recordStore.rankings[0].maxScore).toBe(100)
+
+    const overclaimedBrag = calculateBragIndex(
+      pitStore.getUnifiedTeam(27570)?.pitRecord,
+      recordStore.activeRecords.filter((r) => r.teamNumber === 27570)
+    )
+    expect(overclaimedBrag?.overallRatio).toBeGreaterThan(1.5)
+    expect(overclaimedBrag?.overallRatio).toBeLessThan(2.0)
+    expect(overclaimedBrag?.tier).toBe('overclaimed')
+    expect(overclaimedBrag?.label).toContain('Overclaimed')
+
+    await recordStore.addRecord(
+      createDummyMatch(
+        2,
+        45,
+        52,
+        28,
+        { allianceColor: 'blue', flowerNectars: 4, flowerBottomBonusCount: 3, teleopPark: true },
+        { id: 'rec_m2', eventId, syncStatus: 'PENDING' }
+      )
+    )
+    const updatedBrag = calculateBragIndex(
+      pitStore.getUnifiedTeam(27570)?.pitRecord,
+      recordStore.activeRecords.filter((r) => r.teamNumber === 27570)
+    )
+    expect(updatedBrag?.flowerVerified).toBe(true)
+    expect(updatedBrag?.label).toContain('Flower Verified')
   })
 })

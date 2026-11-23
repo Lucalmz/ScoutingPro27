@@ -72,6 +72,7 @@ public class CrdtRoutes {
             if (!isMember) {
                 throw new ForbiddenResponse("Not a member of this event");
             }
+            boolean isHost = jdbi.withExtension(EventDao.class, dao -> dao.isHost(eventId, userId));
 
             JsonObject body;
             try {
@@ -100,6 +101,8 @@ public class CrdtRoutes {
 
             CrdtProjectionService.SaveResult res = projectionService.saveAndProject(
                     eventId,
+                    userId,
+                    isHost,
                     hostEpoch,
                     snapshotRevision,
                     snapshotEl,

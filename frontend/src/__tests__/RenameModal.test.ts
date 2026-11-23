@@ -1,5 +1,5 @@
 import { nextTick } from 'vue'
-import { mount, flushPromises } from '@vue/test-utils'
+import { mount, flushPromises, type VueWrapper } from '@vue/test-utils'
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
 import { setActivePinia, createPinia } from 'pinia'
 import RenameModal from '@/components/common/RenameModal.vue'
@@ -28,6 +28,11 @@ vi.mock('vue-i18n', async (importOriginal) => {
 })
 
 describe('RenameModal.vue', () => {
+  const wrappers: VueWrapper<any>[] = []
+  const track = <T extends VueWrapper<any>>(w: T): T => {
+    wrappers.push(w)
+    return w
+  }
   const { resetProfileTransition } = useUserProfileTransition()
   const docAny = document as Document & { startViewTransition?: any }
   const origStartVT = docAny.startViewTransition
@@ -40,6 +45,9 @@ describe('RenameModal.vue', () => {
   })
 
   afterEach(() => {
+    while (wrappers.length) wrappers.pop()!.unmount()
+    document.body.innerHTML = ''
+    vi.restoreAllMocks()
     resetProfileTransition()
     if (origStartVT === undefined) {
       delete docAny.startViewTransition
@@ -53,12 +61,12 @@ describe('RenameModal.vue', () => {
     const userStore = useUserStore()
     userStore.user = { id: 'u1', username: 'Alice', token: 'tok' }
 
-    const wrapper = mount(RenameModal, {
+    const wrapper = track(mount(RenameModal, {
       props: {
         visible: true,
         eventId: 'evt_1'
       }
-    })
+    }))
 
     expect(wrapper.find('.modal-title').text()).toContain('修改账号资料与密码')
     const input = wrapper.find<HTMLInputElement>('input.form-input')
@@ -85,12 +93,12 @@ describe('RenameModal.vue', () => {
     }
     connStore.setRtcService(mockRtc as any)
 
-    const wrapper = mount(RenameModal, {
+    const wrapper = track(mount(RenameModal, {
       props: {
         visible: true,
         eventId: 'evt_100'
       }
-    })
+    }))
 
     const input = wrapper.find<HTMLInputElement>('input.form-input')
     await input.setValue('Alice-88')
@@ -119,11 +127,11 @@ describe('RenameModal.vue', () => {
       newUsername: 'Alice'
     })
 
-    const wrapper = mount(RenameModal, {
+    const wrapper = track(mount(RenameModal, {
       props: {
         visible: true
       }
-    })
+    }))
 
     // Click accordion header to expand password fields
     const accordionHeader = wrapper.find('.accordion-header')
@@ -168,10 +176,10 @@ describe('RenameModal.vue', () => {
     document.body.appendChild(triggerBtn)
 
     const { openProfileModal } = useUserProfileTransition()
-    const wrapper = mount(RenameModal, {
+    const wrapper = track(mount(RenameModal, {
       attachTo: document.body,
       props: { visible: false }
-    })
+    }))
 
     try {
       openProfileModal((val) => {
@@ -228,7 +236,7 @@ describe('RenameModal.vue', () => {
     document.body.appendChild(triggerBtn)
 
     const { openProfileModal } = useUserProfileTransition()
-    const wrapper = mount(RenameModal, {
+    const wrapper = track(mount(RenameModal, {
       attachTo: document.body,
       props: {
         visible: false,
@@ -236,7 +244,7 @@ describe('RenameModal.vue', () => {
           void wrapper.setProps({ visible: val })
         }
       }
-    })
+    }))
 
     try {
       openProfileModal((val) => {
@@ -284,14 +292,14 @@ describe('RenameModal.vue', () => {
     })
 
     const { openProfileModal } = useUserProfileTransition()
-    const wrapper = mount(RenameModal, {
+    const wrapper = track(mount(RenameModal, {
       props: {
         visible: false,
         'onUpdate:visible': (val: boolean) => {
           void wrapper.setProps({ visible: val })
         }
       }
-    })
+    }))
 
     try {
       openProfileModal((val) => {
@@ -338,9 +346,9 @@ describe('RenameModal.vue', () => {
     }))
 
     const { openProfileModal } = useUserProfileTransition()
-    const wrapper = mount(RenameModal, {
+    const wrapper = track(mount(RenameModal, {
       props: { visible: false }
-    })
+    }))
 
     try {
       openProfileModal((val) => {
@@ -393,14 +401,14 @@ describe('RenameModal.vue', () => {
     })
 
     vi.useFakeTimers()
-    const wrapper = mount(RenameModal, {
+    const wrapper = track(mount(RenameModal, {
       props: {
         visible: true,
         'onUpdate:visible': (val: boolean) => {
           void wrapper.setProps({ visible: val })
         }
       }
-    })
+    }))
 
     try {
       await wrapper.find('button.btn-secondary').trigger('click')

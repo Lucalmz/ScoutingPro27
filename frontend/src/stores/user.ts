@@ -211,11 +211,15 @@ export const useUserStore = defineStore('user', () => {
         import('@/stores/records'),
         import('@/stores/schedule'),
         import('@/stores/pitScout')
-      ]).then(([{ useRecordStore }, { useScheduleStore }, { usePitScoutStore }]) => {
-        useRecordStore().migrateScoutId(oldId, oldId, trimmed)
-        useScheduleStore().migrateScoutId(oldId, oldId, trimmed)
-        usePitScoutStore().migrateScoutId(oldId, oldId, trimmed)
-      })
+      ])
+        .then(([{ useRecordStore }, { useScheduleStore }, { usePitScoutStore }]) => {
+          useRecordStore().migrateScoutId(oldId, oldId, trimmed)
+          useScheduleStore().migrateScoutId(oldId, oldId, trimmed)
+          usePitScoutStore().migrateScoutId(oldId, oldId, trimmed)
+        })
+        .catch((e) => {
+          console.warn('[userStore] Error propagating nickname update to stores:', e)
+        })
     }
   }
 
@@ -390,7 +394,7 @@ export const useUserStore = defineStore('user', () => {
 
   // Handle automatic logout on 401
   window.addEventListener('auth-unauthorized', () => {
-    logout()
+    void logout().catch(() => {})
   })
 
   return { user, loading, error, isLoggedIn, userId, username, token, restoreFromCache, login, register, rename, updateNickname, mergeAccount, logout }

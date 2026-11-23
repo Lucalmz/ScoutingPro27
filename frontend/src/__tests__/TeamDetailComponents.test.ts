@@ -1,11 +1,13 @@
-import { describe, it, expect, beforeEach } from 'vitest'
-import { mount } from '@vue/test-utils'
+import { afterEach, describe, it, expect, beforeEach, vi } from 'vitest'
+import { mount, type VueWrapper } from '@vue/test-utils'
 import { createPinia, setActivePinia } from 'pinia'
 import { createI18n } from 'vue-i18n'
 import TeamPitProfileCard from '@/views/components/TeamPitProfileCard.vue'
 import TeamRosterCard from '@/components/pit/TeamRosterCard.vue'
 import TeamCustomMetricsCard from '@/views/components/TeamCustomMetricsCard.vue'
 import RankingsTableToolbar from '@/components/rankings/RankingsTableToolbar.vue'
+import TeamDetailDrawer from '@/components/common/TeamDetailDrawer.vue'
+import TeamDetailView from '@/views/TeamDetailView.vue'
 import {
   computeTeamMatchCustomMetrics,
   computeTeamPitCustomSpecs,
@@ -18,22 +20,73 @@ import {
 } from '@/components/rankings/useRankingsCustomColumns'
 import { useEventStore } from '@/stores/events'
 import { useCustomFieldsStore } from '@/stores/customFields'
+import { useNavigationStore } from '@/stores/navigation'
 import zh from '@/locales/zh.json'
 import en from '@/locales/en.json'
 import type { CustomFieldDefinition, ScoutingRecord, UnifiedTeamItem } from '@/types'
 
-function createTestI18n() {
+const mockRouterPush = vi.fn()
+const mockRouterBack = vi.fn()
+
+vi.mock('@/services/api', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('@/services/api')>()
+  return {
+    ...actual,
+    listRecords: vi.fn().mockResolvedValue([]),
+    fetchPitRecords: vi.fn().mockResolvedValue({ records: [], officialTeams: [] }),
+    fetchEventTags: vi.fn().mockResolvedValue([]),
+    fetchFtcMatches: vi.fn().mockResolvedValue([]),
+    fetchFtcRankings: vi.fn().mockResolvedValue([]),
+    fetchFtcAdvancement: vi.fn().mockResolvedValue([]),
+    apiFetchBannedTeams: vi.fn().mockResolvedValue([])
+  }
+})
+
+vi.mock('vue-router', () => ({
+  useRouter: () => ({
+    push: mockRouterPush,
+    back: mockRouterBack
+  }),
+  useRoute: () => ({
+    params: { eventId: 'evt-123', teamNumber: '27570' },
+    query: {}
+  }),
+  onBeforeRouteLeave: vi.fn()
+}))
+
+function createTestI18n(locale: 'zh' | 'en' = 'zh') {
   return createI18n({
     legacy: false,
-    locale: 'zh',
+    locale,
     messages: { zh, en }
   })
 }
 
 describe('TeamDetail & Rankings Decoupled Sub-components and Composables', () => {
+  let mountedWrappers: VueWrapper<any>[] = []
+
+  function track<T extends VueWrapper<any>>(wrapper: T): T {
+    mountedWrappers.push(wrapper)
+    return wrapper
+  }
+
   beforeEach(() => {
     setActivePinia(createPinia())
     localStorage.clear()
+    sessionStorage.clear()
+    mockRouterPush.mockClear()
+    mockRouterBack.mockClear()
+    document.body.innerHTML = ''
+  })
+
+  afterEach(() => {
+    while (mountedWrappers.length > 0) {
+      mountedWrappers.pop()?.unmount()
+    }
+    localStorage.clear()
+    sessionStorage.clear()
+    document.body.innerHTML = ''
+    vi.restoreAllMocks()
   })
 
   const matchFields: CustomFieldDefinition[] = [
@@ -158,10 +211,10 @@ describe('TeamDetail & Rankings Decoupled Sub-components and Composables', () =>
     expect(boolMetric.rate).toBe(50)
     expect(boolMetric.trueCount).toBe(1)
 
-    const wrapper = mount(TeamCustomMetricsCard, {
+    const wrapper = track(mount(TeamCustomMetricsCard, {
       props: { metrics },
       global: { plugins: [createTestI18n()] }
-    })
+    }))
 
     expect(wrapper.find('.custom-metrics-card').exists()).toBe(true)
     expect(wrapper.findAll('.metric-box')).toHaveLength(4)
@@ -255,13 +308,13 @@ describe('TeamDetail & Rankings Decoupled Sub-components and Composables', () =>
       messages: { zh, en }
     })
 
-    const wrapper = mount(TeamPitProfileCard, {
+    const wrapper = track(mount(TeamPitProfileCard, {
       props: {
         unifiedTeam,
         teamPitCustomSpecs: pitSpecs
       },
       global: { plugins: [enI18n] }
-    })
+    }))
 
     expect(wrapper.find('.pit-profile-card').exists()).toBe(true)
     expect(wrapper.find('.custom-spec-badge').text()).toContain('底盘电机数: 4 个')
@@ -281,13 +334,13 @@ describe('TeamDetail & Rankings Decoupled Sub-components and Composables', () =>
     expect(wrapper.emitted('openPitDrawer')).toHaveLength(1)
 
     // Verify TeamRosterCard V6 fields, te() fallback, and claimed_cycles_unit number interpolation
-    const rosterCard = mount(TeamRosterCard, {
+    const rosterCard = track(mount(TeamRosterCard, {
       props: {
         team: unifiedTeam,
         cardIndex: 0
       },
       global: { plugins: [enI18n] }
-    })
+    }))
     expect(rosterCard.text()).toContain('Compact Small (≤15")')
     expect(rosterCard.text()).toContain('38 lbs')
     expect(rosterCard.text()).toContain('Specialized Intake / Sorting')
@@ -341,7 +394,7 @@ describe('TeamDetail & Rankings Decoupled Sub-components and Composables', () =>
     clearAllCustomCols()
     expect(selectedCustomKeys.value).toHaveLength(0)
 
-    const toolbar = mount(RankingsTableToolbar, {
+    const toolbar = track(mount(RankingsTableToolbar, {
       props: {
         availableFilterTags: ['高频得分', '铁壁防守'],
         selectedTagFilter: '高频得分',
@@ -351,7 +404,7 @@ describe('TeamDetail & Rankings Decoupled Sub-components and Composables', () =>
         showCustomColsDropdown: true
       },
       global: { plugins: [createTestI18n()] }
-    })
+    }))
 
     const filterChips = toolbar.findAll('.filter-chip')
     // 0 = All, 1 = 高频得分, 2 = 铁壁防守
@@ -366,5 +419,51 @@ describe('TeamDetail & Rankings Decoupled Sub-components and Composables', () =>
     expect(toolbar.emitted('clearAllCustomCols')).toHaveLength(1)
 
     showCustomColsDropdown.value = false
+  })
+
+  it('TeamDetailDrawer goFullDetail records AI tab position in navStore', () => {
+    const navStore = useNavigationStore()
+    track(
+      mount(TeamDetailDrawer, {
+        props: {
+          teamNumber: 27570,
+          eventId: 'evt-ai-test'
+        },
+        global: {
+          plugins: [createTestI18n('en')]
+        },
+        attachTo: document.body
+      })
+    )
+
+    const fullDetailBtn = document.body.querySelector('.btn-full-detail') as HTMLElement | null
+    expect(fullDetailBtn).not.toBeNull()
+    fullDetailBtn?.click()
+
+    const saved = navStore.getEventPosition('evt-ai-test')
+    expect(saved).not.toBeNull()
+    expect(saved?.fromTab).toBe('ai')
+    expect(saved?.teamNumber).toBe(27570)
+    expect(mockRouterPush).toHaveBeenCalledWith('/event/evt-ai-test/team/27570')
+  })
+
+  it('TeamDetailView back button triggers back navigation', async () => {
+    const wrapper = track(
+      mount(TeamDetailView, {
+        props: {
+          eventId: 'evt-123',
+          teamNumber: '27570'
+        },
+        global: {
+          plugins: [createTestI18n('en')]
+        }
+      })
+    )
+
+    const backBtn = wrapper.find('.btn-back')
+    expect(backBtn.exists()).toBe(true)
+    await backBtn.trigger('click')
+
+    expect(mockRouterBack.mock.calls.length + mockRouterPush.mock.calls.length).toBeGreaterThanOrEqual(1)
   })
 })

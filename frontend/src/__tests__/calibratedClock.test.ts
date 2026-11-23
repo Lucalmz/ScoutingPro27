@@ -33,6 +33,7 @@ describe('CalibratedMonotonicClock & 3-Sample Clock Sync Protocol', () => {
   afterEach(() => {
     delete (globalThis as Record<string, unknown>).__TEST_CLOCK_OFFSET_MS__
     resetClockRegistryForTesting()
+    localStorage.clear()
   })
 
   it('calibrates zero-point using minimum RTT sample across 3 samples', () => {

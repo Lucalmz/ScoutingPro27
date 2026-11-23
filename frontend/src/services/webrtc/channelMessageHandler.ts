@@ -36,18 +36,12 @@ export interface ChannelMessageHandlerContext {
   promoteTakeover: (userId: string, username: string, newClientId: string, oldClientId: string | undefined, reason: string) => void
   enqueueHostTask: (sender: string, task: () => Promise<void>) => Promise<void>
   cleanupPeerResources: (peerId: string) => void
-  stampHostSeq: (records: ScoutingRecord[]) => void
-  getHostSeqCounter: () => number
-  setHostSeqCounter: (n: number) => void
   closeClient: () => void
   setStatus: (s: ConnectionStatus) => void
   getCurrentEventId?: () => string
   getUsername?: () => string
   getUserId?: () => string
   handleMergeAccountResponse?: (msg: any) => void
-  isTakeoverReconciling?: () => boolean
-  waitForTakeoverReconciliation?: () => Promise<void>
-  finishTakeoverReconciliation?: (reason?: string) => void
   onPongReceived?: (timestamp: number) => void
   onPeerPingReceived?: (senderId: string, msg: any) => void
   onPeerIdentityBound?: (senderId: string, userId: string) => void
@@ -184,6 +178,10 @@ export function createChannelMessageHandler(ctx: ChannelMessageHandlerContext): 
       }
       case 'CRDT_SYNC_MSG':
       case 'CRDT_SYNC_CHUNK': {
+        if (isHostMode && senderId && quarantinedSenders.has(senderId)) {
+          log.warn(`[WebRTC Host] Dropping ${msg.type} from quarantined conflicting peer ${senderId}`)
+          return
+        }
         ctx.callbacks.onCrdtSyncMessage?.(senderId || 'host', msg)
         return
       }
@@ -328,13 +326,6 @@ export function createChannelMessageHandler(ctx: ChannelMessageHandlerContext): 
             }
           }
         }
-        if (isHostMode && msg.clientMaxSeq && typeof msg.clientMaxSeq === 'number' && msg.clientMaxSeq > 0) {
-          const curSeq = ctx.getHostSeqCounter()
-          if (msg.clientMaxSeq > curSeq) {
-            console.log(`[WebRTC Host] Advancing hostSeqCounter from ${curSeq} to ${msg.clientMaxSeq} based on clientMaxSeq`)
-            ctx.setHostSeqCounter(msg.clientMaxSeq)
-          }
-        }
         if (isHostMode && senderId && quarantinedSenders.has(senderId)) {
           log.warn(`[WebRTC Host] Suppressing REQUEST_SYNC full sync for quarantined conflicting peer ${senderId}`)
           return
@@ -391,10 +382,6 @@ export function createChannelMessageHandler(ctx: ChannelMessageHandlerContext): 
 
         if (isHostMode) {
           return ctx.enqueueHostTask(senderId || 'default', async () => {
-            if (ctx.isTakeoverReconciling?.()) {
-              log.info(`Takeover reconciliation active; awaiting handoff completion before processing SYNC_DATA from ${senderId}`)
-              await ctx.waitForTakeoverReconciliation?.()
-            }
             const expectedScoutId = senderId ? ctx.clientIdToScoutId.get(senderId) : undefined
 
             // 安全过滤：防伪造冒充。每一条同步的记录必须匹配该 DataChannel 经 JWT 验证绑定的权威 scoutId
@@ -421,29 +408,18 @@ export function createChannelMessageHandler(ctx: ChannelMessageHandlerContext): 
               }
             }
 
-            // 步骤 1：本地过滤并打上单调递增的 hostSeq
+            // 步骤 1：本地接收过滤
             const accepted =
               legitimateRecords.length > 0
                 ? await callbacks.onRecordsReceived(legitimateRecords, senderId)
                 : []
-            const stagedSeq = ctx.getHostSeqCounter()
-            if (accepted.length > 0) {
-              ctx.stampHostSeq(accepted)
-            }
 
             // 步骤 2：持久化先于广播执行！确保落库成功后再通知外界
             if (accepted.length > 0) {
               try {
                 await syncRecords(accepted)
               } catch (err) {
-                console.error('[WebRTC Host] Failed to persist stamped records to DB:', err)
-                // 回滚计数器与 hostSeq，避免虚高断号
-                ctx.setHostSeqCounter(stagedSeq)
-                for (const r of accepted) {
-                  if (r.hostSeq && r.hostSeq > stagedSeq) {
-                    r.hostSeq = undefined
-                  }
-                }
+                console.error('[WebRTC Host] Failed to persist synced records to DB:', err)
                 // 回传拒绝回执，提示客户端重试
                 ctx.sendMessage(
                   {
@@ -780,87 +756,6 @@ export function createChannelMessageHandler(ctx: ChannelMessageHandlerContext): 
           callbacks.onOfficialRosterSyncReceived?.(msg.teams)
         }
         break
-
-      case 'HOST_HANDOFF_BATCH': {
-        if (isHostMode) {
-          return ctx.enqueueHostTask(senderId || 'handoff', async () => {
-            console.log(
-              `[WebRTC Host] Received HOST_HANDOFF_BATCH from ${senderId || 'peer'}: ${msg.records?.length || 0} records, incomingMaxSeq=${msg.incomingMaxSeq}`
-            )
-
-            // 1. 批量落库并保留原有权威序列号
-            let acceptedRecords: ScoutingRecord[] = []
-            if (Array.isArray(msg.records) && msg.records.length > 0) {
-              acceptedRecords = await callbacks.onRecordsReceived(msg.records, senderId)
-              ctx.stampHostSeq(acceptedRecords)
-              try {
-                await syncRecords(acceptedRecords)
-              } catch (err) {
-                console.error('[WebRTC Host] Failed to persist handoff records to DB:', err)
-              }
-            }
-
-            // 2. 推进 hostSeqCounter 至 max(当前, incomingMaxSeq, 记录中最大)
-            const incomingSeq = typeof msg.incomingMaxSeq === 'number' ? msg.incomingMaxSeq : 0
-            let curSeq = ctx.getHostSeqCounter()
-            for (const r of acceptedRecords) {
-              if (typeof r.hostSeq === 'number' && r.hostSeq > curSeq) {
-                curSeq = r.hostSeq
-              }
-            }
-            if (incomingSeq > curSeq) {
-              curSeq = incomingSeq
-            }
-            ctx.setHostSeqCounter(curSeq)
-
-            // 3. 处理赛程排班、Pit 展位、战队标签与自定义字段
-            if (callbacks.onHostHandoffReceived) {
-              await callbacks.onHostHandoffReceived(msg)
-            } else {
-              if (Array.isArray(msg.schedules) && Array.isArray(msg.assignments)) {
-                callbacks.onScheduleFullSyncReceived?.(msg.schedules, msg.assignments)
-              }
-              if (Array.isArray(msg.pitRecords)) {
-                callbacks.onPitScoutFullSyncReceived?.(msg.pitRecords)
-              }
-              if (Array.isArray(msg.teamTags) && msg.eventId) {
-                callbacks.onTagsFullSyncReceived?.(msg.teamTags, msg.eventId)
-              }
-              if (Array.isArray(msg.customFields) && msg.eventId) {
-                callbacks.onCustomFieldsFullSyncReceived?.(msg.customFields, msg.eventId)
-              }
-            }
-
-            // 4. 解除 Takeover 对齐门禁，放行等待中的普通 SYNC_DATA 队列
-            ctx.finishTakeoverReconciliation?.('handoff_processed')
-
-            // 5. 回传 ACK
-            if (senderId) {
-              await ctx.sendMessage(
-                {
-                  type: 'HOST_HANDOFF_ACK',
-                  eventId: msg.eventId,
-                  acceptedCount: acceptedRecords.length,
-                  alignedMaxSeq: curSeq,
-                  hostEpoch: msg.hostEpoch || 0,
-                  authCode: currentInviteCode,
-                  hostSessionId: ctx.getHostSessionId()
-                },
-                senderId
-              )
-            }
-          })
-        }
-        break
-      }
-
-      case 'HOST_HANDOFF_ACK': {
-        console.log(
-          `[WebRTC] Received HOST_HANDOFF_ACK: accepted ${msg.acceptedCount}, alignedMaxSeq=${msg.alignedMaxSeq}`
-        )
-        callbacks.onHostHandoffAck?.(msg)
-        break
-      }
 
       case 'EVENT_METADATA':
         if (msg.event) {

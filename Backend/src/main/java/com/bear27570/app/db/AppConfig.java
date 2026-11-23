@@ -184,20 +184,11 @@ public class AppConfig {
 
     /**
      * 获取 H2 数据库物理文件前缀（H2 会自动追加 .mv.db）。
-     * 显式隔离目录 (<dataDir>/app_data) > DEV (<project_root>/app_data) > PROD (~/.scoutingpro27/app_data)
+     * 统一落盘在基准数据目录下：
+     * 显式隔离目录 (<dataDir>/app_data) > DEV (<project_root>/app_data/app_data) > PROD (~/.scoutingpro27/app_data)
      */
     public static File resolveAppDbFile() {
-        File explicitDir = resolveExplicitDataDir();
-        if (explicitDir != null) {
-            return new File(explicitDir, "app_data");
-        }
-        if (isDev()) {
-            File root = findProjectRootDir();
-            return root != null ? new File(root, "app_data") : new File("app_data");
-        } else {
-            File prodDir = resolveBaseDataDir();
-            return new File(prodDir, "app_data");
-        }
+        return new File(resolveBaseDataDir(), "app_data");
     }
 
     /**

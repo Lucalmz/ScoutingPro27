@@ -89,8 +89,6 @@ export interface ScoutingRecord {
   isConflict?: boolean
   /** 记录级逻辑版本号，每次该记录被任何节点编辑就 +1，用于 LWW 冲突解决（替代 updatedAt 比较）*/
   version: number
-  /** Host 分配的全局单调序列号，用于客户端增量同步请求（sinceVersion 过滤）*/
-  hostSeq?: number
   /** 作者设备 ECDSA SPKI Base64 公钥（用于队友代传灾备验签）*/
   authorPubKey?: string
   /** 作者设备写时计算的 ECDSA-SHA256 签名 Base64 */
@@ -241,8 +239,6 @@ export type WebRtcMessage =
   | WebRtcPitPhotoAck
   | WebRtcMergeAccountRequest
   | WebRtcMergeAccountResponse
-  | WebRtcHostHandoffBatch
-  | WebRtcHostHandoffAck
   | WebRtcClockSyncReq
   | WebRtcClockSyncRes
   | WebRtcForceClockResync
@@ -580,17 +576,13 @@ export interface WebRtcDirectMessage {
 export interface WebRtcRequestSync {
   type: 'REQUEST_SYNC'
   lastSyncTime: string
-  /** 增量同步：只请求 hostSeq > sinceVersion 的记录；0 或缺失表示全量请求 */
+  /** 会话注册与身份绑定握手兼容字段（保留 0） */
   sinceVersion?: number
   authCode?: string
   senderUserId?: string
   senderUserName?: string
   token?: string
   hostSessionId?: string
-  /** 主备切换/对齐标识 */
-  isHostTakeover?: boolean
-  /** 客户端已知的最高 hostSeq，供新主机时钟单调向前推进 */
-  clientMaxSeq?: number
 }
 
 export interface WebRtcSyncData {
@@ -606,36 +598,10 @@ export interface WebRtcSyncData {
 export interface WebRtcAckSync {
   type: 'ACK_SYNC'
   recordIds: string[]
-  /** Host 回传给原始推送者的、已打上 hostSeq 的记录，供其更新本地 hostSeq 和 lastHostSeq */
+  /** Host 回传给原始推送者的确认记录 */
   stampedRecords?: ScoutingRecord[]
-  /** 被 Host 判定为旧版本而被拒绝的记录 ID 列表 */
+  /** 被 Host 拒绝的记录 ID 列表 */
   rejectedRecordIds?: string[]
-  authCode?: string
-  hostSessionId?: string
-}
-
-export interface WebRtcHostHandoffBatch {
-  type: 'HOST_HANDOFF_BATCH'
-  eventId: string
-  incomingMaxSeq: number
-  hostEpoch: number
-  records: ScoutingRecord[]
-  schedules?: MatchScheduleItem[]
-  assignments?: ScoutAssignment[]
-  pitRecords?: PitScoutingRecord[]
-  teamTags?: TeamTagItem[]
-  customFields?: CustomFieldDefinition[]
-  authCode?: string
-  senderUserId?: string
-  hostSessionId?: string
-}
-
-export interface WebRtcHostHandoffAck {
-  type: 'HOST_HANDOFF_ACK'
-  eventId: string
-  acceptedCount: number
-  alignedMaxSeq: number
-  hostEpoch: number
   authCode?: string
   hostSessionId?: string
 }
@@ -784,15 +750,110 @@ export interface RankingRow {
   trend: 'up' | 'down' | 'stable' | 'new'
 }
 
+export type AiProtocol = 'OPENAI' | 'GEMINI' | 'ANTHROPIC'
+
 export interface AiSettings {
   userId?: string;
-  provider: 'OPENAI' | 'GEMINI';
+  provider: 'OPENAI' | 'GEMINI' | 'ANTHROPIC';
   apiKeyEncrypted: string;
   modelName: string;
   systemPrompt: string;
   proxyHost: string;
   proxyPort: number | null;
   baseUrl?: string;
+}
+
+export interface AiProviderProfile {
+  id: string
+  userId?: string
+  name: string
+  presetId: string
+  protocol: AiProtocol
+  apiKeyEncrypted: string
+  hasApiKey?: boolean
+  baseUrl: string
+  modelName: string
+  customModels: string[]
+  systemPrompt: string
+  temperature: number
+  maxTokens: number
+  enableThinking: boolean
+  thinkingBudget: number
+  anthropicVersion: string
+  maxContextMsgs: number
+  proxyHost: string
+  proxyPort: number | null
+  isActive: boolean
+  createdAt?: string
+  updatedAt?: string
+}
+
+export interface AiTokenUsage {
+  promptTokens?: number
+  completionTokens?: number
+  totalTokens?: number
+  thoughtsTokens?: number
+}
+
+export interface AiChatMessage {
+  id: string
+  role: 'user' | 'assistant'
+  content: string
+  reasoning?: string
+  reasoningDurationMs?: number
+  createdAt?: string
+  modelName?: string
+  profileName?: string
+  usage?: AiTokenUsage
+  durationMs?: number
+  contextSummary?: string
+  stopped?: boolean
+  error?: string
+}
+
+export interface AiContextSections {
+  rankings: boolean
+  schedule: boolean
+  pit: boolean
+  matches: boolean
+  tags: boolean
+}
+
+export interface AiContextFocusMatch {
+  matchNumber: number
+  tournamentLevel?: string
+}
+
+export interface AiContextConfig {
+  enabled: boolean
+  sections: AiContextSections
+  focusTeams: number[]
+  focusMatch: AiContextFocusMatch | null
+}
+
+export interface AiThreadSummary {
+  id: string
+  eventId: string
+  title: string
+  personaId: string
+  pinned: boolean
+  messageCount: number
+  lastMessagePreview: string
+  createdAt?: string
+  updatedAt?: string
+}
+
+export interface AiChatThread {
+  id: string
+  userId?: string
+  eventId: string
+  title: string
+  personaId: string
+  pinned: boolean
+  messages: AiChatMessage[]
+  contextConfig: AiContextConfig
+  createdAt?: string
+  updatedAt?: string
 }
 
 // --- Pit Scouting & Unified Team Pool ---
@@ -836,7 +897,6 @@ export interface PitScoutingRecord {
   rawData?: string
   customFields?: Record<string, any>
   version: number
-  hostSeq?: number
   isDeleted?: boolean
   createdAt?: string
   updatedAt?: string

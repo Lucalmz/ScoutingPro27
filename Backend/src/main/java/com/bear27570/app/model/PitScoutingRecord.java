@@ -37,7 +37,6 @@ public class PitScoutingRecord {
     @com.google.gson.annotations.JsonAdapter(com.bear27570.app.util.StringListTypeAdapter.class)
     private java.util.List<String> photoKeys = new java.util.ArrayList<>();
     private int version = 1;
-    private Integer hostSeq;
     private boolean isDeleted = false;
     private String rawData;
     private String createdAt;
@@ -139,9 +138,6 @@ public class PitScoutingRecord {
 
     public int getVersion() { return version; }
     public void setVersion(int version) { this.version = version; }
-
-    public Integer getHostSeq() { return hostSeq; }
-    public void setHostSeq(Integer hostSeq) { this.hostSeq = hostSeq; }
 
     public boolean getIsDeleted() { return isDeleted; }
     public boolean isDeleted() { return isDeleted; }

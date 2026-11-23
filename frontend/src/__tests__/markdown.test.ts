@@ -40,3 +40,30 @@ describe('renderMarkdown utility', () => {
     expect(html).toContain('rel="noopener noreferrer"')
   })
 })
+
+describe('renderMarkdown v2 commercial wrappers', () => {
+  it('wraps fenced code blocks with .md-code-block, .md-code-header, and [data-code-copy]', () => {
+    const html = renderMarkdown('```ts\nconst team = 27570\n```')
+    expect(html).toContain('class="md-code-block"')
+    expect(html).toContain('class="md-code-header"')
+    expect(html).toContain('class="md-code-lang">ts</span>')
+    expect(html).toContain('data-code-copy')
+    expect(html).toContain('<pre class="hljs">')
+    expect(html).toContain('27570')
+  })
+
+  it('wraps plain fenced code blocks with fallback code lang', () => {
+    const html = renderMarkdown('```\nhello pit\n```')
+    expect(html).toContain('class="md-code-block"')
+    expect(html).toContain('class="md-code-lang">code</span>')
+    expect(html).toContain('hello pit')
+  })
+
+  it('wraps markdown tables with .md-table-scroll container', () => {
+    const html = renderMarkdown('| Team | Avg |\n| --- | --- |\n| 27570 | 142.5 |')
+    expect(html).toContain('<div class="md-table-scroll">')
+    expect(html).toContain('<table>')
+    expect(html).toContain('27570')
+    expect(html).toMatch(/<\/table>\s*<\/div>/)
+  })
+})

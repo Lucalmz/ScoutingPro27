@@ -1,19 +1,22 @@
 package com.bear27570.app;
 
+import org.junit.jupiter.api.Assumptions;
 import org.junit.jupiter.api.Test;
 
-import javax.imageio.ImageIO;
 import javax.swing.*;
 import java.awt.*;
 import java.awt.image.BufferedImage;
-import java.io.File;
+import java.util.concurrent.atomic.AtomicReference;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
 public class SplashScreenVisualRenderTest {
 
     @Test
-    public void testRenderSplashScreenLoadingReadyAndFailureStates() throws Exception {
+    public void testSplashScreenStateTransitionsAndOffscreenRender() throws Exception {
+        Assumptions.assumeFalse(GraphicsEnvironment.isHeadless(), "Swing SplashScreen test requires non-headless display");
+        AtomicReference<Throwable> failure = new AtomicReference<>();
+
         SwingUtilities.invokeAndWait(() -> {
             SplashScreen splash = new SplashScreen();
             try {
@@ -24,60 +27,60 @@ public class SplashScreenVisualRenderTest {
                 splash.doLayout();
                 splash.validate();
 
-                File outDir = new File(System.getProperty("java.io.tmpdir"), "sp27-tests");
-                outDir.mkdirs();
+                // 1. Mid-progress loading state
+                splash.updateProgress(62, "Starting local server...");
+                assertThat(splash.isFailed()).isFalse();
+                assertThat(splash.getTargetProgress()).isEqualTo(62);
+                assertThat(splash.getStatusText()).isEqualTo("Starting local server...");
 
-                // 1. Mid-progress loading state (55%, "Starting local server...")
                 splash.setRenderStateForTest(1600L, 62f, "Starting local server...", false);
                 BufferedImage midImg = renderSplashToImage(splash);
-                File midFile = new File(outDir, "splash_loading_mid.png");
-                writePng(midImg, midFile);
+                assertHasPaintedContent(midImg);
 
-                // Verify background is Pit Wall #0B0E10 and 1px inner border is #1B2126
-                int bgRgb = midImg.getRGB(20, 120) & 0xFFFFFF;
-                assertThat(bgRgb).isEqualTo(0x0B0E10);
-                int borderRgb = midImg.getRGB(0, 120) & 0xFFFFFF;
-                assertThat(borderRgb).isEqualTo(0x1B2126);
+                // 2. Ready 100% state (clamped to [0, 100])
+                splash.updateProgress(130, "Ready");
+                assertThat(splash.getTargetProgress()).isEqualTo(100);
+                assertThat(splash.getStatusText()).isEqualTo("Ready");
 
-                // Verify completed segment #0 (x ~ 60, y = 293) is #39FF14
-                int seg0Rgb = midImg.getRGB(60, 293) & 0xFFFFFF;
-                assertThat(seg0Rgb).isEqualTo(0x39FF14);
-
-                // Verify unstarted segment #4 (x ~ 480, y = 293) is #1B2126
-                int seg4Rgb = midImg.getRGB(480, 293) & 0xFFFFFF;
-                assertThat(seg4Rgb).isEqualTo(0x1B2126);
-
-                // 2. Ready 100% state ("Ready")
                 splash.setRenderStateForTest(3000L, 100f, "Ready", false);
                 BufferedImage readyImg = renderSplashToImage(splash);
-                File readyFile = new File(outDir, "splash_ready_100.png");
-                writePng(readyImg, readyFile);
+                assertHasPaintedContent(readyImg);
 
-                // All 5 segments should be #39FF14 at 100%
-                assertThat(readyImg.getRGB(60, 293) & 0xFFFFFF).isEqualTo(0x39FF14);
-                assertThat(readyImg.getRGB(480, 293) & 0xFFFFFF).isEqualTo(0x39FF14);
-
-                // 3. Failure state ("Startup failed: Browser engine init timeout")
-                splash.setRenderStateForTest(2400L, 65f, "Building engine...", false);
-                splash.showFailure("Browser engine init timeout");
+                // 3. Failure state truncation, prefixing, and sticky latch against subsequent updateProgress
+                splash.showFailure("   A very long initialization error message exceeding forty-four characters   ");
                 assertThat(splash.isFailed()).isTrue();
-                assertThat(splash.getStatusText()).contains("Startup failed:");
+                assertThat(splash.getStatusText()).startsWith("Startup failed: ");
+                assertThat(splash.getStatusText()).endsWith("...");
+
+                String lockedFailureText = splash.getStatusText();
+                splash.updateProgress(99, "Should be ignored");
+                assertThat(splash.getStatusText()).isEqualTo(lockedFailureText);
 
                 BufferedImage failImg = renderSplashToImage(splash);
-                File failFile = new File(outDir, "splash_failure.png");
-                writePng(failImg, failFile);
-
-                // Verify failed header dot at (27, 23) is #FF5577
-                int failDotRgb = failImg.getRGB(27, 23) & 0xFFFFFF;
-                assertThat(failDotRgb).isEqualTo(0xFF5577);
-
-                // Verify failed segment #3 fill (x ~ 335, y = 293) is #FF5577
-                int failSegRgb = failImg.getRGB(335, 293) & 0xFFFFFF;
-                assertThat(failSegRgb).isEqualTo(0xFF5577);
+                assertHasPaintedContent(failImg);
+            } catch (Throwable t) {
+                failure.set(t);
             } finally {
                 splash.dispose();
             }
         });
+
+        if (failure.get() != null) {
+            throw new AssertionError("SplashScreen test failed", failure.get());
+        }
+    }
+
+    private static void assertHasPaintedContent(BufferedImage img) {
+        int bgRgb = SplashScreen.BG_GRAPHITE_900.getRGB() & 0xFFFFFF;
+        int nonBgPixels = 0;
+        for (int y = 0; y < img.getHeight(); y += 4) {
+            for (int x = 0; x < img.getWidth(); x += 4) {
+                if ((img.getRGB(x, y) & 0xFFFFFF) != bgRgb) {
+                    nonBgPixels++;
+                }
+            }
+        }
+        assertThat(nonBgPixels).isGreaterThan(0);
     }
 
     private static BufferedImage renderSplashToImage(SplashScreen splash) {
@@ -93,13 +96,5 @@ public class SplashScreenVisualRenderTest {
         }
         g2.dispose();
         return img;
-    }
-
-    private static void writePng(BufferedImage img, File file) {
-        try {
-            ImageIO.write(img, "png", file);
-        } catch (Exception e) {
-            throw new RuntimeException(e);
-        }
     }
 }

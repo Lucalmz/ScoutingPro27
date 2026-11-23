@@ -1,11 +1,13 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest'
-import { fetchEventMatches } from '@/services/ftcApi'
+import { fetchEventMatches, fetchEventRankings, fetchEventAdvancement } from '@/services/ftcApi'
 import * as api from '@/services/api'
-import type { OfficialMatch } from '@/types'
+import type { OfficialMatch, OfficialRanking, AdvancementDetail } from '@/types'
 
 vi.mock('@/services/api', () => ({
   fetchFtcMatches: vi.fn(),
-  fetchFtcScores: vi.fn()
+  fetchFtcScores: vi.fn(),
+  fetchFtcRankings: vi.fn(),
+  fetchFtcAdvancement: vi.fn()
 }))
 
 describe('FTC Events Official API Service', () => {
@@ -13,27 +15,25 @@ describe('FTC Events Official API Service', () => {
     vi.clearAllMocks()
   })
 
-  it('should return empty array for empty season or eventCode', async () => {
-    const res1 = await fetchEventMatches(0, 'CNCMPLB')
-    expect(res1).toEqual([])
-
-    const res2 = await fetchEventMatches(2025, '')
-    expect(res2).toEqual([])
+  it('returns empty arrays for missing season or eventCode without calling API', async () => {
+    expect(await fetchEventMatches(0, 'CNCMPLB')).toEqual([])
+    expect(await fetchEventMatches(2025, '')).toEqual([])
+    expect(await fetchEventRankings(0, 'CNCMPLB')).toEqual([])
+    expect(await fetchEventRankings(2025, '')).toEqual([])
+    expect(await fetchEventAdvancement(0, 'CNCMPLB')).toEqual([])
+    expect(await fetchEventAdvancement(2025, '')).toEqual([])
+    expect(api.fetchFtcMatches).not.toHaveBeenCalled()
+    expect(api.fetchFtcRankings).not.toHaveBeenCalled()
+    expect(api.fetchFtcAdvancement).not.toHaveBeenCalled()
   })
 
-  it('should fetch and return official matches with penalty and np scores', async () => {
+  it('fetches and trims eventCode for matches, rankings, and advancement', async () => {
     const mockMatches: OfficialMatch[] = [
       {
         matchNum: 1,
         scores: {
-          red: {
-            penaltyPointsCommitted: 5,
-            totalPointsNp: 136
-          },
-          blue: {
-            penaltyPointsCommitted: 15,
-            totalPointsNp: 152
-          }
+          red: { penaltyPointsCommitted: 5, totalPointsNp: 136 },
+          blue: { penaltyPointsCommitted: 15, totalPointsNp: 152 }
         },
         teams: [
           { teamNumber: 19666, alliance: 'Red' },
@@ -43,25 +43,46 @@ describe('FTC Events Official API Service', () => {
         ]
       }
     ]
+    const mockRankings: OfficialRanking[] = [
+      { rank: 1, teamNumber: 27570, sortOrder1: 140, sortOrder2: 120, wins: 5, losses: 0, ties: 0, qualMatchesPlayed: 5 }
+    ]
+    const mockAdvancement: AdvancementDetail[] = [
+      { teamNumber: 27570, advancementRank: 1, totalAdvancementPoints: 136, advancementStatus: 'ADVANCING' } as any
+    ]
 
     vi.mocked(api.fetchFtcMatches).mockResolvedValue(mockMatches)
+    vi.mocked(api.fetchFtcRankings).mockResolvedValue(mockRankings)
+    vi.mocked(api.fetchFtcAdvancement).mockResolvedValue(mockAdvancement)
 
-    const matches = await fetchEventMatches(2025, 'CNCMPLB')
-
+    const matches = await fetchEventMatches(2025, '  CNCMPLB  ')
     expect(api.fetchFtcMatches).toHaveBeenCalledWith(2025, 'CNCMPLB')
     expect(matches).toHaveLength(1)
-    expect(matches[0].matchNum).toBe(1)
-    expect(matches[0].scores?.red.penaltyPointsCommitted).toBe(5)
     expect(matches[0].scores?.red.totalPointsNp).toBe(136)
-    expect(matches[0].scores?.blue.penaltyPointsCommitted).toBe(15)
-    expect(matches[0].scores?.blue.totalPointsNp).toBe(152)
-    expect(matches[0].teams).toHaveLength(4)
+
+    const rankings = await fetchEventRankings(2025, '  CNCMPLB ')
+    expect(api.fetchFtcRankings).toHaveBeenCalledWith(2025, 'CNCMPLB')
+    expect(rankings).toEqual(mockRankings)
+
+    const advancement = await fetchEventAdvancement(2025, ' CNCMPLB\t')
+    expect(api.fetchFtcAdvancement).toHaveBeenCalledWith(2025, 'CNCMPLB')
+    expect(advancement).toEqual(mockAdvancement)
   })
 
-  it('should handle API errors gracefully and return empty array', async () => {
-    vi.mocked(api.fetchFtcMatches).mockRejectedValue(new Error('Network error or event not found'))
+  it('guards against non-array payloads and API errors across all three endpoints', async () => {
+    vi.mocked(api.fetchFtcMatches).mockResolvedValue({ unexpected: true } as any)
+    vi.mocked(api.fetchFtcRankings).mockResolvedValue(null as any)
+    vi.mocked(api.fetchFtcAdvancement).mockResolvedValue('invalid' as any)
 
-    const matches = await fetchEventMatches(2025, 'INVALID_EVENT')
-    expect(matches).toEqual([])
+    expect(await fetchEventMatches(2025, 'CNCMPLB')).toEqual([])
+    expect(await fetchEventRankings(2025, 'CNCMPLB')).toEqual([])
+    expect(await fetchEventAdvancement(2025, 'CNCMPLB')).toEqual([])
+
+    vi.mocked(api.fetchFtcMatches).mockRejectedValue(new Error('Network error'))
+    vi.mocked(api.fetchFtcRankings).mockRejectedValue(new Error('500'))
+    vi.mocked(api.fetchFtcAdvancement).mockRejectedValue(new Error('Timeout'))
+
+    expect(await fetchEventMatches(2025, 'INVALID')).toEqual([])
+    expect(await fetchEventRankings(2025, 'INVALID')).toEqual([])
+    expect(await fetchEventAdvancement(2025, 'INVALID')).toEqual([])
   })
 })

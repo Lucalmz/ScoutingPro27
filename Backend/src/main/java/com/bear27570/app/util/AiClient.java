@@ -1,621 +1,178 @@
 package com.bear27570.app.util;
 
+import com.bear27570.app.model.AiProviderProfile;
 import com.bear27570.app.model.AiSettings;
-import com.google.gson.Gson;
-import com.google.gson.JsonArray;
-import com.google.gson.JsonElement;
+import com.bear27570.app.util.ai.AiProxyResolver;
+import com.bear27570.app.util.ai.AiStreamSupport;
+import com.bear27570.app.util.ai.AnthropicProtocolAdapter;
+import com.bear27570.app.util.ai.GeminiProtocolAdapter;
+import com.bear27570.app.util.ai.OpenAiProtocolAdapter;
 import com.google.gson.JsonObject;
-import com.google.gson.JsonParser;
-import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
 
-import java.net.InetSocketAddress;
+import java.net.Proxy;
 import java.net.ProxySelector;
-import java.net.Socket;
-import java.net.URI;
 import java.net.http.HttpClient;
-import java.net.http.HttpRequest;
-import java.net.http.HttpResponse;
-import java.time.Duration;
-import java.util.ArrayList;
-import java.util.HashMap;
 import java.util.List;
+import java.util.Locale;
 import java.util.Map;
+import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.concurrent.atomic.AtomicInteger;
+import java.util.function.Consumer;
 
+/**
+ * Facade delegating proxy resolution, multi-protocol streaming, and endpoint normalization
+ * to cohesive protocol adapters in {@code com.bear27570.app.util.ai}.
+ */
 public class AiClient {
-    private static final Logger logger = LoggerFactory.getLogger(AiClient.class);
-    private static final Gson gson = new Gson();
-    // 主流 VPN 客户端默认本地 HTTP 代理端口（Clash/Mihomo: 7890, Clash Verge Rev: 7897, v2rayN: 10809/10808, Shadowsocks: 1080）
-    private static final int[] COMMON_LOCAL_PROXY_PORTS = {7890, 7897, 10809, 10808, 7891, 1080};
 
-    public static java.net.Proxy resolveEffectiveProxy(String customHost, Integer customPort) {
-        // 1. 优先使用显式指定的代理主机和端口
-        if (customPort != null && customPort > 0 && customPort <= 65535) {
-            String host = (customHost != null && !customHost.isBlank()) ? customHost.trim() : "127.0.0.1";
-            return new java.net.Proxy(java.net.Proxy.Type.HTTP, new InetSocketAddress(host, customPort));
-        }
-        // 2. 其次读取环境变量 HTTPS_PROXY / HTTP_PROXY
-        String envProxy = System.getenv("HTTPS_PROXY");
-        if (envProxy == null || envProxy.isBlank()) {
-            envProxy = System.getenv("HTTP_PROXY");
-        }
-        if (envProxy != null && !envProxy.isBlank()) {
-            try {
-                URI u = URI.create(envProxy.trim());
-                if (u.getHost() != null && u.getPort() > 0) {
-                    return new java.net.Proxy(java.net.Proxy.Type.HTTP, new InetSocketAddress(u.getHost(), u.getPort()));
-                }
-            } catch (Exception ignored) {}
-        }
-        // 3. 自动探测本机正在监听的 VPN 代理端口（无论是系统代理模式还是 TUN 模式均 100% 可达）
-        for (int port : COMMON_LOCAL_PROXY_PORTS) {
-            try (Socket s = new Socket()) {
-                s.connect(new InetSocketAddress("127.0.0.1", port), 35);
-                logger.info("[AiClient] Auto-detected active local VPN proxy on 127.0.0.1:{}", port);
-                return new java.net.Proxy(java.net.Proxy.Type.HTTP, new InetSocketAddress("127.0.0.1", port));
-            } catch (Exception ignored) {}
-        }
-        // 4. 兜底使用操作系统级默认代理
-        try {
-            ProxySelector sysSelector = ProxySelector.getDefault();
-            if (sysSelector != null) {
-                List<java.net.Proxy> proxies = sysSelector.select(URI.create("https://api.openai.com"));
-                if (proxies != null && !proxies.isEmpty()) {
-                    java.net.Proxy p = proxies.get(0);
-                    if (p != null && p.type() != java.net.Proxy.Type.DIRECT) {
-                        return p;
-                    }
-                }
-            }
-        } catch (Exception ignored) {}
-        return java.net.Proxy.NO_PROXY;
+    public record StreamChunk(String kind, String text, JsonObject usage) {}
+
+    // ==================== Proxy Resolution & Bypass ====================
+
+    public static boolean isLoopbackUrl(String targetUrl) {
+        return AiProxyResolver.isLoopbackUrl(targetUrl);
     }
 
-    private static ProxySelector resolveEffectiveProxySelector(AiSettings settings) {
-        String host = settings.getProxyHost();
-        Integer port = settings.getProxyPort();
-        java.net.Proxy proxy = resolveEffectiveProxy(host, port);
-        if (proxy != null && proxy.type() != java.net.Proxy.Type.DIRECT && proxy.address() instanceof InetSocketAddress addr) {
-            return ProxySelector.of(addr);
-        }
-        ProxySelector sys = ProxySelector.getDefault();
-        return sys != null ? sys : HttpClient.Builder.NO_PROXY;
+    public static Proxy resolveEffectiveProxy(String customHost, Integer customPort) {
+        return AiProxyResolver.resolveEffectiveProxy(customHost, customPort, null);
     }
+
+    public static Proxy resolveEffectiveProxy(String customHost, Integer customPort, String targetUrl) {
+        return AiProxyResolver.resolveEffectiveProxy(customHost, customPort, targetUrl);
+    }
+
+    public static ProxySelector resolveEffectiveProxySelector(String customHost, Integer customPort, String targetUrl) {
+        return AiProxyResolver.resolveEffectiveProxySelector(customHost, customPort, targetUrl);
+    }
+
+    public static HttpClient buildHttpClient(String proxyHost, Integer proxyPort, String targetUrl) {
+        return AiProxyResolver.buildHttpClient(proxyHost, proxyPort, targetUrl);
+    }
+
+    // ==================== Legacy Entry Points ====================
 
     public static String chat(AiSettings settings, String systemPrompt, List<Map<String, String>> messages) throws Exception {
-        HttpClient.Builder clientBuilder = HttpClient.newBuilder()
-                .connectTimeout(Duration.ofSeconds(15))
-                .proxy(resolveEffectiveProxySelector(settings));
+        AiProviderProfile profile = AiProviderProfile.fromLegacy(settings);
+        profile.setEnableThinking(false);
+        return chat(profile, systemPrompt, messages, null, null);
+    }
 
-        HttpClient client = clientBuilder.build();
-        String rawKey = AESUtil.decrypt(settings.getApiKeyEncrypted());
+    public static void chatStream(AiSettings settings, String systemPrompt, List<Map<String, String>> messages, Consumer<String> chunkConsumer, AtomicBoolean isCancelled) throws Exception {
+        AiProviderProfile profile = AiProviderProfile.fromLegacy(settings);
+        profile.setEnableThinking(false);
+        chatStream(profile, systemPrompt, messages, null, null, chunk -> {
+            if (("text".equals(chunk.kind()) || "reasoning".equals(chunk.kind())) && chunk.text() != null && !chunk.text().isEmpty()) {
+                chunkConsumer.accept(chunk.text());
+            }
+        }, isCancelled);
+    }
 
-        if ("OPENAI".equalsIgnoreCase(settings.getProvider())) {
-            return callOpenAi(client, settings, rawKey, systemPrompt, messages);
-        } else if ("GEMINI".equalsIgnoreCase(settings.getProvider())) {
-            return callGemini(client, settings.getModelName(), rawKey, systemPrompt, messages);
-        } else {
-            throw new IllegalArgumentException("Unsupported AI provider: " + settings.getProvider());
+    // ==================== Unified Three-Protocol Entry Points ====================
+
+    public static String chat(AiProviderProfile profile, String systemPrompt, List<Map<String, String>> messages) throws Exception {
+        return chat(profile, systemPrompt, messages, null, null);
+    }
+
+    public static String chat(AiProviderProfile profile, String systemPrompt, List<Map<String, String>> messages, Double temperatureOverride, String modelOverride) throws Exception {
+        StringBuilder answer = new StringBuilder();
+        chatStream(profile, systemPrompt, messages, temperatureOverride, modelOverride, chunk -> {
+            if ("text".equals(chunk.kind()) && chunk.text() != null) {
+                answer.append(chunk.text());
+            }
+        }, null);
+        return answer.length() > 0 ? answer.toString() : "[No Content Returned]";
+    }
+
+    public static void chatStream(
+            AiProviderProfile profile,
+            String systemPrompt,
+            List<Map<String, String>> messages,
+            Double temperatureOverride,
+            String modelOverride,
+            Consumer<StreamChunk> chunkConsumer,
+            AtomicBoolean isCancelled
+    ) throws Exception {
+        if (profile == null) {
+            throw new IllegalArgumentException("AI profile cannot be null");
+        }
+        String protocol = profile.getProtocol() != null ? profile.getProtocol().trim().toUpperCase(Locale.ROOT) : "OPENAI";
+        String rawKey = AESUtil.decrypt(profile.getApiKeyEncrypted());
+        rawKey = rawKey == null ? "" : rawKey.trim();
+        String effectiveModel = (modelOverride != null && !modelOverride.isBlank()) ? modelOverride.trim() : profile.getModelName();
+        Double effectiveTemp = temperatureOverride != null ? temperatureOverride : profile.getTemperature();
+        List<Map<String, String>> trimmedMessages = AiStreamSupport.trimContextMessages(messages, profile.getMaxContextMsgs());
+
+        switch (protocol) {
+            case "OPENAI" -> OpenAiProtocolAdapter.streamChat(profile, rawKey, effectiveModel, effectiveTemp, systemPrompt, trimmedMessages, chunkConsumer, isCancelled);
+            case "GEMINI" -> GeminiProtocolAdapter.streamChat(profile, rawKey, effectiveModel, effectiveTemp, systemPrompt, trimmedMessages, chunkConsumer, isCancelled);
+            case "ANTHROPIC" -> AnthropicProtocolAdapter.streamChat(profile, rawKey, effectiveModel, effectiveTemp, systemPrompt, trimmedMessages, chunkConsumer, isCancelled);
+            default -> throw new IllegalArgumentException("Unsupported AI protocol: " + protocol);
         }
     }
 
-    public static void chatStream(AiSettings settings, String systemPrompt, List<Map<String, String>> messages, java.util.function.Consumer<String> chunkConsumer, java.util.concurrent.atomic.AtomicBoolean isCancelled) throws Exception {
-        HttpClient.Builder clientBuilder = HttpClient.newBuilder()
-                .connectTimeout(Duration.ofSeconds(15))
-                .proxy(resolveEffectiveProxySelector(settings));
+    // ==================== Protocol Resolvers & Parsers ====================
 
-        HttpClient client = clientBuilder.build();
-        String rawKey = AESUtil.decrypt(settings.getApiKeyEncrypted());
-
-        if ("OPENAI".equalsIgnoreCase(settings.getProvider())) {
-            callOpenAiStream(client, settings, rawKey, systemPrompt, messages, chunkConsumer, isCancelled);
-        } else if ("GEMINI".equalsIgnoreCase(settings.getProvider())) {
-            callGeminiStream(client, settings.getModelName(), rawKey, systemPrompt, messages, chunkConsumer, isCancelled);
-        } else {
-            throw new IllegalArgumentException("Unsupported AI provider: " + settings.getProvider());
-        }
+    public static boolean isReasoningOnlyTemperatureModel(String modelName) {
+        return OpenAiProtocolAdapter.isReasoningOnlyTemperatureModel(modelName);
     }
 
-    private static String callOpenAi(HttpClient client, AiSettings settings, String apiKey, String systemPrompt, List<Map<String, String>> messages) throws Exception {
-        String modelName = settings.getModelName();
-        JsonObject payload = new JsonObject();
-        payload.addProperty("model", (modelName != null && !modelName.isBlank()) ? modelName.trim() : "gpt-3.5-turbo");
-
-        JsonArray msgsArray = new JsonArray();
-
-        if (systemPrompt != null && !systemPrompt.trim().isEmpty()) {
-            JsonObject sysMsg = new JsonObject();
-            sysMsg.addProperty("role", "system");
-            sysMsg.addProperty("content", systemPrompt);
-            msgsArray.add(sysMsg);
-        }
-
-        for (Map<String, String> msg : messages) {
-            if (msg.get("content") == null || msg.get("content").isBlank()) {
-                continue;
-            }
-            JsonObject m = new JsonObject();
-            m.addProperty("role", msg.get("role") != null ? msg.get("role") : "user");
-            m.addProperty("content", msg.get("content"));
-            msgsArray.add(m);
-        }
-
-        payload.add("messages", msgsArray);
-
-        String endpoint = resolveOpenAiChatEndpoint(settings.getBaseUrl());
-
-        HttpRequest request = HttpRequest.newBuilder()
-                .uri(URI.create(endpoint))
-                .header("Content-Type", "application/json")
-                .header("Authorization", "Bearer " + apiKey)
-                .POST(HttpRequest.BodyPublishers.ofString(gson.toJson(payload)))
-                .timeout(Duration.ofSeconds(60))
-                .build();
-
-        HttpResponse<String> response = client.send(request, HttpResponse.BodyHandlers.ofString());
-
-        if (response.statusCode() >= 200 && response.statusCode() < 300) {
-            JsonObject resObj = JsonParser.parseString(response.body()).getAsJsonObject();
-            if (resObj.has("choices") && resObj.get("choices").isJsonArray()) {
-                JsonArray choices = resObj.getAsJsonArray("choices");
-                if (choices.size() > 0 && choices.get(0).isJsonObject()) {
-                    JsonObject choice0 = choices.get(0).getAsJsonObject();
-                    if (choice0.has("message") && choice0.get("message").isJsonObject()) {
-                        JsonObject msgObj = choice0.getAsJsonObject("message");
-                        if (msgObj.has("content") && !msgObj.get("content").isJsonNull()) {
-                            return msgObj.get("content").getAsString();
-                        }
-                    }
-                }
-            }
-            return "[No Content Returned]";
-        } else {
-            throw new RuntimeException("OpenAI API Error (" + response.statusCode() + "): " + response.body());
-        }
-    }
-
-    private static String callGemini(HttpClient client, String modelName, String apiKey, String systemPrompt, List<Map<String, String>> messages) throws Exception {
-        String model = (modelName != null && !modelName.isBlank()) ? modelName.trim() : "gemini-flash-latest";
-        String url = "https://generativelanguage.googleapis.com/v1beta/models/" + model + ":generateContent";
-
-        JsonObject payload = new JsonObject();
-
-        if (systemPrompt != null && !systemPrompt.trim().isEmpty()) {
-            JsonObject sysInst = new JsonObject();
-            JsonArray partsArray = new JsonArray();
-            JsonObject part = new JsonObject();
-            part.addProperty("text", systemPrompt.trim());
-            partsArray.add(part);
-            sysInst.add("parts", partsArray);
-            payload.add("system_instruction", sysInst);
-        }
-
-        List<Map<String, String>> normalized = normalizeGeminiMessages(messages);
-        JsonArray contentsArray = new JsonArray();
-        for (Map<String, String> msg : normalized) {
-            JsonObject contentObj = new JsonObject();
-            contentObj.addProperty("role", msg.get("role"));
-
-            JsonArray partsArray = new JsonArray();
-            JsonObject part = new JsonObject();
-            part.addProperty("text", msg.get("content"));
-            partsArray.add(part);
-
-            contentObj.add("parts", partsArray);
-            contentsArray.add(contentObj);
-        }
-        payload.add("contents", contentsArray);
-
-        HttpRequest request = HttpRequest.newBuilder()
-                .uri(URI.create(url))
-                .header("Content-Type", "application/json")
-                .header("x-goog-api-key", apiKey)
-                .POST(HttpRequest.BodyPublishers.ofString(gson.toJson(payload)))
-                .timeout(Duration.ofSeconds(60))
-                .build();
-
-        HttpResponse<String> response = client.send(request, HttpResponse.BodyHandlers.ofString());
-
-        if (response.statusCode() >= 200 && response.statusCode() < 300) {
-            JsonObject resObj = JsonParser.parseString(response.body()).getAsJsonObject();
-            JsonArray candidates = resObj.getAsJsonArray("candidates");
-            if (candidates != null && candidates.size() > 0) {
-                JsonObject candidate = candidates.get(0).getAsJsonObject();
-                if (candidate.has("finishReason") && "SAFETY".equalsIgnoreCase(candidate.get("finishReason").getAsString())) {
-                    return "[Blocked by Safety Filter]";
-                }
-                if (candidate.has("content")) {
-                    JsonObject content = candidate.getAsJsonObject("content");
-                    if (content.has("parts")) {
-                        JsonArray parts = content.getAsJsonArray("parts");
-                        StringBuilder textBuilder = new StringBuilder();
-                        for (JsonElement p : parts) {
-                            if (p.isJsonObject() && p.getAsJsonObject().has("text")) {
-                                textBuilder.append(p.getAsJsonObject().get("text").getAsString());
-                            }
-                        }
-                        if (textBuilder.length() > 0) {
-                            return textBuilder.toString();
-                        }
-                    }
-                }
-            }
-            return "[No Content Returned]";
-        } else {
-            String body = response.body();
-            int code = response.statusCode();
-            if (code == 404) {
-                throw new RuntimeException("Gemini API (404 Not Found): 当前模型 [" + model + "] 不可用，可能是您的 API Key 权限或额度不支持该模型，请尝试在设置中切换模型 (如 gemini-flash-latest)。原始响应: " + body);
-            } else if (code == 403) {
-                throw new RuntimeException("Gemini API (403 Forbidden): API Key 无效或未启用相关 API 权限。原始响应: " + body);
-            } else if (code == 429) {
-                throw new RuntimeException("Gemini API (429 Rate Limit/Quota Exceeded): 请求频率超限或配额耗尽。原始响应: " + body);
-            } else {
-                throw new RuntimeException("Gemini API Error (" + code + "): " + body);
-            }
-        }
-    }
-
-    private static void callOpenAiStream(HttpClient client, AiSettings settings, String apiKey, String systemPrompt, List<Map<String, String>> messages, java.util.function.Consumer<String> chunkConsumer, java.util.concurrent.atomic.AtomicBoolean isCancelled) throws Exception {
-        String modelName = settings.getModelName();
-        JsonObject payload = new JsonObject();
-        payload.addProperty("model", (modelName != null && !modelName.isBlank()) ? modelName.trim() : "gpt-3.5-turbo");
-        payload.addProperty("stream", true);
-
-        JsonArray msgsArray = new JsonArray();
-
-        if (systemPrompt != null && !systemPrompt.trim().isEmpty()) {
-            JsonObject sysMsg = new JsonObject();
-            sysMsg.addProperty("role", "system");
-            sysMsg.addProperty("content", systemPrompt);
-            msgsArray.add(sysMsg);
-        }
-
-        for (Map<String, String> msg : messages) {
-            if (msg.get("content") == null || msg.get("content").isBlank()) {
-                continue;
-            }
-            JsonObject m = new JsonObject();
-            m.addProperty("role", msg.get("role") != null ? msg.get("role") : "user");
-            m.addProperty("content", msg.get("content"));
-            msgsArray.add(m);
-        }
-
-        payload.add("messages", msgsArray);
-
-        String endpoint = resolveOpenAiChatEndpoint(settings.getBaseUrl());
-
-        HttpRequest request = HttpRequest.newBuilder()
-                .uri(URI.create(endpoint))
-                .header("Content-Type", "application/json")
-                .header("Authorization", "Bearer " + apiKey)
-                .POST(HttpRequest.BodyPublishers.ofString(gson.toJson(payload)))
-                .timeout(Duration.ofSeconds(120))
-                .build();
-
-        java.util.concurrent.CompletableFuture<HttpResponse<java.io.InputStream>> future = client.sendAsync(request, HttpResponse.BodyHandlers.ofInputStream());
-
-        HttpResponse<java.io.InputStream> response = awaitResponseWithCancellation(future, isCancelled);
-        if (response == null) {
-            return;
-        }
-
-        int statusCode = response.statusCode();
-        if (statusCode < 200 || statusCode >= 300) {
-            try (java.io.InputStream is = response.body()) {
-                String errorBody = new String(is.readAllBytes(), java.nio.charset.StandardCharsets.UTF_8);
-                throw new RuntimeException("OpenAI API Error (" + statusCode + "): " + errorBody);
-            }
-        }
-
-        try (java.io.InputStream is = response.body();
-             java.io.BufferedReader reader = new java.io.BufferedReader(new java.io.InputStreamReader(is, java.nio.charset.StandardCharsets.UTF_8))) {
-            String line;
-            while ((line = reader.readLine()) != null) {
-                if (isCancelled != null && isCancelled.get()) {
-                    future.cancel(true);
-                    is.close(); // Forcibly close underlying HTTP connection stream immediately
-                    break;
-                }
-                String delta = parseOpenAiSseLine(line);
-                if ("[DONE]".equals(delta)) {
-                    break;
-                }
-                if (delta != null && !delta.isEmpty()) {
-                    chunkConsumer.accept(delta);
-                }
-            }
-        }
-    }
-
-    private static void callGeminiStream(HttpClient client, String modelName, String apiKey, String systemPrompt, List<Map<String, String>> messages, java.util.function.Consumer<String> chunkConsumer, java.util.concurrent.atomic.AtomicBoolean isCancelled) throws Exception {
-        String model = (modelName != null && !modelName.isBlank()) ? modelName.trim() : "gemini-flash-latest";
-        String url = "https://generativelanguage.googleapis.com/v1beta/models/" + model + ":streamGenerateContent?alt=sse";
-
-        JsonObject payload = new JsonObject();
-
-        if (systemPrompt != null && !systemPrompt.trim().isEmpty()) {
-            JsonObject sysInst = new JsonObject();
-            JsonArray partsArray = new JsonArray();
-            JsonObject part = new JsonObject();
-            part.addProperty("text", systemPrompt.trim());
-            partsArray.add(part);
-            sysInst.add("parts", partsArray);
-            payload.add("system_instruction", sysInst);
-        }
-
-        List<Map<String, String>> normalized = normalizeGeminiMessages(messages);
-        JsonArray contentsArray = new JsonArray();
-        for (Map<String, String> msg : normalized) {
-            JsonObject contentObj = new JsonObject();
-            contentObj.addProperty("role", msg.get("role"));
-
-            JsonArray partsArray = new JsonArray();
-            JsonObject part = new JsonObject();
-            part.addProperty("text", msg.get("content"));
-            partsArray.add(part);
-
-            contentObj.add("parts", partsArray);
-            contentsArray.add(contentObj);
-        }
-        payload.add("contents", contentsArray);
-
-        HttpRequest request = HttpRequest.newBuilder()
-                .uri(URI.create(url))
-                .header("Content-Type", "application/json")
-                .header("x-goog-api-key", apiKey)
-                .POST(HttpRequest.BodyPublishers.ofString(gson.toJson(payload)))
-                .timeout(Duration.ofSeconds(120))
-                .build();
-
-        java.util.concurrent.CompletableFuture<HttpResponse<java.io.InputStream>> future = client.sendAsync(request, HttpResponse.BodyHandlers.ofInputStream());
-
-        HttpResponse<java.io.InputStream> response = awaitResponseWithCancellation(future, isCancelled);
-        if (response == null) {
-            return;
-        }
-
-        int code = response.statusCode();
-        if (code < 200 || code >= 300) {
-            try (java.io.InputStream is = response.body()) {
-                String body = new String(is.readAllBytes(), java.nio.charset.StandardCharsets.UTF_8);
-                if (code == 404) {
-                    throw new RuntimeException("Gemini API (404 Not Found): 当前模型 [" + model + "] 不可用，可能是您的 API Key 权限或额度不支持该模型，请尝试在设置中切换模型 (如 gemini-flash-latest)。原始响应: " + body);
-                } else if (code == 403) {
-                    throw new RuntimeException("Gemini API (403 Forbidden): API Key 无效或未启用相关 API 权限。原始响应: " + body);
-                } else if (code == 429) {
-                    throw new RuntimeException("Gemini API (429 Rate Limit/Quota Exceeded): 请求频率超限或配额耗尽。原始响应: " + body);
-                } else {
-                    throw new RuntimeException("Gemini API Error (" + code + "): " + body);
-                }
-            }
-        }
-
-        try (java.io.InputStream is = response.body();
-             java.io.BufferedReader reader = new java.io.BufferedReader(new java.io.InputStreamReader(is, java.nio.charset.StandardCharsets.UTF_8))) {
-            String line;
-            while ((line = reader.readLine()) != null) {
-                if (isCancelled != null && isCancelled.get()) {
-                    future.cancel(true);
-                    is.close(); // Forcibly close underlying HTTP connection stream immediately
-                    break;
-                }
-                String delta = parseGeminiSseLine(line);
-                if (delta != null && !delta.isEmpty()) {
-                    chunkConsumer.accept(delta);
-                }
-            }
-        }
-    }
-
-    /**
-     * Parses a single SSE line for OpenAI format:
-     * Returns the delta text content, or "[DONE]" if finished, or null if line is not a valid content delta.
-     */
-    public static String parseOpenAiSseLine(String line) {
-        if (line == null) return null;
-        String trimmed = line.trim();
-        if (trimmed.isEmpty() || trimmed.startsWith(":")) {
-            return null;
-        }
-        if (trimmed.startsWith("data:")) {
-            String data = trimmed.substring(5).trim();
-            if ("[DONE]".equals(data)) {
-                return "[DONE]";
-            }
-            try {
-                JsonObject json = JsonParser.parseString(data).getAsJsonObject();
-                if (json.has("choices") && json.get("choices").isJsonArray()) {
-                    JsonArray choices = json.getAsJsonArray("choices");
-                    if (choices.size() > 0 && choices.get(0).isJsonObject()) {
-                        JsonObject choice0 = choices.get(0).getAsJsonObject();
-                        if (choice0.has("delta") && choice0.get("delta").isJsonObject()) {
-                            JsonObject delta = choice0.getAsJsonObject("delta");
-                            if (delta.has("content") && !delta.get("content").isJsonNull()) {
-                                String c = delta.get("content").getAsString();
-                                if (!c.isEmpty()) {
-                                    return c;
-                                }
-                            }
-                            if (delta.has("reasoning_content") && !delta.get("reasoning_content").isJsonNull()) {
-                                String r = delta.get("reasoning_content").getAsString();
-                                if (!r.isEmpty()) {
-                                    return r;
-                                }
-                            }
-                        }
-                    }
-                }
-            } catch (Exception ignored) {
-            }
-        }
-        return null;
-    }
-
-    /**
-     * Parses a single SSE line for Gemini format:
-     * Returns delta text content or safety message, or null if line is not a valid content delta.
-     */
-    public static String parseGeminiSseLine(String line) {
-        if (line == null) return null;
-        String trimmed = line.trim();
-        if (trimmed.isEmpty() || trimmed.startsWith(":")) {
-            return null;
-        }
-        if (trimmed.startsWith("data:")) {
-            String data = trimmed.substring(5).trim();
-            try {
-                JsonObject resObj = JsonParser.parseString(data).getAsJsonObject();
-                if (resObj.has("candidates") && resObj.get("candidates").isJsonArray()) {
-                    JsonArray candidates = resObj.getAsJsonArray("candidates");
-                    if (candidates.size() > 0 && candidates.get(0).isJsonObject()) {
-                        JsonObject candidate = candidates.get(0).getAsJsonObject();
-                        if (candidate.has("finishReason") && "SAFETY".equalsIgnoreCase(candidate.get("finishReason").getAsString())) {
-                            return "[Blocked by Safety Filter]";
-                        }
-                        if (candidate.has("content") && candidate.get("content").isJsonObject()) {
-                            JsonObject content = candidate.getAsJsonObject("content");
-                            if (content.has("parts") && content.get("parts").isJsonArray()) {
-                                JsonArray parts = content.getAsJsonArray("parts");
-                                StringBuilder sb = new StringBuilder();
-                                for (JsonElement p : parts) {
-                                    if (p.isJsonObject() && p.getAsJsonObject().has("text")) {
-                                        sb.append(p.getAsJsonObject().get("text").getAsString());
-                                    }
-                                }
-                                if (sb.length() > 0) {
-                                    return sb.toString();
-                                }
-                            }
-                        }
-                    }
-                }
-            } catch (Exception ignored) {
-            }
-        }
-        return null;
-    }
-
-    /**
-     * Normalizes conversation history for Gemini API:
-     * 1. Maps 'assistant' to 'model', defaults others to 'user'
-     * 2. Removes empty messages
-     * 3. Merges consecutive messages with the same role
-     * 4. Ensures the conversation sequence starts with 'user'
-     */
-    public static List<Map<String, String>> normalizeGeminiMessages(List<Map<String, String>> messages) {
-        List<Map<String, String>> result = new ArrayList<>();
-        if (messages == null || messages.isEmpty()) {
-            Map<String, String> defaultUser = new HashMap<>();
-            defaultUser.put("role", "user");
-            defaultUser.put("content", "Hello");
-            result.add(defaultUser);
-            return result;
-        }
-
-        for (Map<String, String> msg : messages) {
-            String rawContent = msg.get("content");
-            if (rawContent == null || rawContent.trim().isEmpty()) {
-                continue;
-            }
-            String rawRole = msg.get("role");
-            String role = ("model".equalsIgnoreCase(rawRole) || "assistant".equalsIgnoreCase(rawRole)) ? "model" : "user";
-
-            if (!result.isEmpty() && result.get(result.size() - 1).get("role").equals(role)) {
-                // Merge with previous same-role message
-                Map<String, String> last = result.get(result.size() - 1);
-                last.put("content", last.get("content") + "\n\n" + rawContent.trim());
-            } else {
-                Map<String, String> item = new HashMap<>();
-                item.put("role", role);
-                item.put("content", rawContent.trim());
-                result.add(item);
-            }
-        }
-
-        // Ensure starts with user
-        if (!result.isEmpty() && "model".equals(result.get(0).get("role"))) {
-            Map<String, String> initialUser = new HashMap<>();
-            initialUser.put("role", "user");
-            initialUser.put("content", "Context init");
-            result.add(0, initialUser);
-        }
-
-        if (result.isEmpty()) {
-            Map<String, String> defaultUser = new HashMap<>();
-            defaultUser.put("role", "user");
-            defaultUser.put("content", "Hello");
-            result.add(defaultUser);
-        }
-
-        return result;
-    }
-
-    /**
-     * Resolves the full chat completions endpoint URL for OpenAI-compatible providers.
-     */
     public static String resolveOpenAiChatEndpoint(String baseUrl) {
-        if (baseUrl == null || baseUrl.isBlank()) {
-            return "https://api.openai.com/v1/chat/completions";
-        }
-        String bUrl = baseUrl.trim();
-        while (bUrl.endsWith("/")) {
-            bUrl = bUrl.substring(0, bUrl.length() - 1);
-        }
-        if (bUrl.endsWith("/chat/completions")) {
-            return bUrl;
-        }
-        if (bUrl.matches(".*\\/v[0-9]+([a-zA-Z0-9_-]*)?$")) {
-            return bUrl + "/chat/completions";
-        }
-        return bUrl + "/v1/chat/completions";
+        return OpenAiProtocolAdapter.resolveChatEndpoint(baseUrl);
     }
 
-    /**
-     * Resolves the models listing endpoint URL for OpenAI-compatible providers (used for connection tests).
-     */
     public static String resolveOpenAiModelsEndpoint(String baseUrl) {
-        if (baseUrl == null || baseUrl.isBlank()) {
-            return "https://api.openai.com/v1/models";
-        }
-        String bUrl = baseUrl.trim();
-        while (bUrl.endsWith("/")) {
-            bUrl = bUrl.substring(0, bUrl.length() - 1);
-        }
-        if (bUrl.endsWith("/models")) {
-            return bUrl;
-        }
-        if (bUrl.endsWith("/chat/completions")) {
-            bUrl = bUrl.substring(0, bUrl.lastIndexOf("/chat/completions"));
-        }
-        if (bUrl.matches(".*\\/v[0-9]+([a-zA-Z0-9_-]*)?$")) {
-            return bUrl + "/models";
-        }
-        return bUrl + "/v1/models";
+        return OpenAiProtocolAdapter.resolveModelsEndpoint(baseUrl);
     }
 
-    private static HttpResponse<java.io.InputStream> awaitResponseWithCancellation(
-            java.util.concurrent.CompletableFuture<HttpResponse<java.io.InputStream>> future,
-            java.util.concurrent.atomic.AtomicBoolean isCancelled) throws Exception {
-        try {
-            while (!future.isDone()) {
-                if (isCancelled != null && isCancelled.get()) {
-                    future.cancel(true);
-                    return null;
-                }
-                try {
-                    return future.get(500, java.util.concurrent.TimeUnit.MILLISECONDS);
-                } catch (java.util.concurrent.TimeoutException te) {
-                    // loop check isCancelled
-                }
-            }
-            return future.get();
-        } catch (Exception e) {
-            if (isCancelled != null && isCancelled.get()) {
-                future.cancel(true);
-                return null;
-            }
-            throw e;
-        }
+    public static List<StreamChunk> parseOpenAiSseChunk(String line) {
+        return OpenAiProtocolAdapter.parseSseChunk(line);
+    }
+
+    public static String resolveGeminiBaseUrl(String baseUrl) {
+        return GeminiProtocolAdapter.resolveBaseUrl(baseUrl);
+    }
+
+    public static String resolveGeminiGenerateEndpoint(String baseUrl, String modelName, boolean stream) {
+        return GeminiProtocolAdapter.resolveGenerateEndpoint(baseUrl, modelName, stream);
+    }
+
+    public static String resolveGeminiModelsEndpoint(String baseUrl) {
+        return GeminiProtocolAdapter.resolveModelsEndpoint(baseUrl);
+    }
+
+    public static List<StreamChunk> parseGeminiSseChunk(String line, AtomicBoolean emittedAnyText) {
+        return GeminiProtocolAdapter.parseSseChunk(line, emittedAnyText);
+    }
+
+    public static List<Map<String, String>> normalizeGeminiMessages(List<Map<String, String>> messages) {
+        return GeminiProtocolAdapter.normalizeMessages(messages);
+    }
+
+    public static String resolveAnthropicMessagesEndpoint(String baseUrl) {
+        return AnthropicProtocolAdapter.resolveMessagesEndpoint(baseUrl);
+    }
+
+    public static String resolveAnthropicModelsEndpoint(String baseUrl) {
+        return AnthropicProtocolAdapter.resolveModelsEndpoint(baseUrl);
+    }
+
+    public static List<Map<String, String>> normalizeAnthropicMessages(List<Map<String, String>> messages) {
+        return AnthropicProtocolAdapter.normalizeMessages(messages);
+    }
+
+    public static List<StreamChunk> parseAnthropicSseEvent(String currentEvent, String dataStr, AtomicInteger cachedInputTokens) {
+        return AnthropicProtocolAdapter.parseSseEvent(currentEvent, dataStr, cachedInputTokens);
+    }
+
+    public static List<String> parseModelsResponse(String protocol, String responseBody) {
+        return GeminiProtocolAdapter.parseModelsResponse(protocol, responseBody);
+    }
+
+    public static String parseOpenAiSseLine(String line) {
+        return OpenAiProtocolAdapter.parseLegacySseLine(line);
+    }
+
+    public static String parseGeminiSseLine(String line) {
+        return GeminiProtocolAdapter.parseLegacySseLine(line);
     }
 }

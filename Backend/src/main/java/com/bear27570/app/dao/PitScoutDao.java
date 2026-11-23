@@ -42,7 +42,7 @@ public interface PitScoutDao {
             :claimedAutoStrategy, :claimedAutoScore, :claimedTeleopCycles, :claimedTeleopScore,
             :claimedTeleopPark, :claimedFlowerNectars, :claimedFlowerBottomBonus, :claimedFlowerPollens, :claimedGardenBalls,
             :claimedEndgameScore, :claimedTotalScore,
-            :photoKeys, :version, :hostSeq, :isDeleted, :rawData,
+            :photoKeys, :version, :isDeleted, :rawData,
             COALESCE(CAST(REPLACE(REPLACE(NULLIF(TRIM(:createdAt), ''), 'T', ' '), 'Z', '') AS TIMESTAMP), CURRENT_TIMESTAMP),
             CASE 
                 WHEN NULLIF(TRIM(:updatedAt), '') IS NOT NULL AND CAST(REPLACE(REPLACE(NULLIF(TRIM(:updatedAt), ''), 'T', ' '), 'Z', '') AS TIMESTAMP) > DATEADD('SECOND', 5, CURRENT_TIMESTAMP) THEN CURRENT_TIMESTAMP
@@ -56,7 +56,7 @@ public interface PitScoutDao {
             claimed_auto_strategy, claimed_auto_score, claimed_teleop_cycles, claimed_teleop_score,
             claimed_teleop_park, claimed_flower_nectars, claimed_flower_bottom_bonus, claimed_flower_pollens, claimed_garden_balls,
             claimed_endgame_score, claimed_total_score,
-            photo_keys, version, host_seq, is_deleted, raw_data,
+            photo_keys, version, is_deleted, raw_data,
             created_at, updated_at
         )
         ON target.event_id = src.event_id AND target.team_number = src.team_number
@@ -101,10 +101,6 @@ public interface PitScoutDao {
             claimed_total_score         = src.claimed_total_score,
             photo_keys                  = src.photo_keys,
             version                     = src.version,
-            host_seq                    = CASE
-                WHEN src.host_seq IS NULL THEN target.host_seq
-                ELSE GREATEST(COALESCE(target.host_seq, 0), src.host_seq)
-            END,
             is_deleted                  = src.is_deleted,
             raw_data                    = src.raw_data,
             updated_at                  = src.updated_at
@@ -117,7 +113,7 @@ public interface PitScoutDao {
             claimed_auto_strategy, claimed_auto_score, claimed_teleop_cycles, claimed_teleop_score,
             claimed_teleop_park, claimed_flower_nectars, claimed_flower_bottom_bonus, claimed_flower_pollens, claimed_garden_balls,
             claimed_endgame_score, claimed_total_score,
-            photo_keys, version, host_seq, is_deleted, raw_data,
+            photo_keys, version, is_deleted, raw_data,
             created_at, updated_at
           ) VALUES (
             src.id, src.event_id, src.team_number, src.scout_id, src.scout_name, src.robot_name,
@@ -127,7 +123,7 @@ public interface PitScoutDao {
             src.claimed_auto_strategy, src.claimed_auto_score, src.claimed_teleop_cycles, src.claimed_teleop_score,
             src.claimed_teleop_park, src.claimed_flower_nectars, src.claimed_flower_bottom_bonus, src.claimed_flower_pollens, src.claimed_garden_balls,
             src.claimed_endgame_score, src.claimed_total_score,
-            src.photo_keys, src.version, src.host_seq, src.is_deleted, src.raw_data,
+            src.photo_keys, src.version, src.is_deleted, src.raw_data,
             src.created_at, src.updated_at
           )
     """)

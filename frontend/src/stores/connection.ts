@@ -3,7 +3,6 @@ import { ref, computed } from 'vue'
 import type { ConnectionStatus, ScoutingRecord, ConnectionTransportInfo } from '@/types'
 import type { WebRtcService } from '@/services/webrtc'
 import { probePublicConnectivity } from '@/services/webrtc'
-import { ENABLE_DIAGNOSTICS } from '@/config/features'
 import { isDesktopHost } from '@/services/photoStorage'
 import { isMobileDevice } from '@/composables/useIsMobile'
 
@@ -33,24 +32,6 @@ export const useConnectionStore = defineStore('connection', () => {
 
   const pendingSasQueue = ref<PendingSasItem[]>([])
   const isSasModalOpen = ref(false)
-  const isDiagnosticsEnabled = ref(ENABLE_DIAGNOSTICS)
-  const isDiagnosticsModalOpen = ref(false)
-
-  function openDiagnosticsModal() {
-    if (!isDiagnosticsEnabled.value) return
-    isDiagnosticsModalOpen.value = true
-  }
-
-  function closeDiagnosticsModal() {
-    isDiagnosticsModalOpen.value = false
-  }
-
-  function setDiagnosticsEnabled(val: boolean) {
-    isDiagnosticsEnabled.value = val
-    if (!val) {
-      isDiagnosticsModalOpen.value = false
-    }
-  }
 
   const pendingSas = computed<PendingSasItem | null>({
     get: () => pendingSasQueue.value[0] || null,
@@ -245,20 +226,20 @@ export const useConnectionStore = defineStore('connection', () => {
     authCode?: string,
     senderUserId?: string,
     senderUserName?: string,
-    token?: string,
-    options?: { isHostTakeover?: boolean; clientMaxSeq?: number }
+    token?: string
   ) {
-    rtcService.value?.requestSync(sinceVersion, authCode, senderUserId, senderUserName, token, options)
+    rtcService.value?.requestSync(sinceVersion, authCode, senderUserId, senderUserName, token)
   }
 
-  /** Host：对记录数组打 hostSeq（本地写入前调用） */
-  function stampHostSeq(records: ScoutingRecord[]): ScoutingRecord[] {
-    return rtcService.value?.stampHostSeq(records) ?? records
+  let crdtSyncTrigger: ((peerId?: string) => Promise<boolean>) | null = null
+
+  function setCrdtSyncTrigger(fn: ((peerId?: string) => Promise<boolean>) | null) {
+    crdtSyncTrigger = fn
   }
 
-  /** Host：重启后从记录最大 hostSeq 恢复计数器 */
-  function initHostSeq(maxSeq: number) {
-    rtcService.value?.initHostSeq(maxSeq)
+  async function triggerCrdtSync(peerId = 'host'): Promise<boolean> {
+    if (!crdtSyncTrigger) return false
+    return await crdtSyncTrigger(peerId)
   }
 
   function addConnectedScout(id: string, name: string, transportInfo?: ConnectionTransportInfo | null) {
@@ -386,11 +367,6 @@ export const useConnectionStore = defineStore('connection', () => {
     isSasModalOpen,
     openSasModal,
     closeSasModal,
-    isDiagnosticsEnabled,
-    isDiagnosticsModalOpen,
-    openDiagnosticsModal,
-    closeDiagnosticsModal,
-    setDiagnosticsEnabled,
     isConnected,
     isOffline,
     isLongOffline,
@@ -420,8 +396,8 @@ export const useConnectionStore = defineStore('connection', () => {
     pushRecords,
     pushIfNeeded,
     requestSync,
-    stampHostSeq,
-    initHostSeq,
+    setCrdtSyncTrigger,
+    triggerCrdtSync,
     connectedScouts,
     scoutTransports,
     addConnectedScout,

@@ -1,11 +1,13 @@
 package com.bear27570.app.util;
 
+import org.junit.jupiter.api.AfterEach;
+import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.io.TempDir;
 import java.io.File;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
-import java.nio.file.Paths;
 import java.util.Base64;
 import javax.crypto.Cipher;
 import javax.crypto.spec.IvParameterSpec;
@@ -14,6 +16,29 @@ import javax.crypto.spec.SecretKeySpec;
 import static org.junit.jupiter.api.Assertions.*;
 
 class AESUtilTest {
+
+    @TempDir
+    Path tempDir;
+
+    private String prevDataDir;
+
+    @BeforeEach
+    void setUp() throws Exception {
+        prevDataDir = System.getProperty("scouting.data.dir");
+        System.setProperty("scouting.data.dir", tempDir.toAbsolutePath().toString());
+        AESUtil.resetForTest();
+        AESUtil.initMasterKey();
+    }
+
+    @AfterEach
+    void tearDown() {
+        AESUtil.resetForTest();
+        if (prevDataDir == null) {
+            System.clearProperty("scouting.data.dir");
+        } else {
+            System.setProperty("scouting.data.dir", prevDataDir);
+        }
+    }
 
     @Test
     void testEncryptionAndDecryption() {
@@ -33,7 +58,9 @@ class AESUtilTest {
     @Test
     void testMasterKeyFileCreatedAndAccessibleOnWindows() throws Exception {
         File file = AESUtil.getMasterKeyFile();
-        
+
+        assertTrue(file.toPath().toAbsolutePath().normalize().startsWith(tempDir.toAbsolutePath().normalize()),
+                "Master key file must be isolated under @TempDir");
         assertTrue(file.exists(), "Master key file should exist on the filesystem");
         assertTrue(file.length() > 0, "Master key file should contain key bytes");
         

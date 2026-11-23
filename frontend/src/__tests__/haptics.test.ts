@@ -10,7 +10,7 @@ import {
 } from '../utils/haptics'
 
 describe('Progressive Haptics Engine', () => {
-  const originalVibrate = navigator.vibrate
+  const origVibrateDesc = Object.getOwnPropertyDescriptor(navigator, 'vibrate')
 
   beforeEach(() => {
     vi.useFakeTimers()
@@ -18,12 +18,10 @@ describe('Progressive Haptics Engine', () => {
 
   afterEach(() => {
     vi.useRealTimers()
-    if (originalVibrate !== undefined) {
-      Object.defineProperty(navigator, 'vibrate', {
-        value: originalVibrate,
-        configurable: true,
-        writable: true
-      })
+    if (origVibrateDesc) {
+      Object.defineProperty(navigator, 'vibrate', origVibrateDesc)
+    } else {
+      delete (navigator as any).vibrate
     }
   })
 

@@ -23,9 +23,15 @@ public class SignalingRoutes {
         routes.ws("/ws/signal/{room}", ws -> {
             ws.onConnect(ctx -> {
                 String room = ctx.pathParam("room");
-                roomPeers.computeIfAbsent(room, k -> ConcurrentHashMap.newKeySet()).add(ctx);
-                logger.info("[Signaling LAN] Client connected to room [{}] (room size: {})", 
-                        room, roomPeers.get(room).size());
+                int[] sizeHolder = new int[1];
+                roomPeers.compute(room, (k, set) -> {
+                    Set<WsContext> activeSet = (set != null) ? set : ConcurrentHashMap.newKeySet();
+                    activeSet.add(ctx);
+                    sizeHolder[0] = activeSet.size();
+                    return activeSet;
+                });
+                logger.info("[Signaling LAN] Client connected to room [{}] (room size: {})",
+                        room, sizeHolder[0]);
             });
 
             ws.onMessage(ctx -> {
@@ -48,25 +54,13 @@ public class SignalingRoutes {
 
             ws.onClose(ctx -> {
                 String room = ctx.pathParam("room");
-                Set<WsContext> peers = roomPeers.get(room);
-                if (peers != null) {
-                    peers.remove(ctx);
-                    if (peers.isEmpty()) {
-                        roomPeers.remove(room);
-                    }
-                }
+                removePeer(room, ctx);
                 logger.info("[Signaling LAN] Client disconnected from room [{}]", room);
             });
 
             ws.onError(ctx -> {
                 String room = ctx.pathParam("room");
-                Set<WsContext> peers = roomPeers.get(room);
-                if (peers != null) {
-                    peers.remove(ctx);
-                    if (peers.isEmpty()) {
-                        roomPeers.remove(room);
-                    }
-                }
+                removePeer(room, ctx);
                 Throwable err = ctx.error();
                 if (err instanceof java.nio.channels.ClosedChannelException || err instanceof java.io.EOFException) {
                     logger.info("[Signaling LAN] Channel closed for client in room [{}]", room);
@@ -77,6 +71,13 @@ public class SignalingRoutes {
                         : (err != null ? err.getClass().getSimpleName() : "unknown error");
                 logger.warn("[Signaling LAN] Error on client in room [{}]: {}", room, errMsg);
             });
+        });
+    }
+
+    private void removePeer(String room, WsContext ctx) {
+        roomPeers.computeIfPresent(room, (k, peers) -> {
+            peers.remove(ctx);
+            return peers.isEmpty() ? null : peers;
         });
     }
 

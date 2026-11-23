@@ -1,16 +1,21 @@
 package com.bear27570.app.routes;
 
+import com.bear27570.app.db.JdbiConfig;
 import com.bear27570.app.model.TurnServerConfig;
 import com.bear27570.app.util.AESUtil;
+import com.bear27570.app.util.JwtUtil;
 import com.google.gson.Gson;
 import io.javalin.Javalin;
 import io.javalin.testtools.JavalinTest;
 import org.flywaydb.core.Flyway;
 import org.jdbi.v3.core.Jdbi;
 import org.jdbi.v3.sqlobject.SqlObjectPlugin;
+import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.io.TempDir;
 
+import java.nio.file.Path;
 import java.util.List;
 import java.util.Map;
 
@@ -18,12 +23,21 @@ import static org.assertj.core.api.Assertions.assertThat;
 
 class EventTurnConfigRoutesTest {
 
+    @TempDir
+    Path tempDir;
+
     private Jdbi jdbi;
+    private ApiRoutes apiRoutes;
     private Javalin app;
+    private String prevDataDir;
     private final Gson gson = new Gson();
 
     @BeforeEach
     void setUp() throws Exception {
+        prevDataDir = System.getProperty("scouting.data.dir");
+        System.setProperty("scouting.data.dir", tempDir.toAbsolutePath().toString());
+        JwtUtil.resetForTest();
+        AESUtil.resetForTest();
         AESUtil.initMasterKey();
         String url = "jdbc:h2:mem:test_turn_cfg_" + System.nanoTime() + ";DB_CLOSE_DELAY=-1";
 
@@ -36,7 +50,26 @@ class EventTurnConfigRoutesTest {
         jdbi = Jdbi.create(url, "sa", "");
         jdbi.installPlugin(new SqlObjectPlugin());
 
-        app = Javalin.create(config -> new ApiRoutes(jdbi).register(config.routes));
+        apiRoutes = new ApiRoutes(jdbi);
+        app = Javalin.create(config -> apiRoutes.register(config.routes));
+    }
+
+    @AfterEach
+    void tearDown() {
+        try {
+            if (apiRoutes != null) {
+                apiRoutes.shutdown();
+            }
+            JdbiConfig.closeDataSources();
+        } finally {
+            JwtUtil.resetForTest();
+            AESUtil.resetForTest();
+            if (prevDataDir == null) {
+                System.clearProperty("scouting.data.dir");
+            } else {
+                System.setProperty("scouting.data.dir", prevDataDir);
+            }
+        }
     }
 
     private Map<?, ?> registerUser(io.javalin.testtools.HttpClient client, String username) throws Exception {

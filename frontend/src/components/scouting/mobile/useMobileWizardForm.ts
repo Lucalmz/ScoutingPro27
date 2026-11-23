@@ -961,7 +961,6 @@ export function useMobileWizardForm(
         updatedAt: new Date().toISOString(),
         isBroken: team.value.isBroken,
         version: props.editRecord ? (props.editRecord.version || 0) : 0,
-        hostSeq: props.editRecord ? props.editRecord.hostSeq : undefined,
       }
 
       emit('submit', record)

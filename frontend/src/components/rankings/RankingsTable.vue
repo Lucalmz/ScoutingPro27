@@ -6,10 +6,11 @@ import { useEventStore } from '@/stores/events'
 import { useRecordStore } from '@/stores/records'
 import { usePitScoutStore } from '@/stores/pitScout'
 import { useToastStore } from '@/stores/toast'
-import { useRouter } from 'vue-router'
+import { useRouter, useRoute } from 'vue-router'
 import { transitionState } from '@/utils/transitionState'
 import { useTween } from '@/composables/useTween'
 import { useNavigationStore } from '@/stores/navigation'
+import { useAiStore } from '@/stores/ai'
 import { hapticLight } from '@/utils/haptics'
 import { useConfirm } from '@/composables/useConfirm'
 import { calculateBragIndex } from '@/utils/bragIndex'
@@ -26,13 +27,24 @@ const AnimatedNumber = defineComponent({
   }
 })
 
-const { t, te } = useI18n()
+const { t, te, locale } = useI18n()
 const eventStore = useEventStore()
 const recordStore = useRecordStore()
 const pitStore = usePitScoutStore()
 const toastStore = useToastStore()
 const router = useRouter()
+const route = useRoute()
 const navStore = useNavigationStore()
+const aiStore = useAiStore()
+
+async function askAiForTeam(teamNumber: number) {
+  const evtId = eventStore.currentEvent?.id || (route.params.eventId as string) || ''
+  if (!evtId) return
+  await aiStore.openCopilotForTeam(evtId, teamNumber, undefined, locale.value)
+  if (typeof window !== 'undefined' && window.innerWidth <= 768) {
+    router.replace({ query: { ...route.query, tab: 'ai' } })
+  }
+}
 
 const props = defineProps<{
   rankings: RankingRow[]
@@ -579,9 +591,19 @@ function enter(el: Element, done: () => void) {
                 <span v-else class="material-icons" style="color: var(--status-warning); font-size: 18px;" title="New">fiber_new</span>
               </td>
               <td>
-                <button class="details-btn" @click="viewTeamDetails(row.teamNumber)" :title="t('rankings.details')">
-                  <span class="material-icons" style="font-size: 16px;">visibility</span>
-                </button>
+                <div class="detail-actions-cell">
+                  <button class="details-btn" @click="viewTeamDetails(row.teamNumber)" :title="t('rankings.details')">
+                    <span class="material-icons" style="font-size: 16px;">visibility</span>
+                  </button>
+                  <button
+                    type="button"
+                    class="details-btn ai-ask-btn"
+                    @click.stop="askAiForTeam(row.teamNumber)"
+                    :title="t('ai.ask_ai_about_team')"
+                  >
+                    <span class="material-icons" style="font-size: 16px;">auto_awesome</span>
+                  </button>
+                </div>
               </td>
               <td v-if="eventStore.isHost">
                 <button 
@@ -1095,5 +1117,22 @@ td.custom-col-td {
   border-color: var(--border);
   background: var(--surface-elevated);
   color: var(--muted-foreground);
+}
+
+.detail-actions-cell {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.details-btn.ai-ask-btn {
+  color: var(--status-ai);
+  border-color: var(--status-ai-border);
+  background: var(--status-ai-bg);
+}
+
+.details-btn.ai-ask-btn:hover {
+  border-color: var(--status-ai);
+  transform: translateY(-1px);
 }
 </style>

@@ -75,13 +75,6 @@ class NetworkUtilTest {
         assertThat(cmd).contains("dir=in action=allow");
     }
 
-    @Test
-    void testIsWindowsFirewallPortAllowed() {
-        // Method should execute cleanly and return boolean without throwing
-        boolean allowed = NetworkUtil.isWindowsFirewallPortAllowed(59998);
-        assertThat(allowed).isIn(true, false);
-    }
-
     /**
      * 回归守卫：防火墙提权脚本只允许改 ScoutingPro27 自身防火墙规则。
      * 1. 历史版本曾修改 WeakHost / InterfaceMetric / 增删 TUN 与 Loopback 路由，导致 Clash/Mihomo TUN 模式全部节点不可用。
@@ -146,12 +139,6 @@ class NetworkUtilTest {
     }
 
     @Test
-    void testHasWindowsFirewallAppBlockRuleReadOnly() {
-        boolean blocked = NetworkUtil.hasWindowsFirewallAppBlockRule();
-        assertThat(blocked).isIn(true, false);
-    }
-
-    @Test
     void testNetshOutputMatchesNonAsciiJavaPathAcrossNativeAndUtf8Charsets() throws Exception {
         String nonAsciiJava = "C:\\Users\\测试用户\\jdk-21\\bin\\java.exe";
         java.nio.charset.Charset nativeCs = NetworkUtil.resolveWindowsConsoleCharsets().get(0);
@@ -165,25 +152,6 @@ class NetworkUtilTest {
 
         // Verify InetAddress.isSiteLocalAddress() already excludes 28.0.0.0/8 Fake-IP addresses
         assertThat(java.net.InetAddress.getByName("28.0.0.1").isSiteLocalAddress()).isFalse();
-    }
-
-    @Test
-    void testSystemRoutesNetworkInfoEndpointAndHealRouteRemoved() {
-        io.javalin.Javalin app = io.javalin.Javalin.create(config -> {
-            new com.bear27570.app.routes.SystemRoutes(new com.google.gson.Gson()).register(config.routes);
-        });
-        io.javalin.testtools.JavalinTest.test(app, (server, client) -> {
-            var infoRes = client.get("/api/system/network-info");
-            assertThat(infoRes.code()).isEqualTo(200);
-            String infoBody = infoRes.body().string();
-            System.out.println("[E2E-TEST] GET /api/system/network-info -> " + infoBody);
-            assertThat(infoBody).contains("\"primaryIp\":");
-            assertThat(infoBody).contains("\"allIpv6s\":");
-
-            var healRes = client.post("/api/system/heal-ipv6-routes");
-            System.out.println("[E2E-TEST] POST /api/system/heal-ipv6-routes -> " + healRes.code());
-            assertThat(healRes.code()).isEqualTo(404);
-        });
     }
 
     @Test

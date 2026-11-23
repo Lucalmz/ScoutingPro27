@@ -1,10 +1,14 @@
 import { setActivePinia, createPinia } from 'pinia'
-import { describe, it, expect, beforeEach } from 'vitest'
+import { describe, it, expect, beforeEach, afterEach } from 'vitest'
 import { useNavigationStore } from '../stores/navigation'
 
 describe('Navigation Store', () => {
   beforeEach(() => {
     setActivePinia(createPinia())
+    sessionStorage.clear()
+  })
+
+  afterEach(() => {
     sessionStorage.clear()
   })
 

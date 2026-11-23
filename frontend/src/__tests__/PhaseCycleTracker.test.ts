@@ -1,5 +1,5 @@
-import { describe, it, expect } from 'vitest'
-import { mount } from '@vue/test-utils'
+import { describe, it, expect, afterEach } from 'vitest'
+import { mount, VueWrapper } from '@vue/test-utils'
 import { createI18n } from 'vue-i18n'
 import PhaseCycleTracker from '@/components/scouting/PhaseCycleTracker.vue'
 import zh from '@/locales/zh.json'
@@ -11,8 +11,16 @@ const i18n = createI18n({
 })
 
 describe('PhaseCycleTracker.vue', () => {
+  const mountedWrappers: VueWrapper<any>[] = []
+
+  afterEach(() => {
+    while (mountedWrappers.length > 0) {
+      mountedWrappers.pop()?.unmount()
+    }
+  })
+
   const createWrapper = (props = {}) => {
-    return mount(PhaseCycleTracker, {
+    const wrapper = mount(PhaseCycleTracker, {
       props: {
         phase: 'auto',
         title: '自动阶段',
@@ -26,6 +34,8 @@ describe('PhaseCycleTracker.vue', () => {
         plugins: [i18n]
       }
     })
+    mountedWrappers.push(wrapper)
+    return wrapper
   }
 
   it('renders header, icon, and rate capsule correctly', () => {

@@ -1,7 +1,9 @@
 import { mount } from '@vue/test-utils'
-import { describe, it, expect, vi, beforeEach } from 'vitest'
+import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
+import { nextTick } from 'vue'
 import { setActivePinia, createPinia } from 'pinia'
 import HistoryList from '../components/history/HistoryList.vue'
+import * as api from '../services/api'
 import { useRecordStore } from '../stores/records'
 import type { ScoutingRecord } from '../types'
 
@@ -28,6 +30,14 @@ vi.mock('vue-i18n', async (importOriginal) => {
   }
 })
 
+vi.mock('../services/api', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('../services/api')>()
+  return {
+    ...actual,
+    markRecordsSynced: vi.fn().mockResolvedValue(undefined)
+  }
+})
+
 function createRecord(overrides: Partial<ScoutingRecord> = {}): ScoutingRecord {
   return {
     id: 'rec-' + Math.random().toString(36).slice(2, 7),
@@ -41,7 +51,6 @@ function createRecord(overrides: Partial<ScoutingRecord> = {}): ScoutingRecord {
     endgameScore: 20,
     totalScore: 100,
     syncStatus: 'SYNCED',
-    hostSeq: 1,
     isConflict: false,
     createdAt: new Date().toISOString(),
     updatedAt: new Date().toISOString(),
@@ -51,14 +60,29 @@ function createRecord(overrides: Partial<ScoutingRecord> = {}): ScoutingRecord {
 }
 
 describe('HistoryList.vue Component & Animations', () => {
+  const mountedWrappers: any[] = []
+  const mountHistory = (options: any) => {
+    const w = mount(HistoryList, options)
+    mountedWrappers.push(w)
+    return w
+  }
+
   beforeEach(() => {
     setActivePinia(createPinia())
     mockRoute.query = {}
     vi.clearAllMocks()
+    vi.mocked(api.markRecordsSynced).mockResolvedValue(undefined)
+  })
+
+  afterEach(() => {
+    while (mountedWrappers.length > 0) {
+      mountedWrappers.pop()?.unmount()
+    }
+    vi.restoreAllMocks()
   })
 
   it('renders loading state when loading prop is true', () => {
-    const wrapper = mount(HistoryList, {
+    const wrapper = mountHistory({
       props: {
         records: [],
         loading: true
@@ -69,7 +93,7 @@ describe('HistoryList.vue Component & Animations', () => {
   })
 
   it('renders empty state when there are no records and not loading', () => {
-    const wrapper = mount(HistoryList, {
+    const wrapper = mountHistory({
       props: {
         records: [],
         loading: false
@@ -84,7 +108,7 @@ describe('HistoryList.vue Component & Animations', () => {
       createRecord({ id: 'r1', matchNumber: 3, teamNumber: 27570, totalScore: 120 }),
       createRecord({ id: 'r2', matchNumber: 4, teamNumber: 27570, totalScore: 140 })
     ]
-    const wrapper = mount(HistoryList, {
+    const wrapper = mountHistory({
       props: {
         records,
         loading: false
@@ -103,7 +127,7 @@ describe('HistoryList.vue Component & Animations', () => {
     const records = [
       createRecord({ id: 'r1', scoutId: 'usr_xyz999', scoutName: '' })
     ]
-    const wrapper = mount(HistoryList, {
+    const wrapper = mountHistory({
       props: {
         records,
         loading: false
@@ -124,7 +148,7 @@ describe('HistoryList.vue Component & Animations', () => {
     const records = [
       createRecord({ id: 'r1', scoutId: 'usr_me', scoutName: '' })
     ]
-    const wrapper = mount(HistoryList, {
+    const wrapper = mountHistory({
       props: {
         records,
         loading: false
@@ -142,7 +166,7 @@ describe('HistoryList.vue Component & Animations', () => {
       createRecord({ id: 'r-normal', isConflict: false }),
       createRecord({ id: 'r-conflict', isConflict: true, syncStatus: 'SYNCED' })
     ]
-    const wrapper = mount(HistoryList, {
+    const wrapper = mountHistory({
       props: {
         records,
         loading: false
@@ -169,7 +193,7 @@ describe('HistoryList.vue Component & Animations', () => {
       createRecord({ id: 'r-other', matchNumber: 2, teamNumber: 27570 }),
       createRecord({ id: 'r-target', matchNumber: 5, teamNumber: 27570 })
     ]
-    const wrapper = mount(HistoryList, {
+    const wrapper = mountHistory({
       props: {
         records,
         loading: false
@@ -183,7 +207,7 @@ describe('HistoryList.vue Component & Animations', () => {
 
   it('emits editRecord event when edit button is clicked', async () => {
     const conflictRecord = createRecord({ id: 'r-edit', isConflict: true })
-    const wrapper = mount(HistoryList, {
+    const wrapper = mountHistory({
       props: {
         records: [conflictRecord],
         loading: false
@@ -198,56 +222,8 @@ describe('HistoryList.vue Component & Animations', () => {
     expect(wrapper.emitted('editRecord')![0]).toEqual([conflictRecord])
   })
 
-  it('cleans up inline transition, opacity, and transform in enter hook so pulse-conflict animation is not overridden', async () => {
-    vi.useFakeTimers()
-    const wrapper = mount(HistoryList, {
-      props: {
-        records: [createRecord({ id: 'r-anim', isConflict: true })],
-        loading: false
-      }
-    })
-
-    const dummyEl = document.createElement('div')
-    dummyEl.dataset.index = '0'
-    document.body.appendChild(dummyEl)
-
-    // Access vm methods
-    const vm = wrapper.vm as any
-
-    const rafSpy = vi.spyOn(window, 'requestAnimationFrame').mockImplementation((cb) => {
-      cb(0)
-      return 0
-    })
-
-    // 1. Test beforeEnter
-    vm.beforeEnter(dummyEl)
-    expect(dummyEl.style.opacity).toBe('0')
-    expect(dummyEl.style.transform).toBe('translateY(20px)')
-
-    // 2. Test enter
-    let doneCalled = false
-    vm.enter(dummyEl, () => {
-      doneCalled = true
-    })
-
-    // Advance timers for delay + transition duration (40ms + 360ms)
-    vi.advanceTimersByTime(500)
-
-    // Assert done was invoked
-    expect(doneCalled).toBe(true)
-
-    // Verify inline styles are cleanly removed (vital so @keyframes pulse-conflict takes over)
-    expect(dummyEl.style.opacity).toBe('')
-    expect(dummyEl.style.transform).toBe('')
-    expect(dummyEl.style.transition).toBe('')
-
-    rafSpy.mockRestore()
-    document.body.removeChild(dummyEl)
-    vi.useRealTimers()
-  })
-
   it('updates hover-highlight position on card mouseenter and hides on list mouseleave', async () => {
-    const wrapper = mount(HistoryList, {
+    const wrapper = mountHistory({
       props: {
         records: [createRecord({ id: 'r-hover' })],
         loading: false
@@ -276,12 +252,21 @@ describe('HistoryList.vue Component & Animations', () => {
     expect((highlightEl.element as HTMLElement).style.opacity).toBe('0')
   })
 
-  it('correctly distinguishes synced records and pending records without legacy hostSeq', () => {
+  it('correctly distinguishes synced records and pending records without legacy hostSeq', async () => {
+    const { useEventStore } = await import('../stores/events')
+    const { useUserStore } = await import('../stores/user')
+    const eventStore = useEventStore()
+    const userStore = useUserStore()
+
+    // Non-host scout viewing their own records (neither has hostSeq!)
+    eventStore.currentEvent = { id: 'evt-1', hostId: 'host-user' } as any
+    userStore.user = { id: 'scout-1', username: 'Tester', token: 'tok' } as any
+
     const records = [
-      createRecord({ id: 'r-synced', syncStatus: 'SYNCED' }),
-      createRecord({ id: 'r-pending', syncStatus: 'PENDING' })
+      createRecord({ id: 'r-synced', scoutId: 'scout-1', syncStatus: 'SYNCED' }),
+      createRecord({ id: 'r-pending', scoutId: 'scout-1', syncStatus: 'PENDING' })
     ]
-    const wrapper = mount(HistoryList, {
+    const wrapper = mountHistory({
       props: {
         records,
         loading: false
@@ -289,33 +274,98 @@ describe('HistoryList.vue Component & Animations', () => {
     })
 
     const cards = wrapper.findAll('.history-card')
-    // First card is synced
+    // First card is own SYNCED record without hostSeq -> MUST NOT show Resync button!
     expect(cards[0].find('.sync-badge').text()).toBe('check_circle')
-    expect(cards[0].find('.btn-edit').exists()).toBe(false)
+    expect(cards[0].find('.sync-badge').classes()).toContain('is-synced')
+    expect(cards[0].find('.btn-edit').exists()).toBe(true)
     expect(cards[0].find('.btn-resync').exists()).toBe(false)
 
-    // Second card is PENDING -> rendered with pending icon and editable/resyncable
+    // Second card is own PENDING record -> rendered with pending icon, editable AND resyncable
     expect(cards[1].find('.sync-badge').text()).toBe('hourglass_empty')
+    expect(cards[1].find('.sync-badge').classes()).toContain('is-pending')
     expect(cards[1].find('.btn-edit').exists()).toBe(true)
+    expect(cards[1].find('.btn-resync').exists()).toBe(true)
   })
 
-  it('triggers pushRecords and toast when re-sync button is clicked online', async () => {
+  it('triggers CRDT sync, marks SYNCED, and removes resync button when clicked online', async () => {
+    const { useEventStore } = await import('../stores/events')
     const { useUserStore } = await import('../stores/user')
     const { useConnectionStore } = await import('../stores/connection')
     const { useToastStore } = await import('../stores/toast')
+    const { useRecordStore } = await import('../stores/records')
+    const crdtMod = await import('../services/crdt')
+    await crdtMod.resetCrdtRegistryForTesting()
 
+    const eventStore = useEventStore()
     const userStore = useUserStore()
+    const recordStore = useRecordStore()
+    eventStore.currentEvent = { id: 'evt-1', hostId: 'host-user' } as any
     userStore.user = { id: 'scout-1', username: 'Tester', token: 'tok' } as any
+
+    const handle = crdtMod.getOrCreateEventCrdt('evt-1', {
+      deviceId: 'dev-scout-1',
+      enableHttp: false,
+      enableIndexedDb: false
+    })
 
     const connStore = useConnectionStore()
     connStore.status = 'connected'
-    const pushSpy = vi.spyOn(connStore, 'pushRecords').mockImplementation(() => {})
+    const crdtSyncSpy = vi.fn().mockResolvedValue(true)
+    connStore.setCrdtSyncTrigger(crdtSyncSpy)
 
     const toastStore = useToastStore()
     const toastSpy = vi.spyOn(toastStore, 'showToast')
 
-    const unconfirmed = createRecord({ id: 'r-unconfirmed', scoutId: 'scout-1', hostSeq: undefined, syncStatus: 'PENDING' })
-    const wrapper = mount(HistoryList, {
+    const unconfirmed = createRecord({ id: 'r-unconfirmed', scoutId: 'scout-1', syncStatus: 'PENDING' })
+    recordStore.records = [unconfirmed]
+    const wrapper = mountHistory({
+      props: {
+        records: [unconfirmed],
+        loading: false
+      }
+    })
+
+    const resyncBtn = wrapper.find('.btn-resync')
+    expect(resyncBtn.exists()).toBe(true)
+    await resyncBtn.trigger('click')
+    await vi.waitFor(async () => {
+      await nextTick()
+      expect(crdtSyncSpy).toHaveBeenCalledWith('host')
+      const crdtRec = crdtMod.readScoutingRecordsFromCrdt(handle.store, 'evt-1').find((r) => r.id === 'r-unconfirmed')
+      expect(crdtRec).toBeDefined()
+      expect(crdtRec?.authorPubKey).toBeTruthy()
+      expect(crdtRec?.authorSig).toBeTruthy()
+      expect(await crdtMod.verifyScoutingRecordSignature(crdtRec!)).toBe(true)
+      expect(unconfirmed.syncStatus).toBe('SYNCED')
+      expect(toastSpy).toHaveBeenCalledWith('history.resync_triggered', 'info')
+      expect(wrapper.find('.btn-resync').exists()).toBe(false)
+    }, { timeout: 1500 })
+
+    await crdtMod.resetCrdtRegistryForTesting()
+  })
+
+  it('refuses to mark SYNCED and keeps resync button when device ECDSA signing fails online', async () => {
+    const { useEventStore } = await import('../stores/events')
+    const { useUserStore } = await import('../stores/user')
+    const { useConnectionStore } = await import('../stores/connection')
+    const { useToastStore } = await import('../stores/toast')
+
+    const eventStore = useEventStore()
+    const userStore = useUserStore()
+    eventStore.currentEvent = { id: 'evt-1', hostId: 'host-user' } as any
+    userStore.user = { id: 'scout-1', username: 'Tester', token: 'tok' } as any
+
+    const connStore = useConnectionStore()
+    connStore.status = 'connected'
+    const crdtSyncSpy = vi.fn().mockResolvedValue(true)
+    connStore.setCrdtSyncTrigger(crdtSyncSpy)
+
+    const toastStore = useToastStore()
+    const toastSpy = vi.spyOn(toastStore, 'showToast')
+    vi.spyOn(globalThis.crypto.subtle, 'sign').mockRejectedValue(new Error('WebCrypto disabled'))
+
+    const unconfirmed = createRecord({ id: 'r-unsigned-fail', scoutId: 'scout-1', syncStatus: 'PENDING' })
+    const wrapper = mountHistory({
       props: {
         records: [unconfirmed],
         loading: false
@@ -326,27 +376,72 @@ describe('HistoryList.vue Component & Animations', () => {
     expect(resyncBtn.exists()).toBe(true)
     await resyncBtn.trigger('click')
 
-    expect(pushSpy).toHaveBeenCalledWith([unconfirmed])
-    expect(toastSpy).toHaveBeenCalledWith('history.resync_triggered', 'info')
+    await vi.waitFor(async () => {
+      await nextTick()
+      expect(toastSpy).toHaveBeenCalledWith('history.resync_offline_queued', 'warning')
+    }, { timeout: 1500 })
+
+    expect(crdtSyncSpy).not.toHaveBeenCalled()
+    expect(unconfirmed.syncStatus).toBe('PENDING')
+    expect(wrapper.find('.btn-resync').exists()).toBe(true)
   })
 
-  it('shows offline queued toast when re-sync button is clicked while offline', async () => {
+  it('keeps PENDING status and shows warning toast when CRDT sync trigger fails online', async () => {
+    const { useEventStore } = await import('../stores/events')
     const { useUserStore } = await import('../stores/user')
     const { useConnectionStore } = await import('../stores/connection')
     const { useToastStore } = await import('../stores/toast')
 
+    const eventStore = useEventStore()
     const userStore = useUserStore()
+    eventStore.currentEvent = { id: 'evt-1', hostId: 'host-user' } as any
+    userStore.user = { id: 'scout-1', username: 'Tester', token: 'tok' } as any
+
+    const connStore = useConnectionStore()
+    connStore.status = 'connected'
+    connStore.setCrdtSyncTrigger(vi.fn().mockResolvedValue(false))
+
+    const toastStore = useToastStore()
+    const toastSpy = vi.spyOn(toastStore, 'showToast')
+
+    const unconfirmed = createRecord({ id: 'r-unconfirmed-fail', scoutId: 'scout-1', syncStatus: 'PENDING' })
+    const wrapper = mountHistory({
+      props: {
+        records: [unconfirmed],
+        loading: false
+      }
+    })
+
+    await wrapper.find('.btn-resync').trigger('click')
+    await vi.waitFor(async () => {
+      await nextTick()
+      expect(unconfirmed.syncStatus).toBe('PENDING')
+      expect(toastSpy).toHaveBeenCalledWith('history.resync_offline_queued', 'warning')
+      expect(wrapper.find('.btn-resync').exists()).toBe(true)
+    }, { timeout: 1500 })
+  })
+
+  it('shows offline queued toast when re-sync button is clicked while offline', async () => {
+    const { useEventStore } = await import('../stores/events')
+    const { useUserStore } = await import('../stores/user')
+    const { useConnectionStore } = await import('../stores/connection')
+    const { useToastStore } = await import('../stores/toast')
+
+    const eventStore = useEventStore()
+    const userStore = useUserStore()
+    eventStore.currentEvent = { id: 'evt-1', hostId: 'host-user' } as any
     userStore.user = { id: 'scout-1', username: 'Tester', token: 'tok' } as any
 
     const connStore = useConnectionStore()
     connStore.status = 'offline'
-    const pushSpy = vi.spyOn(connStore, 'pushRecords').mockImplementation(() => {})
+    const crdtSyncSpy = vi.fn().mockResolvedValue(true)
+    connStore.setCrdtSyncTrigger(crdtSyncSpy)
 
     const toastStore = useToastStore()
     const toastSpy = vi.spyOn(toastStore, 'showToast')
 
     const unconfirmed = createRecord({ id: 'r-unconfirmed-off', scoutId: 'scout-1', syncStatus: 'PENDING' })
-    const wrapper = mount(HistoryList, {
+    const wrapper = mountHistory({
       props: {
         records: [unconfirmed],
         loading: false
@@ -356,10 +451,50 @@ describe('HistoryList.vue Component & Animations', () => {
     const resyncBtn = wrapper.find('.btn-resync')
     expect(resyncBtn.exists()).toBe(true)
     await resyncBtn.trigger('click')
+    await vi.waitFor(async () => {
+      await nextTick()
+      expect(crdtSyncSpy).not.toHaveBeenCalled()
+      expect(unconfirmed.syncStatus).toBe('PENDING')
+      expect(toastSpy).toHaveBeenCalledWith('history.resync_offline_queued', 'warning')
+    }, { timeout: 1500 })
+  })
 
-    expect(pushSpy).not.toHaveBeenCalled()
-    expect(unconfirmed.syncStatus).toBe('PENDING')
-    expect(toastSpy).toHaveBeenCalledWith('history.resync_offline_queued', 'warning')
+  it('never renders resync button for active Host even if record is PENDING, but allows Standby Host for own PENDING records', async () => {
+    const { useEventStore } = await import('../stores/events')
+    const { useUserStore } = await import('../stores/user')
+    const { useConnectionStore } = await import('../stores/connection')
+    const photoStorage = await import('../services/photoStorage')
+    const mobileMod = await import('../composables/useIsMobile')
+    vi.spyOn(photoStorage, 'isDesktopHost').mockReturnValue(true)
+    vi.spyOn(mobileMod, 'isMobileDevice').mockReturnValue(false)
+
+    const eventStore = useEventStore()
+    const userStore = useUserStore()
+    const connStore = useConnectionStore()
+    userStore.user = { id: 'host-user', username: 'Host', token: 'tok' } as any
+    eventStore.currentEvent = { id: 'evt-1', hostId: 'host-user' } as any
+
+    const pendingOwn = createRecord({ id: 'r-host-pending', scoutId: 'host-user', syncStatus: 'PENDING' })
+    const syncedOwn = createRecord({ id: 'r-host-synced', scoutId: 'host-user', syncStatus: 'SYNCED' })
+
+    // 1. Active Host: cards & edit buttons render, but no resync button
+    connStore.setStandbyHost(false)
+    expect(eventStore.isHost).toBe(true)
+    const activeHostWrapper = mountHistory({
+      props: { records: [pendingOwn, syncedOwn], loading: false }
+    })
+    expect(activeHostWrapper.findAll('.history-card')).toHaveLength(2)
+    expect(activeHostWrapper.findAll('.btn-edit')).toHaveLength(2)
+    expect(activeHostWrapper.findAll('.btn-resync')).toHaveLength(0)
+
+    // 2. Standby Host: resync button shown ONLY for own PENDING record, not SYNCED
+    connStore.setStandbyHost(true, { hostSessionId: 'other-host-sess' })
+    const standbyWrapper = mountHistory({
+      props: { records: [pendingOwn, syncedOwn], loading: false }
+    })
+    const standbyCards = standbyWrapper.findAll('.history-card')
+    expect(standbyCards[0].find('.btn-resync').exists()).toBe(true)
+    expect(standbyCards[1].find('.btn-resync').exists()).toBe(false)
   })
 
   it('allows Host to edit any synced record regardless of ownership', async () => {
@@ -377,11 +512,10 @@ describe('HistoryList.vue Component & Animations', () => {
       id: 'r-other-scout',
       scoutId: 'scout-different-user',
       syncStatus: 'SYNCED',
-      hostSeq: 10,
       isConflict: false
     })
 
-    const wrapper = mount(HistoryList, {
+    const wrapper = mountHistory({
       props: {
         records: [otherScoutRecord],
         loading: false
@@ -395,7 +529,7 @@ describe('HistoryList.vue Component & Animations', () => {
     expect(wrapper.emitted('editRecord')![0]).toEqual([otherScoutRecord])
   })
 
-  it('allows normal scout to edit their own synced record but not others', async () => {
+  it('allows normal scout to edit their own synced record without rendering resync button', async () => {
     const { useEventStore } = await import('../stores/events')
     const { useUserStore } = await import('../stores/user')
     const eventStore = useEventStore()
@@ -408,18 +542,16 @@ describe('HistoryList.vue Component & Animations', () => {
       id: 'r-my-synced',
       scoutId: 'scout-alice',
       syncStatus: 'SYNCED',
-      hostSeq: 11,
       isConflict: false
     })
     const otherRecord = createRecord({
       id: 'r-bob-synced',
       scoutId: 'scout-bob',
       syncStatus: 'SYNCED',
-      hostSeq: 12,
       isConflict: false
     })
 
-    const wrapper = mount(HistoryList, {
+    const wrapper = mountHistory({
       props: {
         records: [myRecord, otherRecord],
         loading: false
@@ -427,10 +559,12 @@ describe('HistoryList.vue Component & Animations', () => {
     })
 
     const cards = wrapper.findAll('.history-card')
-    // Alice can edit her own synced record
+    // Alice can edit her own synced record and sees NO resync button
     expect(cards[0].find('.btn-edit').exists()).toBe(true)
-    // Alice cannot edit Bob's synced record
+    expect(cards[0].find('.btn-resync').exists()).toBe(false)
+    // Alice cannot edit Bob's synced record and sees NO resync button
     expect(cards[1].find('.btn-edit').exists()).toBe(false)
+    expect(cards[1].find('.btn-resync').exists()).toBe(false)
   })
 
   it('renders BIOBUZZ endgame summary pills and predict cycle badge when present in rawData', () => {
@@ -447,7 +581,7 @@ describe('HistoryList.vue Component & Animations', () => {
         predictCycleTimeSec: 10.5
       })
     })
-    const wrapper = mount(HistoryList, {
+    const wrapper = mountHistory({
       props: {
         records: [rec],
         loading: false

@@ -312,10 +312,10 @@ export const usePitScoutStore = defineStore('pitScout', () => {
 
     saveToLocalStorage(eid)
 
-    // 局域网 DataChannel 增量广播（CRDT 通道已激活时由 TinyBase 自动增量同步，跳过全量覆盖消息）
+    // 局域网 DataChannel 增量广播（CRDT 通道或本地 CRDT 实例激活时由 TinyBase 自动增量同步，跳过全量覆盖消息）
     try {
       const connStore = useConnectionStore()
-      if (connStore.rtcService && !isCrdtTransportActive(eid)) {
+      if (connStore.rtcService && !isCrdtTransportActive(eid) && !crdtHandle) {
         connStore.rtcService.sendMessage({
           type: 'PIT_SCOUT_UPDATE',
           record
@@ -360,7 +360,7 @@ export const usePitScoutStore = defineStore('pitScout', () => {
       }
     }
 
-    if (isCrdtTransportActive(eid)) {
+    if (isCrdtTransportActive(eid) || getExistingEventCrdt(eid)) {
       return
     }
 

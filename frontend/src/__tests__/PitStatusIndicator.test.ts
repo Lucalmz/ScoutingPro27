@@ -1,6 +1,6 @@
 import { setActivePinia, createPinia } from 'pinia'
-import { describe, it, expect, beforeEach } from 'vitest'
-import { mount } from '@vue/test-utils'
+import { describe, it, expect, beforeEach, afterEach } from 'vitest'
+import { mount, type VueWrapper } from '@vue/test-utils'
 import { createI18n } from 'vue-i18n'
 import PitStatusIndicator from '../components/pit/PitStatusIndicator.vue'
 import { usePitScoutStore } from '../stores/pitScout'
@@ -10,18 +10,29 @@ import zh from '@/locales/zh.json'
 import type { ScoutingRecord } from '../types'
 
 describe('PitStatusIndicator.vue', () => {
+  const wrappers: VueWrapper<any>[] = []
+  const track = <T extends VueWrapper<any>>(w: T): T => {
+    wrappers.push(w)
+    return w
+  }
+
   beforeEach(() => {
     setActivePinia(createPinia())
     localStorage.clear()
   })
 
+  afterEach(() => {
+    while (wrappers.length) wrappers.pop()!.unmount()
+    localStorage.clear()
+  })
+
   it('renders unrecorded status cleanly without alarms', () => {
-    const wrapper = mount(PitStatusIndicator, {
+    const wrapper = track(mount(PitStatusIndicator, {
       props: {
         teamNumber: 12345,
         showLabel: true
       }
-    })
+    }))
 
     expect(wrapper.classes()).toContain('status-unrecorded')
     expect(wrapper.text()).toContain('未录入')
@@ -72,13 +83,13 @@ describe('PitStatusIndicator.vue', () => {
       } as ScoutingRecord
     ]
 
-    const wrapper = mount(PitStatusIndicator, {
+    const wrapper = track(mount(PitStatusIndicator, {
       props: {
         teamNumber: 27570,
         showLabel: true,
         showBrag: true
       }
-    })
+    }))
 
     expect(wrapper.classes()).toContain('status-recorded')
     expect(wrapper.text()).toContain('已录入')
@@ -87,12 +98,12 @@ describe('PitStatusIndicator.vue', () => {
   })
 
   it('emits click event when clicked', async () => {
-    const wrapper = mount(PitStatusIndicator, {
+    const wrapper = track(mount(PitStatusIndicator, {
       props: {
         teamNumber: 27570,
         clickable: true
       }
-    })
+    }))
 
     await wrapper.trigger('click')
     expect(wrapper.emitted('click')).toHaveLength(1)
@@ -143,10 +154,10 @@ describe('PitStatusIndicator.vue', () => {
     ]
 
     const i18n = createI18n({ legacy: false, locale: 'en', messages: { en, zh } })
-    const wrapper = mount(PitStatusIndicator, {
+    const wrapper = track(mount(PitStatusIndicator, {
       props: { teamNumber: 27570, showLabel: true, showBrag: true },
       global: { plugins: [i18n] }
-    })
+    }))
 
     const badge = wrapper.find('.brag-badge')
     expect(badge.exists()).toBe(true)

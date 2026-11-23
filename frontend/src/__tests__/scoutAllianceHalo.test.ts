@@ -1,5 +1,6 @@
 import { mount } from '@vue/test-utils'
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
+import { nextTick } from 'vue'
 import { createPinia, setActivePinia } from 'pinia'
 import { createRouter, createMemoryHistory } from 'vue-router'
 import App from '../App.vue'
@@ -34,6 +35,7 @@ describe('Scout Alliance Ambient Halo', () => {
 
   afterEach(() => {
     clearScoutAllianceHalo()
+    document.body.innerHTML = ''
   })
 
   it('tracks red/blue/none state, syncs html dataset attribute, and enforces owner isolation', () => {
@@ -84,19 +86,19 @@ describe('Scout Alliance Ambient Halo', () => {
       expect(blueLayer.classes()).not.toContain('active')
 
       setScoutAllianceHalo('red')
-      await wrapper.vm.$nextTick()
+      await nextTick()
       expect(defaultLayer.classes()).not.toContain('active')
       expect(redLayer.classes()).toContain('active')
       expect(blueLayer.classes()).not.toContain('active')
 
       setScoutAllianceHalo('blue')
-      await wrapper.vm.$nextTick()
+      await nextTick()
       expect(defaultLayer.classes()).not.toContain('active')
       expect(redLayer.classes()).not.toContain('active')
       expect(blueLayer.classes()).toContain('active')
 
       clearScoutAllianceHalo()
-      await wrapper.vm.$nextTick()
+      await nextTick()
       expect(defaultLayer.classes()).toContain('active')
       expect(redLayer.classes()).not.toContain('active')
       expect(blueLayer.classes()).not.toContain('active')
@@ -121,12 +123,12 @@ describe('Scout Alliance Ambient Halo', () => {
       const blueLabel = wrapper.find('.spdt-labels span:last-child')
 
       await redLabel.trigger('click')
-      await wrapper.vm.$nextTick()
+      await nextTick()
       expect(scoutAllianceHalo.value).toBe('red')
       expect(document.documentElement.dataset.scoutAlliance).toBe('red')
 
       await blueLabel.trigger('click')
-      await wrapper.vm.$nextTick()
+      await nextTick()
       expect(scoutAllianceHalo.value).toBe('blue')
       expect(document.documentElement.dataset.scoutAlliance).toBe('blue')
     } finally {

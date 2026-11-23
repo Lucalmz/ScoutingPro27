@@ -1,10 +1,12 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
+import { flushPromises } from '@vue/test-utils'
 import { setupSelfHealing } from '../services/webrtc/selfHealing'
 import * as connectivity from '../services/webrtc/connectivity'
 
 describe('setupSelfHealing', () => {
   let probeSpy: any
   let listeners: Record<string, Function[]> = {}
+  const origVisibilityDesc = Object.getOwnPropertyDescriptor(document, 'visibilityState')
 
   beforeEach(() => {
     listeners = {}
@@ -39,6 +41,11 @@ describe('setupSelfHealing', () => {
   })
 
   afterEach(() => {
+    if (origVisibilityDesc) {
+      Object.defineProperty(document, 'visibilityState', origVisibilityDesc)
+    } else {
+      delete (document as any).visibilityState
+    }
     vi.restoreAllMocks()
   })
 
@@ -209,6 +216,29 @@ describe('setupSelfHealing', () => {
       clearTimeoutSpy.mockRestore()
       vi.useRealTimers()
     }
+  })
+
+  it('suppresses auto-reconnect when isConflictActive returns true', async () => {
+    const reconnectNow = vi.fn().mockResolvedValue(true)
+    let conflictActive = true
+
+    const healing = setupSelfHealing({
+      getStatus: () => 'unstable',
+      reconnectNow,
+      isConflictActive: () => conflictActive
+    })
+
+    expect(listeners['focus']).toBeDefined()
+    await listeners['focus'][0]()
+    await flushPromises()
+    expect(reconnectNow).not.toHaveBeenCalled()
+
+    conflictActive = false
+    await listeners['focus'][0]()
+    await flushPromises()
+    expect(reconnectNow).toHaveBeenCalledTimes(1)
+
+    healing.dispose()
   })
 })
 

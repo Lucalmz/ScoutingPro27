@@ -1,5 +1,5 @@
-import { mount } from '@vue/test-utils'
-import { describe, it, expect, vi } from 'vitest'
+import { mount, type VueWrapper } from '@vue/test-utils'
+import { describe, it, expect, vi, afterEach } from 'vitest'
 import DynamicFieldsRenderer from '../components/customFields/DynamicFieldsRenderer.vue'
 import type { CustomFieldDefinition } from '../types'
 
@@ -27,14 +27,24 @@ const createField = (overrides: Partial<CustomFieldDefinition>): CustomFieldDefi
 })
 
 describe('DynamicFieldsRenderer.vue', () => {
+  const wrappers: VueWrapper<any>[] = []
+  const track = <T extends VueWrapper<any>>(w: T): T => {
+    wrappers.push(w)
+    return w
+  }
+
+  afterEach(() => {
+    while (wrappers.length) wrappers.pop()!.unmount()
+  })
+
   it('renders boolean field and emits update:modelValue on click', async () => {
     const field = createField({ fieldType: 'boolean', fieldKey: 'is_super' })
-    const wrapper = mount(DynamicFieldsRenderer, {
+    const wrapper = track(mount(DynamicFieldsRenderer, {
       props: {
         definitions: [field],
         modelValue: { is_super: false }
       }
-    })
+    }))
 
     const toggleCard = wrapper.find('.boolean-toggle-card')
     expect(toggleCard.exists()).toBe(true)
@@ -55,12 +65,12 @@ describe('DynamicFieldsRenderer.vue', () => {
       stepVal: 1
     })
 
-    const wrapper = mount(DynamicFieldsRenderer, {
+    const wrapper = track(mount(DynamicFieldsRenderer, {
       props: {
         definitions: [field],
         modelValue: { cycle_count: 3 }
       }
-    })
+    }))
 
     const plusBtn = wrapper.find('.stepper-btn.btn-inc')
     const minusBtn = wrapper.find('.stepper-btn.btn-dec')
@@ -83,12 +93,12 @@ describe('DynamicFieldsRenderer.vue', () => {
       maxVal: 5
     })
 
-    const wrapper = mount(DynamicFieldsRenderer, {
+    const wrapper = track(mount(DynamicFieldsRenderer, {
       props: {
         definitions: [field],
         modelValue: { defense_rating: 2 }
       }
-    })
+    }))
 
     const buttons = wrapper.findAll('.level-tick-btn')
     expect(buttons).toHaveLength(5)
@@ -111,12 +121,12 @@ describe('DynamicFieldsRenderer.vue', () => {
       ]
     })
 
-    const wrapper = mount(DynamicFieldsRenderer, {
+    const wrapper = track(mount(DynamicFieldsRenderer, {
       props: {
         definitions: [field],
         modelValue: { intake_type: 'roller' }
       }
-    })
+    }))
 
     const pills = wrapper.findAll('.capsule-chip')
     expect(pills).toHaveLength(2)
@@ -140,12 +150,12 @@ describe('DynamicFieldsRenderer.vue', () => {
       ]
     })
 
-    const wrapper = mount(DynamicFieldsRenderer, {
+    const wrapper = track(mount(DynamicFieldsRenderer, {
       props: {
         definitions: [field],
         modelValue: { auto_routes: ['left'] }
       }
-    })
+    }))
 
     const tags = wrapper.findAll('.tag-flow-badge')
     expect(tags).toHaveLength(3)
@@ -171,12 +181,12 @@ describe('DynamicFieldsRenderer.vue', () => {
       fieldKey: 'custom_notes'
     })
 
-    const wrapper = mount(DynamicFieldsRenderer, {
+    const wrapper = track(mount(DynamicFieldsRenderer, {
       props: {
         definitions: [field],
         modelValue: { custom_notes: 'Initial' }
       }
-    })
+    }))
 
     const input = wrapper.find('.dynamic-textarea')
     expect(input.exists()).toBe(true)
@@ -197,18 +207,18 @@ describe('DynamicFieldsRenderer.vue', () => {
     })
 
     // At minVal (0)
-    const wrapperMin = mount(DynamicFieldsRenderer, {
+    const wrapperMin = track(mount(DynamicFieldsRenderer, {
       props: { definitions: [field], modelValue: { score: 0 } }
-    })
+    }))
     const minusBtn = wrapperMin.find('.stepper-btn.btn-dec')
     await minusBtn.trigger('click')
     // Value does not go below minVal
     expect(wrapperMin.emitted('update:modelValue')).toBeFalsy()
 
     // At maxVal (5)
-    const wrapperMax = mount(DynamicFieldsRenderer, {
+    const wrapperMax = track(mount(DynamicFieldsRenderer, {
       props: { definitions: [field], modelValue: { score: 5 } }
-    })
+    }))
     const plusBtn = wrapperMax.find('.stepper-btn.btn-inc')
     await plusBtn.trigger('click')
     // Value does not exceed maxVal
@@ -224,9 +234,9 @@ describe('DynamicFieldsRenderer.vue', () => {
       stepVal: 0.1
     })
 
-    const wrapper = mount(DynamicFieldsRenderer, {
+    const wrapper = track(mount(DynamicFieldsRenderer, {
       props: { definitions: [field], modelValue: { cycle_time: 0.2 } }
-    })
+    }))
     await wrapper.find('.stepper-btn.btn-inc').trigger('click')
 
     // 0.2 + 0.1 = 0.3 (not 0.30000000000000004)
@@ -241,9 +251,9 @@ describe('DynamicFieldsRenderer.vue', () => {
       maxVal: 10
     })
 
-    const wrapper = mount(DynamicFieldsRenderer, {
+    const wrapper = track(mount(DynamicFieldsRenderer, {
       props: { definitions: [field], modelValue: { auto_balls: 2 } }
-    })
+    }))
     const input = wrapper.find('.stepper-input')
 
     // 1. Enter value above maxVal (15) -> clamps to 10
@@ -277,17 +287,17 @@ describe('DynamicFieldsRenderer.vue', () => {
     })
 
     // Optional field: clicking currently selected level 3 sets to 0
-    const wrapperOpt = mount(DynamicFieldsRenderer, {
+    const wrapperOpt = track(mount(DynamicFieldsRenderer, {
       props: { definitions: [optionalLevelField], modelValue: { rating_opt: 3 } }
-    })
+    }))
     const optButtons = wrapperOpt.findAll('.level-tick-btn')
     await optButtons[2].trigger('click') // index 2 is level 3
     expect(wrapperOpt.emitted('update:modelValue')?.[0][0]).toEqual({ rating_opt: 0 })
 
     // Required field: clicking currently selected level 3 stays 3
-    const wrapperReq = mount(DynamicFieldsRenderer, {
+    const wrapperReq = track(mount(DynamicFieldsRenderer, {
       props: { definitions: [requiredLevelField], modelValue: { rating_req: 3 } }
-    })
+    }))
     const reqButtons = wrapperReq.findAll('.level-tick-btn')
     await reqButtons[2].trigger('click')
     expect(wrapperReq.emitted('update:modelValue')?.[0][0]).toEqual({ rating_req: 3 })
@@ -295,21 +305,21 @@ describe('DynamicFieldsRenderer.vue', () => {
 
   it('level rating: dynamically clamps tick counts between 3 and 7', () => {
     // maxVal: 1 -> clamped to min 3
-    const wrapperSmall = mount(DynamicFieldsRenderer, {
+    const wrapperSmall = track(mount(DynamicFieldsRenderer, {
       props: {
         definitions: [createField({ fieldType: 'level', fieldKey: 'lvl1', maxVal: 1 })],
         modelValue: {}
       }
-    })
+    }))
     expect(wrapperSmall.findAll('.level-tick-btn')).toHaveLength(3)
 
     // maxVal: 10 -> clamped to max 7
-    const wrapperLarge = mount(DynamicFieldsRenderer, {
+    const wrapperLarge = track(mount(DynamicFieldsRenderer, {
       props: {
         definitions: [createField({ fieldType: 'level', fieldKey: 'lvl2', maxVal: 10 })],
         modelValue: {}
       }
-    })
+    }))
     expect(wrapperLarge.findAll('.level-tick-btn')).toHaveLength(7)
   })
 
@@ -328,16 +338,16 @@ describe('DynamicFieldsRenderer.vue', () => {
     })
 
     // Optional: clicking active option deselects to null
-    const wrapperOpt = mount(DynamicFieldsRenderer, {
+    const wrapperOpt = track(mount(DynamicFieldsRenderer, {
       props: { definitions: [optField], modelValue: { opt_test: 'opt_a' } }
-    })
+    }))
     await wrapperOpt.find('.capsule-chip').trigger('click')
     expect(wrapperOpt.emitted('update:modelValue')?.[0][0]).toEqual({ opt_test: null })
 
     // Required: clicking active option retains opt_a
-    const wrapperReq = mount(DynamicFieldsRenderer, {
+    const wrapperReq = track(mount(DynamicFieldsRenderer, {
       props: { definitions: [reqField], modelValue: { req_test: 'opt_a' } }
-    })
+    }))
     await wrapperReq.find('.capsule-chip').trigger('click')
     expect(wrapperReq.emitted('update:modelValue')?.[0][0]).toEqual({ req_test: 'opt_a' })
   })
@@ -349,9 +359,9 @@ describe('DynamicFieldsRenderer.vue', () => {
       options: [{ label: 'Tag 1', value: 'tag1' }]
     })
 
-    const wrapper = mount(DynamicFieldsRenderer, {
+    const wrapper = track(mount(DynamicFieldsRenderer, {
       props: { definitions: [field], modelValue: {} }
-    })
+    }))
     await wrapper.find('.tag-flow-badge').trigger('click')
     expect(wrapper.emitted('update:modelValue')?.[0][0]).toEqual({ tags: ['tag1'] })
   })
@@ -372,9 +382,9 @@ describe('DynamicFieldsRenderer.vue', () => {
       fieldKey: 'simple'
     })
 
-    const wrapper = mount(DynamicFieldsRenderer, {
+    const wrapper = track(mount(DynamicFieldsRenderer, {
       props: { definitions: [fieldWithUnitAndReq, fieldWithout], modelValue: {} }
-    })
+    }))
 
     const items = wrapper.findAll('.dynamic-field-item')
     // Item 0 has required star and unit badge
@@ -387,9 +397,9 @@ describe('DynamicFieldsRenderer.vue', () => {
   })
 
   it('renders empty container gracefully when definitions is empty array', () => {
-    const wrapper = mount(DynamicFieldsRenderer, {
+    const wrapper = track(mount(DynamicFieldsRenderer, {
       props: { definitions: [], modelValue: {} }
-    })
+    }))
     expect(wrapper.find('.dynamic-custom-fields').exists()).toBe(false)
   })
 })

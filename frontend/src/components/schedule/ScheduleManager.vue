@@ -7,6 +7,8 @@ import { useRecordStore } from '@/stores/records'
 import { useConnectionStore } from '@/stores/connection'
 import { useUserStore } from '@/stores/user'
 import { useToastStore } from '@/stores/toast'
+import { useAiStore } from '@/stores/ai'
+import { useRouter, useRoute } from 'vue-router'
 import ScheduleImportModal from './ScheduleImportModal.vue'
 import ScheduleAuditModal from './ScheduleAuditModal.vue'
 import PitStatusIndicator from '@/components/pit/PitStatusIndicator.vue'
@@ -24,12 +26,24 @@ const emit = defineEmits<{
   (e: 'openWhiteboard', match: { matchNumber: number; tournamentLevel?: string }): void
 }>()
 
-const { t } = useI18n()
+const { t, locale } = useI18n()
 const scheduleStore = useScheduleStore()
 const recordStore = useRecordStore()
 const connStore = useConnectionStore()
 const userStore = useUserStore()
 const toastStore = useToastStore()
+const aiStore = useAiStore()
+const router = useRouter()
+const route = useRoute()
+
+async function askAiForMatch(sched: MatchScheduleItem) {
+  const evtId = props.event?.id || sched.eventId
+  if (!evtId) return
+  await aiStore.openCopilotForMatch(evtId, sched, undefined, locale.value)
+  if (typeof window !== 'undefined' && window.innerWidth <= 768) {
+    router.replace({ query: { ...route.query, tab: 'ai' } })
+  }
+}
 
 const showImportModal = ref(false)
 const showAuditModal = ref(false)
@@ -598,15 +612,26 @@ function enter(el: Element, done: () => void) {
             <td class="td-match">
               <div class="match-cell-stack">
                 <div class="match-badge">{{ (sched.tournamentLevel || '').toUpperCase() === 'PLAYOFF' ? 'P' : 'Q' }}{{ sched.matchNumber }}</div>
-                <button
-                  type="button"
-                  class="btn-match-whiteboard"
-                  :title="t('whiteboard.open_from_schedule')"
-                  @mousedown.stop
-                  @click.stop="emit('openWhiteboard', { matchNumber: sched.matchNumber, tournamentLevel: sched.tournamentLevel || 'QUALIFICATION' })"
-                >
-                  <span class="material-icons">draw</span>
-                </button>
+                <div class="match-action-pills">
+                  <button
+                    type="button"
+                    class="btn-match-whiteboard"
+                    :title="t('whiteboard.open_from_schedule')"
+                    @mousedown.stop
+                    @click.stop="emit('openWhiteboard', { matchNumber: sched.matchNumber, tournamentLevel: sched.tournamentLevel || 'QUALIFICATION' })"
+                  >
+                    <span class="material-icons">draw</span>
+                  </button>
+                  <button
+                    type="button"
+                    class="btn-match-ai"
+                    :title="t('ai.ask_ai_about_match')"
+                    @mousedown.stop
+                    @click.stop="askAiForMatch(sched)"
+                  >
+                    <span class="material-icons">auto_awesome</span>
+                  </button>
+                </div>
               </div>
             </td>
 

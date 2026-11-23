@@ -65,38 +65,4 @@ describe('ScoutStorage & Member Lifecycle Tests', () => {
     clearKnownScouts(testEventId)
     expect(getKnownScouts(testEventId)).toEqual([])
   })
-
-  it('verifies WebRTC reconnect deduplication prevents API call storms', async () => {
-    const addEventMemberMock = vi.fn().mockResolvedValue(undefined)
-    const syncedMemberIds = new Set<string>()
-
-    // Simulate WebRTC onClientConnected logic
-    const handleClientConnected = async (currentEventId: string, userId: string, userName: string, isHost: boolean) => {
-      saveKnownScout(currentEventId, { id: userId, name: userName, lastSeen: Date.now() })
-      if (!syncedMemberIds.has(userId) && isHost) {
-        syncedMemberIds.add(userId)
-        await addEventMemberMock(currentEventId, userId, userName)
-      }
-    }
-
-    // 1. Initial connection from mobile phone
-    await handleClientConnected(testEventId, 'phone_user_1', 'Mobile Scout 1', true)
-    expect(addEventMemberMock).toHaveBeenCalledTimes(1)
-    expect(addEventMemberMock).toHaveBeenCalledWith(testEventId, 'phone_user_1', 'Mobile Scout 1')
-
-    // 2. Flapping / Reconnection 1 (phone screen lock & unlock)
-    await handleClientConnected(testEventId, 'phone_user_1', 'Mobile Scout 1', true)
-    // 3. Flapping / Reconnection 2 (Wi-Fi roaming)
-    await handleClientConnected(testEventId, 'phone_user_1', 'Mobile Scout 1', true)
-    // 4. Flapping / Reconnection 3
-    await handleClientConnected(testEventId, 'phone_user_1', 'Mobile Scout 1', true)
-
-    // Assert: addEventMember was NOT spammed; strictly called only ONCE
-    expect(addEventMemberMock).toHaveBeenCalledTimes(1)
-
-    // 5. Another scout joins
-    await handleClientConnected(testEventId, 'phone_user_2', 'Mobile Scout 2', true)
-    expect(addEventMemberMock).toHaveBeenCalledTimes(2)
-    expect(addEventMemberMock).toHaveBeenCalledWith(testEventId, 'phone_user_2', 'Mobile Scout 2')
-  })
 })

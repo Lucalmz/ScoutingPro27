@@ -547,3 +547,260 @@ describe('buildEventDataContext', () => {
 })
 
 
+
+describe('buildEventDataContext v2 enhancements', () => {
+  it('renders Perspective & Focus, Match Schedule, Spread/Descore, Advancement, and Custom Metrics when supplied', async () => {
+    const { buildContextPreviewStats, estimateTokenCount } = await import('../components/ai/contextBuilder')
+
+    const opts: Parameters<typeof buildEventDataContext>[0] = {
+      event: {
+        id: 'evt-v2',
+        name: 'BIOBUZZ Regional',
+        inviteCode: 'BIO27',
+        hostId: 'u1',
+        ftcYear: 2026,
+        ftcEventCode: 'CNREG'
+      },
+      myTeamNumber: 27570,
+      focusTeams: [12345],
+      focusMatch: { matchNumber: 12, tournamentLevel: 'QUALIFICATION' },
+      rankings: [
+        {
+          teamNumber: 27570,
+          matchCount: 4,
+          avgAutoScore: 30,
+          avgTeleopScore: 95,
+          avgEndgameScore: 22,
+          maxScore: 168,
+          avgRating: 147,
+          brokenCount: 0,
+          trend: 'up',
+          teleopParkRate: 0.75,
+          avgMobilityRpPts: 11.5,
+          avgFlowerNectars: 4.5,
+          avgFlowerBottomBonus: 2.0,
+          avgFlowerPollens: 5.0,
+          avgGardenBalls: 3.0,
+          descoreRate: 0.5,
+          g410FoulRate: 0,
+          predictCycleTime: 7.4,
+          predictCycleMatches: 3,
+          predictCycleSpread: 1.2,
+          estimatedMaxCycles: 10,
+          advancementPoints: 58,
+          advancementStatus: 'ADVANCING',
+          advancementRolledDown: true
+        }
+      ],
+      schedules: [
+        {
+          eventId: 'evt-v2',
+          matchNumber: 12,
+          tournamentLevel: 'QUALIFICATION',
+          red1: 27570,
+          red2: 12345,
+          blue1: 8888,
+          blue2: 9999,
+          scoreRedFinal: null,
+          scoreBlueFinal: null
+        },
+        {
+          eventId: 'evt-v2',
+          matchNumber: 2,
+          tournamentLevel: 'PLAYOFF',
+          red1: 27570,
+          red2: 8888,
+          blue1: 12345,
+          blue2: 9999,
+          scoreRedFinal: 175,
+          scoreBlueFinal: 162
+        }
+      ],
+      customFields: [
+        {
+          id: 'cf1',
+          eventId: 'evt-v2',
+          target: 'MATCH',
+          phase: 'teleop',
+          name: 'Intake Jam',
+          fieldKey: 'intakeJam',
+          fieldType: 'boolean',
+          required: false,
+          orderSeq: 1,
+          isActive: true
+        },
+        {
+          id: 'cf2',
+          eventId: 'evt-v2',
+          target: 'MATCH',
+          phase: 'auto',
+          name: 'Sort Speed',
+          fieldKey: 'sortSpeed',
+          fieldType: 'number',
+          required: false,
+          unit: 's',
+          orderSeq: 2,
+          isActive: true
+        }
+      ],
+      records: [
+        {
+          id: 'rec-1',
+          eventId: 'evt-v2',
+          scoutId: 's1',
+          scoutName: 'Alex',
+          matchNumber: 12,
+          teamNumber: 27570,
+          autoScore: 30,
+          teleopScore: 98,
+          endgameScore: 24,
+          totalScore: 152,
+          notes: 'Smooth cycle',
+          rawData: JSON.stringify({
+            customFields: { intakeJam: true, sortSpeed: 2.5 }
+          }),
+          syncStatus: 'SYNCED',
+          createdAt: '2026-11-21T10:00:00Z',
+          updatedAt: '2026-11-21T10:00:00Z',
+          isBroken: false,
+          version: 1
+        }
+      ],
+      pitRecords: [
+        {
+          id: 'pit-1',
+          eventId: 'evt-v2',
+          teamNumber: 27570,
+          scoutId: 's1',
+          scoutName: 'Alex',
+          drivetrainType: 'swerve',
+          weightLbs: 31,
+          ballCompatibility: 'universal',
+          launcherType: 'turret',
+          flowerMechanism: 'elevator',
+          hasColorSensor: true,
+          hasDescoreMech: true,
+          hasApriltagVision: true,
+          odometryType: 'pinpoint',
+          claimedAutoScore: 32,
+          claimedTeleopCycles: 10,
+          claimedTeleopScore: 100,
+          claimedTeleopPark: true,
+          claimedEndgameScore: 24,
+          claimedTotalScore: 156,
+          version: 1
+        }
+      ]
+    }
+
+    const stats = buildContextPreviewStats(opts)
+    expect(stats.text).toContain('[Perspective & Focus]')
+    expect(stats.text).toContain('My Team: #27570')
+    expect(stats.text).toContain('Focused Teams: #12345')
+    expect(stats.text).toContain('Focused Match: Qual Match 12')
+    expect(stats.text).toContain('Cycle Spread | Descore %')
+    expect(stats.text).toContain('Advancement Pts | Advancement Status')
+    expect(stats.text).toContain('1.2s | 50% | 58 | ADVANCING (Rolled Down)')
+    expect(stats.text).toContain('[Match Schedule]')
+    expect(stats.text).toContain('Q12 | #27570, #12345 | #8888, #9999 | Upcoming')
+    expect(stats.text).toContain('P2 | #27570, #8888 | #12345, #9999 | 175 - 162')
+    expect(stats.text).toContain('Weight & Capabilities')
+    expect(stats.text).toContain('31lbs, DescoreMech, AprilTag, ClaimsTeleOpPark')
+    expect(stats.text).toContain('[Custom Metrics]')
+    expect(stats.text).toContain('Team 27570: Intake Jam: 100% · Sort Speed: 2.5s')
+    expect(stats.scheduleCount).toBe(2)
+    expect(stats.focusTeamsCount).toBe(1)
+    expect(stats.estimatedTokens).toBe(estimateTokenCount(stats.text))
+    expect(estimateTokenCount('你好FTC')).toBeGreaterThan(0)
+  })
+
+  it('respects section toggles and preserves focus teams across strict line-boundary truncation', async () => {
+    const { buildContextPreviewStats } = await import('../components/ai/contextBuilder')
+
+    const manyRecords: Parameters<typeof buildEventDataContext>[0]['records'] = []
+    manyRecords.push({
+      id: 'focus-rec-1',
+      eventId: 'evt-trunc',
+      scoutId: 's1',
+      scoutName: 'FocusScout',
+      matchNumber: 1,
+      teamNumber: 27570,
+      autoScore: 25,
+      teleopScore: 90,
+      endgameScore: 20,
+      totalScore: 135,
+      notes: 'Focused early match MUST survive truncation',
+      rawData: '{}',
+      syncStatus: 'SYNCED',
+      createdAt: '2026-11-21T08:00:00Z',
+      updatedAt: '2026-11-21T08:00:00Z',
+      isBroken: false,
+      version: 1
+    })
+
+    for (let i = 2; i <= 40; i++) {
+      manyRecords.push({
+        id: `rec-${i}`,
+        eventId: 'evt-trunc',
+        scoutId: 's2',
+        scoutName: 'OtherScout',
+        matchNumber: i,
+        teamNumber: 9000 + i,
+        autoScore: 10,
+        teleopScore: 50,
+        endgameScore: 10,
+        totalScore: 70,
+        notes: 'Long padding note to consume context budget cleanly on line boundary '.repeat(2),
+        rawData: '{}',
+        syncStatus: 'SYNCED',
+        createdAt: '2026-11-21T09:00:00Z',
+        updatedAt: '2026-11-21T09:00:00Z',
+        isBroken: false,
+        version: 1
+      })
+    }
+
+    const stats = buildContextPreviewStats({
+      rankings: [
+        {
+          teamNumber: 27570,
+          matchCount: 1,
+          avgAutoScore: 25,
+          avgTeleopScore: 90,
+          avgEndgameScore: 20,
+          maxScore: 135,
+          avgRating: 135,
+          brokenCount: 0,
+          trend: 'stable'
+        }
+      ],
+      schedules: [
+        {
+          eventId: 'evt-trunc',
+          matchNumber: 1,
+          tournamentLevel: 'QUALIFICATION',
+          red1: 27570,
+          red2: 1111,
+          blue1: 2222,
+          blue2: 3333
+        }
+      ],
+      focusTeams: [27570],
+      sections: {
+        rankings: false,
+        schedule: false,
+        pit: false,
+        tags: false,
+        matches: true
+      },
+      records: manyRecords,
+      maxCharsBudget: 2400
+    })
+
+    expect(stats.text).not.toContain('[Teams Overall Rankings')
+    expect(stats.text).not.toContain('[Match Schedule]')
+    expect(stats.truncatedMatchesCount).toBeGreaterThan(0)
+    expect(stats.text).toContain('Match 1 | Team 27570 | FocusScout')
+    expect(stats.text).toContain('omitted to stay within')
+  })
+})

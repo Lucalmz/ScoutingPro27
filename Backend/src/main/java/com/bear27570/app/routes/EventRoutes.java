@@ -651,6 +651,9 @@ public class EventRoutes {
         """, newEventId, oldEventId, newEventId);
         handle.execute("DELETE FROM ai_chat_sessions WHERE event_id = ?", oldEventId);
 
+        // 9.1 ai_chat_threads
+        handle.execute("UPDATE ai_chat_threads SET event_id = ? WHERE event_id = ?", newEventId, oldEventId);
+
         // 9.5 event_custom_fields
         handle.execute("""
             UPDATE event_custom_fields

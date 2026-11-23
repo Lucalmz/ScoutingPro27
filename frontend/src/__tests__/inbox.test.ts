@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeEach, vi } from 'vitest'
+import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest'
 import { setActivePinia, createPinia } from 'pinia'
 import { useInboxStore } from '../stores/inbox'
 import { useUserStore } from '../stores/user'
@@ -7,6 +7,11 @@ describe('useInboxStore Outbox and Message delivery', () => {
   beforeEach(() => {
     setActivePinia(createPinia())
     localStorage.clear()
+  })
+
+  afterEach(() => {
+    localStorage.clear()
+    vi.restoreAllMocks()
   })
 
   it('adds incoming messages and computes unread count', () => {

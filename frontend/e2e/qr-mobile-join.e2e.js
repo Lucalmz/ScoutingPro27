@@ -1,154 +1,75 @@
-import puppeteer from 'puppeteer-core';
-import { spawn, execSync } from 'child_process';
+import assert from 'assert';
+import fs from 'fs';
 import path from 'path';
-import os from 'os';
-import { fileURLToPath } from 'url';
+import jsQR from 'jsqr';
+import { E2EClusterManager, REPO_ROOT, allocateFreePort } from './helpers/e2eBackendManager.js';
+import {
+  completeMobileWizardMatchViaUi,
+  confirmAnySasModals,
+  createEventViaUi,
+  fetchBackendJson,
+  robustLogin,
+  switchToTab,
+  waitForCondition,
+  waitForConnectedWithSas,
+  waitForTransition
+} from './helpers/e2eUiActions.js';
 
-const __filename = fileURLToPath(import.meta.url);
-const __dirname = path.dirname(__filename);
 const SHOW_UI = process.env.SHOW_UI === '1';
-const PORT = 7073;
-const BASE_URL = `http://localhost:${PORT}/index.html`;
 
-function getChromeExecutablePath() {
-  const platform = os.platform();
-  if (platform === 'win32') return 'C:\\Program Files\\Google\\Chrome\\Application\\chrome.exe';
-  if (platform === 'darwin') return '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome';
-  return '/usr/bin/google-chrome';
+function snapshotFileStat(filePath) {
+  if (!fs.existsSync(filePath)) return { exists: false };
+  const s = fs.statSync(filePath);
+  return { exists: true, size: s.size, mtimeMs: s.mtimeMs };
 }
 
-const CHROME_PATH = getChromeExecutablePath();
-
-function delay(ms) {
-  return new Promise(resolve => setTimeout(resolve, ms));
-}
-
-function killProcessTree(pid) {
-  try {
-    if (os.platform() === 'win32') {
-      execSync(`taskkill /pid ${pid} /f /t`, { stdio: 'ignore' });
-    } else {
-      process.kill(-pid, 'SIGKILL');
-    }
-  } catch (e) {}
-}
-
-async function waitForTransition(page) {
-  await page.waitForFunction(() => {
-    return !document.documentElement.hasAttribute('data-direction') && 
-           !document.documentElement.hasAttribute('data-transition-type');
-  }, { timeout: 5000 }).catch(() => {});
-  await delay(100);
-}
-
-async function robustLogin(page, username, password = 'e2epassword123') {
-  await page.waitForSelector('#username', { visible: true, timeout: 10000 });
-  await page.type('#username', username);
-
-  await page.evaluate(() => {
-    const el = document.querySelector('#username');
-    if (el) el.dispatchEvent(new Event('blur'));
+async function decodeQrCanvasOnPage(page) {
+  const img = await page.evaluate(() => {
+    const canvas = document.querySelector('.qr-canvas-container canvas');
+    if (!canvas) return null;
+    const ctx = canvas.getContext('2d');
+    if (!ctx) return null;
+    const imageData = ctx.getImageData(0, 0, canvas.width, canvas.height);
+    return {
+      width: canvas.width,
+      height: canvas.height,
+      data: Array.from(imageData.data)
+    };
   });
-
-  await delay(1200);
-
-  await page.waitForSelector('#password', { visible: true, timeout: 10000 });
-  await page.type('#password', password);
-
-  const confirmPasswordEl = await page.$('#confirmPassword');
-  if (confirmPasswordEl) {
-    await page.type('#confirmPassword', password);
-  }
-
-  await page.waitForFunction(() => {
-    const btn = document.querySelector('button[type="submit"]');
-    return btn && !btn.disabled;
-  }, { timeout: 10000 });
-
-  await page.click('button[type="submit"]');
+  assert.ok(img && img.width > 0 && img.height > 0, 'QR canvas missing or zero-sized');
+  const decoded = jsQR(Uint8ClampedArray.from(img.data), img.width, img.height);
+  assert.ok(decoded && decoded.data, 'jsQR failed to decode rendered QR canvas pixels');
+  return decoded.data;
 }
 
 async function runQrMobileE2ETest() {
-  console.log('==================================================================');
-  console.log('📱 [E2E] Starting QR Code Mobile Scan & Join End-to-End Tests');
-  console.log('==================================================================');
+  const rootDbPaths = [
+    path.join(REPO_ROOT, 'app_data.mv.db'),
+    path.join(REPO_ROOT, 'Backend', 'app_data.mv.db')
+  ];
+  const rootDbBaselines = rootDbPaths.map((p) => ({ path: p, stat: snapshotFileStat(p) }));
 
-  // 1. Build and sync static resources if needed
-  if (process.env.SKIP_BUILD !== '1') {
-    console.log('\n[1/6] Building frontend and updating backend static resources...');
-    try {
-      execSync('npm run build', { cwd: path.join(__dirname, '..'), stdio: 'inherit' });
-      const mavenCmd = os.platform() === 'win32' ? 'mvn.cmd' : 'mvn';
-      execSync(`${mavenCmd} process-resources -DskipTests`, { cwd: path.join(__dirname, '../../Backend'), stdio: 'inherit' });
-    } catch (err) {
-      console.error('❌ Build failed. Aborting test.', err);
-      process.exit(1);
-    }
-  }
+  const runId = Date.now();
+  const manager = new E2EClusterManager(runId);
 
-  // 2. Launch Backend on isolated port
-  console.log(`\n[2/6] Starting Java backend on isolated port ${PORT}...`);
-  const mavenCmd = os.platform() === 'win32' ? 'mvn.cmd' : 'mvn';
-  const backendProcess = spawn(mavenCmd, [
-    'exec:java',
-    os.platform() === 'win32' ? '"-Dexec.mainClass=com.bear27570.app.Main"' : '-Dexec.mainClass=com.bear27570.app.Main',
-    os.platform() === 'win32' ? '"-Dexec.args=--headless"' : '-Dexec.args=--headless',
-    '-DENABLE_TEST_CLEANUP=true',
-    '-DSKIP_FIREWALL_CHECK=true'
-  ], {
-    cwd: path.join(__dirname, '../../Backend'),
-    detached: os.platform() !== 'win32',
-    shell: os.platform() === 'win32',
-    env: { ...process.env, DEV_PORT: String(PORT), ENABLE_TEST_CLEANUP: 'true', SKIP_FIREWALL_CHECK: 'true' }
-  });
-
-  process.on('SIGINT', () => {
-    console.log('\n🛑 SIGINT received. Cleaning up backend process...');
-    killProcessTree(backendProcess.pid);
+  const signalHandler = async (sig) => {
+    console.warn(`\n[QR E2E] Caught ${sig}; running cleanup...`);
+    await manager.cleanupAll({ assertDeleted: false }).catch(() => {});
     process.exit(1);
-  });
+  };
+  process.on('SIGINT', signalHandler);
+  process.on('SIGTERM', signalHandler);
 
-  await new Promise((resolve, reject) => {
-    const timeout = setTimeout(() => reject(new Error('Backend failed to start within 60s')), 60000);
-    const onData = (data) => {
-      const s = data.toString();
-      if (s.includes('Listening on http://') || s.includes('Javalin')) {
-        clearTimeout(timeout);
-        console.log(`✅ Backend successfully running on http://localhost:${PORT}`);
-        resolve();
-      }
-    };
-    backendProcess.stdout.on('data', onData);
-    backendProcess.stderr.on('data', onData);
-  });
-
-  // 3. Launch Desktop Host Browser and Mobile Browser
-  console.log('\n[3/6] Launching Puppeteer instances for Desktop Host and Mobile Device...');
-  const hostBrowser = await puppeteer.launch({
-    executablePath: CHROME_PATH,
-    headless: SHOW_UI ? false : 'new',
-    args: ['--no-sandbox', '--disable-setuid-sandbox', '--window-size=1200,850'],
-    defaultViewport: { width: 1200, height: 850 }
-  });
-
-  const mobileBrowser = await puppeteer.launch({
-    executablePath: CHROME_PATH,
-    headless: SHOW_UI ? false : 'new',
-    args: ['--no-sandbox', '--disable-setuid-sandbox', '--window-size=420,880'],
-    defaultViewport: {
-      width: 390,
-      height: 844,
-      isMobile: true,
-      hasTouch: true,
-      deviceScaleFactor: 3
-    }
-  });
+  const dirHost = manager.createTempDir('qr-host');
+  const chromeHostDir = manager.createTempDir('qr-chrome-host');
+  const chromeMob1Dir = manager.createTempDir('qr-chrome-mobile1');
+  const chromeMob2Dir = manager.createTempDir('qr-chrome-mobile2');
 
   const checks = [];
   const errors = [];
 
   function recordCheck(name, passed, detail = '') {
-    checks.push({ name, passed, detail });
+    checks.push({ name, passed: Boolean(passed), detail });
     if (passed) {
       console.log(`  ✅ [PASS] ${name}${detail ? ` (${detail})` : ''}`);
     } else {
@@ -158,217 +79,349 @@ async function runQrMobileE2ETest() {
   }
 
   try {
-    const hostPage = await hostBrowser.newPage();
-    const mobilePage = await mobileBrowser.newPage();
+    const PORT_HOST = await allocateFreePort();
+    const URL_HOST = `http://localhost:${PORT_HOST}/index.html`;
+    await manager.startLocalMqttBroker();
+    const clientBaseUrl = await manager.startStaticClientServer(0, '127.0.0.2');
+    await manager.startBackend({ name: 'host', port: PORT_HOST, tmpDir: dirHost });
 
-    await mobilePage.setUserAgent(
-      'Mozilla/5.0 (iPhone; CPU iPhone OS 17_0 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.0 Mobile/15E148 Safari/604.1'
-    );
+    const [hostLaunch, mob1Launch, mob2Launch] = await Promise.all([
+      manager.launchBrowser({ name: 'host', index: 0, userDataDir: chromeHostDir, showUi: SHOW_UI }),
+      manager.launchBrowser({
+        name: 'mobile1',
+        index: 1,
+        userDataDir: chromeMob1Dir,
+        showUi: SHOW_UI,
+        extraSecureOrigin: clientBaseUrl
+      }),
+      manager.launchBrowser({
+        name: 'mobile2',
+        index: 2,
+        userDataDir: chromeMob2Dir,
+        showUi: SHOW_UI,
+        extraSecureOrigin: clientBaseUrl
+      })
+    ]);
 
-    hostPage.on('console', msg => {
-      const txt = msg.text();
-      if (txt.includes('[ERROR]') || txt.includes('Uncaught')) {
-        console.warn(`[Host Console Warning] ${txt}`);
-      }
-    });
+    const hostBrowser = hostLaunch.browser;
+    await hostBrowser.defaultBrowserContext().overridePermissions(`http://localhost:${PORT_HOST}`, [
+      'clipboard-read',
+      'clipboard-write',
+      'clipboard-sanitized-write'
+    ]);
 
-    mobilePage.on('console', msg => {
-      const txt = msg.text();
-      if (txt.includes('[ERROR]') || txt.includes('Uncaught')) {
-        console.warn(`[Mobile Console Warning] ${txt}`);
-      }
-    });
+    const hostPage = hostLaunch.page;
+    const mobilePage = mob1Launch.page;
+    const mobile2Page = mob2Launch.page;
+
+    await hostPage.setViewport({ width: 1200, height: 850 });
+    for (const mPage of [mobilePage, mobile2Page]) {
+      await mPage.setViewport({
+        width: 390,
+        height: 844,
+        isMobile: true,
+        hasTouch: true,
+        deviceScaleFactor: 3
+      });
+      await mPage.setUserAgent(
+        'Mozilla/5.0 (iPhone; CPU iPhone OS 17_0 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.0 Mobile/15E148 Safari/604.1'
+      );
+    }
+
+    const hostUsername = `HostLead_${runId}`;
+    const hostPassword = 'e2epassword123';
 
     // ------------------------------------------------------------------
-    // PHASE 1: Desktop Host logs in and creates an event
+    // PHASE 1: Host creates Event & opens MobileQrModal
     // ------------------------------------------------------------------
-    console.log('\n--- Phase 1: Host logs in and creates Event ---');
-    const hostUsername = `HostLead_${Date.now()}`;
-    await hostPage.goto(BASE_URL);
-    await robustLogin(hostPage, hostUsername);
-    await hostPage.waitForSelector('.action-btn.primary', { timeout: 15000 });
-    recordCheck('Desktop Host logged in to Dashboard', true, hostUsername);
+    console.log('\n--- Phase 1: Host login & Event creation ---');
+    await hostPage.goto(URL_HOST, { waitUntil: 'domcontentloaded' });
+    await robustLogin(hostPage, hostUsername, hostPassword);
+    const hostLoggedIn = Boolean(await hostPage.$('.action-btn.primary')) && hostPage.url().includes('/dashboard');
+    recordCheck('Desktop Host logged in to Dashboard', hostLoggedIn, hostUsername);
 
-    // Create event
-    await waitForTransition(hostPage);
-    await hostPage.click('.action-btn.primary');
-    await hostPage.waitForSelector('.modal-card input', { visible: true, timeout: 5000 });
-    const eventName = `QR_CHAMPIONSHIP_${Date.now()}`;
-    await hostPage.type('.modal-card input', eventName);
-    await hostPage.click('.btn-confirm');
-
-    await hostPage.waitForSelector('.event-view', { visible: true, timeout: 15000 });
-    await hostPage.waitForSelector('.event-code strong', { visible: true, timeout: 5000 });
-    const inviteCode = await hostPage.$eval('.event-code strong', el => el.textContent.trim());
-    recordCheck('Host created event & extracted inviteCode', !!inviteCode && inviteCode.length === 6, inviteCode);
+    const { eventCode, eventId } = await createEventViaUi(hostPage, `QR_CHAMP_${runId}`);
+    recordCheck('Host created event & extracted inviteCode', Boolean(eventId && eventCode.length === 6), `${eventId}/${eventCode}`);
+    const hostSession = await hostPage.evaluate(() => JSON.parse(localStorage.getItem('scoutingpro-user') || '{}'));
 
     // ------------------------------------------------------------------
-    // PHASE 2: Host opens Mobile QR Modal
+    // PHASE 2: Real jsQR Pixel Decode + Cloud/LAN Channel + Real Clipboard Check
     // ------------------------------------------------------------------
-    console.log('\n--- Phase 2: Host opens Mobile QR Modal & Inspects Canvas & URL ---');
-    await waitForTransition(hostPage);
-    await delay(500);
+    console.log('\n--- Phase 2: MobileQrModal jsQR Decode, Channel Toggle & Real Clipboard Copy ---');
     await hostPage.waitForSelector('.host-qr-btn', { visible: true, timeout: 8000 });
     await hostPage.evaluate(() => {
       const btn = document.querySelector('.host-qr-btn');
-      if (btn) btn.click();
+      if (!btn) throw new Error('Expected .host-qr-btn in topbar');
+      btn.click();
     });
-
     await hostPage.waitForSelector('.qr-modal-dialog', { visible: true, timeout: 8000 });
-    recordCheck('MobileQrModal dialog opened', true);
 
-    // Verify modal elements
     const modalDetails = await hostPage.evaluate(() => {
-      const codeVal = document.querySelector('.code-badge-bar .code-value')?.textContent.trim();
-      const canvas = document.querySelector('.qr-canvas-container canvas');
+      const codeVal = document.querySelector('.code-badge-bar .code-value')?.textContent?.trim() || '';
       const urlInput = document.querySelector('.url-copy-box .url-input');
-      const copyBtn = document.querySelector('.url-copy-box .btn-copy');
-
+      const hasChannelPill = Boolean(document.querySelector('.channel-pill-bar'));
       return {
         codeVal,
-        canvasRendered: !!canvas && canvas.width > 0 && canvas.height > 0,
-        canvasWidth: canvas?.width,
-        canvasHeight: canvas?.height,
         joinUrl: urlInput ? urlInput.value : '',
-        hasCopyBtn: !!copyBtn
+        hasChannelPill
       };
     });
+    recordCheck('QR Modal code badge matches event inviteCode', modalDetails.codeVal === eventCode, modalDetails.codeVal);
+    recordCheck('Generated Join URL includes ?join=CODE&b=emqx', modalDetails.joinUrl.includes(`join=${eventCode}&b=emqx`), modalDetails.joinUrl);
 
-    recordCheck('QR Modal code badge matches event inviteCode', modalDetails.codeVal === inviteCode, modalDetails.codeVal);
-    recordCheck('QR Canvas is properly rendered with non-zero dimensions', modalDetails.canvasRendered, `${modalDetails.canvasWidth}x${modalDetails.canvasHeight}`);
-    recordCheck('Generated Join URL contains ?join=INVITE_CODE parameter', modalDetails.joinUrl.includes(`join=${inviteCode}`), modalDetails.joinUrl);
+    const decodedCloudQr = await decodeQrCanvasOnPage(hostPage);
+    recordCheck(
+      'jsQR pixel decode strictly matches generated Cloud Join URL',
+      decodedCloudQr === modalDetails.joinUrl,
+      decodedCloudQr
+    );
 
-    // Test Copy URL button
+    recordCheck('MobileQrModal renders Cloud/LAN channel pill bar', modalDetails.hasChannelPill);
+    assert.strictEqual(modalDetails.hasChannelPill, true, 'Expected .channel-pill-bar in MobileQrModal');
+
+    await hostPage.click('.channel-pill-item:nth-child(2)');
+    await hostPage.waitForFunction(
+      () => (document.querySelector('.url-copy-box .url-input')?.value || '').includes('&b=lan'),
+      { timeout: 5000 }
+    );
+    const decodedLanQr = await waitForCondition(
+      async () => {
+        try {
+          const val = await decodeQrCanvasOnPage(hostPage);
+          return val.includes(`join=${eventCode}&b=lan`) ? val : false;
+        } catch {
+          return false;
+        }
+      },
+      { timeoutMs: 5000, intervalMs: 50, label: 'QR canvas update for LAN channel (&b=lan)' }
+    );
+    recordCheck('jsQR decode switches cleanly to LAN channel (&b=lan)', decodedLanQr.includes(`join=${eventCode}&b=lan`), decodedLanQr);
+    await hostPage.click('.channel-pill-item:nth-child(1)');
+    await hostPage.waitForFunction(
+      () => (document.querySelector('.url-copy-box .url-input')?.value || '').includes('&b=emqx'),
+      { timeout: 5000 }
+    );
+
+    // Strict Clipboard Copy assertion (no tautological fallback!)
+    await hostPage.bringToFront();
     await hostPage.click('.url-copy-box .btn-copy');
-    await delay(300);
-    const copyState = await hostPage.evaluate(() => {
-      const btn = document.querySelector('.url-copy-box .btn-copy');
-      return btn ? btn.textContent.trim() : '';
+    await hostPage.waitForFunction(
+      () => {
+        const txt = document.querySelector('.url-copy-box .btn-copy')?.textContent || '';
+        return txt.includes('已复制') || txt.includes('Copied');
+      },
+      { timeout: 5000 }
+    );
+    const clipboardCheck = await hostPage.evaluate(async () => {
+      const btnText = (document.querySelector('.url-copy-box .btn-copy')?.textContent || '').trim();
+      const clipText = await navigator.clipboard.readText();
+      return { btnText, clipText };
     });
-    recordCheck('Copy URL button triggered feedback state', copyState.includes('已复制') || copyState.includes('Copied') || modalDetails.hasCopyBtn, copyState);
+    recordCheck(
+      'Copy URL wrote exact Join URL into system clipboard and updated button state',
+      clipboardCheck.clipText === modalDetails.joinUrl,
+      clipboardCheck.btnText
+    );
+
+    await hostPage.click('.qr-modal-header .close-btn');
+    await hostPage.waitForFunction(() => !document.querySelector('.qr-modal-dialog'), { timeout: 5000 });
+    const qrModalDismissed = await hostPage.evaluate(() => !document.querySelector('.qr-modal-dialog'));
+    recordCheck('Host dismissed QR modal cleanly', qrModalDismissed);
 
     // ------------------------------------------------------------------
-    // PHASE 3: Mobile client simulates scanning QR code by navigating to Join URL
+    // PHASE 3: Mobile #1 Opens Decoded QR URL -> Registers -> Real WebRTC + SAS
     // ------------------------------------------------------------------
-    console.log('\n--- Phase 3: Mobile client scans QR code and opens Join URL ---');
-    const mobileJoinUrl = `http://localhost:${PORT}/index.html#/?join=${inviteCode}`;
-    await mobilePage.goto(mobileJoinUrl);
-    await delay(600);
+    console.log('\n--- Phase 3: Mobile #1 QR Join, Broker Param Verification & WebRTC Connect ---');
+    const decodedHash = new URL(decodedCloudQr).hash;
+    const mobileEntryUrl = `${clientBaseUrl}/index.html${decodedHash}`;
+    await mobilePage.goto(mobileEntryUrl, { waitUntil: 'domcontentloaded' });
 
-    // Verify Invite Banner on Login screen
-    await mobilePage.waitForSelector('.invite-banner', { visible: true, timeout: 8000 });
-    const bannerCode = await mobilePage.$eval('.invite-code-text', el => el.textContent.trim());
-    recordCheck('Mobile LoginView shows pending invite banner with inviteCode', bannerCode === inviteCode, bannerCode);
+    await mobilePage.waitForSelector('.invite-banner .invite-code-text', { visible: true, timeout: 10000 });
+    const inviteCheck = await mobilePage.evaluate(() => ({
+      bannerCode: (document.querySelector('.invite-code-text')?.textContent || '').trim(),
+      activeBroker: sessionStorage.getItem('sp27-active-broker')
+    }));
+    recordCheck('Mobile LoginView shows decoded inviteCode banner', inviteCheck.bannerCode === eventCode, inviteCheck.bannerCode);
+    recordCheck('QR ?b=emqx populated sessionStorage[sp27-active-broker]', inviteCheck.activeBroker === 'emqx', inviteCheck.activeBroker);
 
-    // Mobile Scout registers
-    console.log('\n--- Phase 4: Mobile scout signs in and auto-joins event ---');
-    const mobileScoutUser = `MobileScout_${Date.now()}`;
-    await robustLogin(mobilePage, mobileScoutUser);
+    // Switch mobile session broker override off before signaling so isolated local MQTT broker routes P2P test
+    await mobilePage.evaluate(() => sessionStorage.removeItem('sp27-active-broker'));
 
-    // Mobile client should automatically join and navigate to /event/:eventId
+    const mobileScoutUser = `MobileScout_${runId}`;
+    await robustLogin(mobilePage, mobileScoutUser, hostPassword);
     await mobilePage.waitForSelector('.event-view', { visible: true, timeout: 15000 });
-    const mobileCurrentUrl = mobilePage.url();
-    recordCheck('Mobile client auto-joined and landed in EventView', mobileCurrentUrl.includes('/event/'), mobileCurrentUrl);
+    await waitForTransition(mobilePage, { strict: true });
 
-    // Check responsive layout: Desktop topbar hidden in Zero Topbar Mode; MobileStatusPill & BottomNav active
-    const mobileTopbarStyle = await mobilePage.evaluate(() => {
+    const mobileLayout = await mobilePage.evaluate(() => {
       const topbar = document.querySelector('.topbar');
       const bottomNav = document.querySelector('.mobile-bottom-nav');
       const statusPill = document.querySelector('.status-pill');
       return {
-        topbarHidden: !topbar || window.getComputedStyle(topbar).display === 'none',
-        statusPillVisible: !!statusPill && window.getComputedStyle(statusPill).display !== 'none',
-        bottomNavVisible: !!bottomNav && window.getComputedStyle(bottomNav).display !== 'none'
+        hasTopbarInDom: Boolean(topbar),
+        topbarDisplay: topbar ? window.getComputedStyle(topbar).display : null,
+        statusPillVisible: Boolean(statusPill && window.getComputedStyle(statusPill).display !== 'none'),
+        bottomNavVisible: Boolean(bottomNav && window.getComputedStyle(bottomNav).display !== 'none')
       };
     });
-    recordCheck('Responsive CSS: Topbar hidden on mobile (Zero Topbar Mode)', mobileTopbarStyle.topbarHidden);
-    recordCheck('Mobile Status Pill is active and visible in EventView', mobileTopbarStyle.statusPillVisible);
-    recordCheck('Mobile Bottom Navigation bar is active in EventView', mobileTopbarStyle.bottomNavVisible);
+    recordCheck(
+      'Mobile Zero-Topbar mode: .topbar present in DOM and display:none',
+      mobileLayout.hasTopbarInDom && mobileLayout.topbarDisplay === 'none',
+      mobileLayout.topbarDisplay
+    );
+    recordCheck('Mobile Status Pill visible', mobileLayout.statusPillVisible);
+    recordCheck('Mobile Bottom Nav visible', mobileLayout.bottomNavVisible);
+
+    // Wait strictly for BOTH Host & Mobile to complete WebRTC + SAS handshake
+    await waitForConnectedWithSas(mobilePage, [hostPage, mobilePage], 45000);
+    await waitForConnectedWithSas(hostPage, [hostPage, mobilePage], 45000);
+    await mobilePage.waitForFunction(
+      (authEventId) => window.__sp27E2eBridge?.getEventId?.() === authEventId,
+      { timeout: 15000 },
+      eventId
+    );
+    const liveDotOk = await mobilePage.evaluate(() => Boolean(document.querySelector('.status-pill .status-indicator-dot.is-connected')));
+    recordCheck('WebRTC P2P connected: Host .connected AND Mobile .status-indicator-dot.is-connected', liveDotOk);
 
     // ------------------------------------------------------------------
-    // PHASE 5: Real-time WebRTC Peer Discovery & Data Synchronization
+    // PHASE 4: Full 5-Step Mobile Wizard Submission -> Host History, Rankings & H2 DB
     // ------------------------------------------------------------------
-    console.log('\n--- Phase 5: WebRTC Peer Connection & Realtime Match Sync ---');
-    console.log('Waiting for WebRTC link status on Host and Mobile Scout...');
-    await hostPage.waitForSelector('.connection-status.connected', { visible: true, timeout: 20000 }).catch(() => {});
-    await mobilePage.waitForSelector('.status-pill', { visible: true, timeout: 15000 });
-
-    const hostPeerCheck = await hostPage.evaluate(() => {
-      const statusBadge = document.querySelector('.connection-status');
-      return {
-        hasIndicator: !!statusBadge,
-        statusText: statusBadge ? statusBadge.textContent.trim() : '',
-        statusClass: statusBadge ? statusBadge.className : ''
-      };
+    console.log('\n--- Phase 4: Full 5-Step Mobile Wizard Match Submit & Host Sync ---');
+    const submittedTotal = await completeMobileWizardMatchViaUi(mobilePage, {
+      matchNumber: 1,
+      teamNumber: 27570,
+      alliance: 'red',
+      autoHits: 2,
+      teleopHits: 3,
+      endgameNectars: 1,
+      teleopPark: true,
+      notes: 'QR Mobile 5-Step Sync'
     });
-    recordCheck('Host connection indicator is active', hostPeerCheck.hasIndicator, hostPeerCheck.statusClass);
+    recordCheck('Mobile Scout completed 5-step wizard and submitted Match 1', submittedTotal > 0, `Score=${submittedTotal}`);
 
-    const mobilePeerCheck = await mobilePage.evaluate(() => {
-      const statusPill = document.querySelector('.status-pill');
-      return {
-        hasIndicator: !!statusPill,
-        statusText: statusPill ? statusPill.textContent.trim() : '',
-        statusClass: statusPill ? statusPill.className : ''
-      };
+    await switchToTab(hostPage, 'history');
+    await waitForCondition(
+      () =>
+        hostPage.evaluate(() =>
+          Array.from(document.querySelectorAll('.history-card')).some(
+            (c) => (c.textContent || '').includes('#Q1') && (c.textContent || '').includes('#27570')
+          )
+        ),
+      { timeoutMs: 25000, label: 'Mobile Match 1 visible in Host History DOM' }
+    );
+    const historyVisible = await hostPage.evaluate(() =>
+      Array.from(document.querySelectorAll('.history-card')).some(
+        (c) => (c.textContent || '').includes('#Q1') && (c.textContent || '').includes('#27570')
+      )
+    );
+    recordCheck('Mobile Match 1 converged to Host visible History DOM', historyVisible);
+
+    await switchToTab(hostPage, 'rankings');
+    await hostPage.waitForSelector('.rankings-panel .team-num', { timeout: 10000 });
+    const hasTeamInRankings = await hostPage.evaluate(() =>
+      Array.from(document.querySelectorAll('.rankings-panel .team-num')).some((el) => (el.textContent || '').includes('27570'))
+    );
+    recordCheck('Mobile Match 1 reflected in Host Rankings table', hasTeamInRankings);
+
+    await hostPage.evaluate(() => window.__sp27E2eBridge.flushCrdtNow());
+    const hostDbRecs = await fetchBackendJson(PORT_HOST, `/api/records?eventId=${eventId}`, hostSession.token);
+    const h2Record = Array.isArray(hostDbRecs)
+      ? hostDbRecs.find((r) => Number(r.matchNumber) === 1 && Number(r.teamNumber) === 27570)
+      : null;
+    recordCheck('Mobile Match 1 persisted into Host H2 DB', Boolean(h2Record && h2Record.totalScore === submittedTotal));
+
+    // ------------------------------------------------------------------
+    // PHASE 5: Duplicate-Username QR Join -> SessionConflictModal (DUPLICATE_NAME) -> Account Merge
+    // ------------------------------------------------------------------
+    console.log('\n--- Phase 5: Duplicate Username QR Join -> Wrong Password Error -> Real Account Merge ---');
+    await mobile2Page.goto(`${clientBaseUrl}/index.html#/?join=${eventCode}`, { waitUntil: 'domcontentloaded' });
+    await robustLogin(mobile2Page, hostUsername, 'tempOfflinePass99');
+    await mobile2Page.waitForSelector('.event-view', { visible: true, timeout: 15000 });
+
+    // Confirm SAS on peers and wait for SessionConflictModal (DUPLICATE_NAME) on mobile2Page
+    await waitForCondition(
+      () =>
+        mobile2Page.evaluate(() => Boolean(document.querySelector('.modal-overlay .modal-card .merge-block'))),
+      {
+        timeoutMs: 35000,
+        intervalMs: 250,
+        label: 'SessionConflictModal DUPLICATE_NAME merge block on mobile2',
+        onPoll: () => confirmAnySasModals([hostPage, mobilePage, mobile2Page])
+      }
+    );
+    const mergeModalShown = await mobile2Page.evaluate(() => Boolean(document.querySelector('.modal-overlay .modal-card .merge-block')));
+    recordCheck('Duplicate-username mobile client triggered SessionConflictModal (DUPLICATE_NAME)', mergeModalShown);
+
+    // Wrong password must fail visibly inside modal
+    await mobile2Page.type('.merge-block input[type="password"]', 'wrongpassword');
+    await mobile2Page.evaluate(() => {
+      const btn = document.querySelector('.merge-block .btn-accent');
+      if (!btn) throw new Error('Expected .merge-block .btn-accent');
+      btn.click();
     });
-    recordCheck('Mobile scout status pill indicator is active', mobilePeerCheck.hasIndicator, mobilePeerCheck.statusClass);
+    await mobile2Page.waitForSelector('.merge-block .alert-banner.error', { visible: true, timeout: 10000 });
+    const wrongPwdRejected = await mobile2Page.evaluate(() => Boolean(document.querySelector('.merge-block .alert-banner.error')));
+    recordCheck('SessionConflictModal rejected wrong account-merge password visibly', wrongPwdRejected);
 
-    // Mobile Scout interacts with mobile scouting wizard
-    console.log('Mobile Scout interacts with mobile scouting UI...');
-    await mobilePage.waitForSelector('.mobile-wizard-container, .giant-num-input', { visible: true, timeout: 8000 });
-    await mobilePage.evaluate(() => {
-      const redBtn = document.querySelector('.alliance-btn.red-btn');
-      if (redBtn) redBtn.click();
-      const inputs = document.querySelectorAll('.giant-num-input');
-      if (inputs.length >= 2) {
-        inputs[0].value = '';
-        inputs[0].dispatchEvent(new Event('input', { bubbles: true }));
-        inputs[1].value = '';
-        inputs[1].dispatchEvent(new Event('input', { bubbles: true }));
+    // Clear password -> enter real Host password -> Merge succeeds & userId converges!
+    await mobile2Page.evaluate(() => {
+      const inp = document.querySelector('.merge-block input[type="password"]');
+      if (inp) {
+        inp.value = '';
+        inp.dispatchEvent(new Event('input', { bubbles: true }));
       }
     });
-    const inputs = await mobilePage.$$('.giant-num-input');
-    if (inputs.length >= 2) {
-      await inputs[0].type('1');
-      await inputs[1].type('27570');
-    }
-    await mobilePage.evaluate(() => {
-      const nextBtn = document.querySelector('.btn-wizard-primary, .btn-submit');
-      if (nextBtn) {
-        nextBtn.scrollIntoView({ behavior: 'instant', block: 'center' });
-        nextBtn.click();
-      }
+    await mobile2Page.type('.merge-block input[type="password"]', hostPassword);
+    await mobile2Page.evaluate(() => {
+      const btn = document.querySelector('.merge-block .btn-accent');
+      if (!btn) throw new Error('Expected .merge-block .btn-accent');
+      btn.click();
     });
-    await delay(300);
-    recordCheck('Mobile Scout interacted with wizard form', true, 'Match 1 Team 27570');
-
-    // Close QR modal on Host if still open
-    await hostPage.evaluate(() => {
-      const btn = document.querySelector('.qr-modal-header .close-btn');
-      if (btn) btn.click();
+    await mobile2Page.waitForFunction(() => !document.querySelector('.modal-overlay .modal-card .merge-block'), {
+      timeout: 15000
     });
-    await delay(300);
-    recordCheck('Host successfully dismissed QR modal', true);
 
+    const mergedSession = await mobile2Page.evaluate(() => JSON.parse(localStorage.getItem('scoutingpro-user') || '{}'));
+    recordCheck(
+      'Account merge migrated mobile2 userId to authoritative Host userId',
+      mergedSession.id === hostSession.id,
+      `mobile2=${mergedSession.id}, host=${hostSession.id}`
+    );
+
+    await waitForConnectedWithSas(mobile2Page, [hostPage, mobilePage, mobile2Page], 30000);
+    const mergedConnectedDot = await mobile2Page.evaluate(() =>
+      Boolean(document.querySelector('.status-pill .status-indicator-dot.is-connected, .connection-status .status-dot.online'))
+    );
+    recordCheck('Merged mobile2 session connected cleanly post-merge', mergedConnectedDot);
+
+    manager.assertNoUnexpectedErrors([hostPage], {
+      allowConsolePatterns: [/status of 401|Failed to load resource.*401/i]
+    });
+    manager.assertNoUnexpectedErrors([mobilePage, mobile2Page], {
+      allowConsolePatterns: [/status of 401|Failed to load resource.*401|WakeLock|WebSocket connection to 'ws:\/\/127\.0\.0\.2/i]
+    });
   } catch (err) {
     console.error('\n❌ Uncaught Exception during QR Mobile E2E Test:', err);
     errors.push(err.message || String(err));
+    process.exitCode = 1;
   } finally {
-    console.log('\n[5/6] Closing Chrome browser instances...');
-    if (hostBrowser) await hostBrowser.close();
-    if (mobileBrowser) await mobileBrowser.close();
-
-    console.log('[6/6] Terminating Java backend...');
-    killProcessTree(backendProcess.pid);
+    await manager.cleanupAll({ assertDeleted: !process.exitCode && errors.length === 0 }).catch((cleanupErr) => {
+      console.error('❌ Cleanup error:', cleanupErr);
+      process.exitCode = 1;
+    });
+    process.removeListener('SIGINT', signalHandler);
+    process.removeListener('SIGTERM', signalHandler);
   }
 
   console.log('\n==================================================================');
   console.log('📊 QR MOBILE SCAN-TO-JOIN E2E RESULT SUMMARY');
   console.log('==================================================================');
-  const passedCount = checks.filter(c => c.passed).length;
+  const passedCount = checks.filter((c) => c.passed).length;
   console.log(`Total Checks: ${checks.length} | Passed: ${passedCount} | Failed: ${errors.length}`);
 
-  if (errors.length === 0 && checks.length > 0) {
+  if (errors.length === 0 && passedCount === checks.length && checks.length > 0) {
+    for (const base of rootDbBaselines) {
+      assert.deepStrictEqual(snapshotFileStat(base.path), base.stat, `Root DB polluted: ${base.path}`);
+    }
     console.log('\n🎉 ALL QR MOBILE SCAN-TO-JOIN CHECKS PASSED WITH 100% SUCCESS!\n');
     process.exit(0);
   } else {

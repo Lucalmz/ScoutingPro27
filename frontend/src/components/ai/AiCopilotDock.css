@@ -1,0 +1,91 @@
+.ai-copilot-dock {
+  position: relative;
+  display: flex;
+  flex-shrink: 0;
+  width: var(--ai-dock-width, 420px);
+  height: 100%;
+  min-height: 0;
+  background: var(--g-900);
+  border-left: 1px solid var(--border);
+  container-type: inline-size;
+  container-name: ai-dock;
+  z-index: 40;
+}
+
+.ai-copilot-dock.is-expanded {
+  position: fixed;
+  top: var(--ai-dock-top-offset, 64px);
+  right: 0;
+  bottom: 0;
+  height: auto;
+  width: min(940px, 82vw);
+  z-index: 950;
+  box-shadow: var(--shadow-3);
+}
+
+.dock-splitter {
+  width: 6px;
+  flex-shrink: 0;
+  cursor: col-resize;
+  background: transparent;
+  position: relative;
+  transition: background-color 0.15s ease;
+  touch-action: none;
+}
+
+.dock-splitter::after {
+  content: '';
+  position: absolute;
+  top: 50%;
+  left: 2px;
+  width: 2px;
+  height: 36px;
+  transform: translateY(-50%);
+  border-radius: 2px;
+  background: var(--border-strong);
+  opacity: 0.45;
+  transition: opacity 0.15s ease, background-color 0.15s ease;
+}
+
+.dock-splitter:hover,
+.dock-splitter.dragging {
+  background: color-mix(in srgb, var(--status-ai) 25%, transparent);
+}
+
+.dock-splitter:hover::after,
+.dock-splitter.dragging::after {
+  opacity: 1;
+  background: var(--status-ai);
+}
+
+.dock-inner {
+  flex: 1;
+  min-width: 0;
+  min-height: 0;
+  display: flex;
+}
+
+.dock-overlay-backdrop {
+  position: fixed;
+  inset: 0;
+  background: rgba(7, 9, 10, 0.56);
+  z-index: 940;
+}
+
+/* Narrow Desktop (769px - 1119px): slide-over drawer so left main stage does not squish */
+@media (max-width: 1119px) {
+  .ai-copilot-dock {
+    position: fixed;
+    top: var(--ai-dock-top-offset, 64px);
+    right: 0;
+    bottom: 0;
+    height: auto;
+    width: min(440px, 88vw);
+    z-index: 950;
+    box-shadow: var(--shadow-3);
+  }
+
+  .dock-splitter {
+    display: none;
+  }
+}

@@ -1,5 +1,5 @@
 import { setActivePinia, createPinia } from 'pinia'
-import { describe, it, expect, vi, beforeEach } from 'vitest'
+import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
 import { useCustomFieldsStore } from '../stores/customFields'
 import { useConnectionStore } from '../stores/connection'
 import { useEventStore } from '../stores/events'
@@ -43,6 +43,11 @@ describe('CustomFields Store', () => {
     const userStore = useUserStore()
     userStore.user = { id: 'me', username: 'host', token: 'tok' }
     vi.clearAllMocks()
+  })
+
+  afterEach(() => {
+    localStorage.clear()
+    vi.restoreAllMocks()
   })
 
   it('fetchFields loads from API and caches to localStorage', async () => {

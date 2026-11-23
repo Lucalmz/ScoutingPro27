@@ -1,27 +1,43 @@
 package com.bear27570.app;
 
+import com.bear27570.app.db.JdbiConfig;
 import com.bear27570.app.routes.ApiRoutes;
+import com.bear27570.app.util.AESUtil;
+import com.bear27570.app.util.JwtUtil;
 import com.google.gson.Gson;
 import io.javalin.Javalin;
 import io.javalin.testtools.JavalinTest;
 import org.flywaydb.core.Flyway;
 import org.jdbi.v3.core.Jdbi;
 import org.jdbi.v3.sqlobject.SqlObjectPlugin;
+import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.io.TempDir;
 
+import java.nio.file.Path;
 import java.util.Map;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
 class UserMergeRouteTest {
 
+    @TempDir
+    Path tempDir;
+
     private Jdbi jdbi;
+    private ApiRoutes apiRoutes;
     private Javalin app;
+    private String prevDataDir;
     private final Gson gson = new Gson();
 
     @BeforeEach
     void setUp() {
+        prevDataDir = System.getProperty("scouting.data.dir");
+        System.setProperty("scouting.data.dir", tempDir.toAbsolutePath().toString());
+        JwtUtil.resetForTest();
+        AESUtil.resetForTest();
+
         String url = "jdbc:h2:mem:test_merge_" + System.nanoTime() + ";DB_CLOSE_DELAY=-1";
 
         Flyway.configure()
@@ -33,9 +49,26 @@ class UserMergeRouteTest {
         jdbi = Jdbi.create(url, "sa", "");
         jdbi.installPlugin(new SqlObjectPlugin());
 
-        app = Javalin.create(config -> {
-            new ApiRoutes(jdbi).register(config.routes);
-        });
+        apiRoutes = new ApiRoutes(jdbi);
+        app = Javalin.create(config -> apiRoutes.register(config.routes));
+    }
+
+    @AfterEach
+    void tearDown() {
+        try {
+            if (apiRoutes != null) {
+                apiRoutes.shutdown();
+            }
+            JdbiConfig.closeDataSources();
+        } finally {
+            JwtUtil.resetForTest();
+            AESUtil.resetForTest();
+            if (prevDataDir == null) {
+                System.clearProperty("scouting.data.dir");
+            } else {
+                System.setProperty("scouting.data.dir", prevDataDir);
+            }
+        }
     }
 
     @Test
@@ -151,6 +184,22 @@ class UserMergeRouteTest {
                 // team_tags: created by phone user
                 handle.execute("INSERT INTO team_tags (id, event_id, team_number, tag, created_by) VALUES (?, ?, ?, ?, ?)",
                         "tag1", "evtA", 27570, "Fast", phoneUserId);
+
+                // V9 ai_provider_profiles: main has an active profile; phone has both an active and an inactive profile
+                handle.execute("INSERT INTO ai_provider_profiles (id, user_id, name, protocol, is_active) VALUES (?, ?, ?, ?, ?)",
+                        "prof_main_1", mainUserId, "Main OpenAI", "OPENAI", true);
+                handle.execute("INSERT INTO ai_provider_profiles (id, user_id, name, protocol, is_active) VALUES (?, ?, ?, ?, ?)",
+                        "prof_phone_active", phoneUserId, "Phone Gemini", "GEMINI", true);
+                handle.execute("INSERT INTO ai_provider_profiles (id, user_id, name, protocol, is_active) VALUES (?, ?, ?, ?, ?)",
+                        "prof_phone_inactive", phoneUserId, "Phone Anthropic", "ANTHROPIC", false);
+
+                // V9 ai_chat_threads: evtA has both users; evtB has phone user
+                handle.execute("INSERT INTO ai_chat_threads (id, user_id, event_id, title) VALUES (?, ?, ?, ?)",
+                        "thread_main_a", mainUserId, "evtA", "Main Thread A");
+                handle.execute("INSERT INTO ai_chat_threads (id, user_id, event_id, title) VALUES (?, ?, ?, ?)",
+                        "thread_phone_a", phoneUserId, "evtA", "Phone Thread A");
+                handle.execute("INSERT INTO ai_chat_threads (id, user_id, event_id, title) VALUES (?, ?, ?, ?)",
+                        "thread_phone_b", phoneUserId, "evtB", "Phone Thread B");
             });
 
             String reqJson = gson.toJson(Map.of(
@@ -181,6 +230,26 @@ class UserMergeRouteTest {
                 // Verify team_tags
                 String tagCreator = handle.createQuery("SELECT created_by FROM team_tags WHERE id = 'tag1'").mapTo(String.class).one();
                 assertThat(tagCreator).isEqualTo(mainUserId);
+
+                // Verify V9 ai_provider_profiles: 3 profiles under mainUserId, strictly 1 active, 0 under phoneUserId
+                int totalProfiles = handle.createQuery("SELECT COUNT(*) FROM ai_provider_profiles WHERE user_id = ?").bind(0, mainUserId).mapTo(Integer.class).one();
+                int activeProfiles = handle.createQuery("SELECT COUNT(*) FROM ai_provider_profiles WHERE user_id = ? AND is_active = TRUE").bind(0, mainUserId).mapTo(Integer.class).one();
+                int phoneProfiles = handle.createQuery("SELECT COUNT(*) FROM ai_provider_profiles WHERE user_id = ?").bind(0, phoneUserId).mapTo(Integer.class).one();
+                Boolean mainProfActive = handle.createQuery("SELECT is_active FROM ai_provider_profiles WHERE id = 'prof_main_1'").mapTo(Boolean.class).one();
+                Boolean phoneActiveProfActive = handle.createQuery("SELECT is_active FROM ai_provider_profiles WHERE id = 'prof_phone_active'").mapTo(Boolean.class).one();
+                Boolean phoneInactiveProfActive = handle.createQuery("SELECT is_active FROM ai_provider_profiles WHERE id = 'prof_phone_inactive'").mapTo(Boolean.class).one();
+                assertThat(totalProfiles).isEqualTo(3);
+                assertThat(activeProfiles).isEqualTo(1);
+                assertThat(phoneProfiles).isZero();
+                assertThat(mainProfActive).isTrue();
+                assertThat(phoneActiveProfActive).isFalse();
+                assertThat(phoneInactiveProfActive).isFalse();
+
+                // Verify V9 ai_chat_threads: 3 threads under mainUserId, 0 under phoneUserId
+                int mainThreads = handle.createQuery("SELECT COUNT(*) FROM ai_chat_threads WHERE user_id = ?").bind(0, mainUserId).mapTo(Integer.class).one();
+                int phoneThreads = handle.createQuery("SELECT COUNT(*) FROM ai_chat_threads WHERE user_id = ?").bind(0, phoneUserId).mapTo(Integer.class).one();
+                assertThat(mainThreads).isEqualTo(3);
+                assertThat(phoneThreads).isZero();
             });
         });
     }

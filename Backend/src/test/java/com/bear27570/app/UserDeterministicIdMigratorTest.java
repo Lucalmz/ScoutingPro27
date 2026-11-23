@@ -48,7 +48,14 @@ class UserDeterministicIdMigratorTest {
             }
 
             // All foreign keys referencing USERS(ID) in the schema must be known and handled
-            assertThat(fkTables).containsExactlyInAnyOrder("EVENTS", "EVENT_USERS", "AI_SETTINGS", "AI_CHAT_SESSIONS");
+            assertThat(fkTables).containsExactlyInAnyOrder(
+                    "EVENTS",
+                    "EVENT_USERS",
+                    "AI_SETTINGS",
+                    "AI_CHAT_SESSIONS",
+                    "AI_PROVIDER_PROFILES",
+                    "AI_CHAT_THREADS"
+            );
         });
     }
 
@@ -76,6 +83,10 @@ class UserDeterministicIdMigratorTest {
                     "asgn1", "evt1", 1, "QUALIFICATION", "red1", 27570, oldId, "Alice");
             handle.execute("INSERT INTO pit_scouting_records (id, event_id, team_number, scout_id, scout_name, claimed_total_score) VALUES (?, ?, ?, ?, ?, ?)",
                     "pit1", "evt1", 27570, oldId, "Alice", 180);
+            handle.execute("INSERT INTO ai_provider_profiles (id, user_id, name, protocol, api_key_encrypted, is_active) VALUES (?, ?, ?, ?, ?, ?)",
+                    "prof1", oldId, "Claude Profile", "ANTHROPIC", "enc-ant", true);
+            handle.execute("INSERT INTO ai_chat_threads (id, user_id, event_id, title, messages_json) VALUES (?, ?, ?, ?, ?)",
+                    "thr1", oldId, "evt1", "Strategy Thread", "[]");
             handle.execute("SET REFERENTIAL_INTEGRITY TRUE");
 
             // Execute cascading user ID migration
@@ -105,6 +116,12 @@ class UserDeterministicIdMigratorTest {
 
             String pitScoutId = handle.createQuery("SELECT scout_id FROM pit_scouting_records WHERE id = 'pit1'").mapTo(String.class).one();
             assertThat(pitScoutId).isEqualTo(newDeterministicId);
+
+            String profileUserId = handle.createQuery("SELECT user_id FROM ai_provider_profiles WHERE id = 'prof1'").mapTo(String.class).one();
+            assertThat(profileUserId).isEqualTo(newDeterministicId);
+
+            String threadUserId = handle.createQuery("SELECT user_id FROM ai_chat_threads WHERE id = 'thr1'").mapTo(String.class).one();
+            assertThat(threadUserId).isEqualTo(newDeterministicId);
         });
     }
 

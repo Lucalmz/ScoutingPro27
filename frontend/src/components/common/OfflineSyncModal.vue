@@ -15,6 +15,7 @@ import {
   generateSyncFileName,
   createEventPackage,
   createSyncPackage,
+  buildClientExportCrdtSnapshot,
   scanFilesAndFolders,
   extractFilesFromDataTransfer,
   executeBatchSyncImport,
@@ -58,16 +59,13 @@ const isHost = computed(() => {
 // Host Export Options
 const hostTargetType = ref<'ALL' | 'SPECIFIC'>('ALL')
 const hostSpecificTarget = ref('')
-const hostFromSeq = ref(0)
-const hostToSeq = ref<number | null>(null)
 
 // Client Export Options
 const clientExportMode = ref<'PENDING_ONLY' | 'ALL_MY'>('PENDING_ONLY')
 
 const hostFilteredRecords = computed(() => {
   if (!currentEvent.value) return []
-  const from = Number(hostFromSeq.value) || 0
-  return recordStore.records.filter((r) => r.eventId === currentEvent.value!.id && (from <= 0 || (r.hostSeq || 0) > from))
+  return recordStore.records.filter((r) => r.eventId === currentEvent.value!.id)
 })
 
 const clientFilteredRecords = computed(() => {
@@ -76,17 +74,23 @@ const clientFilteredRecords = computed(() => {
   return clientExportMode.value === 'PENDING_ONLY' ? myRecs.filter((r) => r.syncStatus === 'PENDING') : myRecs
 })
 
+const canHostExport = computed(() => {
+  if (!currentEvent.value) return false
+  return (
+    hostFilteredRecords.value.length > 0 ||
+    recordStore.teamTags.length > 0 ||
+    Boolean(getExistingEventCrdt(currentEvent.value.id))
+  )
+})
+
 const previewFileName = computed(() => {
   if (!currentEvent.value) return ''
   if (isHost.value) {
-    const maxSeq = hostFilteredRecords.value.reduce((m, r) => Math.max(m, r.hostSeq || 0), 0)
     return generateSyncFileName({
       eventName: currentEvent.value.ftcEventCode || currentEvent.value.name,
       senderName: userStore.username,
       isHost: true,
       targetName: hostTargetType.value === 'ALL' ? 'ALL' : (hostSpecificTarget.value || 'Scout'),
-      fromSeq: Number(hostFromSeq.value) || 0,
-      toSeq: maxSeq,
       recordCount: hostFilteredRecords.value.length
     })
   } else {
@@ -155,7 +159,10 @@ function handleExportEvent() {
 function handleExportSync() {
   if (!currentEvent.value) return
   const records = isHost.value ? hostFilteredRecords.value : clientFilteredRecords.value
-  const maxSeq = records.reduce((m, r) => Math.max(m, r.hostSeq || 0), 0)
+  const rawCrdt = getExistingEventCrdt(currentEvent.value.id)?.store.getMergeableContent()
+  const crdtSnapshot = isHost.value
+    ? rawCrdt
+    : buildClientExportCrdtSnapshot(rawCrdt, userStore.userId, currentEvent.value.id)
 
   const content = createSyncPackage({
     packetType: isHost.value ? 'HOST_BROADCAST' : 'CLIENT_PUSH',
@@ -172,10 +179,8 @@ function handleExportSync() {
     },
     records,
     teamTags: isHost.value ? recordStore.teamTags : undefined,
-    fromHostSeq: isHost.value ? Number(hostFromSeq.value) || 0 : 0,
-    toHostSeq: isHost.value ? maxSeq : 0,
     hostSessionId: undefined,
-    crdtSnapshot: getExistingEventCrdt(currentEvent.value.id)?.store.getMergeableContent()
+    crdtSnapshot
   })
 
   triggerFileDownload(previewFileName.value, content)
@@ -241,13 +246,32 @@ async function applyImport() {
   importError.value = null
 
   try {
+    const hostAuthoritative = isHost.value && !connStore.isStandbyHost
+    const targetEid = currentEvent.value?.id || ''
+    const existingRecordOwners = new Map<string, string>()
+    for (const r of recordStore.records) {
+      if (r.id && r.scoutId && (!targetEid || !r.eventId || r.eventId === targetEid)) {
+        existingRecordOwners.set(r.id, r.scoutId)
+      }
+    }
+    const existingCrdt = targetEid ? getExistingEventCrdt(targetEid) : undefined
+    if (existingCrdt) {
+      const crdtRecs = existingCrdt.store.getTable('scouting_records')
+      for (const [rid, row] of Object.entries(crdtRecs)) {
+        if (typeof row?.scoutId === 'string' && row.scoutId) {
+          existingRecordOwners.set(rid, row.scoutId)
+        }
+      }
+    }
+
     const res = await executeBatchSyncImport({
       scanResult: scanResult.value,
-      targetEventId: currentEvent.value?.id || '',
-      isHost: isHost.value && !connStore.isStandbyHost,
+      targetEventId: targetEid,
+      isHost: hostAuthoritative,
       events: eventStore.events,
+      expectedHostUserId: currentEvent.value?.hostId,
+      existingRecordOwners,
       bulkSync: recordStore.bulkSync,
-      stampHostSeq: connStore.stampHostSeq,
       persistRecordsToDb: async (recs) => {
         await syncRecords(recs)
       },
@@ -255,10 +279,15 @@ async function applyImport() {
       applyTagsFullSync: recordStore.applyTagsFullSync,
       applyScheduleFullSync: scheduleStore.applyScheduleFullSync,
       syncExternalEvent: eventStore.syncExternal,
-      applyCrdtSnapshot: (snap) => {
-        const eid = currentEvent.value?.id
+      applyCrdtSnapshot: (snap, snapshotEventId) => {
+        const eid = snapshotEventId || currentEvent.value?.id
         if (!eid) return false
-        return getOrCreateEventCrdt(eid).persistence.applyMergeableSnapshot(snap, true)
+        const handle = getOrCreateEventCrdt(eid)
+        const applied = handle.persistence.applyMergeableSnapshot(snap, true)
+        if (applied && hostAuthoritative) {
+          void handle.flushNow().catch(() => {})
+        }
+        return applied
       }
     })
 
@@ -376,17 +405,6 @@ async function applyImport() {
               />
             </div>
 
-            <div class="form-row">
-              <label>{{ t('offline_sync.from_version') }}</label>
-              <input
-                type="number"
-                min="0"
-                v-model="hostFromSeq"
-                class="text-input number-input"
-              />
-              <small class="hint">{{ t('offline_sync.full_sync') }}</small>
-            </div>
-
             <div class="export-summary">
               <div>{{ t('offline_sync.records_to_export') }}: <strong>{{ hostFilteredRecords.length }}</strong></div>
               <div>{{ t('offline_sync.tags_to_export') }}: <strong>{{ recordStore.teamTags.length }}</strong></div>
@@ -399,7 +417,7 @@ async function applyImport() {
             <button
               class="btn-action primary"
               @click="handleExportSync"
-              :disabled="hostFilteredRecords.length === 0"
+              :disabled="!canHostExport"
             >
               <span class="material-icons">file_download</span>
               {{ t('offline_sync.btn_export_info') }}

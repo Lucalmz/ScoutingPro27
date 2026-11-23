@@ -19,11 +19,12 @@
   <a href="README_en.md"><b>English</b></a>
   &nbsp;|&nbsp;
   <b>Standalone User Guides (Step-by-Step Illustrated Manuals):</b>
-  <a href="USER_GUIDE.md"><b>Bilingual Hub</b></a> ·
+  <a href="docs/USER_GUIDE.md"><b>Bilingual Hub</b></a> ·
   <a href="docs/USER_GUIDE.en.md"><b>English Guide</b></a> ·
   <a href="docs/USER_GUIDE.zh.md"><b>中文教程</b></a> ·
   <a href="docs/ScoutingPro27_UserGuide_EN.pdf"><b>Offline PDF (EN)</b></a> ·
-  <a href="docs/ScoutingPro27_UserGuide_ZH.pdf"><b>离线 PDF (ZH)</b></a>
+  <a href="docs/ScoutingPro27_UserGuide_ZH.pdf"><b>离线 PDF (ZH)</b></a> ·
+  <a href="docs/README.md"><b>Docs Index</b></a>
 </p>
 
 > 💡 **Independently conceived, architected, and full-stack developed by middle and high school students of FIRST Tech Challenge (FTC) Team 27570 B.E.A.R.**  
@@ -53,10 +54,11 @@ It is **15 minutes before Playoff Alliance Selection**, and your scouting operat
 
 ## 📖 Standalone User Guide (For Scouts & Team Leads)
 
-> To keep this README focused on architecture and engineering, **step-by-step illustrated operating manuals are maintained separately**:
-> - 📘 **[Bilingual User Guide Hub (USER_GUIDE.md)](USER_GUIDE.md)**
+> To keep this README focused on architecture and engineering, **step-by-step illustrated manuals and technical docs are organized under `docs/`**:
+> - 📘 **[Bilingual User Guide Hub (docs/USER_GUIDE.md)](docs/USER_GUIDE.md)**
 > - 🇺🇸 **[English Step-by-Step Illustrated Guide (docs/USER_GUIDE.en.md)](docs/USER_GUIDE.en.md)** / **[English Offline PDF](docs/ScoutingPro27_UserGuide_EN.pdf)**
 > - 🇨🇳 **[中文保姆级图文教程 (docs/USER_GUIDE.zh.md)](docs/USER_GUIDE.zh.md)** / **[中文离线 PDF](docs/ScoutingPro27_UserGuide_ZH.pdf)**
+> - 🗂️ **[Full Documentation Directory (QA, Releases, Plans) (docs/README.md)](docs/README.md)**
 
 ---
 

@@ -1,5 +1,5 @@
-import { mount, flushPromises } from '@vue/test-utils'
-import { describe, it, expect, vi, beforeEach } from 'vitest'
+import { mount, flushPromises, type VueWrapper } from '@vue/test-utils'
+import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
 import { setActivePinia, createPinia } from 'pinia'
 import SessionConflictModal from '../components/common/SessionConflictModal.vue'
 import { useUserStore } from '../stores/user'
@@ -27,18 +27,30 @@ vi.mock('vue-router', () => ({
   })
 }))
 
-const mountModal = () => mount(SessionConflictModal, {
-  global: {
-    stubs: {
-      teleport: true
+const wrappers: VueWrapper<any>[] = []
+
+const mountModal = () => {
+  const w = mount(SessionConflictModal, {
+    global: {
+      stubs: {
+        teleport: true
+      }
     }
-  }
-})
+  })
+  wrappers.push(w)
+  return w
+}
 
 describe('SessionConflictModal.vue', () => {
   beforeEach(() => {
     setActivePinia(createPinia())
     vi.clearAllMocks()
+  })
+
+  afterEach(() => {
+    while (wrappers.length) wrappers.pop()!.unmount()
+    document.body.innerHTML = ''
+    vi.restoreAllMocks()
   })
 
   it('renders nothing when there is no session conflict', () => {

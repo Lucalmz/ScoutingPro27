@@ -1,10 +1,16 @@
-import { describe, it, expect, beforeEach } from 'vitest'
+import { afterEach, describe, it, expect, beforeEach } from 'vitest'
 import { ApiError, formatUserFriendlyError } from '@/utils/errorHelper'
 import { i18n } from '@/i18n'
 
 describe('errorHelper.ts - formatUserFriendlyError', () => {
+  const origLocale = i18n.global.locale.value
+
   beforeEach(() => {
     i18n.global.locale.value = 'zh'
+  })
+
+  afterEach(() => {
+    i18n.global.locale.value = origLocale
   })
 
   it('converts network failures into user-friendly message', () => {
@@ -116,5 +122,19 @@ describe('errorHelper.ts - formatUserFriendlyError', () => {
     expect(resFtc.message).toContain('FTC official event not found')
     expect(resFtc.message).toContain('2026')
     expect(resFtc.message).toContain('USUTSAS1')
+  })
+
+  it('only classifies actual API or LocalApiTimeout errors as request_timeout', () => {
+    const sasTimeoutResult = formatUserFriendlyError('Safety code mismatch: SAS verification timeout (60s)')
+    expect(sasTimeoutResult.message).not.toContain('服务响应超时')
+    expect(sasTimeoutResult.message).not.toContain('Service response timed out')
+    expect(sasTimeoutResult.detail).toContain('Safety code mismatch')
+
+    const apiTimeoutResult = formatUserFriendlyError(new ApiError(408, '/api/records', 'POST', 'Request timed out'))
+    expect(apiTimeoutResult.message).toMatch(/(服务响应超时|Service response timed out)/)
+
+    const localTimeoutErr = new Error('LocalApiTimeoutError: /api/events/test挂起超过15000ms')
+    const localResult = formatUserFriendlyError(localTimeoutErr)
+    expect(localResult.message).toMatch(/(服务响应超时|Service response timed out)/)
   })
 })

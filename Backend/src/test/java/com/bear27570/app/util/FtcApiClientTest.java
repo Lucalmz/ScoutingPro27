@@ -103,6 +103,8 @@ class FtcApiClientTest {
     @Test
     void testCacheAndIfModifiedSince304Support() throws Exception {
         AtomicInteger serverCallCount = new AtomicInteger(0);
+        java.util.concurrent.atomic.AtomicReference<String> seenIfModifiedSince = new java.util.concurrent.atomic.AtomicReference<>();
+        java.util.concurrent.atomic.AtomicReference<String> seenIfNoneMatch = new java.util.concurrent.atomic.AtomicReference<>();
 
         String responseBody = "{\n" +
                 "  \"matches\": [\n" +
@@ -121,7 +123,11 @@ class FtcApiClientTest {
         mockServer.createContext("/v2.0/2025/matches/CACHE_EVENT", exchange -> {
             serverCallCount.incrementAndGet();
             String ifModifiedSince = exchange.getRequestHeaders().getFirst("If-Modified-Since");
-            if ("Thu, 20 Aug 2026 12:00:00 GMT".equals(ifModifiedSince)) {
+            String ifNoneMatch = exchange.getRequestHeaders().getFirst("If-None-Match");
+            seenIfModifiedSince.set(ifModifiedSince);
+            seenIfNoneMatch.set(ifNoneMatch);
+            if ("Thu, 20 Aug 2026 12:00:00 GMT".equals(ifModifiedSince)
+                    && "\"etag-12345\"".equals(ifNoneMatch)) {
                 exchange.sendResponseHeaders(304, -1);
                 return;
             }
@@ -136,17 +142,56 @@ class FtcApiClientTest {
             }
         });
 
-        FtcApiClient client = new FtcApiClient("http://127.0.0.1:" + mockPort, "testuser", "testtoken");
+        java.util.concurrent.atomic.AtomicLong nowMillis = new java.util.concurrent.atomic.AtomicLong(1_000_000L);
+        java.time.Clock mutableClock = new java.time.Clock() {
+            @Override
+            public java.time.ZoneId getZone() {
+                return java.time.ZoneOffset.UTC;
+            }
 
-        // 1st request -> fetches from server (count = 1)
+            @Override
+            public java.time.Clock withZone(java.time.ZoneId zone) {
+                return this;
+            }
+
+            @Override
+            public java.time.Instant instant() {
+                return java.time.Instant.ofEpochMilli(nowMillis.get());
+            }
+
+            @Override
+            public long millis() {
+                return nowMillis.get();
+            }
+        };
+
+        FtcApiClient client = new FtcApiClient("http://127.0.0.1:" + mockPort, "testuser", "testtoken", 45_000L, mutableClock);
+
+        // 1st request -> fetches 200 OK from server (count = 1)
         JsonArray matches1 = client.fetchNormalizedMatches(2025, "CACHE_EVENT", "qual");
         assertThat(matches1).hasSize(1);
         assertThat(serverCallCount.get()).isEqualTo(1);
+        assertThat(seenIfModifiedSince.get()).isNull();
+        assertThat(seenIfNoneMatch.get()).isNull();
 
-        // 2nd request immediately -> hits in-memory cache without HTTP call (count stays 1)
+        // 2nd request before TTL expiry -> hits in-memory cache without HTTP call (count stays 1)
+        nowMillis.addAndGet(10_000L);
         JsonArray matches2 = client.fetchNormalizedMatches(2025, "CACHE_EVENT", "qual");
         assertThat(matches2).hasSize(1);
         assertThat(serverCallCount.get()).isEqualTo(1);
+
+        // 3rd request after TTL expires -> sends If-Modified-Since + If-None-Match, gets 304, preserves data (count = 2)
+        nowMillis.addAndGet(36_000L); // total elapsed: 46,000ms > 45,000ms
+        JsonArray matches3 = client.fetchNormalizedMatches(2025, "CACHE_EVENT", "qual");
+        assertThat(matches3).hasSize(1);
+        assertThat(serverCallCount.get()).isEqualTo(2);
+        assertThat(seenIfModifiedSince.get()).isEqualTo("Thu, 20 Aug 2026 12:00:00 GMT");
+        assertThat(seenIfNoneMatch.get()).isEqualTo("\"etag-12345\"");
+
+        // 4th request immediately after 304 -> TTL refreshed, hits cache (count stays 2)
+        JsonArray matches4 = client.fetchNormalizedMatches(2025, "CACHE_EVENT", "qual");
+        assertThat(matches4).hasSize(1);
+        assertThat(serverCallCount.get()).isEqualTo(2);
     }
 
     @Test

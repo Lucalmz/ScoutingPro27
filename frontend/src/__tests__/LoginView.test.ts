@@ -1,5 +1,5 @@
-import { mount } from '@vue/test-utils'
-import { describe, it, expect, vi, beforeEach } from 'vitest'
+import { mount, flushPromises, VueWrapper } from '@vue/test-utils'
+import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
 import { setActivePinia, createPinia } from 'pinia'
 import LoginView from '../views/LoginView.vue'
 import { useUserStore } from '../stores/user'
@@ -21,7 +21,7 @@ vi.mock('vue-router', () => ({
 
 vi.mock('vue-i18n', () => ({
   useI18n: () => ({
-    t: (key: string, params?: any) => key,
+    t: (key: string) => key,
     locale: { value: 'en' }
   })
 }))
@@ -40,6 +40,12 @@ vi.mock('../services/api', () => ({
 }))
 
 describe('LoginView.vue', () => {
+  const wrappers: VueWrapper[] = []
+  const track = (w: VueWrapper) => {
+    wrappers.push(w)
+    return w
+  }
+
   beforeEach(() => {
     setActivePinia(createPinia())
     mockPush.mockClear()
@@ -48,22 +54,26 @@ describe('LoginView.vue', () => {
     localStorage.clear()
   })
 
+  afterEach(() => {
+    while (wrappers.length > 0) {
+      wrappers.pop()!.unmount()
+    }
+    localStorage.clear()
+    vi.restoreAllMocks()
+  })
+
   it('handles direct form submission for existing user without manual blur', async () => {
     const userStore = useUserStore()
     const loginSpy = vi.spyOn(userStore, 'login').mockResolvedValue(true)
     vi.mocked(api.checkUserExists).mockResolvedValue({ exists: true })
 
-    const wrapper = mount(LoginView)
+    const wrapper = track(mount(LoginView))
 
-    const usernameInput = wrapper.find('#username')
-    const passwordInput = wrapper.find('#password')
+    await wrapper.find('#username').setValue('alice')
+    await wrapper.find('#password').setValue('alicePass123')
 
-    await usernameInput.setValue('alice')
-    await passwordInput.setValue('alicePass123')
-
-    // Submit form directly without triggering blur on username
     await wrapper.find('form').trigger('submit')
-    await new Promise((r) => setTimeout(r, 60))
+    await flushPromises()
 
     expect(api.checkUserExists).toHaveBeenCalledWith('alice')
     expect(loginSpy).toHaveBeenCalledWith('alice', 'alicePass123')
@@ -75,27 +85,21 @@ describe('LoginView.vue', () => {
     const registerSpy = vi.spyOn(userStore, 'register').mockResolvedValue(true)
     vi.mocked(api.checkUserExists).mockResolvedValue({ exists: false })
 
-    const wrapper = mount(LoginView)
+    const wrapper = track(mount(LoginView))
 
-    const usernameInput = wrapper.find('#username')
-    const passwordInput = wrapper.find('#password')
+    await wrapper.find('#username').setValue('newbie')
+    await wrapper.find('#password').setValue('newbiePass123')
 
-    await usernameInput.setValue('newbie')
-    await passwordInput.setValue('newbiePass123')
-
-    // Submit directly without confirmPassword
     await wrapper.find('form').trigger('submit')
-    await new Promise((r) => setTimeout(r, 60))
+    await flushPromises()
 
     expect(api.checkUserExists).toHaveBeenCalledWith('newbie')
-    // Should NOT have registered yet because confirmPassword was not entered
     expect(registerSpy).not.toHaveBeenCalled()
     expect(wrapper.find('#confirmPassword').exists()).toBe(true)
 
-    // Now enter matching confirm password and submit
     await wrapper.find('#confirmPassword').setValue('newbiePass123')
     await wrapper.find('form').trigger('submit')
-    await new Promise((r) => setTimeout(r, 60))
+    await flushPromises()
 
     expect(registerSpy).toHaveBeenCalledWith('newbie', 'newbiePass123')
     expect(mockPush).toHaveBeenCalledWith('/dashboard')
@@ -109,18 +113,18 @@ describe('LoginView.vue', () => {
     const toastStore = useToastStore()
     const toastErrorSpy = vi.spyOn(toastStore, 'showError')
 
-    const wrapper = mount(LoginView)
+    const wrapper = track(mount(LoginView))
 
     await wrapper.find('#username').setValue('bob')
     await wrapper.find('#username').trigger('blur')
-    await new Promise((r) => setTimeout(r, 20))
+    await flushPromises()
 
     expect(wrapper.find('#confirmPassword').exists()).toBe(true)
     await wrapper.find('#password').setValue('password123')
     await wrapper.find('#confirmPassword').setValue('password456')
 
     await wrapper.find('form').trigger('submit')
-    await new Promise((r) => setTimeout(r, 20))
+    await flushPromises()
 
     expect(toastErrorSpy).toHaveBeenCalledWith('login.password_mismatch')
     expect(registerSpy).not.toHaveBeenCalled()
@@ -128,24 +132,28 @@ describe('LoginView.vue', () => {
 
   it('resets isNewUser state when username is changed', async () => {
     vi.mocked(api.checkUserExists).mockResolvedValue({ exists: false })
-    const wrapper = mount(LoginView)
+    const wrapper = track(mount(LoginView))
 
     await wrapper.find('#username').setValue('first_user')
     await wrapper.find('#username').trigger('blur')
-    await new Promise((r) => setTimeout(r, 20))
+    await flushPromises()
     expect(wrapper.find('#confirmPassword').exists()).toBe(true)
 
-    // Change username -> should reset isNewUser so confirmPassword collapses
     await wrapper.find('#username').setValue('second_user')
-    await new Promise((r) => setTimeout(r, 20))
+    await flushPromises()
     expect(wrapper.find('#confirmPassword').exists()).toBe(false)
   })
 
   it('does NOT render scan QR button on desktop host', async () => {
+    const { ref } = await import('vue')
     const photoStorage = await import('@/services/photoStorage')
+    const isMobileComposable = await import('@/composables/useIsMobile')
     vi.spyOn(photoStorage, 'isDesktopHost').mockReturnValue(true)
+    vi.spyOn(isMobileComposable, 'useIsMobile').mockReturnValue({ isMobile: ref(true) } as any)
 
-    const wrapper = mount(LoginView)
+    const wrapper = track(mount(LoginView))
+    expect(wrapper.find('#username').exists()).toBe(true)
+    expect(wrapper.find('button[type="submit"]').exists()).toBe(true)
     expect(wrapper.find('.btn-scan-login').exists()).toBe(false)
   })
 
@@ -156,7 +164,7 @@ describe('LoginView.vue', () => {
     const isMobileComposable = await import('@/composables/useIsMobile')
     vi.spyOn(isMobileComposable, 'useIsMobile').mockReturnValue({ isMobile: ref(true) } as any)
 
-    const wrapper = mount(LoginView)
+    const wrapper = track(mount(LoginView))
     expect(wrapper.find('.btn-scan-login').exists()).toBe(true)
   })
 })

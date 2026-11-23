@@ -14,7 +14,7 @@ import { parseScoutRawData } from '@/utils/analytics/rankings'
 import { calcMatchPredictCycleTime } from '@/utils/analytics/predictCycleTime'
 import {
   getExistingEventCrdt,
-  isCrdtTransportActive,
+  signScoutingRecordWithDeviceKey,
   withLocalCrdtWrite,
   writeScoutingRecordToCrdt
 } from '@/services/crdt'
@@ -125,19 +125,38 @@ function startEdit(record: ScoutingRecord) {
   emit('editRecord', record)
 }
 
-function retrySyncRecord(record: ScoutingRecord) {
+function canShowResync(rec: ScoutingRecord): boolean {
+  return (!eventStore.isHost || connStore.isStandbyHost) && !isRecordSynced(rec) && rec.scoutId === userStore.userId
+}
+
+async function retrySyncRecord(record: ScoutingRecord) {
   hapticLight()
   record.syncStatus = 'PENDING'
-  if (connStore.isConnected) {
-    const crdtHandle = record.eventId ? getExistingEventCrdt(record.eventId) : undefined
-    if (record.eventId && isCrdtTransportActive(record.eventId) && crdtHandle) {
-      withLocalCrdtWrite(record.eventId, () => {
-        writeScoutingRecordToCrdt(crdtHandle.store, record)
-      })
-      record.syncStatus = 'SYNCED'
-    } else {
-      connStore.pushRecords([record])
-    }
+  if (!connStore.isConnected) {
+    hapticWarning()
+    toastStore.showToast(t('history.resync_offline_queued'), 'warning')
+    return
+  }
+
+  if (!record.authorSig || !record.authorPubKey) {
+    await signScoutingRecordWithDeviceKey(record)
+  }
+  if (!record.authorSig || !record.authorPubKey) {
+    hapticWarning()
+    toastStore.showToast(t('history.resync_offline_queued'), 'warning')
+    return
+  }
+
+  const crdtHandle = record.eventId ? getExistingEventCrdt(record.eventId) : undefined
+  if (record.eventId && crdtHandle) {
+    withLocalCrdtWrite(record.eventId, () => {
+      writeScoutingRecordToCrdt(crdtHandle.store, record)
+    })
+  }
+
+  const synced = await connStore.triggerCrdtSync('host')
+  if (synced) {
+    await recordStore.markSynced([record.id])
     hapticSuccess()
     toastStore.showToast(t('history.resync_triggered'), 'info')
   } else {
@@ -341,7 +360,7 @@ function enter(el: Element, done: () => void) {
         </div>
 
         <!-- Edit & Resync buttons -->
-        <div v-if="canEditRecord(rec) || (!isRecordSynced(rec) && rec.scoutId === userStore.userId)" class="card-actions">
+        <div v-if="canEditRecord(rec) || canShowResync(rec)" class="card-actions">
           <button
             v-if="canEditRecord(rec)"
             class="btn-edit"
@@ -352,7 +371,7 @@ function enter(el: Element, done: () => void) {
           </button>
 
           <button
-            v-if="!eventStore.isHost && (!rec.hostSeq || rec.syncStatus === 'PENDING') && rec.scoutId === userStore.userId"
+            v-if="canShowResync(rec)"
             type="button"
             class="btn-resync"
             @click="retrySyncRecord(rec)"

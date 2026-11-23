@@ -190,45 +190,6 @@ export function createHostElectionController(deps: HostElectionControllerDeps) {
     }
   }
 
-  let inTakeoverReconciliation = false
-  let takeoverReconciliationResolvers: Array<() => void> = []
-  let takeoverReconciliationTimer: any = null
-
-  function startTakeoverReconciliation(_timeoutMs = 2000) {
-    // Retired blocking Takeover Staging Gate: CRDT anti-entropy merges concurrently without stalling peer writes.
-    inTakeoverReconciliation = false
-    if (takeoverReconciliationTimer) {
-      clearTimeout(takeoverReconciliationTimer)
-      takeoverReconciliationTimer = null
-    }
-  }
-
-  function finishTakeoverReconciliation(reason = 'completed') {
-    if (!inTakeoverReconciliation) return
-    console.log(`[WebRTC Host] Takeover reconciliation finished (${reason})`)
-    inTakeoverReconciliation = false
-    if (takeoverReconciliationTimer) {
-      clearTimeout(takeoverReconciliationTimer)
-      takeoverReconciliationTimer = null
-    }
-    const resolvers = [...takeoverReconciliationResolvers]
-    takeoverReconciliationResolvers = []
-    for (const resolve of resolvers) {
-      try {
-        resolve()
-      } catch (e) {
-        console.error(e)
-      }
-    }
-  }
-
-  function waitForTakeoverReconciliation(): Promise<void> {
-    if (!inTakeoverReconciliation) return Promise.resolve()
-    return new Promise((resolve) => {
-      takeoverReconciliationResolvers.push(resolve)
-    })
-  }
-
   function startHostHeartbeat() {
     stopHostHeartbeat()
     const payload = {
@@ -405,7 +366,6 @@ export function createHostElectionController(deps: HostElectionControllerDeps) {
       activeHostSessionId: newHostSessionId,
       activeHostDeviceId: deps.getLocalDeviceId()
     })
-    startTakeoverReconciliation(2000)
 
     const signaling = deps.getSignaling()
     await signaling?.send({
@@ -942,13 +902,8 @@ export function createHostElectionController(deps: HostElectionControllerDeps) {
     get isStandbyHostMode() {
       return isStandbyHostMode
     },
-    get isTakeoverReconciling() {
-      return inTakeoverReconciliation
-    },
     getLocalEpoch: () => localEpoch,
     handleEpochBeacon,
-    waitForTakeoverReconciliation,
-    finishTakeoverReconciliation,
     takeoverHost,
     createHostSignalingMessageHandler,
     startHostProbeWindow,

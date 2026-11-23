@@ -1,14 +1,29 @@
-import { describe, it, expect } from 'vitest'
-import { mount } from '@vue/test-utils'
+import { describe, it, expect, afterEach } from 'vitest'
+import { mount, VueWrapper } from '@vue/test-utils'
+import { nextTick } from 'vue'
 import ConfirmModal from '@/components/common/ConfirmModal.vue'
 import { useConfirm } from '@/composables/useConfirm'
 
 describe('ConfirmModal.vue & useConfirm', () => {
+  const wrappers: VueWrapper[] = []
+  const track = (w: VueWrapper) => {
+    wrappers.push(w)
+    return w
+  }
+
+  afterEach(() => {
+    while (wrappers.length > 0) {
+      wrappers.pop()!.unmount()
+    }
+    document.body.innerHTML = ''
+  })
+
   it('renders modal when showConfirm is triggered and resolves on confirm', async () => {
     const { showConfirm, confirmState } = useConfirm()
-    const wrapper = mount(ConfirmModal)
+    track(mount(ConfirmModal, { attachTo: document.body }))
 
     expect(confirmState.value).toBeNull()
+    expect(document.body.querySelector('.confirm-modal-card')).toBeNull()
 
     const confirmPromise = showConfirm({
       title: '注意',
@@ -16,16 +31,14 @@ describe('ConfirmModal.vue & useConfirm', () => {
       type: 'warning'
     })
 
-    await wrapper.vm.$nextTick()
+    await nextTick()
     expect(confirmState.value?.isOpen).toBe(true)
 
-    // The modal overlay and card are rendered into body via Teleport
     const card = document.body.querySelector('.confirm-modal-card')
     expect(card).toBeTruthy()
     expect(card?.querySelector('.confirm-title')?.textContent).toContain('注意')
     expect(card?.querySelector('.confirm-message')?.textContent).toContain('确定要丢弃吗？')
 
-    // Click confirm button
     const confirmBtn = card?.querySelector('.btn-primary') as HTMLButtonElement
     confirmBtn.click()
 
@@ -36,16 +49,17 @@ describe('ConfirmModal.vue & useConfirm', () => {
 
   it('resolves false on cancel', async () => {
     const { showConfirm, confirmState } = useConfirm()
-    mount(ConfirmModal)
+    track(mount(ConfirmModal, { attachTo: document.body }))
 
     const confirmPromise = showConfirm({
       message: '取消操作测试',
       type: 'danger'
     })
 
-    await new Promise((r) => setTimeout(r, 10))
+    await nextTick()
 
     const card = document.body.querySelector('.confirm-modal-card')
+    expect(card).toBeTruthy()
     const cancelBtn = card?.querySelector('.btn-secondary') as HTMLButtonElement
     cancelBtn.click()
 

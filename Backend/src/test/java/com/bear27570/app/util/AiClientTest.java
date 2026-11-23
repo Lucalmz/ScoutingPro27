@@ -198,4 +198,122 @@ class AiClientTest {
         // Malformed line
         assertNull(AiClient.parseGeminiSseLine("data: invalid-json"));
     }
+
+    @Test
+    void testLoopbackUrlAndProxyBypass() {
+        assertTrue(AiClient.isLoopbackUrl("http://localhost:11434/v1"));
+        assertTrue(AiClient.isLoopbackUrl("http://127.0.0.1:8080/v1"));
+        assertTrue(AiClient.isLoopbackUrl("http://[::1]:11434/v1"));
+        assertFalse(AiClient.isLoopbackUrl("https://api.deepseek.com/v1"));
+
+        assertEquals(java.net.Proxy.NO_PROXY, AiClient.resolveEffectiveProxy(null, null, "http://localhost:11434/v1"));
+        assertEquals(java.net.Proxy.NO_PROXY, AiClient.resolveEffectiveProxy("127.0.0.1", null, "http://127.0.0.1:11434/v1"));
+
+        java.net.Proxy explicit = AiClient.resolveEffectiveProxy("127.0.0.1", 7890, "http://localhost:11434/v1");
+        assertEquals(java.net.Proxy.Type.HTTP, explicit.type());
+        assertEquals(7890, ((java.net.InetSocketAddress) explicit.address()).getPort());
+    }
+
+    @Test
+    void testGeminiAndAnthropicEndpointResolvers() {
+        assertEquals("https://generativelanguage.googleapis.com/v1beta", AiClient.resolveGeminiBaseUrl(null));
+        assertEquals("https://my-gemini-proxy.example.com/v1beta", AiClient.resolveGeminiBaseUrl("https://my-gemini-proxy.example.com/"));
+        assertEquals("https://my-gemini-proxy.example.com/v1beta", AiClient.resolveGeminiBaseUrl("https://my-gemini-proxy.example.com/v1beta/"));
+        assertEquals(
+                "https://my-gemini-proxy.example.com/v1beta/models/gemini-flash-latest:streamGenerateContent?alt=sse",
+                AiClient.resolveGeminiGenerateEndpoint("https://my-gemini-proxy.example.com", "models/gemini-flash-latest", true)
+        );
+        assertEquals(
+                "https://generativelanguage.googleapis.com/v1beta/models",
+                AiClient.resolveGeminiModelsEndpoint(null)
+        );
+
+        assertEquals("https://api.anthropic.com/v1/messages", AiClient.resolveAnthropicMessagesEndpoint(null));
+        assertEquals("https://api.deepseek.com/anthropic/v1/messages", AiClient.resolveAnthropicMessagesEndpoint("https://api.deepseek.com/anthropic"));
+        assertEquals("https://api.moonshot.cn/anthropic/v1/messages", AiClient.resolveAnthropicMessagesEndpoint("https://api.moonshot.cn/anthropic/"));
+        assertEquals("https://open.bigmodel.cn/api/anthropic/v1/messages", AiClient.resolveAnthropicMessagesEndpoint("https://open.bigmodel.cn/api/anthropic"));
+        assertEquals("https://api.anthropic.com/v1/models", AiClient.resolveAnthropicModelsEndpoint("https://api.anthropic.com/v1/messages"));
+        assertEquals("https://api.deepseek.com/anthropic/v1/models", AiClient.resolveAnthropicModelsEndpoint("https://api.deepseek.com/anthropic"));
+    }
+
+    @Test
+    void testNormalizeAnthropicMessagesAndReasoningModelDetection() {
+        List<Map<String, String>> raw = List.of(
+                Map.of("role", "assistant", "content", "Leading model"),
+                Map.of("role", "user", "content", "Q1"),
+                Map.of("role", "user", "content", "Q2"),
+                Map.of("role", "assistant", "content", "   "),
+                Map.of("role", "assistant", "content", "Trailing assistant")
+        );
+        List<Map<String, String>> normalized = AiClient.normalizeAnthropicMessages(raw);
+        assertEquals(3, normalized.size());
+        assertEquals("user", normalized.get(0).get("role"));
+        assertEquals("Context init", normalized.get(0).get("content"));
+        assertEquals("assistant", normalized.get(1).get("role"));
+        assertEquals("Leading model", normalized.get(1).get("content"));
+        assertEquals("user", normalized.get(2).get("role"));
+        assertEquals("Q1\n\nQ2", normalized.get(2).get("content"));
+
+        assertTrue(AiClient.isReasoningOnlyTemperatureModel("o1"));
+        assertTrue(AiClient.isReasoningOnlyTemperatureModel("o3-mini"));
+        assertTrue(AiClient.isReasoningOnlyTemperatureModel("deepseek-reasoner"));
+        assertTrue(AiClient.isReasoningOnlyTemperatureModel("deepseek-r1:8b"));
+        assertTrue(AiClient.isReasoningOnlyTemperatureModel("qwq-plus"));
+        assertFalse(AiClient.isReasoningOnlyTemperatureModel("gpt-4o"));
+        assertFalse(AiClient.isReasoningOnlyTemperatureModel("deepseek-chat"));
+    }
+
+    @Test
+    void testThreeProtocolStructuredSseAndModelsParsing() {
+        List<AiClient.StreamChunk> openAiChunks = AiClient.parseOpenAiSseChunk(
+                "data: {\"choices\":[{\"delta\":{\"reasoning_content\":\"think\",\"content\":\"ans\"}}],\"usage\":{\"prompt_tokens\":10,\"completion_tokens\":5,\"total_tokens\":15}}"
+        );
+        assertEquals(3, openAiChunks.size());
+        assertEquals("reasoning", openAiChunks.get(0).kind());
+        assertEquals("think", openAiChunks.get(0).text());
+        assertEquals("text", openAiChunks.get(1).kind());
+        assertEquals("ans", openAiChunks.get(1).text());
+        assertEquals("usage", openAiChunks.get(2).kind());
+        assertEquals(15, openAiChunks.get(2).usage().get("totalTokens").getAsInt());
+
+        var emittedAnyText = new java.util.concurrent.atomic.AtomicBoolean(false);
+        List<AiClient.StreamChunk> geminiChunks = AiClient.parseGeminiSseChunk(
+                "data: {\"candidates\":[{\"content\":{\"parts\":[{\"text\":\"gthink\",\"thought\":true},{\"text\":\"gans\"}]}}],\"usageMetadata\":{\"promptTokenCount\":20,\"candidatesTokenCount\":8,\"thoughtsTokenCount\":12,\"totalTokenCount\":40}}",
+                emittedAnyText
+        );
+        assertTrue(emittedAnyText.get());
+        assertEquals(3, geminiChunks.size());
+        assertEquals("reasoning", geminiChunks.get(0).kind());
+        assertEquals("gthink", geminiChunks.get(0).text());
+        assertEquals("text", geminiChunks.get(1).kind());
+        assertEquals("gans", geminiChunks.get(1).text());
+        assertEquals("usage", geminiChunks.get(2).kind());
+        assertEquals(20, geminiChunks.get(2).usage().get("completionTokens").getAsInt());
+
+        var cachedIn = new java.util.concurrent.atomic.AtomicInteger(0);
+        AiClient.parseAnthropicSseEvent("message_start", "{\"type\":\"message_start\",\"message\":{\"usage\":{\"input_tokens\":55}}}", cachedIn);
+        assertEquals(55, cachedIn.get());
+        List<AiClient.StreamChunk> anthThink = AiClient.parseAnthropicSseEvent("content_block_delta", "{\"type\":\"content_block_delta\",\"delta\":{\"type\":\"thinking_delta\",\"thinking\":\"deep\"}}", cachedIn);
+        assertEquals("reasoning", anthThink.get(0).kind());
+        assertEquals("deep", anthThink.get(0).text());
+        List<AiClient.StreamChunk> anthText = AiClient.parseAnthropicSseEvent("content_block_delta", "{\"type\":\"content_block_delta\",\"delta\":{\"type\":\"text_delta\",\"text\":\"final\"}}", cachedIn);
+        assertEquals("text", anthText.get(0).kind());
+        assertEquals("final", anthText.get(0).text());
+        List<AiClient.StreamChunk> anthUsage = AiClient.parseAnthropicSseEvent("message_delta", "{\"type\":\"message_delta\",\"usage\":{\"output_tokens\":25}}", cachedIn);
+        assertEquals("usage", anthUsage.get(0).kind());
+        assertEquals(80, anthUsage.get(0).usage().get("totalTokens").getAsInt());
+        List<AiClient.StreamChunk> anthStop = AiClient.parseAnthropicSseEvent("message_stop", "{\"type\":\"message_stop\"}", cachedIn);
+        assertEquals("done", anthStop.get(0).kind());
+        assertThrows(RuntimeException.class, () ->
+                AiClient.parseAnthropicSseEvent("error", "{\"type\":\"error\",\"error\":{\"type\":\"overloaded_error\",\"message\":\"Overloaded\"}}", cachedIn)
+        );
+
+        String geminiModelsJson = "{\"models\":[{\"name\":\"models/embedding-001\",\"supportedGenerationMethods\":[\"embedContent\"]},{\"name\":\"models/gemini-2.5-flash\",\"supportedGenerationMethods\":[\"generateContent\"]},{\"name\":\"models/gemini-flash-latest\",\"supportedGenerationMethods\":[\"generateContent\"]}]}";
+        List<String> parsedGemini = AiClient.parseModelsResponse("GEMINI", geminiModelsJson);
+        assertEquals(List.of("gemini-flash-latest", "gemini-2.5-flash"), parsedGemini);
+
+        String anthropicModelsJson = "{\"data\":[{\"id\":\"claude-sonnet-4-20250514\"},{\"id\":\"claude-3-5-haiku-latest\"}]}";
+        List<String> parsedAnthropic = AiClient.parseModelsResponse("ANTHROPIC", anthropicModelsJson);
+        assertEquals(List.of("claude-3-5-haiku-latest", "claude-sonnet-4-20250514"), parsedAnthropic);
+    }
 }

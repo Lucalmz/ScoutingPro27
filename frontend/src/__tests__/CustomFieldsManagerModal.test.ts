@@ -1,5 +1,5 @@
-import { describe, it, expect, beforeEach, vi } from 'vitest'
-import { mount, flushPromises } from '@vue/test-utils'
+import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest'
+import { mount, flushPromises, type VueWrapper } from '@vue/test-utils'
 import { createPinia, setActivePinia } from 'pinia'
 import { createI18n } from 'vue-i18n'
 import CustomFieldsManagerModal from '@/components/customFields/CustomFieldsManagerModal.vue'
@@ -27,10 +27,21 @@ function createTestI18n() {
 }
 
 describe('CustomFieldsManagerModal & CustomFieldBuilderForm', () => {
+  const wrappers: VueWrapper<any>[] = []
+  const track = <T extends VueWrapper<any>>(w: T): T => {
+    wrappers.push(w)
+    return w
+  }
+
   beforeEach(() => {
     setActivePinia(createPinia())
     vi.clearAllMocks()
     mockShowConfirm.mockResolvedValue(true)
+  })
+
+  afterEach(() => {
+    while (wrappers.length) wrappers.pop()!.unmount()
+    vi.restoreAllMocks()
   })
 
   const sampleField: CustomFieldDefinition = {
@@ -56,10 +67,10 @@ describe('CustomFieldsManagerModal & CustomFieldBuilderForm', () => {
     vi.spyOn(store, 'fetchFields').mockResolvedValue([])
     vi.spyOn(store, 'getFields').mockReturnValue([])
 
-    const wrapper = mount(CustomFieldsManagerModal, {
+    const wrapper = track(mount(CustomFieldsManagerModal, {
       props: { visible: true, eventId: 'evt-1' },
       global: { plugins: [createTestI18n()] }
-    })
+    }))
 
     expect(wrapper.find('.cf-empty-state').exists()).toBe(true)
 
@@ -87,10 +98,10 @@ describe('CustomFieldsManagerModal & CustomFieldBuilderForm', () => {
     const moveSpy = vi.spyOn(store, 'moveFieldOrder').mockResolvedValue()
     const deleteSpy = vi.spyOn(store, 'deleteField').mockResolvedValue()
 
-    const wrapper = mount(CustomFieldsManagerModal, {
+    const wrapper = track(mount(CustomFieldsManagerModal, {
       props: { visible: true, eventId: 'evt-1' },
       global: { plugins: [createTestI18n()] }
-    })
+    }))
 
     const cards = wrapper.findAll('.cf-card')
     expect(cards).toHaveLength(2)
@@ -124,10 +135,10 @@ describe('CustomFieldsManagerModal & CustomFieldBuilderForm', () => {
     const createSpy = vi.spyOn(store, 'createField').mockResolvedValue(sampleField)
     const toastSpy = vi.spyOn(toast, 'showToast')
 
-    const wrapper = mount(CustomFieldsManagerModal, {
+    const wrapper = track(mount(CustomFieldsManagerModal, {
       props: { visible: true, eventId: 'evt-1' },
       global: { plugins: [createTestI18n()] }
-    })
+    }))
 
     // Click create button
     await wrapper.find('.btn-create-field').trigger('click')
@@ -184,10 +195,10 @@ describe('CustomFieldsManagerModal & CustomFieldBuilderForm', () => {
     vi.spyOn(store, 'getFields').mockReturnValue([sampleField])
     const updateSpy = vi.spyOn(store, 'updateField').mockResolvedValue(sampleField)
 
-    const wrapper = mount(CustomFieldsManagerModal, {
+    const wrapper = track(mount(CustomFieldsManagerModal, {
       props: { visible: true, eventId: 'evt-1' },
       global: { plugins: [createTestI18n()] }
-    })
+    }))
 
     await wrapper.find('.edit-btn').trigger('click')
     const builder = wrapper.findComponent(CustomFieldBuilderForm)

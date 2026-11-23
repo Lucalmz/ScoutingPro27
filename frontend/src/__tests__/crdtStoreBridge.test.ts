@@ -6,10 +6,12 @@ import {
   CRDT_TABLES,
   createWebRtcCrdtSynchronizerHub,
   getExistingEventCrdt,
+  getOrCreateEventCrdt,
   hydrateAndBindEventCrdt,
   isCrdtTransportActive,
   readCustomFieldsFromCrdt,
   readPitRecordsFromCrdt,
+  readScoutingRecordsFromCrdt,
   readSchedulesFromCrdt,
   readTeamTagsFromCrdt,
   resetCrdtRegistryForTesting,
@@ -17,18 +19,20 @@ import {
   setTeamTagActive,
   writeCustomFieldToCrdt,
   writePitRecordToCrdt,
+  writeScoutingRecordToCrdt,
   writeTeamTagToCrdt,
   type CrdtHttpTransport
 } from '@/services/crdt'
 import * as api from '@/services/api'
 import { useConnectionStore } from '@/stores/connection'
 import { useCustomFieldsStore } from '@/stores/customFields'
+import { useEventStore } from '@/stores/events'
 import { usePitScoutStore } from '@/stores/pitScout'
 import { useRecordStore } from '@/stores/records'
 import { useScheduleStore } from '@/stores/schedule'
 import { clearBeforeLogoutHooksForTesting, useUserStore } from '@/stores/user'
 import { createSyncPackage, executeBatchSyncImport, scanFilesAndFolders } from '@/utils/offlineSync'
-import type { CustomFieldDefinition, MatchScheduleItem, PitScoutingRecord, TeamTagItem } from '@/types'
+import type { CustomFieldDefinition, MatchScheduleItem, PitScoutingRecord, ScoutingRecord, TeamTagItem } from '@/types'
 
 vi.mock('@/services/api', async () => {
   const actual = await vi.importActual<typeof import('@/services/api')>('@/services/api')
@@ -117,6 +121,7 @@ describe('CRDT Store Bridge End-to-End Integration', () => {
     await resetCrdtRegistryForTesting()
     resetClockRegistryForTesting()
     clearBeforeLogoutHooksForTesting()
+    localStorage.clear()
   })
 
   it('converges Pit field merge, Tag tombstones, Schedule/Assignments & CustomField order across Pinia <-> WebRTC Hub without legacy broadcasts', async () => {
@@ -201,28 +206,30 @@ describe('CRDT Store Bridge End-to-End Integration', () => {
 
     // 2. Pit initial baseline synced, then concurrent sibling field edits across Host & Peer
     await pitStore.saveRecord(makePit({ weightLbs: 28, launcherType: 'Flywheel', photoKeys: ['p1.jpg'] }))
-    await new Promise((r) => setTimeout(r, 50))
-    expect(readPitRecordsFromCrdt(peerStore, 'evt-uuid-1')[0]?.photoKeys).toEqual(['p1.jpg'])
+    await vi.waitFor(() => {
+      expect(readPitRecordsFromCrdt(peerStore, 'evt-uuid-1')[0]?.photoKeys).toEqual(['p1.jpg'])
+    })
 
     // Simulate true concurrent edits on distinct fields before WebRTC microtask delivery completes
     clockMs += 1_000
     const concurrentSave = pitStore.saveRecord(makePit({ weightLbs: 32.5, launcherType: 'Flywheel', photoKeys: ['p1.jpg'] }))
     writePitRecordToCrdt(peerStore, makePit({ weightLbs: 28, launcherType: 'Turret', photoKeys: ['p1.jpg', 'p2.jpg'] }))
     await concurrentSave
-    await new Promise((r) => setTimeout(r, 60))
 
     // Both sibling edits + union of photoKeys appear reactively inside Pinia pitStore!
-    const reactivePit = pitStore.records.find((r) => r.teamNumber === 27570)!
-    expect(reactivePit.weightLbs).toBe(32.5)
-    expect(reactivePit.launcherType).toBe('Turret')
-    expect(reactivePit.photoKeys).toEqual(['p1.jpg', 'p2.jpg'])
+    await vi.waitFor(() => {
+      const reactivePit = pitStore.records.find((r) => r.teamNumber === 27570)
+      expect(reactivePit?.weightLbs).toBe(32.5)
+      expect(reactivePit?.launcherType).toBe('Turret')
+      expect(reactivePit?.photoKeys).toEqual(['p1.jpg', 'p2.jpg'])
+    })
 
     // 3. Schedule + Assignment updates flow cleanly through CRDT -> peerStore -> Pinia
     await scheduleStore.importSchedules('evt-uuid-1', [makeSchedule({ matchNumber: 1 }), makeSchedule({ matchNumber: 2 })], true, true)
     await scheduleStore.assignStation('evt-uuid-1', 1, 'red1', 'scout-bob', 'Bob', true, 'QUALIFICATION')
-    await new Promise((r) => setTimeout(r, 50))
-
-    expect(readSchedulesFromCrdt(peerStore, 'evt-uuid-1')).toHaveLength(2)
+    await vi.waitFor(() => {
+      expect(readSchedulesFromCrdt(peerStore, 'evt-uuid-1')).toHaveLength(2)
+    })
 
     // 4. CustomFields fractional orderKey reorder + soft-delete converge reactively
     vi.mocked(api.createCustomField)
@@ -237,10 +244,10 @@ describe('CRDT Store Bridge End-to-End Integration', () => {
       makeField({ id, name: def.name || id, orderSeq: Number(def.orderSeq || 1) })
     )
     await customFieldsStore.moveFieldOrder('evt-uuid-1', 'cf-3', 'up', 'MATCH')
-    await new Promise((r) => setTimeout(r, 50))
-
-    const peerOrdered = readCustomFieldsFromCrdt(peerStore, 'evt-uuid-1')
-    expect(peerOrdered.map((f) => f.id)).toEqual(['cf-1', 'cf-3', 'cf-2'])
+    await vi.waitFor(() => {
+      const peerOrdered = readCustomFieldsFromCrdt(peerStore, 'evt-uuid-1')
+      expect(peerOrdered.map((f) => f.id)).toEqual(['cf-1', 'cf-3', 'cf-2'])
+    })
 
     // Verify legacy broadcast suppression: NO legacy Pit/Tag/Schedule/CustomField WebRTC packets fired!
     expect(legacySendSpy).not.toHaveBeenCalled()
@@ -248,8 +255,9 @@ describe('CRDT Store Bridge End-to-End Integration', () => {
     // Deleting a custom field via remote CRDT propagates tombstone into customFieldsStore
     clockMs += 1_000
     writeCustomFieldToCrdt(peerStore, makeField({ id: 'cf-1' }), true)
-    await new Promise((r) => setTimeout(r, 50))
-    expect(customFieldsStore.getFields('evt-uuid-1').map((f) => f.id)).toEqual(['cf-3', 'cf-2'])
+    await vi.waitFor(() => {
+      expect(customFieldsStore.getFields('evt-uuid-1').map((f) => f.id)).toEqual(['cf-3', 'cf-2'])
+    })
 
     session.unbind()
     await Promise.all([hostHub.destroy(), peerHub.destroy()])
@@ -317,54 +325,58 @@ describe('CRDT Store Bridge End-to-End Integration', () => {
 
   it('seeds cold-start legacy data and schedules catch-up flush on Desktop Host when H2 has no snapshot yet', async () => {
     vi.useFakeTimers()
-    const pitStore = usePitScoutStore()
-    const scheduleStore = useScheduleStore()
-    const customFieldsStore = useCustomFieldsStore()
-    const recordStore = useRecordStore()
+    try {
+      const pitStore = usePitScoutStore()
+      const scheduleStore = useScheduleStore()
+      const customFieldsStore = useCustomFieldsStore()
+      const recordStore = useRecordStore()
 
-    pitStore.records = [makePit({ eventId: 'evt-cold', teamNumber: 4444, weightLbs: 26 })]
-    recordStore.teamTags = [
-      { id: 't-cold', eventId: 'evt-cold', teamNumber: 4444, tag: 'legacy_tag', color: 'blue', isPreset: false }
-    ]
+      pitStore.records = [makePit({ eventId: 'evt-cold', teamNumber: 4444, weightLbs: 26 })]
+      recordStore.teamTags = [
+        { id: 't-cold', eventId: 'evt-cold', teamNumber: 4444, tag: 'legacy_tag', color: 'blue', isPreset: false }
+      ]
 
-    const savedPayloads: Array<{ dirtyRows: Record<string, string[]> }> = []
-    const transport: CrdtHttpTransport = {
-      loadState: vi.fn(async () => ({
-        exists: false,
+      const savedPayloads: Array<{ dirtyRows: Record<string, string[]> }> = []
+      const transport: CrdtHttpTransport = {
+        loadState: vi.fn(async () => ({
+          exists: false,
+          eventId: 'evt-cold',
+          hostEpoch: 1,
+          snapshotRevision: 0,
+          snapshot: null
+        })),
+        saveState: vi.fn(async (eventId, payload) => {
+          savedPayloads.push({ dirtyRows: payload.dirtyRows })
+          return {
+            saved: true,
+            eventId,
+            hostEpoch: payload.hostEpoch,
+            snapshotRevision: payload.snapshotRevision
+          }
+        })
+      }
+
+      const session = await hydrateAndBindEventCrdt({
         eventId: 'evt-cold',
-        hostEpoch: 1,
-        snapshotRevision: 0,
-        snapshot: null
-      })),
-      saveState: vi.fn(async (eventId, payload) => {
-        savedPayloads.push({ dirtyRows: payload.dirtyRows })
-        return {
-          saved: true,
-          eventId,
-          hostEpoch: payload.hostEpoch,
-          snapshotRevision: payload.snapshotRevision
-        }
+        deviceId: 'host-cold',
+        transport,
+        enableHttp: true,
+        enableIndexedDb: false,
+        isDesktopHost: true,
+        debounceMs: 200,
+        maxWaitMs: 500,
+        stores: { pitStore, scheduleStore, customFieldsStore, recordStore }
       })
+
+      await vi.advanceTimersByTimeAsync(300)
+      expect(savedPayloads.length).toBe(1)
+      expect(savedPayloads[0]?.dirtyRows[CRDT_TABLES.PIT_RECORDS]).toEqual(['4444'])
+      expect(savedPayloads[0]?.dirtyRows[CRDT_TABLES.TEAM_TAGS]).toEqual(['4444::legacy_tag'])
+
+      session.unbind()
+    } finally {
+      vi.useRealTimers()
     }
-
-    const session = await hydrateAndBindEventCrdt({
-      eventId: 'evt-cold',
-      deviceId: 'host-cold',
-      transport,
-      enableHttp: true,
-      enableIndexedDb: false,
-      isDesktopHost: true,
-      debounceMs: 200,
-      maxWaitMs: 500,
-      stores: { pitStore, scheduleStore, customFieldsStore, recordStore }
-    })
-
-    await vi.advanceTimersByTimeAsync(300)
-    expect(savedPayloads.length).toBe(1)
-    expect(savedPayloads[0]?.dirtyRows[CRDT_TABLES.PIT_RECORDS]).toEqual(['4444'])
-    expect(savedPayloads[0]?.dirtyRows[CRDT_TABLES.TEAM_TAGS]).toEqual(['4444::legacy_tag'])
-
-    session.unbind()
   })
 
   it('roundtrips crdtSnapshot losslessly through offlineSync createSyncPackage & executeBatchSyncImport', async () => {
@@ -517,5 +529,86 @@ describe('CRDT Store Bridge End-to-End Integration', () => {
     expect(scheduleStore.getStationAssignment(10, 'blue2', 'QUALIFICATION')?.scoutName).toBe('Charlie')
 
     aliceSession.unbind()
+  })
+
+  it('deletes record offline into CRDT tombstone and converges tombstone to Host upon reconnection', async () => {
+    vi.spyOn(api, 'saveRecord').mockResolvedValue(undefined as any)
+    vi.spyOn(api, 'isStaticCloudHost').mockReturnValue(false)
+
+    const recordStore = useRecordStore()
+    const userStore = useUserStore()
+    const eventStore = useEventStore()
+    userStore.user = { id: 'scout-1', username: 'ScoutOne' }
+    eventStore.currentEvent = { id: 'evt-real-uuid', hostId: 'host-1' } as any
+
+    const scoutHandle = getOrCreateEventCrdt('evt-real-uuid', {
+      deviceId: 'dev-scout-1',
+      enableHttp: false,
+      enableIndexedDb: false
+    })
+    let hostNow = Date.now() - 5_000
+    const hostStore = createMergeableStore('dev-host-1', () => hostNow, 300)
+
+    const rec: ScoutingRecord = {
+      id: 'rec-tomb-1',
+      eventId: 'evt-real-uuid',
+      scoutId: 'scout-1',
+      scoutName: 'ScoutOne',
+      matchNumber: 1,
+      teamNumber: 27570,
+      autoScore: 0,
+      teleopScore: 0,
+      endgameScore: 0,
+      totalScore: 120,
+      notes: '',
+      rawData: '{}',
+      version: 1,
+      isDeleted: false,
+      syncStatus: 'SYNCED',
+      createdAt: new Date().toISOString(),
+      updatedAt: new Date().toISOString()
+    }
+    recordStore.records.push(rec)
+    writeScoutingRecordToCrdt(scoutHandle.store, rec)
+    writeScoutingRecordToCrdt(hostStore, rec)
+
+    await recordStore.deleteRecord('rec-tomb-1')
+
+    expect(rec.isDeleted).toBe(true)
+    expect(rec.syncStatus).toBe('PENDING')
+    expect(rec.version).toBe(2)
+    expect(recordStore.myRecords('scout-1')).toHaveLength(0)
+
+    const scoutCrdtRec = readScoutingRecordsFromCrdt(scoutHandle.store, 'evt-real-uuid').find((r) => r.id === 'rec-tomb-1')
+    expect(scoutCrdtRec?.isDeleted).toBe(true)
+    expect(scoutCrdtRec?.version).toBe(2)
+
+    hostNow = Math.max(Date.now(), scoutHandle.clock.now())
+    let hostHub!: ReturnType<typeof createWebRtcCrdtSynchronizerHub>
+    let scoutHub!: ReturnType<typeof createWebRtcCrdtSynchronizerHub>
+    hostHub = createWebRtcCrdtSynchronizerHub({
+      eventId: 'evt-real-uuid',
+      store: hostStore,
+      clientId: 'dev-host-1',
+      getNowMs: () => hostNow,
+      sendToPeer: (_peerId, msg) => queueMicrotask(() => scoutHub.handleIncomingMessage('host', msg))
+    })
+    scoutHub = createWebRtcCrdtSynchronizerHub({
+      eventId: 'evt-real-uuid',
+      store: scoutHandle.store,
+      clientId: 'dev-scout-1',
+      getNowMs: () => scoutHandle.clock.now(),
+      sendToPeer: (_peerId, msg) => queueMicrotask(() => hostHub.handleIncomingMessage('scout-1', msg))
+    })
+
+    await Promise.all([hostHub.attachPeer('scout-1'), scoutHub.attachPeer('host')])
+
+    await vi.waitFor(() => {
+      const hostRec = readScoutingRecordsFromCrdt(hostStore, 'evt-real-uuid').find((r) => r.id === 'rec-tomb-1')
+      expect(hostRec?.isDeleted).toBe(true)
+      expect(hostRec?.version).toBe(2)
+    }, { timeout: 2000 })
+
+    await Promise.all([hostHub.destroy(), scoutHub.destroy()])
   })
 })

@@ -1,5 +1,6 @@
-import { mount } from '@vue/test-utils'
+import { mount, type VueWrapper } from '@vue/test-utils'
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
+import { nextTick } from 'vue'
 import { setActivePinia, createPinia } from 'pinia'
 import TakeoverPromptModal from '../components/common/TakeoverPromptModal.vue'
 import { useConnectionStore } from '../stores/connection'
@@ -19,15 +20,20 @@ vi.mock('vue-i18n', () => ({
   })
 }))
 
-const mountModal = () => mount(TakeoverPromptModal, {
-  global: {
-    stubs: {
-      teleport: true
-    }
-  }
-})
-
 describe('TakeoverPromptModal.vue', () => {
+  const mountedWrappers: VueWrapper<any>[] = []
+  const mountModal = () => {
+    const w = mount(TakeoverPromptModal, {
+      global: {
+        stubs: {
+          teleport: true
+        }
+      }
+    })
+    mountedWrappers.push(w)
+    return w
+  }
+
   beforeEach(() => {
     setActivePinia(createPinia())
     vi.clearAllMocks()
@@ -35,6 +41,10 @@ describe('TakeoverPromptModal.vue', () => {
   })
 
   afterEach(() => {
+    while (mountedWrappers.length > 0) {
+      mountedWrappers.pop()?.unmount()
+    }
+    vi.restoreAllMocks()
     vi.useRealTimers()
   })
 
@@ -72,11 +82,11 @@ describe('TakeoverPromptModal.vue', () => {
     expect(wrapper.text()).toContain('3s timeout')
 
     vi.advanceTimersByTime(1000)
-    await wrapper.vm.$nextTick()
+    await nextTick()
     expect(wrapper.text()).toContain('2s timeout')
 
     vi.advanceTimersByTime(2000)
-    await wrapper.vm.$nextTick()
+    await nextTick()
     expect(connStore.takeoverPrompt).toBeNull()
   })
 

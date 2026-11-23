@@ -39,6 +39,12 @@ jobs:
         working-directory: frontend
         run: npm ci
 
+      - name: Type check and run tests
+        working-directory: frontend
+        run: |
+          npm run type-check
+          npm test
+
       - name: Build PWA
         working-directory: frontend
         run: npm run build:pwa

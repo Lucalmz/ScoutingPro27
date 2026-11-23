@@ -1,5 +1,6 @@
 import type { ScoutingEvent, ScoutingRecord, TeamTagItem } from '@/types'
-import { scanMergeableContent } from '@/services/crdt'
+import { scanMergeableContent, verifyScoutingRecordSignature } from '@/services/crdt'
+import { hasSubtleCrypto } from '@/utils/crypto'
 
 export interface EventPackageFile {
   format: 'SCOUTING_PRO_27_EVENT'
@@ -34,9 +35,8 @@ export interface SyncPackageFile {
     targetUsername?: string
   }
   syncRange: {
-    fromHostSeq: number
-    toHostSeq: number
     recordCount: number
+    hasCrdtSnapshot?: boolean
   }
   exportedAt: string
   payload: {
@@ -82,16 +82,14 @@ export function generateEventFileName(event: ScoutingEvent, exportedAt: Date = n
 /**
  * 自动生成增量数据包文件名:
  * Client -> Host: [EventName]_[ScoutName]_to_HOST_r[Count]_[Timestamp].info
- * Host -> All:    [EventName]_HOST_to_ALL_v[From]_to_v[To]_[Timestamp].info
- * Host -> Scout:  [EventName]_HOST_to_[ScoutName]_v[From]_to_v[To]_[Timestamp].info
+ * Host -> All:    [EventName]_HOST_to_ALL_r[Count]_[Timestamp].info
+ * Host -> Scout:  [EventName]_HOST_to_[ScoutName]_r[Count]_[Timestamp].info
  */
 export function generateSyncFileName(params: {
   eventName: string
   senderName: string
   isHost: boolean
   targetName?: string
-  fromSeq?: number
-  toSeq?: number
   recordCount: number
   exportedAt?: Date
 }): string {
@@ -105,9 +103,7 @@ export function generateSyncFileName(params: {
     const target = params.targetName && params.targetName !== 'ALL'
       ? sanitizeFileSegment(params.targetName)
       : 'ALL'
-    const from = params.fromSeq ?? 0
-    const to = params.toSeq ?? 0
-    return `${eventBase}_HOST_to_${target}_v${from}_to_v${to}_${dateStr}.info`
+    return `${eventBase}_HOST_to_${target}_r${params.recordCount}_${dateStr}.info`
   }
 }
 
@@ -158,15 +154,9 @@ export function createSyncPackage(params: {
   target: { recipientType: 'HOST' | 'ALL_SCOUTS' | 'SCOUT'; targetUserId?: string; targetUsername?: string }
   records: ScoutingRecord[]
   teamTags?: TeamTagItem[]
-  fromHostSeq?: number
-  toHostSeq?: number
   hostSessionId?: string
   crdtSnapshot?: unknown
 }): string {
-  const maxHostSeq = params.records.reduce((m, r) => Math.max(m, r.hostSeq ?? 0), 0)
-  const fromSeq = params.fromHostSeq ?? 0
-  const toSeq = params.toHostSeq ?? maxHostSeq
-
   const pkg: SyncPackageFile = {
     format: 'SCOUTING_PRO_27_SYNC',
     version: 1,
@@ -176,9 +166,8 @@ export function createSyncPackage(params: {
     sender: params.sender,
     target: params.target,
     syncRange: {
-      fromHostSeq: fromSeq,
-      toHostSeq: toSeq,
-      recordCount: params.records.length
+      recordCount: params.records.length,
+      ...(params.crdtSnapshot !== undefined ? { hasCrdtSnapshot: true } : {})
     },
     exportedAt: new Date().toISOString(),
     payload: {
@@ -231,13 +220,210 @@ export function parseSyncPackage(rawJson: string): SyncPackageFile {
   return parsed as SyncPackageFile
 }
 
+const CLIENT_ALLOWED_CRDT_TABLES = new Set([
+  'scouting_records',
+  'member_identities',
+  'pit_records',
+  'pit_photo_keys',
+  'team_tags'
+])
+
+function isPlainObject(v: unknown): v is Record<string, unknown> {
+  return Boolean(v && typeof v === 'object' && !Array.isArray(v))
+}
+
+function extractCellPrimitive(cellsObj: Record<string, unknown>, cellKey: string): unknown {
+  const cellTuple = cellsObj[cellKey]
+  return Array.isArray(cellTuple) ? cellTuple[0] : undefined
+}
+
+function matchesExpectedEventCell(cellsObj: Record<string, unknown>, eventId?: string): boolean {
+  if (!eventId) return true
+  const rawEventId = extractCellPrimitive(cellsObj, 'eventId')
+  if (typeof rawEventId !== 'string' || rawEventId === '') return true
+  return rawEventId === eventId
+}
+
+/**
+ * 过滤客户端导出快照：仅保留客户端允许同步的 5 张表、当前赛事行及发送者本人的记录与身份，
+ * 剔除 Host 专属管理表（custom_fields/schedules/assignments）及队友记录，防止 Host 误拒合法客户端包。
+ */
+export function buildClientExportCrdtSnapshot(
+  snapshot: unknown,
+  senderUserId: string,
+  eventId?: string
+): unknown | undefined {
+  if (!senderUserId || !Array.isArray(snapshot) || snapshot.length !== 2) return undefined
+  const tablesStamp = snapshot[0]
+  if (!Array.isArray(tablesStamp) || !isPlainObject(tablesStamp[0])) return undefined
+
+  const rawTablesObj = tablesStamp[0] as Record<string, unknown>
+  const filteredTablesObj: Record<string, unknown> = {}
+  let hasAnyRow = false
+
+  for (const [tableName, tableTuple] of Object.entries(rawTablesObj)) {
+    if (!CLIENT_ALLOWED_CRDT_TABLES.has(tableName)) continue
+    if (!Array.isArray(tableTuple) || !isPlainObject(tableTuple[0])) continue
+
+    const rawRowsObj = tableTuple[0] as Record<string, unknown>
+    const filteredRowsObj: Record<string, unknown> = {}
+
+    for (const [rowId, rowTuple] of Object.entries(rawRowsObj)) {
+      if (!Array.isArray(rowTuple) || !isPlainObject(rowTuple[0])) continue
+      const cellsObj = rowTuple[0] as Record<string, unknown>
+      if (!matchesExpectedEventCell(cellsObj, eventId)) continue
+
+      if (tableName === 'scouting_records') {
+        if (extractCellPrimitive(cellsObj, 'scoutId') !== senderUserId) continue
+      } else if (tableName === 'member_identities') {
+        if (extractCellPrimitive(cellsObj, 'userId') !== senderUserId) continue
+      }
+
+      filteredRowsObj[rowId] = rowTuple.slice(0, 2)
+    }
+
+    if (Object.keys(filteredRowsObj).length > 0) {
+      filteredTablesObj[tableName] = [filteredRowsObj, '']
+      hasAnyRow = true
+    }
+  }
+
+  if (!hasAnyRow) return undefined
+  return [
+    [filteredTablesObj, ''],
+    [{}, '']
+  ]
+}
+
+function findUnauthorizedClientCrdtRows(
+  snapshot: unknown,
+  senderUserId: string | undefined,
+  currentEventId: string,
+  existingRecordOwners?: ReadonlyMap<string, string>
+): string[] {
+  if (snapshot === undefined || snapshot === null) return []
+  if (
+    !Array.isArray(snapshot) ||
+    snapshot.length !== 2 ||
+    !Array.isArray(snapshot[0]) ||
+    !Array.isArray(snapshot[1]) ||
+    !isPlainObject(snapshot[0][0]) ||
+    !isPlainObject(snapshot[1][0])
+  ) {
+    return ['__malformed_crdt_snapshot__']
+  }
+
+  const unauthorized: string[] = []
+  const tablesStamp = snapshot[0] as unknown[]
+  const valuesStamp = snapshot[1] as unknown[]
+  const tablesObj = tablesStamp[0] as Record<string, unknown>
+  const valuesObj = valuesStamp[0] as Record<string, unknown>
+
+  if (Object.keys(valuesObj).length > 0 || (typeof valuesStamp[1] === 'string' && valuesStamp[1].length > 0)) {
+    unauthorized.push('__forbidden_crdt_values__')
+  }
+
+  if (Object.keys(tablesObj).length === 0 && typeof tablesStamp[1] === 'string' && tablesStamp[1].length > 0) {
+    unauthorized.push('__malformed_crdt_snapshot__')
+  }
+
+  for (const [tableName, tableTuple] of Object.entries(tablesObj)) {
+    if (!CLIENT_ALLOWED_CRDT_TABLES.has(tableName)) {
+      unauthorized.push(`__forbidden_table__:${tableName}`)
+      continue
+    }
+    if (!Array.isArray(tableTuple) || !isPlainObject(tableTuple[0])) {
+      unauthorized.push(`__malformed_table__:${tableName}`)
+      continue
+    }
+    const rowsObj = tableTuple[0] as Record<string, unknown>
+    if (Object.keys(rowsObj).length === 0 && typeof tableTuple[1] === 'string' && tableTuple[1].length > 0) {
+      unauthorized.push(`__table_tombstone__:${tableName}`)
+      continue
+    }
+
+    for (const [rowId, rowTuple] of Object.entries(rowsObj)) {
+      if (!Array.isArray(rowTuple) || !isPlainObject(rowTuple[0])) {
+        unauthorized.push(`${tableName}:${rowId}`)
+        continue
+      }
+      const cellsObj = rowTuple[0] as Record<string, unknown>
+      if (!matchesExpectedEventCell(cellsObj, currentEventId)) {
+        unauthorized.push(`${tableName}:${rowId}`)
+        continue
+      }
+
+      if (tableName === 'scouting_records') {
+        const ownerVal = extractCellPrimitive(cellsObj, 'scoutId')
+        if (!senderUserId || typeof ownerVal !== 'string' || ownerVal !== senderUserId) {
+          unauthorized.push(rowId)
+          continue
+        }
+        if (existingRecordOwners?.has(rowId) && existingRecordOwners.get(rowId) !== senderUserId) {
+          unauthorized.push(rowId)
+          continue
+        }
+      } else if (tableName === 'member_identities') {
+        const ownerVal = extractCellPrimitive(cellsObj, 'userId')
+        if (!senderUserId || typeof ownerVal !== 'string' || ownerVal !== senderUserId) {
+          unauthorized.push(rowId)
+          continue
+        }
+      }
+    }
+  }
+
+  return unauthorized
+}
+
+function findMalformedOrCrossEventCrdtRows(snapshot: unknown, currentEventId: string): string[] {
+  if (snapshot === undefined || snapshot === null) return []
+  if (
+    !Array.isArray(snapshot) ||
+    snapshot.length !== 2 ||
+    !Array.isArray(snapshot[0]) ||
+    !Array.isArray(snapshot[1]) ||
+    !isPlainObject(snapshot[0][0]) ||
+    !isPlainObject(snapshot[1][0])
+  ) {
+    return ['__malformed_crdt_snapshot__']
+  }
+
+  const invalid: string[] = []
+  const tablesObj = snapshot[0][0] as Record<string, unknown>
+  for (const [tableName, tableTuple] of Object.entries(tablesObj)) {
+    if (!Array.isArray(tableTuple) || !isPlainObject(tableTuple[0])) {
+      invalid.push(`__malformed_table__:${tableName}`)
+      continue
+    }
+    const rowsObj = tableTuple[0] as Record<string, unknown>
+    for (const [rowId, rowTuple] of Object.entries(rowsObj)) {
+      if (!Array.isArray(rowTuple) || !isPlainObject(rowTuple[0])) {
+        invalid.push(`${tableName}:${rowId}`)
+        continue
+      }
+      const cellsObj = rowTuple[0] as Record<string, unknown>
+      if (!matchesExpectedEventCell(cellsObj, currentEventId)) {
+        invalid.push(`${tableName}:${rowId}`)
+      }
+    }
+  }
+  return invalid
+}
+
+export interface SyncSecurityOptions {
+  expectedHostUserId?: string
+  existingRecordOwners?: ReadonlyMap<string, string>
+}
+
 /**
  * 针对当前环境执行同步包业务安全核验
  */
 export function validateSyncPackageSecurity(
   pkg: SyncPackageFile,
   currentEventId: string,
-  isCurrentHost: boolean
+  isCurrentHost: boolean,
+  options?: SyncSecurityOptions
 ): {
   valid: boolean
   error?: string
@@ -255,22 +441,61 @@ export function validateSyncPackageSecurity(
 
   const legitimateRecords: ScoutingRecord[] = []
   const droppedRecordIds: string[] = []
+  const pushDropped = (id: string) => {
+    if (!droppedRecordIds.includes(id)) {
+      droppedRecordIds.push(id)
+    }
+  }
 
-  // 如果 Host 导入 Client 上传的包，必须核验每条记录的 scoutId 是否匹配发送方 userId
-  if (isCurrentHost && pkg.packetType === 'CLIENT_PUSH') {
+  const isTrustedHostBroadcastOnHost =
+    isCurrentHost &&
+    pkg.packetType === 'HOST_BROADCAST' &&
+    pkg.sender?.role === 'HOST' &&
+    Boolean(options?.expectedHostUserId && pkg.sender?.userId === options.expectedHostUserId)
+
+  // Host 导入 Client 上传包或未通过预期 Host 身份核验的包：严格校验记录归属、防篡改已有记录及 CRDT 快照越权
+  if (isCurrentHost && !isTrustedHostBroadcastOnHost) {
     const senderUserId = pkg.sender?.userId
     for (const r of pkg.payload.records) {
       if (!r || typeof r !== 'object' || !r.id) continue
-      if (!senderUserId || r.scoutId !== senderUserId) {
-        droppedRecordIds.push(r.id)
+      const crossEventMismatch = Boolean(r.eventId && r.eventId !== currentEventId)
+      const ownerHijack = Boolean(
+        options?.existingRecordOwners?.has(r.id) && options.existingRecordOwners.get(r.id) !== senderUserId
+      )
+      if (!senderUserId || r.scoutId !== senderUserId || crossEventMismatch || ownerHijack) {
+        pushDropped(r.id)
       } else {
         legitimateRecords.push(r)
       }
     }
-  } else {
-    // Client 导入 Host 广播包，或 Host 导入非伪造包
+    const unauthorizedCrdtIds = findUnauthorizedClientCrdtRows(
+      pkg.payload?.crdtSnapshot,
+      senderUserId,
+      currentEventId,
+      options?.existingRecordOwners
+    )
+    for (const badId of unauthorizedCrdtIds) {
+      pushDropped(badId)
+    }
+  } else if (isTrustedHostBroadcastOnHost) {
     for (const r of pkg.payload.records) {
-      if (r && typeof r === 'object' && r.id) {
+      if (!r || typeof r !== 'object' || !r.id) continue
+      if (r.eventId && r.eventId !== currentEventId) {
+        pushDropped(r.id)
+      } else {
+        legitimateRecords.push(r)
+      }
+    }
+    for (const badId of findMalformedOrCrossEventCrdtRows(pkg.payload?.crdtSnapshot, currentEventId)) {
+      pushDropped(badId)
+    }
+  } else {
+    // Client 导入 Host 广播包
+    for (const r of pkg.payload.records) {
+      if (!r || typeof r !== 'object' || !r.id) continue
+      if (r.eventId && r.eventId !== currentEventId) {
+        pushDropped(r.id)
+      } else {
         legitimateRecords.push(r)
       }
     }
@@ -439,14 +664,15 @@ export interface BatchImportContext {
   targetEventId: string
   isHost: boolean
   events: ScoutingEvent[]
+  expectedHostUserId?: string
+  existingRecordOwners?: ReadonlyMap<string, string>
   bulkSync: (records: ScoutingRecord[]) => Promise<ScoutingRecord[]>
-  stampHostSeq?: (records: ScoutingRecord[]) => void
   persistRecordsToDb?: (records: ScoutingRecord[]) => Promise<void>
   markSynced?: (ids: string[]) => void
   applyTagsFullSync?: (tags: TeamTagItem[]) => void
   applyScheduleFullSync?: (schedules: import('@/types').MatchScheduleItem[], assignments: import('@/types').ScoutAssignment[]) => void
   syncExternalEvent?: (event: ScoutingEvent) => Promise<ScoutingEvent | null | void>
-  applyCrdtSnapshot?: (snapshot: unknown) => boolean
+  applyCrdtSnapshot?: (snapshot: unknown, eventId?: string) => boolean
 }
 
 export interface BatchImportExecutionResult {
@@ -458,7 +684,8 @@ export interface BatchImportExecutionResult {
 
 function maybeApplyIncomingCrdtSnapshot(
   syncPkg: SyncPackageFile,
-  applyCrdtSnapshot?: (snapshot: unknown) => boolean
+  applyCrdtSnapshot?: (snapshot: unknown, eventId?: string) => boolean,
+  eventId?: string
 ): void {
   const snapshot = syncPkg.payload?.crdtSnapshot
   if (snapshot === undefined || !applyCrdtSnapshot) return
@@ -468,7 +695,7 @@ function maybeApplyIncomingCrdtSnapshot(
       '[OfflineSync] Incoming CRDT snapshot contains future-skewed HLC cells (>300s); TinyBase will drop offending cells'
     )
   }
-  applyCrdtSnapshot(snapshot)
+  applyCrdtSnapshot(snapshot, eventId)
 }
 
 /**
@@ -509,58 +736,101 @@ export async function executeBatchSyncImport(ctx: BatchImportContext): Promise<B
   if (matchedSyncFiles.length > 0) {
     const firstSync = matchedSyncFiles[0]
     const eventId = ctx.targetEventId || firstSync?.syncPkg?.eventId || ''
+    const subtleAvailable = hasSubtleCrypto()
 
     if (ctx.isHost) {
       const allLegitimateRecords: ScoutingRecord[] = []
+      const crdtSnapshotsToApply: SyncPackageFile[] = []
+
       for (const item of matchedSyncFiles) {
         if (!item.syncPkg) continue
-        const sec = validateSyncPackageSecurity(item.syncPkg, eventId, true)
+        const sec = validateSyncPackageSecurity(item.syncPkg, eventId, true, {
+          expectedHostUserId: ctx.expectedHostUserId,
+          existingRecordOwners: ctx.existingRecordOwners
+        })
         if (!sec.valid) {
           throw new Error(sec.error || '数据包安全核验失败')
         }
-        maybeApplyIncomingCrdtSnapshot(item.syncPkg, ctx.applyCrdtSnapshot)
-        totalDropped += sec.droppedRecordIds.length
-        allLegitimateRecords.push(...sec.legitimateRecords)
+
+        const verifiedRecords: ScoutingRecord[] = []
+        const droppedSet = new Set(sec.droppedRecordIds)
+
+        for (const r of sec.legitimateRecords) {
+          if (subtleAvailable) {
+            const requiresSigForOtherScoutOnHostBroadcast =
+              item.syncPkg.packetType === 'HOST_BROADCAST' &&
+              Boolean(ctx.expectedHostUserId && r.scoutId !== ctx.expectedHostUserId)
+
+            if (requiresSigForOtherScoutOnHostBroadcast) {
+              if (!r.authorPubKey || !r.authorSig || !(await verifyScoutingRecordSignature(r))) {
+                droppedSet.add(r.id)
+                continue
+              }
+            } else if (r.authorPubKey || r.authorSig) {
+              if (!(await verifyScoutingRecordSignature(r))) {
+                droppedSet.add(r.id)
+                continue
+              }
+            }
+          }
+          verifiedRecords.push(r)
+        }
+
+        if (droppedSet.size === 0) {
+          crdtSnapshotsToApply.push(item.syncPkg)
+        }
+        totalDropped += droppedSet.size
+        allLegitimateRecords.push(...verifiedRecords)
       }
 
       const accepted = await ctx.bulkSync(allLegitimateRecords)
       totalAccepted = accepted.length
-      if (accepted.length > 0) {
-        if (ctx.stampHostSeq) ctx.stampHostSeq(accepted)
-        if (ctx.persistRecordsToDb) {
-          try {
-            await ctx.persistRecordsToDb(accepted)
-          } catch (e) {
-            console.warn('[OfflineSync] Host failed to persist stamped records to DB:', e)
-          }
+      if (accepted.length > 0 && ctx.persistRecordsToDb) {
+        try {
+          await ctx.persistRecordsToDb(accepted)
+        } catch (e) {
+          console.warn('[OfflineSync] Host failed to persist imported records to DB:', e)
         }
+      }
+
+      for (const syncPkg of crdtSnapshotsToApply) {
+        maybeApplyIncomingCrdtSnapshot(syncPkg, ctx.applyCrdtSnapshot, eventId)
       }
     } else {
       const allLegitimateRecords: ScoutingRecord[] = []
+      const hostConfirmedIds: string[] = []
+      const crdtSnapshotsToApply: SyncPackageFile[] = []
+
       for (const item of matchedSyncFiles) {
         if (!item.syncPkg) continue
         const sec = validateSyncPackageSecurity(item.syncPkg, eventId, false)
         if (!sec.valid) {
           throw new Error(sec.error || '数据包安全核验失败')
         }
-        maybeApplyIncomingCrdtSnapshot(item.syncPkg, ctx.applyCrdtSnapshot)
+        totalDropped += sec.droppedRecordIds.length
         allLegitimateRecords.push(...sec.legitimateRecords)
+        if (item.syncPkg.packetType === 'HOST_BROADCAST') {
+          for (const rec of sec.legitimateRecords) {
+            hostConfirmedIds.push(rec.id)
+          }
+        }
         if (item.syncPkg.payload.teamTags && item.syncPkg.payload.teamTags.length > 0) {
           if (ctx.applyTagsFullSync) ctx.applyTagsFullSync(item.syncPkg.payload.teamTags)
+        }
+        if (sec.droppedRecordIds.length === 0) {
+          crdtSnapshotsToApply.push(item.syncPkg)
         }
       }
 
       const accepted = await ctx.bulkSync(allLegitimateRecords)
       totalAccepted = accepted.length
 
-      const confirmedIds: string[] = []
-      for (const stamped of allLegitimateRecords) {
-        if (stamped.hostSeq && stamped.hostSeq > 0) {
-          confirmedIds.push(stamped.id)
-        }
+      if (hostConfirmedIds.length > 0 && ctx.markSynced) {
+        ctx.markSynced(hostConfirmedIds)
       }
-      if (confirmedIds.length > 0 && ctx.markSynced) {
-        ctx.markSynced(confirmedIds)
+
+      for (const syncPkg of crdtSnapshotsToApply) {
+        maybeApplyIncomingCrdtSnapshot(syncPkg, ctx.applyCrdtSnapshot, eventId)
       }
     }
   }

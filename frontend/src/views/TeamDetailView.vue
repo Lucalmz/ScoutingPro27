@@ -7,7 +7,10 @@ import { useConnectionStore } from '@/stores/connection'
 import { useEventStore } from '@/stores/events'
 import { useUserStore } from '@/stores/user'
 import { useToastStore } from '@/stores/toast'
-import { syncRecords } from '@/services/api'
+import { useAiStore } from '@/stores/ai'
+import { disposeEventCrdt, getExistingEventCrdt } from '@/services/crdt'
+import { isDesktopHost } from '@/services/photoStorage'
+import { isMobileDevice } from '@/composables/useIsMobile'
 import TagPicker from '@/components/common/TagPicker.vue'
 import ConnectionStatus from '@/components/common/ConnectionStatus.vue'
 import { usePitScoutStore } from '@/stores/pitScout'
@@ -31,7 +34,7 @@ const props = defineProps<{
 }>()
 
 const router = useRouter()
-const { t } = useI18n()
+const { t, locale } = useI18n()
 const recordStore = useRecordStore()
 const pitStore = usePitScoutStore()
 const customFieldsStore = useCustomFieldsStore()
@@ -39,7 +42,18 @@ const eventStore = useEventStore()
 const userStore = useUserStore()
 const connStore = useConnectionStore()
 const toastStore = useToastStore()
+const aiStore = useAiStore()
 const isPitDrawerOpen = ref(false)
+
+async function askAiAboutTeam() {
+  if (isNaN(teamNumVal.value)) return
+  await aiStore.openCopilotForTeam(props.eventId, teamNumVal.value, undefined, locale.value)
+  const target =
+    typeof window !== 'undefined' && window.innerWidth <= 768
+      ? `/event/${props.eventId}?tab=ai`
+      : `/event/${props.eventId}`
+  router.push(target)
+}
 
 const teamNumVal = computed(() => parseInt(props.teamNumber))
 const unifiedTeam = computed(() => isNaN(teamNumVal.value) ? undefined : pitStore.getUnifiedTeam(teamNumVal.value))
@@ -153,13 +167,20 @@ onUnmounted(() => {
 })
 
 onBeforeRouteLeave((to) => {
-  // 仅在完全离开赛事页面时（如返回主面板、登出或跨赛事切换）切断长连接
+  // 仅在完全离开赛事页面时（如返回主面板、登出或跨赛事切换）切断长连接并释放 CRDT 会话
   if ((to.name !== 'event' && to.name !== 'team-detail') || to.params.eventId !== props.eventId) {
     const connStore = useConnectionStore()
+    connStore.setCrdtSyncTrigger(null)
     connStore.rtcService?.disconnect()
     connStore.setRtcService(null)
     connStore.clearConnectedScouts()
     connStore.setStatus('offline')
+    if (props.eventId) {
+      if (isDesktopHost() && !isMobileDevice()) {
+        void getExistingEventCrdt(props.eventId)?.flushNow().catch(() => {})
+      }
+      void disposeEventCrdt(props.eventId)
+    }
   }
 })
 
@@ -167,29 +188,8 @@ async function saveComment(match: ScoutingRecord) {
   isSaving.value = true
   try {
     const updatedRecord = { ...match, notes: editCommentText.value, updatedAt: new Date().toISOString() }
-    const { success, recordsToPush } = await recordStore.updateRecord(updatedRecord)
+    const { success } = await recordStore.updateRecord(updatedRecord)
     if (success) {
-      if (recordsToPush && recordsToPush.length > 0) {
-        const deduplicatedRecords = Array.from(new Map(recordsToPush.map((r) => [r.id, r])).values())
-        if (eventStore.isHost && !connStore.isStandbyHost) {
-          for (const r of deduplicatedRecords) {
-            r.hostSeq = undefined
-          }
-          connStore.stampHostSeq(deduplicatedRecords)
-          try {
-            await syncRecords(deduplicatedRecords)
-          } catch (e) {
-            console.error('[TeamDetailView] Failed to sync stamped records to DB:', e)
-          }
-          connStore.pushIfNeeded(deduplicatedRecords)
-        } else {
-          // 非主机客户端：只推送属于自己的记录！绝不越权推送其他人被 reassessConflicts 影响的记录
-          const myOnlyRecords = deduplicatedRecords.filter((r) => r.scoutId === userStore.userId)
-          if (myOnlyRecords.length > 0) {
-            connStore.pushIfNeeded(myOnlyRecords)
-          }
-        }
-      }
       editingMatchId.value = null
     }
   } catch (e: any) {
@@ -213,6 +213,15 @@ async function saveComment(match: ScoutingRecord) {
           <h1>{{ t('team_detail.title', { team: teamNumber }) }}</h1>
         </div>
         <div class="header-right">
+          <button
+            type="button"
+            class="btn-ask-ai-detail"
+            @click="askAiAboutTeam"
+            :title="t('ai.ask_ai_about_team')"
+          >
+            <span class="material-icons">auto_awesome</span>
+            <span class="btn-ask-ai-text">{{ t('ai.ask_ai_short') }}</span>
+          </button>
           <ConnectionStatus />
           <button class="btn-close" @click="handleBack" :aria-label="t('team_drawer.close')" :title="t('team_drawer.close')">
             <span class="material-icons">close</span>
@@ -452,6 +461,28 @@ async function saveComment(match: ScoutingRecord) {
   align-items: center;
   gap: 8px;
   flex-shrink: 0;
+}
+
+.btn-ask-ai-detail {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 6px 10px;
+  border-radius: 999px;
+  border: 1px solid var(--status-ai-border);
+  background: var(--status-ai-bg);
+  color: var(--status-ai);
+  font-size: 12px;
+  font-weight: 700;
+  cursor: pointer;
+}
+
+.btn-ask-ai-detail .material-icons {
+  font-size: 15px;
+}
+
+.btn-ask-ai-detail:hover {
+  border-color: var(--status-ai);
 }
 
 .btn-close {

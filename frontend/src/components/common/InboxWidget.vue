@@ -133,8 +133,9 @@ function handleMessageClick(msg: SystemMessage) {
 .inbox-widget {
   position: fixed;
   bottom: 2rem;
-  right: 2rem;
+  right: calc(2rem + var(--ai-dock-right-offset, 0px));
   z-index: 1000;
+  transition: right var(--motion-duration-fast) var(--motion-ease-out);
 }
 
 @media (max-width: 768px) {

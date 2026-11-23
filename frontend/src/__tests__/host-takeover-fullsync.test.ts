@@ -1,8 +1,13 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest'
+import { flushPromises } from '@vue/test-utils'
 import { setActivePinia, createPinia } from 'pinia'
+import mqtt from 'mqtt'
+import * as api from '@/services/api'
 import { createWebRtcService } from '@/services/webrtc'
 import { useConnectionStore } from '@/stores/connection'
 import type { ScoutingRecord } from '@/types'
+
+const origRTCPeerConnection = global.RTCPeerConnection
 
 const mockMqttClient = {
   subscribe: vi.fn(),
@@ -45,6 +50,15 @@ describe('Host Takeover Full-Sync & Handoff Protocol (主机接管全量对齐�
     vi.clearAllMocks()
     localStorage.clear()
 
+    vi.mocked(mqtt.connect).mockImplementation(() => mockMqttClient as any)
+    vi.mocked(api.createWebRtcTicket).mockImplementation(async (_eventId: string, ecdhPublicKey: string) => ({
+      ticket: `ticket_for_${ecdhPublicKey ? ecdhPublicKey.slice(0, 10) : 'dummy'}`,
+      expiresIn: 180
+    }))
+    vi.mocked(api.verifyToken).mockResolvedValue({ valid: true, userId: 'host_id', username: 'HostUser' })
+    vi.mocked(api.verifyWebRtcTicket).mockResolvedValue({ valid: true, userId: 'valid_scout', username: 'Scout' })
+    vi.mocked(api.syncRecords).mockResolvedValue({ success: true } as any)
+
     mockMqttClient.on.mockImplementation((event: string, handler: any) => {
       if (event === 'connect') handler()
       if (event === 'message') messageHandler = handler
@@ -75,11 +89,15 @@ describe('Host Takeover Full-Sync & Handoff Protocol (主机接管全量对齐�
   })
 
   afterEach(() => {
+    delete (globalThis as any).__TEST_ALLOW_UNSIGNED_SIGNALING__
     delete (globalThis as any).__TEST_PROBE_MS__
+    global.RTCPeerConnection = origRTCPeerConnection
+    vi.useRealTimers()
+    vi.restoreAllMocks()
     messageHandler = null
   })
 
-  it('stampHostSeq is non-destructive: preserves existing hostSeq and advances clock monotonically', () => {
+  it('retires legacy hostSeq and HOST_HANDOFF_BATCH methods from WebRtcService', () => {
     const service = createWebRtcService({
       onStatusChange: vi.fn(),
       onRecordsReceived: vi.fn().mockResolvedValue([]),
@@ -87,57 +105,11 @@ describe('Host Takeover Full-Sync & Handoff Protocol (主机接管全量对齐�
       onRequestSync: vi.fn()
     })
 
-    // 1. Fresh records get stamped starting from 1
-    const fresh1: ScoutingRecord = {
-      id: 'rec-1',
-      eventId: 'ev-1',
-      matchNumber: 1,
-      teamNumber: 100,
-      scoutId: 'scout-1',
-      scoutName: 'Scout 1',
-      autoScore: 10,
-      teleopScore: 20,
-      endgameScore: 30,
-      updatedAt: new Date().toISOString()
-    }
-    const stamped1 = service.stampHostSeq([fresh1])
-    expect(stamped1[0].hostSeq).toBe(1)
-    expect(service.getHostSeqCounter()).toBe(1)
-
-    // 2. Incoming record from another host handoff already stamped with hostSeq=25
-    const preStamped: ScoutingRecord = {
-      id: 'rec-2',
-      eventId: 'ev-1',
-      matchNumber: 2,
-      teamNumber: 101,
-      scoutId: 'scout-2',
-      scoutName: 'Scout 2',
-      autoScore: 15,
-      teleopScore: 25,
-      endgameScore: 35,
-      hostSeq: 25,
-      updatedAt: new Date().toISOString()
-    }
-    const stamped2 = service.stampHostSeq([preStamped])
-    expect(stamped2[0].hostSeq).toBe(25) // Preserved, not overwritten!
-    expect(service.getHostSeqCounter()).toBe(25) // Clock advanced!
-
-    // 3. Next fresh record continues monotonically from 26
-    const fresh2: ScoutingRecord = {
-      id: 'rec-3',
-      eventId: 'ev-1',
-      matchNumber: 3,
-      teamNumber: 102,
-      scoutId: 'scout-1',
-      scoutName: 'Scout 1',
-      autoScore: 5,
-      teleopScore: 10,
-      endgameScore: 15,
-      updatedAt: new Date().toISOString()
-    }
-    const stamped3 = service.stampHostSeq([fresh2])
-    expect(stamped3[0].hostSeq).toBe(26)
-    expect(service.getHostSeqCounter()).toBe(26)
+    expect((service as any).stampHostSeq).toBeUndefined()
+    expect((service as any).initHostSeq).toBeUndefined()
+    expect((service as any).getHostSeqCounter).toBeUndefined()
+    expect((service as any).sendHostHandoffBatch).toBeUndefined()
+    expect((service as any).sendHostHandoffAck).toBeUndefined()
 
     service.disconnect()
   })
@@ -153,7 +125,9 @@ describe('Host Takeover Full-Sync & Handoff Protocol (主机接管全量对齐�
     })
 
     await service.host('room-ftc-epoch')
-    await new Promise((r) => setTimeout(r, 70))
+    await vi.waitFor(() => {
+      expect(onHostPromoted).toHaveBeenCalled()
+    })
     await service.takeoverHost()
 
     const publishCalls = mockMqttClient.publish.mock.calls
@@ -183,38 +157,37 @@ describe('Host Takeover Full-Sync & Handoff Protocol (主机接管全量对齐�
     })
 
     await service.host('room-ftc-tie')
-    await new Promise(r => setTimeout(r, 100))
+    await vi.waitFor(() => {
+      expect(onHostPromoted).toHaveBeenCalled()
+    })
     expect(service.isStandbyHost()).toBe(false)
+    expect(messageHandler).toBeTypeOf('function')
 
     // Simulate incoming takeover from competing host with LOWER epoch (epoch: 0 < local: 1)
-    if (messageHandler) {
-      const lowerTakeover = JSON.stringify({
-        type: 'host_takeover',
-        oldHostSessionId: 'old-sess',
-        newHostSessionId: 'competing-host-low',
-        deviceId: 'device-competing-aaa',
-        hostEpoch: 0,
-        sender: 'competing-client-low'
-      })
-      await messageHandler('scoutingpro/signal/room-ftc-tie', Buffer.from(lowerTakeover))
-    }
+    const lowerTakeover = JSON.stringify({
+      type: 'host_takeover',
+      oldHostSessionId: 'old-sess',
+      newHostSessionId: 'competing-host-low',
+      deviceId: 'device-competing-aaa',
+      hostEpoch: 0,
+      sender: 'competing-client-low'
+    })
+    await messageHandler!('scoutingpro/signal/room-ftc-tie', Buffer.from(lowerTakeover))
 
     // Host should NOT demote because incoming epoch is lower!
     expect(onHostDemoted).not.toHaveBeenCalled()
     expect(service.isStandbyHost()).toBe(false)
 
     // Now simulate incoming takeover from competing host with HIGHER epoch (epoch: 10 > local: 1)
-    if (messageHandler) {
-      const higherTakeover = JSON.stringify({
-        type: 'host_takeover',
-        oldHostSessionId: 'old-sess',
-        newHostSessionId: 'competing-host-high',
-        deviceId: 'device-competing-zzz',
-        hostEpoch: 10,
-        sender: 'competing-client-high'
-      })
-      await messageHandler('scoutingpro/signal/room-ftc-tie', Buffer.from(higherTakeover))
-    }
+    const higherTakeover = JSON.stringify({
+      type: 'host_takeover',
+      oldHostSessionId: 'old-sess',
+      newHostSessionId: 'competing-host-high',
+      deviceId: 'device-competing-zzz',
+      hostEpoch: 10,
+      sender: 'competing-client-high'
+    })
+    await messageHandler!('scoutingpro/signal/room-ftc-tie', Buffer.from(higherTakeover))
 
     // Host should demote because incoming epoch is higher!
     expect(onHostDemoted).toHaveBeenCalled()
@@ -241,165 +214,122 @@ describe('Host Takeover Full-Sync & Handoff Protocol (主机接管全量对齐�
     expect(mockRtc.takeoverHost).toHaveBeenCalledTimes(1) // Still 1!
   })
 
-  it('HOST_HANDOFF_BATCH updates clock, calls callbacks, and emits HOST_HANDOFF_ACK', async () => {
-    const { createChannelMessageHandler } = await import('@/services/webrtc/channelMessageHandler')
-    const sentMessages: any[] = []
-    let hostSeqCounter = 10
-    const onRecordsReceived = vi.fn().mockImplementation(async (records: ScoutingRecord[]) => records)
-    const onHostHandoffReceived = vi.fn().mockResolvedValue(2)
-    const finishTakeoverReconciliation = vi.fn()
+  it('CRDT concurrent takeover merges old-host, standby-host, and in-flight scout writes without blocking gate or hostSeq', async () => {
+    const { createMergeableStore } = await import('tinybase')
+    const { createWebRtcCrdtSynchronizerHub, readScoutingRecordsFromCrdt, writeScoutingRecordToCrdt } = await import('@/services/crdt')
 
-    const handler = createChannelMessageHandler({
-      isHostMode: () => true,
-      currentInviteCode: () => 'room-handoff',
-      getHostSessionId: () => 'host-session-123',
-      getCurrentHostSessionId: () => 'host-session-123',
-      setCurrentHostSessionId: vi.fn(),
-      callbacks: {
-        onStatusChange: vi.fn(),
-        onRecordsReceived,
-        onAckReceived: vi.fn(),
-        onRequestSync: vi.fn(),
-        onHostHandoffReceived
-      } as any,
-      clients: new Map(),
-      stagedClients: new Map(),
-      scoutIdToClientIds: new Map(),
-      clientIdToScoutId: new Map([['peer_old_host', 'host_user']]),
-      clientIdToScoutName: new Map([['peer_old_host', 'OldHost']]),
-      pendingTakeovers: new Map(),
-      takeoverCooldowns: new Map(),
-      offlineMessages: { enqueue: vi.fn() } as any,
-      sendMessage: vi.fn().mockImplementation(async (msg, target) => {
-        sentMessages.push({ msg, target })
-      }),
-      promoteTakeover: vi.fn(),
-      enqueueHostTask: vi.fn().mockImplementation((sender, task) => task()),
-      cleanupPeerResources: vi.fn(),
-      stampHostSeq: (records) => {
-        for (const r of records) {
-          if (r.hostSeq && r.hostSeq > hostSeqCounter) hostSeqCounter = r.hostSeq
-        }
-      },
-      getHostSeqCounter: () => hostSeqCounter,
-      setHostSeqCounter: (n) => {
-        hostSeqCounter = n
-      },
-      closeClient: vi.fn(),
-      setStatus: vi.fn(),
-      finishTakeoverReconciliation
-    })
+    let now = 1_760_000_000_000
+    const oldHostStore = createMergeableStore('dev-old-host', () => ++now, 300)
+    const newHostStore = createMergeableStore('dev-new-host', () => ++now, 300)
+    const scoutStore = createMergeableStore('dev-scout-1', () => ++now, 300)
 
-    const handoffPayload = {
-      type: 'HOST_HANDOFF_BATCH',
+    writeScoutingRecordToCrdt(oldHostStore, {
+      id: 'rec-old-host-exclusive',
       eventId: 'event-1',
-      incomingMaxSeq: 42,
-      hostEpoch: 3,
-      authCode: 'room-handoff',
-      records: [
-        { id: 'rec-10', eventId: 'event-1', matchNumber: 1, teamNumber: 100, hostSeq: 41, scoutId: 'scout-1', autoScore: 10, teleopScore: 20, endgameScore: 30, updatedAt: '' },
-        { id: 'rec-11', eventId: 'event-1', matchNumber: 2, teamNumber: 200, hostSeq: 42, scoutId: 'scout-2', autoScore: 15, teleopScore: 25, endgameScore: 35, updatedAt: '' }
-      ]
-    }
-
-    const ev = { data: JSON.stringify(handoffPayload) } as MessageEvent
-    await handler(ev, 'peer_old_host')
-
-    // Records received and merged
-    expect(onRecordsReceived).toHaveBeenCalled()
-    expect(onHostHandoffReceived).toHaveBeenCalled()
-    // Reconciliation finished
-    expect(finishTakeoverReconciliation).toHaveBeenCalledWith('handoff_processed')
-    // Clock advanced to incomingMaxSeq (42)
-    expect(hostSeqCounter).toBe(42)
-
-    // ACK returned to peer_old_host
-    expect(sentMessages.length).toBe(1)
-    expect(sentMessages[0].target).toBe('peer_old_host')
-    expect(sentMessages[0].msg.type).toBe('HOST_HANDOFF_ACK')
-    expect(sentMessages[0].msg.alignedMaxSeq).toBe(42)
-  })
-
-  it('in-flight SYNC_DATA waits for takeover reconciliation gate and stamps non-colliding hostSeq', async () => {
-    const { createChannelMessageHandler } = await import('@/services/webrtc/channelMessageHandler')
-    let isReconciling = true
-    let resolveReconciliation: () => void
-    const reconPromise = new Promise<void>((r) => {
-      resolveReconciliation = r
+      scoutId: 'host-user',
+      scoutName: 'OldHost',
+      matchNumber: 5,
+      teamNumber: 27570,
+      autoScore: 10,
+      teleopScore: 20,
+      endgameScore: 10,
+      totalScore: 40,
+      notes: '',
+      rawData: '{}',
+      syncStatus: 'SYNCED',
+      createdAt: '',
+      updatedAt: '',
+      isBroken: false,
+      version: 1
     })
 
-    let hostSeqCounter = 10
-    const sentMessages: any[] = []
-
-    const handler = createChannelMessageHandler({
-      isHostMode: () => true,
-      currentInviteCode: () => 'room-gate',
-      getHostSessionId: () => 'host-gate-sess',
-      getCurrentHostSessionId: () => 'host-gate-sess',
-      setCurrentHostSessionId: vi.fn(),
-      callbacks: {
-        onStatusChange: vi.fn(),
-        onRecordsReceived: vi.fn().mockImplementation(async (recs) => recs),
-        onAckReceived: vi.fn(),
-        onRequestSync: vi.fn()
-      } as any,
-      clients: new Map(),
-      stagedClients: new Map(),
-      scoutIdToClientIds: new Map(),
-      clientIdToScoutId: new Map([['scout_peer', 'scout_user_1']]),
-      clientIdToScoutName: new Map([['scout_peer', 'Scout 1']]),
-      pendingTakeovers: new Map(),
-      takeoverCooldowns: new Map(),
-      offlineMessages: { enqueue: vi.fn() } as any,
-      sendMessage: vi.fn().mockImplementation(async (msg, target) => {
-        sentMessages.push({ msg, target })
-      }),
-      promoteTakeover: vi.fn(),
-      enqueueHostTask: vi.fn().mockImplementation((sender, task) => task()),
-      cleanupPeerResources: vi.fn(),
-      stampHostSeq: (records) => {
-        for (const r of records) {
-          if (!r.hostSeq) r.hostSeq = ++hostSeqCounter
-        }
-      },
-      getHostSeqCounter: () => hostSeqCounter,
-      setHostSeqCounter: (n) => {
-        hostSeqCounter = n
-      },
-      closeClient: vi.fn(),
-      setStatus: vi.fn(),
-      isTakeoverReconciling: () => isReconciling,
-      waitForTakeoverReconciliation: () => reconPromise
+    writeScoutingRecordToCrdt(newHostStore, {
+      id: 'rec-new-host-offline',
+      eventId: 'event-1',
+      scoutId: 'bob-user',
+      scoutName: 'StandbyBob',
+      matchNumber: 6,
+      teamNumber: 1234,
+      autoScore: 15,
+      teleopScore: 25,
+      endgameScore: 15,
+      totalScore: 55,
+      notes: '',
+      rawData: '{}',
+      syncStatus: 'SYNCED',
+      createdAt: '',
+      updatedAt: '',
+      isBroken: false,
+      version: 1
     })
 
-    const freshRecordPayload = {
-      type: 'SYNC_DATA',
-      authCode: 'room-gate',
-      senderUserId: 'scout_user_1',
-      records: [
-        { id: 'fresh-rec', eventId: 'event-1', matchNumber: 5, teamNumber: 999, scoutId: 'scout_user_1', autoScore: 10, teleopScore: 20, endgameScore: 30, updatedAt: '' }
-      ]
-    }
+    writeScoutingRecordToCrdt(scoutStore, {
+      id: 'rec-scout-inflight',
+      eventId: 'event-1',
+      scoutId: 'scout-1',
+      scoutName: 'Scout 1',
+      matchNumber: 7,
+      teamNumber: 999,
+      autoScore: 20,
+      teleopScore: 30,
+      endgameScore: 10,
+      totalScore: 60,
+      notes: '',
+      rawData: '{}',
+      syncStatus: 'SYNCED',
+      createdAt: '',
+      updatedAt: '',
+      isBroken: false,
+      version: 1
+    })
 
-    // Launch SYNC_DATA while reconciling
-    const syncDataPromise = handler({ data: JSON.stringify(freshRecordPayload) } as MessageEvent, 'scout_peer')
+    let newHostHub!: ReturnType<typeof createWebRtcCrdtSynchronizerHub>
+    let oldHostHub!: ReturnType<typeof createWebRtcCrdtSynchronizerHub>
+    let scoutHub!: ReturnType<typeof createWebRtcCrdtSynchronizerHub>
 
-    // At this moment, syncDataPromise is paused awaiting reconPromise!
-    expect(sentMessages.length).toBe(0)
+    newHostHub = createWebRtcCrdtSynchronizerHub({
+      eventId: 'event-1',
+      store: newHostStore,
+      clientId: 'dev-new-host',
+      getNowMs: () => now,
+      sendToPeer: (peerId, msg) => {
+        if (peerId === 'old-host') oldHostHub.handleIncomingMessage('host', msg)
+        if (peerId === 'scout-1') scoutHub.handleIncomingMessage('host', msg)
+      }
+    })
+    oldHostHub = createWebRtcCrdtSynchronizerHub({
+      eventId: 'event-1',
+      store: oldHostStore,
+      clientId: 'dev-old-host',
+      getNowMs: () => now,
+      sendToPeer: (_peerId, msg) => newHostHub.handleIncomingMessage('old-host', msg)
+    })
+    scoutHub = createWebRtcCrdtSynchronizerHub({
+      eventId: 'event-1',
+      store: scoutStore,
+      clientId: 'dev-scout-1',
+      getNowMs: () => now,
+      sendToPeer: (_peerId, msg) => newHostHub.handleIncomingMessage('scout-1', msg)
+    })
 
-    // Simulate Handoff batch completes, advancing hostSeqCounter to 50
-    hostSeqCounter = 50
-    isReconciling = false
-    resolveReconciliation!()
+    // Concurrent peer attachment without any blocking staging gate
+    await Promise.all([
+      newHostHub.attachPeer('scout-1'),
+      scoutHub.attachPeer('host'),
+      newHostHub.attachPeer('old-host'),
+      oldHostHub.attachPeer('host')
+    ])
 
-    // Wait for syncDataPromise to finish
-    await syncDataPromise
+    const expectedIds = ['rec-new-host-offline', 'rec-old-host-exclusive', 'rec-scout-inflight']
+    await vi.waitFor(() => {
+      for (const st of [newHostStore, oldHostStore, scoutStore]) {
+        const recs = readScoutingRecordsFromCrdt(st, 'event-1')
+        expect(recs.map((r) => r.id).sort()).toEqual(expectedIds)
+        expect(recs.every((r) => (r as any).hostSeq === undefined)).toBe(true)
+      }
+    })
 
-    // Stamped record now has hostSeq = 51!
-    expect(sentMessages.length).toBeGreaterThanOrEqual(1)
-    const ackMsg = sentMessages.find(m => m.msg.type === 'ACK_SYNC')
-    expect(ackMsg).toBeDefined()
-    expect(ackMsg.msg.stampedRecords[0].hostSeq).toBe(51) // Strictly greater than 50!
+    await Promise.all([newHostHub.destroy(), oldHostHub.destroy(), scoutHub.destroy()])
   })
 
   it('compareHostAuthority enforces strict total order across epoch, sessionId, and deviceId', async () => {
@@ -420,34 +350,37 @@ describe('Host Takeover Full-Sync & Handoff Protocol (主机接管全量对齐�
   })
 
   it('stale host_heartbeat with lower epoch NEVER demotes a higher-epoch active host', async () => {
+    const onHostPromoted = vi.fn()
     const onHostDemoted = vi.fn()
     const service = createWebRtcService({
       onStatusChange: vi.fn(),
       onRecordsReceived: vi.fn().mockResolvedValue([]),
       onAckReceived: vi.fn(),
       onRequestSync: vi.fn(),
+      onHostPromoted,
       onHostDemoted
     })
 
     await service.host('room-stale-hb')
-    await new Promise(r => setTimeout(r, 70))
+    await vi.waitFor(() => {
+      expect(onHostPromoted).toHaveBeenCalled()
+    })
     // Promote local host to epoch 3
     await service.takeoverHost()
     await service.takeoverHost() // localEpoch is now at least 3
 
     expect(service.isStandbyHost()).toBe(false)
+    expect(messageHandler).toBeTypeOf('function')
 
     // Stale heartbeat from old host with epoch: 1 arrives over MQTT broker
-    if (messageHandler) {
-      const staleHeartbeat = JSON.stringify({
-        type: 'host_heartbeat',
-        hostSessionId: 'host-old-timestamp-1111111',
-        deviceId: 'device-zzz',
-        hostEpoch: 1,
-        sender: 'old-host-client'
-      })
-      await messageHandler('scoutingpro/signal/room-stale-hb', Buffer.from(staleHeartbeat))
-    }
+    const staleHeartbeat = JSON.stringify({
+      type: 'host_heartbeat',
+      hostSessionId: 'host-old-timestamp-1111111',
+      deviceId: 'device-zzz',
+      hostEpoch: 1,
+      sender: 'old-host-client'
+    })
+    await messageHandler!('scoutingpro/signal/room-stale-hb', Buffer.from(staleHeartbeat))
 
     // Active host MUST NOT demote!
     expect(onHostDemoted).not.toHaveBeenCalled()
@@ -485,8 +418,9 @@ describe('Host Takeover Full-Sync & Handoff Protocol (主机接管全量对齐�
         })
       )
     )
-    await new Promise((r) => setTimeout(r, 70))
-    expect(service.isStandbyHost()).toBe(true)
+    await vi.waitFor(() => {
+      expect(service.isStandbyHost()).toBe(true)
+    })
 
     // Now active host sends host_hello with ECDH public key
     const { generateEcdhKeyPair, exportEcdhPublicKey } = await import('@/utils/crypto')
@@ -510,72 +444,73 @@ describe('Host Takeover Full-Sync & Handoff Protocol (主机接管全量对齐�
     await vi.waitFor(() => {
       expect(onSasVerified).toHaveBeenCalledWith('host')
       expect(service.getSasState('host')).toBe('VERIFIED')
+      expect(onSasVerificationRequired).not.toHaveBeenCalled()
     }, { timeout: 1000 })
 
     service.disconnect()
   })
 
   it('Concurrent takeovers with identical epoch break tie deterministically without split-brain or double-standby', async () => {
+    const onHostPromoted1 = vi.fn()
     const onHostDemoted1 = vi.fn()
     const service1 = createWebRtcService({
       onStatusChange: vi.fn(),
       onRecordsReceived: vi.fn().mockResolvedValue([]),
       onAckReceived: vi.fn(),
       onRequestSync: vi.fn(),
+      onHostPromoted: onHostPromoted1,
       onHostDemoted: onHostDemoted1
     })
 
     await service1.host('room-concurrent-takeover')
-    await new Promise((r) => setTimeout(r, 70))
+    await vi.waitFor(() => {
+      expect(onHostPromoted1).toHaveBeenCalled()
+    })
 
     // Host 1 promotes to epoch 2
     await service1.takeoverHost()
     expect(service1.isStandbyHost()).toBe(false)
+    expect(messageHandler).toBeTypeOf('function')
 
     // Host 2 also initiated takeover with identical epoch 2 but different sessionId
     // Suppose Host 2 has a newer (larger) session ID: 'host-999999999-peer'
     // Under our rule: smaller/older session ID wins, so Host 1 wins and stays Active Host!
-    if (messageHandler) {
-      await messageHandler(
-        'scoutingpro/signal/room-concurrent-takeover',
-        Buffer.from(
-          JSON.stringify({
-            type: 'host_takeover',
-            newHostSessionId: 'host-999999999-peer',
-            deviceId: 'dev_host2',
-            hostEpoch: 2,
-            sender: 'peer-host2'
-          })
-        )
+    await messageHandler!(
+      'scoutingpro/signal/room-concurrent-takeover',
+      Buffer.from(
+        JSON.stringify({
+          type: 'host_takeover',
+          newHostSessionId: 'host-999999999-peer',
+          deviceId: 'dev_host2',
+          hostEpoch: 2,
+          sender: 'peer-host2'
+        })
       )
-    }
-    await new Promise((r) => setTimeout(r, 70))
+    )
+    await flushPromises()
 
     // Host 1 did not demote because its session was earlier!
     expect(onHostDemoted1).not.toHaveBeenCalled()
     expect(service1.isStandbyHost()).toBe(false)
 
     // Now test the opposite: incoming takeover has an older/smaller session ID: 'host-000000000-winner'
-    if (messageHandler) {
-      await messageHandler(
-        'scoutingpro/signal/room-concurrent-takeover',
-        Buffer.from(
-          JSON.stringify({
-            type: 'host_takeover',
-            newHostSessionId: 'host-000000000-winner',
-            deviceId: 'dev_host_winner',
-            hostEpoch: 2,
-            sender: 'peer-winner'
-          })
-        )
+    await messageHandler!(
+      'scoutingpro/signal/room-concurrent-takeover',
+      Buffer.from(
+        JSON.stringify({
+          type: 'host_takeover',
+          newHostSessionId: 'host-000000000-winner',
+          deviceId: 'dev_host_winner',
+          hostEpoch: 2,
+          sender: 'peer-winner'
+        })
       )
-    }
-    await new Promise((r) => setTimeout(r, 70))
-
-    // Host 1 gracefully demotes to standby!
-    expect(onHostDemoted1).toHaveBeenCalledWith({
-      hostSessionId: 'host-000000000-winner',
-      hostDeviceId: 'dev_host_winner'
+    )
+    await vi.waitFor(() => {
+      expect(onHostDemoted1).toHaveBeenCalledWith({
+        hostSessionId: 'host-000000000-winner',
+        hostDeviceId: 'dev_host_winner'
+      })
     })
     expect(service1.isStandbyHost()).toBe(true)
 

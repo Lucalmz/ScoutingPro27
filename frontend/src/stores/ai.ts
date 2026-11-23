@@ -1,138 +1,76 @@
 import { defineStore } from 'pinia'
-import { ref } from 'vue'
 import { useUserStore } from './user'
-import type { AiSettings } from '@/types'
+import { DEFAULT_DOCK_WIDTH, MAX_DOCK_WIDTH, MIN_DOCK_WIDTH } from '@/components/ai/constants'
+import { clampDockWidth, createAiDockState } from './aiModules/aiDockState'
+import {
+  createAiProfilesModule,
+  type ConnectionCheckParams,
+  type ConnectionCheckResponse
+} from './aiModules/aiProfiles'
+import {
+  createAiThreadsModule,
+  createDefaultContextConfig,
+  type PendingAutoSendRequest
+} from './aiModules/aiThreads'
+import { createAiStreamingModule } from './aiModules/aiStreaming'
+
+export { MIN_DOCK_WIDTH, MAX_DOCK_WIDTH, DEFAULT_DOCK_WIDTH, clampDockWidth, createDefaultContextConfig }
+export type { ConnectionCheckParams, ConnectionCheckResponse, PendingAutoSendRequest }
 
 export const useAiStore = defineStore('ai', () => {
   const userStore = useUserStore()
-  
-  const settingsList = ref<AiSettings[]>([])
-  const loading = ref(false)
-  
-  const activeProvider = ref<'OPENAI' | 'GEMINI'>('OPENAI')
-  
-  async function fetchSettings() {
-    if (!userStore.userId || !userStore.token) return
-    loading.value = true
-    try {
-      const res = await fetch(`/api/users/${userStore.userId}/ai-settings`, {
-        headers: { 'Authorization': `Bearer ${userStore.token}` }
-      })
-      if (res.ok) {
-        const data = await res.json()
-        settingsList.value = data
-      }
-    } catch (e) {
-      console.error('Failed to fetch AI settings', e)
-    } finally {
-      loading.value = false
-    }
-  }
 
-  async function saveSettings(settings: Partial<AiSettings>) {
-    if (!userStore.userId || !userStore.token) return false
-    
-    // Create a copy and remove masked keys if unmodified
-    const payload = { ...settings }
-    if (payload.apiKeyEncrypted && (payload.apiKeyEncrypted === '****' || payload.apiKeyEncrypted.includes('***'))) {
-      delete payload.apiKeyEncrypted
-    }
-    
-    try {
-      const res = await fetch(`/api/users/${userStore.userId}/ai-settings`, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'Authorization': `Bearer ${userStore.token}`
-        },
-        body: JSON.stringify(payload)
-      })
-      
-      if (res.ok) {
-        await fetchSettings() // refresh
-        return true
-      }
-    } catch (e) {
-      console.error('Failed to save AI settings', e)
-    }
-    return false
-  }
+  const dock = createAiDockState()
+  const profilesMod = createAiProfilesModule(userStore)
 
-  async function testConnection(provider: string, apiKey?: string, proxyHost?: string, proxyPort?: number, baseUrl?: string) {
-    if (!userStore.token) return { success: false, error: 'Not logged in' }
-    
-    try {
-      const res = await fetch('/api/ai/test-connection', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'Authorization': `Bearer ${userStore.token}`
-        },
-        body: JSON.stringify({
-          provider,
-          apiKey: (apiKey && !apiKey.includes('***') && apiKey !== '****') ? apiKey.trim() : undefined,
-          proxyHost: proxyHost || undefined,
-          proxyPort: proxyPort || undefined,
-          baseUrl: baseUrl || undefined
-        })
-      })
-      if (res.ok) {
-        return await res.json() // {success, statusCode, latencyMs, message, error}
-      } else {
-        const errJson = await res.json().catch(() => null)
-        return { success: false, error: (errJson && errJson.error) ? errJson.error : ('HTTP ' + res.status) }
-      }
-    } catch (e: any) {
-      return { success: false, error: e.message }
-    }
-  }
+  let stopStreamingFn: (threadId?: string | null) => void = () => {}
+  const threadsMod = createAiThreadsModule(userStore, {
+    onBeforeDeleteOrClearThread: id => stopStreamingFn(id)
+  })
 
-  function getSettingsForProvider(provider: string): AiSettings | undefined {
-    return settingsList.value.find(s => s.provider === provider)
-  }
-
-  async function fetchChatHistory(eventId: string) {
-    if (!userStore.token) return []
-    try {
-      const res = await fetch(`/api/events/${eventId}/ai-chat`, {
-        headers: { 'Authorization': `Bearer ${userStore.token}` }
-      })
-      if (res.ok) {
-        return await res.json()
-      }
-    } catch (e) {
-      console.error('Failed to fetch chat history', e)
-    }
-    return []
-  }
-
-  async function saveChatHistory(eventId: string, chatArray: any[]) {
-    if (!userStore.token) return false
-    try {
-      const res = await fetch(`/api/events/${eventId}/ai-chat`, {
-        method: 'PUT',
-        headers: {
-          'Content-Type': 'application/json',
-          'Authorization': `Bearer ${userStore.token}`
-        },
-        body: JSON.stringify(chatArray)
-      })
-      return res.ok
-    } catch (e) {
-      console.error('Failed to save chat history', e)
-      return false
-    }
-  }
+  const streamingMod = createAiStreamingModule({
+    userStore,
+    activeProfile: profilesMod.activeProfile,
+    canSendWithActiveProfile: profilesMod.canSendWithActiveProfile,
+    setDockOpen: dock.setDockOpen,
+    openSettingsModal: dock.openSettingsModal,
+    threads: threadsMod
+  })
+  stopStreamingFn = streamingMod.stopStreaming
 
   return {
-    settingsList,
-    loading,
-    activeProvider,
-    fetchSettings,
-    saveSettings,
-    testConnection,
-    getSettingsForProvider,
-    fetchChatHistory,
-    saveChatHistory
+    // Dock & workspace UI state
+    ...dock,
+
+    // Multi-profile state & actions (+ backwards-compatible settings bridge)
+    ...profilesMod,
+
+    // Event threads & persistence actions
+    threadsByEvent: threadsMod.threadsByEvent,
+    threadDetailsById: threadsMod.threadDetailsById,
+    activeThreadIdByEvent: threadsMod.activeThreadIdByEvent,
+    loadingThreads: threadsMod.loadingThreads,
+    draftPromptByEvent: threadsMod.draftPromptByEvent,
+    pendingAutoSendByEvent: threadsMod.pendingAutoSendByEvent,
+    getThreadsForEvent: threadsMod.getThreadsForEvent,
+    getActiveThread: threadsMod.getActiveThread,
+    loadEventThreads: threadsMod.loadEventThreads,
+    createThread: threadsMod.createThread,
+    ensureActiveThread: threadsMod.ensureActiveThread,
+    selectThread: threadsMod.selectThread,
+    renameThread: threadsMod.renameThread,
+    togglePinThread: threadsMod.togglePinThread,
+    deleteThread: threadsMod.deleteThread,
+    updateThreadContextConfig: threadsMod.updateThreadContextConfig,
+    updateThreadPersona: threadsMod.updateThreadPersona,
+    deleteThreadMessage: threadsMod.deleteThreadMessage,
+    clearThreadMessages: threadsMod.clearThreadMessages,
+    scheduleSaveThread: threadsMod.scheduleSaveThread,
+    flushPendingSaves: threadsMod.flushPendingSaves,
+    fetchChatHistory: threadsMod.fetchChatHistory,
+    saveChatHistory: threadsMod.saveChatHistory,
+
+    // Streaming & workflow shortcuts
+    ...streamingMod
   }
 })

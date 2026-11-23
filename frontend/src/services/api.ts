@@ -67,7 +67,7 @@ function handleStaticHostFallback<T>(method: string, path: string, body?: unknow
     return Promise.reject(new Error('Static cloud host does not support direct HTTP account merge; must merge via WebRTC host'))
   }
   // 5. Events list
-  if (path.startsWith('/events') && method === 'GET') {
+  if ((path === '/events' || path.startsWith('/events?')) && method === 'GET') {
     return Promise.resolve([] as unknown as T)
   }
   // 6. Join event
@@ -88,7 +88,7 @@ function handleStaticHostFallback<T>(method: string, path: string, body?: unknow
     return Promise.resolve(b as unknown as T)
   }
   // 7. Create event
-  if (path.startsWith('/events') && method === 'POST') {
+  if ((path === '/events' || path.startsWith('/events?')) && method === 'POST') {
     const b = (body || {}) as { name?: string }
     const code = 'SP' + Math.random().toString(36).slice(2, 6).toUpperCase()
     const pwaEvt: CreateEventResponse = {
@@ -130,6 +130,9 @@ function handleStaticHostFallback<T>(method: string, path: string, body?: unknow
     return Promise.resolve({ schedules: [], assignments: [] } as unknown as T)
   }
   // 10. Pit records & Custom fields & Tags & Members
+  if (path.includes('/pit-records') && method === 'GET') {
+    return Promise.resolve({ records: [], officialTeams: [] } as unknown as T)
+  }
   if (
     path.includes('/pit/records') ||
     path.includes('/custom-fields') ||

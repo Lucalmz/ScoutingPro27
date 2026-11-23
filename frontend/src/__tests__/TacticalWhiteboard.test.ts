@@ -1,6 +1,6 @@
-import { describe, it, expect, beforeEach, vi } from 'vitest'
+import { afterEach, describe, it, expect, beforeEach, vi } from 'vitest'
 import { ref, nextTick } from 'vue'
-import { mount } from '@vue/test-utils'
+import { mount, type VueWrapper } from '@vue/test-utils'
 import { createPinia, setActivePinia } from 'pinia'
 import { createI18n } from 'vue-i18n'
 import zh from '@/locales/zh.json'
@@ -204,6 +204,11 @@ describe('useTacticalWhiteboard Composable State & Persistence', () => {
     vi.useFakeTimers()
   })
 
+  afterEach(() => {
+    vi.useRealTimers()
+    localStorage.clear()
+  })
+
   it('automatically populates 4 teams on match selection, supports Undo/Redo, phase robot sync, and localStorage recovery', () => {
     const eventId = ref('evt-wb-1')
     const schedules = ref<MatchScheduleItem[]>([
@@ -361,6 +366,13 @@ describe('useTacticalWhiteboard Composable State & Persistence', () => {
 })
 
 describe('TacticalWhiteboardView Component Integration (Match -> 4 Teams -> Sidebar Detail)', () => {
+  const origGetContext = HTMLCanvasElement.prototype.getContext
+  const mountedWrappers: VueWrapper<any>[] = []
+  const track = <T extends VueWrapper<any>>(w: T): T => {
+    mountedWrappers.push(w)
+    return w
+  }
+
   beforeEach(() => {
     localStorage.clear()
     setActivePinia(createPinia())
@@ -393,6 +405,14 @@ describe('TacticalWhiteboardView Component Integration (Match -> 4 Teams -> Side
         addColorStop: vi.fn()
       })
     }) as any
+  })
+
+  afterEach(() => {
+    while (mountedWrappers.length > 0) {
+      mountedWrappers.pop()?.unmount()
+    }
+    HTMLCanvasElement.prototype.getContext = origGetContext
+    localStorage.clear()
   })
 
   it('renders 4 match teams, switches matches, and shows deep-dive team intel in the sidebar', async () => {
@@ -470,7 +490,7 @@ describe('TacticalWhiteboardView Component Integration (Match -> 4 Teams -> Side
     }
     pitStore.records = [samplePit]
 
-    const wrapper = mount(TacticalWhiteboardView, {
+    const wrapper = track(mount(TacticalWhiteboardView, {
       props: {
         eventId: 'evt-wb-test',
         initialMatch: { matchNumber: 1, tournamentLevel: 'QUALIFICATION' }
@@ -478,7 +498,7 @@ describe('TacticalWhiteboardView Component Integration (Match -> 4 Teams -> Side
       global: {
         plugins: [createTestI18n()]
       }
-    })
+    }))
 
     await nextTick()
 
@@ -632,7 +652,7 @@ describe('TacticalWhiteboardView Component Integration (Match -> 4 Teams -> Side
       }
     ]
 
-    const wrapper = mount(TacticalWhiteboardView, {
+    const wrapper = track(mount(TacticalWhiteboardView, {
       props: {
         eventId: 'evt-wb-bb',
         initialMatch: { matchNumber: 1, tournamentLevel: 'QUALIFICATION' }
@@ -640,7 +660,7 @@ describe('TacticalWhiteboardView Component Integration (Match -> 4 Teams -> Side
       global: {
         plugins: [createTestI18n()]
       }
-    })
+    }))
     await nextTick()
 
     // Swarm RP forecast strip & 8 Nectar budget rendered

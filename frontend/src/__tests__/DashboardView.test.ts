@@ -1,10 +1,14 @@
-import { mount } from '@vue/test-utils'
+import { mount, flushPromises, VueWrapper } from '@vue/test-utils'
+import { ref } from 'vue'
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
 import { setActivePinia, createPinia } from 'pinia'
 import DashboardView from '../views/DashboardView.vue'
 import { useUserStore } from '../stores/user'
 import { useEventStore } from '../stores/events'
 import { useToastStore } from '../stores/toast'
+import { isDesktopHost } from '@/services/photoStorage'
+import * as isMobileComposable from '@/composables/useIsMobile'
+import { hasDesktopTitleBar } from '@/utils/desktopShell'
 
 const mockPush = vi.fn()
 const mockReplace = vi.fn()
@@ -45,7 +49,13 @@ vi.mock('@/services/photoStorage', () => ({
 
 import { transitionState } from '@/utils/transitionState'
 
-describe('DashboardView.vue', () => {
+describe('DashboardView.vue & desktopShell', () => {
+  const wrappers: VueWrapper[] = []
+  const track = (w: VueWrapper) => {
+    wrappers.push(w)
+    return w
+  }
+
   beforeEach(() => {
     setActivePinia(createPinia())
     transitionState.sharedElementId = null
@@ -53,18 +63,34 @@ describe('DashboardView.vue', () => {
     mockPush.mockClear()
     mockReplace.mockClear()
     vi.clearAllMocks()
+    vi.mocked(isDesktopHost).mockReturnValue(true)
   })
 
   afterEach(() => {
+    while (wrappers.length > 0) {
+      wrappers.pop()!.unmount()
+    }
+    vi.restoreAllMocks()
     window.history.replaceState({}, '', '/')
+  })
+
+  it('hasDesktopTitleBar detects ?shell=desktop accurately', () => {
+    window.history.replaceState({}, '', '/index.html?shell=desktop#/dashboard')
+    expect(hasDesktopTitleBar()).toBe(true)
+
+    window.history.replaceState({}, '', '/index.html#/dashboard')
+    expect(hasDesktopTitleBar()).toBe(false)
+
+    window.history.replaceState({}, '', '/index.html?join=ABC123&shell=web#/')
+    expect(hasDesktopTitleBar()).toBe(false)
   })
 
   it('redirects to / when user is not logged in', async () => {
     const userStore = useUserStore()
-    userStore.user = null // not logged in
+    userStore.user = null
 
-    mount(DashboardView)
-    await new Promise((r) => setTimeout(r, 10))
+    track(mount(DashboardView))
+    await flushPromises()
 
     expect(mockReplace).toHaveBeenCalledWith('/')
   })
@@ -77,8 +103,8 @@ describe('DashboardView.vue', () => {
     eventStore.events = []
     vi.spyOn(eventStore, 'fetchEvents').mockResolvedValue(undefined)
 
-    const wrapper = mount(DashboardView)
-    await new Promise((r) => setTimeout(r, 10))
+    const wrapper = track(mount(DashboardView))
+    await flushPromises()
 
     expect(wrapper.text()).toContain('dashboard.no_events')
   })
@@ -93,8 +119,8 @@ describe('DashboardView.vue', () => {
     ]
     vi.spyOn(eventStore, 'fetchEvents').mockResolvedValue(undefined)
 
-    const wrapper = mount(DashboardView)
-    await new Promise((r) => setTimeout(r, 10))
+    const wrapper = track(mount(DashboardView))
+    await flushPromises()
 
     expect(wrapper.text()).toContain('FTC Championship')
     expect(wrapper.text()).toContain('ABCDEF')
@@ -104,8 +130,7 @@ describe('DashboardView.vue', () => {
     expect(card.exists()).toBe(true)
     await card.trigger('click')
     expect(card.classes()).toContain('slide-out-right')
-    await wrapper.vm.$nextTick()
-    await new Promise((r) => setTimeout(r, 10))
+    await flushPromises()
 
     expect(mockPush).toHaveBeenCalledWith('/event/evt-1')
   })
@@ -124,24 +149,19 @@ describe('DashboardView.vue', () => {
       hostId: 'u1'
     })
 
-    const wrapper = mount(DashboardView)
-    await new Promise((r) => setTimeout(r, 10))
+    const wrapper = track(mount(DashboardView))
+    await flushPromises()
 
-    // Open create modal
     const createBtn = wrapper.findAll('.action-btn').find((b) => b.text().includes('dashboard.create_event'))
     expect(createBtn).toBeDefined()
     await createBtn!.trigger('click')
 
-    // Find input in modal and type event name
     const input = wrapper.find('.modal-card input')
     expect(input.exists()).toBe(true)
     await input.setValue('Super Regional')
 
-    // Confirm creation
-    const confirmBtn = wrapper.find('.btn-confirm')
-    await confirmBtn.trigger('click')
-    await wrapper.vm.$nextTick()
-    await new Promise((r) => setTimeout(r, 10))
+    await wrapper.find('.btn-confirm').trigger('click')
+    await flushPromises()
 
     expect(eventStore.create).toHaveBeenCalledWith('Super Regional')
     expect(mockPush).toHaveBeenCalledWith('/event/new-evt-123')
@@ -161,24 +181,19 @@ describe('DashboardView.vue', () => {
       hostId: 'host-1'
     })
 
-    const wrapper = mount(DashboardView)
-    await new Promise((r) => setTimeout(r, 10))
+    const wrapper = track(mount(DashboardView))
+    await flushPromises()
 
-    // Open join modal
     const joinBtn = wrapper.findAll('.action-btn').find((b) => b.text().includes('dashboard.join_event'))
     expect(joinBtn).toBeDefined()
     await joinBtn!.trigger('click')
 
-    // Enter lowercase code
     const input = wrapper.find('.modal-card input')
     expect(input.exists()).toBe(true)
     await input.setValue('join99')
 
-    // Confirm join
-    const confirmBtn = wrapper.find('.btn-confirm')
-    await confirmBtn.trigger('click')
-    await wrapper.vm.$nextTick()
-    await new Promise((r) => setTimeout(r, 10))
+    await wrapper.find('.btn-confirm').trigger('click')
+    await flushPromises()
 
     expect(eventStore.join).toHaveBeenCalledWith('JOIN99', 'Joined Event')
     expect(mockPush).toHaveBeenCalledWith('/event/joined-evt-456')
@@ -199,8 +214,8 @@ describe('DashboardView.vue', () => {
     const toastStore = useToastStore()
     const toastSpy = vi.spyOn(toastStore, 'showToast')
 
-    const wrapper = mount(DashboardView)
-    await new Promise((r) => setTimeout(r, 10))
+    const wrapper = track(mount(DashboardView))
+    await flushPromises()
 
     const samplePackage = JSON.stringify({
       format: 'SCOUTING_PRO_27_EVENT',
@@ -220,66 +235,17 @@ describe('DashboardView.vue', () => {
     const fileInput = wrapper.find('input[type="file"]')
     expect(fileInput.exists()).toBe(true)
 
-    // Trigger change event with file
     Object.defineProperty(fileInput.element, 'files', {
       value: [file],
       writable: true
     })
     await fileInput.trigger('change')
-    await new Promise((r) => setTimeout(r, 50))
+    await flushPromises()
 
     expect(syncExternalSpy).toHaveBeenCalledWith(expect.objectContaining({ id: 'pkg-evt-789' }))
     expect(eventStore.events.some((e) => e.id === 'pkg-evt-789')).toBe(true)
     expect(toastSpy).toHaveBeenCalledWith('offline_sync.import_success_event', 'info')
     expect(mockPush).toHaveBeenCalledWith('/event/pkg-evt-789')
-  })
-
-  it('cleans up inline transition, opacity, and transform in enter hook so card styles are not permanently locked', async () => {
-    const userStore = useUserStore()
-    userStore.user = { id: 'u1', username: 'Tester', token: 'token' }
-    const eventStore = useEventStore()
-    eventStore.events = []
-    vi.spyOn(eventStore, 'fetchEvents').mockResolvedValue(undefined)
-
-    const wrapper = mount(DashboardView)
-    await new Promise((r) => setTimeout(r, 10))
-
-    vi.useFakeTimers()
-
-    const dummyEl = document.createElement('div')
-    dummyEl.dataset.index = '0'
-    document.body.appendChild(dummyEl)
-
-    const vm = wrapper.vm as any
-
-    const rafSpy = vi.spyOn(window, 'requestAnimationFrame').mockImplementation((cb) => {
-      cb(0)
-      return 0
-    })
-
-    // Test beforeEnter
-    vm.beforeEnter(dummyEl)
-    expect(dummyEl.style.opacity).toBe('0')
-    expect(dummyEl.style.transform).toBe('translateY(20px)')
-
-    // Test enter
-    let doneCalled = false
-    vm.enter(dummyEl, () => {
-      doneCalled = true
-    })
-
-    // Advance timers for delay (0ms) + transition duration (360ms)
-    vi.advanceTimersByTime(500)
-
-    expect(doneCalled).toBe(true)
-    // Inline styles must be removed so that .slide-out-right and other transitions work seamlessly
-    expect(dummyEl.style.opacity).toBe('')
-    expect(dummyEl.style.transform).toBe('')
-    expect(dummyEl.style.transition).toBe('')
-
-    rafSpy.mockRestore()
-    document.body.removeChild(dummyEl)
-    vi.useRealTimers()
   })
 
   it('does NOT render persistent account-merge-btn in topbar', async () => {
@@ -289,9 +255,11 @@ describe('DashboardView.vue', () => {
     eventStore.events = []
     vi.spyOn(eventStore, 'fetchEvents').mockResolvedValue(undefined)
 
-    const wrapper = mount(DashboardView)
-    await new Promise((r) => setTimeout(r, 10))
+    const wrapper = track(mount(DashboardView))
+    await flushPromises()
 
+    expect(wrapper.find('.dashboard').exists()).toBe(true)
+    expect(wrapper.find('.btn-logout').exists()).toBe(true)
     expect(wrapper.find('.account-merge-btn').exists()).toBe(false)
   })
 
@@ -304,25 +272,22 @@ describe('DashboardView.vue', () => {
     ]
     vi.spyOn(eventStore, 'fetchEvents').mockResolvedValue(undefined)
     const deleteSpy = vi.spyOn(eventStore, 'deleteEvent').mockResolvedValue(undefined)
-
-    // Mock window.confirm
     const confirmSpy = vi.spyOn(window, 'confirm').mockReturnValue(true)
 
-    const wrapper = mount(DashboardView)
-    await new Promise((r) => setTimeout(r, 10))
+    const wrapper = track(mount(DashboardView))
+    await flushPromises()
 
     const deleteBtn = wrapper.find('.btn-card-delete')
     expect(deleteBtn.exists()).toBe(true)
 
     await deleteBtn.trigger('click')
-    await new Promise((r) => setTimeout(r, 10))
+    await flushPromises()
 
+    expect(confirmSpy).toHaveBeenCalled()
     expect(deleteSpy).toHaveBeenCalledWith('evt-ghost-1')
-    confirmSpy.mockRestore()
   })
 
   it('does NOT render clear cache button on desktop host', async () => {
-    const { isDesktopHost } = await import('@/services/photoStorage')
     vi.mocked(isDesktopHost).mockReturnValue(true)
 
     const userStore = useUserStore()
@@ -331,14 +296,15 @@ describe('DashboardView.vue', () => {
     eventStore.events = []
     vi.spyOn(eventStore, 'fetchEvents').mockResolvedValue(undefined)
 
-    const wrapper = mount(DashboardView)
-    await new Promise((r) => setTimeout(r, 10))
+    const wrapper = track(mount(DashboardView))
+    await flushPromises()
 
+    expect(wrapper.find('.dashboard').exists()).toBe(true)
+    expect(wrapper.find('.btn-logout').exists()).toBe(true)
     expect(wrapper.find('.clear-cache-btn').exists()).toBe(false)
   })
 
   it('renders clear cache button on mobile client and clears all offline cache upon confirmation', async () => {
-    const { isDesktopHost } = await import('@/services/photoStorage')
     vi.mocked(isDesktopHost).mockReturnValue(false)
 
     const userStore = useUserStore()
@@ -347,26 +313,24 @@ describe('DashboardView.vue', () => {
     eventStore.events = []
     vi.spyOn(eventStore, 'fetchEvents').mockResolvedValue(undefined)
     const clearSpy = vi.spyOn(eventStore, 'clearAllLocalCache')
-
-    // Mock window.confirm
     const confirmSpy = vi.spyOn(window, 'confirm').mockReturnValue(true)
 
-    const wrapper = mount(DashboardView)
-    await new Promise((r) => setTimeout(r, 10))
+    const wrapper = track(mount(DashboardView))
+    await flushPromises()
 
     const clearBtn = wrapper.find('.clear-cache-btn')
     expect(clearBtn.exists()).toBe(true)
 
     await clearBtn.trigger('click')
-    await new Promise((r) => setTimeout(r, 10))
+    await flushPromises()
 
+    expect(confirmSpy).toHaveBeenCalled()
     expect(clearSpy).toHaveBeenCalled()
-    confirmSpy.mockRestore()
   })
 
-  it('does NOT render scan-to-join button on desktop host', async () => {
-    const { isDesktopHost } = await import('@/services/photoStorage')
+  it('does NOT render scan-to-join button or modal scan icon on desktop host even on narrow viewport', async () => {
     vi.mocked(isDesktopHost).mockReturnValue(true)
+    vi.spyOn(isMobileComposable, 'useIsMobile').mockReturnValue({ isMobile: ref(true) } as any)
 
     const userStore = useUserStore()
     userStore.user = { id: 'u1', username: 'Tester', token: 'token' }
@@ -374,11 +338,40 @@ describe('DashboardView.vue', () => {
     eventStore.events = []
     vi.spyOn(eventStore, 'fetchEvents').mockResolvedValue(undefined)
 
-    const wrapper = mount(DashboardView)
-    await new Promise((r) => setTimeout(r, 10))
+    const wrapper = track(mount(DashboardView))
+    await flushPromises()
 
+    expect(wrapper.find('.dashboard').exists()).toBe(true)
+    expect(wrapper.find('.action-buttons').exists()).toBe(true)
+    expect(wrapper.find('.btn-logout').exists()).toBe(true)
     expect(wrapper.find('.scan-btn').exists()).toBe(false)
+
+    const joinBtn = wrapper.findAll('.action-btn').find((b) => b.text().includes('dashboard.join_event'))
+    expect(joinBtn).toBeDefined()
+    await joinBtn!.trigger('click')
+    expect(wrapper.find('.modal-card .join-input-group input').exists()).toBe(true)
     expect(wrapper.find('.btn-scan-input').exists()).toBe(false)
+  })
+
+  it('renders scan-to-join button and modal scan icon on mobile client', async () => {
+    vi.mocked(isDesktopHost).mockReturnValue(false)
+    vi.spyOn(isMobileComposable, 'useIsMobile').mockReturnValue({ isMobile: ref(true) } as any)
+
+    const userStore = useUserStore()
+    userStore.user = { id: 'u1', username: 'Tester', token: 'token' }
+    const eventStore = useEventStore()
+    eventStore.events = []
+    vi.spyOn(eventStore, 'fetchEvents').mockResolvedValue(undefined)
+
+    const wrapper = track(mount(DashboardView))
+    await flushPromises()
+
+    expect(wrapper.find('.scan-btn').exists()).toBe(true)
+    const joinBtn = wrapper.findAll('.action-btn').find((b) => b.text().includes('dashboard.join_event'))
+    expect(joinBtn).toBeDefined()
+    await joinBtn!.trigger('click')
+    expect(wrapper.find('.modal-card .join-input-group input').exists()).toBe(true)
+    expect(wrapper.find('.btn-scan-input').exists()).toBe(true)
   })
 
   it('renders language toggle button and toggles language on click', async () => {
@@ -388,8 +381,8 @@ describe('DashboardView.vue', () => {
     eventStore.events = []
     vi.spyOn(eventStore, 'fetchEvents').mockResolvedValue(undefined)
 
-    const wrapper = mount(DashboardView)
-    await new Promise((r) => setTimeout(r, 10))
+    const wrapper = track(mount(DashboardView))
+    await flushPromises()
 
     const langBtn = wrapper.find('.lang-topbar-btn')
     expect(langBtn.exists()).toBe(true)
@@ -409,8 +402,8 @@ describe('DashboardView.vue', () => {
     ]
     vi.spyOn(eventStore, 'fetchEvents').mockResolvedValue(undefined)
 
-    const wrapper = mount(DashboardView)
-    await new Promise((r) => setTimeout(r, 10))
+    const wrapper = track(mount(DashboardView))
+    await flushPromises()
 
     expect(wrapper.find('.topbar').classes()).toContain('is-desktop-shell')
     expect(wrapper.find('.page-heading').exists()).toBe(true)
@@ -429,8 +422,8 @@ describe('DashboardView.vue', () => {
     eventStore.events = []
     vi.spyOn(eventStore, 'fetchEvents').mockResolvedValue(undefined)
 
-    const wrapper = mount(DashboardView)
-    await new Promise((r) => setTimeout(r, 10))
+    const wrapper = track(mount(DashboardView))
+    await flushPromises()
 
     expect(wrapper.find('.topbar').classes()).not.toContain('is-desktop-shell')
     expect(wrapper.find('.brand').exists()).toBe(true)

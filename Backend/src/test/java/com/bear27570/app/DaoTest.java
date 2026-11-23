@@ -3,6 +3,7 @@ package com.bear27570.app;
 import com.bear27570.app.dao.EventDao;
 import com.bear27570.app.dao.RecordDao;
 import com.bear27570.app.dao.UserDao;
+import com.bear27570.app.model.EventMember;
 import com.bear27570.app.model.ScoutingEvent;
 import com.bear27570.app.model.ScoutingRecord;
 import com.bear27570.app.model.User;
@@ -13,6 +14,7 @@ import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 
 import java.util.List;
+import java.util.UUID;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
@@ -95,7 +97,7 @@ class DaoTest {
         });
 
         jdbi.useExtension(RecordDao.class, dao -> {
-            // 1. Initial insert: version 1, totalScore = 100, host_seq = 5
+            // 1. Initial insert: version 1, totalScore = 100, with authorPubKey / authorSig
             ScoutingRecord r1 = new ScoutingRecord();
             r1.setId("rec1");
             r1.setEventId("e1");
@@ -105,7 +107,8 @@ class DaoTest {
             r1.setTeamNumber(27570);
             r1.setTotalScore(100);
             r1.setVersion(1);
-            r1.setHostSeq(5);
+            r1.setAuthorPubKey("pubKeyA");
+            r1.setAuthorSig("sigV1");
             r1.setUpdatedAt("2026-08-14 10:00:00");
             dao.upsert(r1);
 
@@ -113,9 +116,10 @@ class DaoTest {
             assertThat(fetched).isNotNull();
             assertThat(fetched.getTotalScore()).isEqualTo(100);
             assertThat(fetched.getVersion()).isEqualTo(1);
-            assertThat(fetched.getHostSeq()).isEqualTo(5);
+            assertThat(fetched.getAuthorPubKey()).isEqualTo("pubKeyA");
+            assertThat(fetched.getAuthorSig()).isEqualTo("sigV1");
 
-            // 2. Higher version (version 2) should overwrite
+            // 2. Higher version (version 2) should overwrite and update signature
             ScoutingRecord r2 = new ScoutingRecord();
             r2.setId("rec1");
             r2.setEventId("e1");
@@ -125,14 +129,15 @@ class DaoTest {
             r2.setTeamNumber(27570);
             r2.setTotalScore(150);
             r2.setVersion(2);
-            r2.setHostSeq(8);
+            r2.setAuthorPubKey("pubKeyA");
+            r2.setAuthorSig("sigV2");
             r2.setUpdatedAt("2026-08-14 10:05:00");
             dao.upsert(r2);
 
             fetched = dao.findById("rec1");
             assertThat(fetched.getTotalScore()).isEqualTo(150);
             assertThat(fetched.getVersion()).isEqualTo(2);
-            assertThat(fetched.getHostSeq()).isEqualTo(8);
+            assertThat(fetched.getAuthorSig()).isEqualTo("sigV2");
 
             // 3. Lower version (version 1) should be REJECTED (not overwrite)
             ScoutingRecord rOld = new ScoutingRecord();
@@ -151,7 +156,7 @@ class DaoTest {
             assertThat(fetched.getTotalScore()).isEqualTo(150); // Still 150
             assertThat(fetched.getVersion()).isEqualTo(2);
 
-            // 4. host_seq monotonicity: incoming null or smaller host_seq preserves existing
+            // 4. Higher version without new signature preserves existing non-empty authorPubKey/authorSig
             ScoutingRecord r3 = new ScoutingRecord();
             r3.setId("rec1");
             r3.setEventId("e1");
@@ -161,14 +166,16 @@ class DaoTest {
             r3.setTeamNumber(27570);
             r3.setTotalScore(200);
             r3.setVersion(3);
-            r3.setHostSeq(3); // Smaller than 8
+            r3.setHostSig("hostSigV3");
             r3.setUpdatedAt("2026-08-14 10:15:00");
             dao.upsert(r3);
 
             fetched = dao.findById("rec1");
             assertThat(fetched.getTotalScore()).isEqualTo(200);
             assertThat(fetched.getVersion()).isEqualTo(3);
-            assertThat(fetched.getHostSeq()).isEqualTo(8); // Monotonically kept at 8
+            assertThat(fetched.getAuthorPubKey()).isEqualTo("pubKeyA");
+            assertThat(fetched.getAuthorSig()).isEqualTo("sigV2");
+            assertThat(fetched.getHostSig()).isEqualTo("hostSigV3");
 
             // 5. Same version: newer updatedAt overwrites older updatedAt
             ScoutingRecord r4 = new ScoutingRecord();
@@ -205,7 +212,7 @@ class DaoTest {
     }
 
     @Test
-    void testFutureTimeClampingAndTombstoneGC() {
+    void testFutureTimeClamping() {
         jdbi.useExtension(UserDao.class, dao -> {
             User host = new User("host1", "hostuser");
             host.setPassword("pass");
@@ -222,7 +229,7 @@ class DaoTest {
         });
 
         jdbi.useExtension(RecordDao.class, dao -> {
-            // 1. Future time clamping: updatedAt > 5 seconds in future gets clamped
+            // Future time clamping: updatedAt > 5 seconds in future gets clamped
             ScoutingRecord futureRecord = new ScoutingRecord();
             futureRecord.setId("future_rec");
             futureRecord.setEventId("e1");
@@ -239,50 +246,56 @@ class DaoTest {
             ScoutingRecord fetched = dao.findById("future_rec");
             assertThat(fetched).isNotNull();
             assertThat(fetched.getUpdatedAt()).doesNotContain("2099-01-01"); // Clamped to server timestamp!
+        });
+    }
 
-            // 2. Tombstone GC test
-            // Insert active record
-            ScoutingRecord active = new ScoutingRecord();
-            active.setId("active_rec");
-            active.setEventId("e1");
-            active.setScoutId("host1");
-            active.setScoutName("Host");
-            active.setMatchNumber(2);
-            active.setTeamNumber(27570);
-            active.setIsDeleted(false);
-            dao.upsert(active);
+    @Test
+    void testIsHostMapper() {
+        String eventId = UUID.randomUUID().toString();
+        String hostId = "user-host-mapper";
+        String scoutId = "user-scout-mapper";
 
-            // Insert recent tombstone (< 14 days)
-            ScoutingRecord recentTombstone = new ScoutingRecord();
-            recentTombstone.setId("recent_deleted");
-            recentTombstone.setEventId("e1");
-            recentTombstone.setScoutId("host1");
-            recentTombstone.setScoutName("Host");
-            recentTombstone.setMatchNumber(3);
-            recentTombstone.setTeamNumber(27570);
-            recentTombstone.setIsDeleted(true);
-            dao.upsert(recentTombstone);
+        jdbi.useExtension(UserDao.class, dao -> {
+            User host = new User(hostId, "HostAlice");
+            host.setPassword("pass");
+            dao.upsert(host);
 
-            // Insert expired tombstone (> 14 days ago) directly into table
-            jdbi.useHandle(handle -> {
-                handle.execute("""
-                    INSERT INTO scouting_records (
-                        id, event_id, scout_id, scout_name, match_number, team_number,
-                        is_deleted, updated_at
-                    ) VALUES (
-                        'old_deleted', 'e1', 'host1', 'Host', 4, 27570,
-                        TRUE, DATEADD('DAY', -20, CURRENT_TIMESTAMP)
-                    )
-                """);
-            });
+            User scout = new User(scoutId, "ScoutBob");
+            scout.setPassword("pass");
+            dao.upsert(scout);
+        });
 
-            // Run GC
-            int purged = dao.purgeExpiredTombstones();
-            assertThat(purged).isEqualTo(1);
+        jdbi.useExtension(EventDao.class, dao -> {
+            ScoutingEvent evt = new ScoutingEvent();
+            evt.setId(eventId);
+            evt.setName("2026 FTC Championship");
+            evt.setInviteCode("BEAR27");
+            evt.setHostId(hostId);
+            evt.setFtcYear(2026);
+            evt.setFtcEventCode("CNCMPLB");
+            dao.insert(evt);
+            dao.joinEvent(eventId, scoutId);
 
-            assertThat(dao.findById("active_rec")).isNotNull();
-            assertThat(dao.findById("recent_deleted")).isNotNull();
-            assertThat(dao.findById("old_deleted")).isNull(); // Purged!
+            ScoutingEvent loaded = dao.findById(eventId);
+            assertThat(loaded).isNotNull();
+            assertThat(loaded.getId()).isEqualTo(eventId);
+            assertThat(loaded.getName()).isEqualTo("2026 FTC Championship");
+            assertThat(loaded.getInviteCode()).isEqualTo("BEAR27");
+            assertThat(loaded.getHostId()).isEqualTo(hostId);
+            assertThat(loaded.getFtcYear()).isEqualTo(2026);
+            assertThat(loaded.getFtcEventCode()).isEqualTo("CNCMPLB");
+
+            assertThat(dao.isHost(eventId, hostId)).isTrue();
+            assertThat(dao.isHost(eventId, scoutId)).isFalse();
+            assertThat(dao.isMember(eventId, hostId)).isTrue();
+            assertThat(dao.isMember(eventId, scoutId)).isTrue();
+
+            List<EventMember> members = dao.findMembersByEvent(eventId);
+            assertThat(members).hasSize(2);
+            assertThat(members.get(0).getId()).isEqualTo(hostId);
+            assertThat(members.get(0).isHost()).isTrue();
+            assertThat(members.get(1).getId()).isEqualTo(scoutId);
+            assertThat(members.get(1).isHost()).isFalse();
         });
     }
 
@@ -380,27 +393,27 @@ class DaoTest {
             handle.execute("""
                 INSERT INTO scouting_records (id, event_id, scout_id, scout_name, match_number, team_number,
                     auto_score, teleop_score, endgame_score, total_score, notes, raw_data, sync_status, is_broken, is_deleted,
-                    created_at, updated_at, version, host_seq)
+                    created_at, updated_at, version)
                 VALUES ('rec_active_old', 'e_tomb', 'u_tomb', 'scout', 1, 100, 10, 10, 10, 30, '', '{}', 'SYNCED', FALSE, FALSE,
-                    DATEADD('DAY', -20, CURRENT_TIMESTAMP), DATEADD('DAY', -20, CURRENT_TIMESTAMP), 1, 1)
+                    DATEADD('DAY', -20, CURRENT_TIMESTAMP), DATEADD('DAY', -20, CURRENT_TIMESTAMP), 1)
             """);
 
             // 2. Fresh tombstone (5 days ago) -> MUST NOT be deleted (preserved for P2P sync)!
             handle.execute("""
                 INSERT INTO scouting_records (id, event_id, scout_id, scout_name, match_number, team_number,
                     auto_score, teleop_score, endgame_score, total_score, notes, raw_data, sync_status, is_broken, is_deleted,
-                    created_at, updated_at, version, host_seq)
+                    created_at, updated_at, version)
                 VALUES ('rec_tomb_fresh', 'e_tomb', 'u_tomb', 'scout', 2, 200, 10, 10, 10, 30, '', '{}', 'SYNCED', FALSE, TRUE,
-                    DATEADD('DAY', -5, CURRENT_TIMESTAMP), DATEADD('DAY', -5, CURRENT_TIMESTAMP), 2, 2)
+                    DATEADD('DAY', -5, CURRENT_TIMESTAMP), DATEADD('DAY', -5, CURRENT_TIMESTAMP), 2)
             """);
 
             // 3. Expired tombstone (20 days ago) -> MUST BE PURGED!
             handle.execute("""
                 INSERT INTO scouting_records (id, event_id, scout_id, scout_name, match_number, team_number,
                     auto_score, teleop_score, endgame_score, total_score, notes, raw_data, sync_status, is_broken, is_deleted,
-                    created_at, updated_at, version, host_seq)
+                    created_at, updated_at, version)
                 VALUES ('rec_tomb_expired', 'e_tomb', 'u_tomb', 'scout', 3, 300, 10, 10, 10, 30, '', '{}', 'SYNCED', FALSE, TRUE,
-                    DATEADD('DAY', -20, CURRENT_TIMESTAMP), DATEADD('DAY', -20, CURRENT_TIMESTAMP), 2, 3)
+                    DATEADD('DAY', -20, CURRENT_TIMESTAMP), DATEADD('DAY', -20, CURRENT_TIMESTAMP), 2)
             """);
         });
 

@@ -1,5 +1,6 @@
 import { createPinia, setActivePinia } from 'pinia'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+import { flushPromises } from '@vue/test-utils'
 import { resetClockRegistryForTesting, CalibratedMonotonicClock } from '@/services/clock'
 import {
   buildMemberIdentityCanonicalPayload,
@@ -121,6 +122,9 @@ function createStarBusHarness(withIdentity: <T>(id: DeviceIdentity, fn: () => Pr
   const nodes = new Map<string, TestPeerNode>()
   const boundUsersByHostPeer = new Map<string, string>()
   let activeHost: TestPeerNode | null = null
+  let pendingWireDeliveries = 0
+  let activeSanitizeCount = 0
+  let activeCountersignCount = 0
 
   function registerNode(params: {
     peerId: string
@@ -147,39 +151,51 @@ function createStarBusHarness(withIdentity: <T>(id: DeviceIdentity, fn: () => Pr
         const target = targetPeerId === 'host' ? activeHost : nodes.get(targetPeerId)
         if (!target) return
         const inboundSenderId = params.isHostMode ? 'host' : params.peerId
-        setTimeout(() => {
-          target.hub.handleIncomingMessage(inboundSenderId, msg)
-        }, 0)
-      },
-      sanitizeIncomingMessage: (senderPeerId, msg, pullContext) =>
-        withIdentity(params.identity, async () => {
-          const boundSenderUserId = params.isHostMode
-            ? boundUsersByHostPeer.get(senderPeerId) ?? nodes.get(senderPeerId)?.userId
-            : params.eventHostId
-          const res = await sanitizeIncomingCrdtSyncBody({
-            store,
-            eventId: params.eventId,
-            eventHostId: params.eventHostId,
-            isHostMode: params.isHostMode,
-            senderPeerId,
-            boundSenderUserId,
-            localDeviceId: params.identity.deviceId,
-            pullContext,
-            message: msg.message,
-            body: msg.body
-          })
-          if (res.rejectedRecords.length > 0 || res.rejectedIdentities.length > 0) {
-            rejects.push({
-              senderPeerId,
-              rejectedRecords: res.rejectedRecords,
-              rejectedIdentities: res.rejectedIdentities
-            })
+        pendingWireDeliveries++
+        queueMicrotask(() => {
+          try {
+            target.hub.handleIncomingMessage(inboundSenderId, msg)
+          } finally {
+            pendingWireDeliveries--
           }
-          return { ...msg, body: res.msgBody }
-        }),
+        })
+      },
+      sanitizeIncomingMessage: (senderPeerId, msg, pullContext) => {
+        activeSanitizeCount++
+        return withIdentity(params.identity, async () => {
+          try {
+            const boundSenderUserId = params.isHostMode
+              ? boundUsersByHostPeer.get(senderPeerId) ?? nodes.get(senderPeerId)?.userId
+              : params.eventHostId
+            const res = await sanitizeIncomingCrdtSyncBody({
+              store,
+              eventId: params.eventId,
+              eventHostId: params.eventHostId,
+              isHostMode: params.isHostMode,
+              senderPeerId,
+              boundSenderUserId,
+              localDeviceId: params.identity.deviceId,
+              pullContext,
+              message: msg.message,
+              body: msg.body
+            })
+            if (res.rejectedRecords.length > 0 || res.rejectedIdentities.length > 0) {
+              rejects.push({
+                senderPeerId,
+                rejectedRecords: res.rejectedRecords,
+                rejectedIdentities: res.rejectedIdentities
+              })
+            }
+            return { ...msg, body: res.msgBody }
+          } finally {
+            activeSanitizeCount--
+          }
+        })
+      },
       onPeerSyncSettled: (peerId) => {
         settledPeers.push(peerId)
         if (params.isHostMode) {
+          activeCountersignCount++
           void withIdentity(params.identity, () =>
             countersignPendingMemberIdentities({
               store,
@@ -187,7 +203,9 @@ function createStarBusHarness(withIdentity: <T>(id: DeviceIdentity, fn: () => Pr
               eventHostId: params.eventHostId,
               currentUserId: params.userId
             })
-          )
+          ).finally(() => {
+            activeCountersignCount--
+          })
         }
       }
     })
@@ -215,10 +233,20 @@ function createStarBusHarness(withIdentity: <T>(id: DeviceIdentity, fn: () => Pr
     await flushSyncCycles()
   }
 
-  async function flushSyncCycles(rounds = 8): Promise<void> {
-    for (let i = 0; i < rounds; i++) {
-      await new Promise((r) => setTimeout(r, 15))
-    }
+  async function flushSyncCycles(_rounds = 8): Promise<void> {
+    await vi.waitFor(async () => {
+      await flushPromises()
+      expect(pendingWireDeliveries).toBe(0)
+      expect(activeSanitizeCount).toBe(0)
+      expect(activeCountersignCount).toBe(0)
+    })
+    await flushPromises()
+    await vi.waitFor(async () => {
+      await flushPromises()
+      expect(pendingWireDeliveries).toBe(0)
+      expect(activeSanitizeCount).toBe(0)
+      expect(activeCountersignCount).toBe(0)
+    })
   }
 
   async function destroyAll(): Promise<void> {
@@ -260,6 +288,7 @@ describe('CRDT ScoutingRecord ECDSA Signing, Relay Defense & Pure Derived Confli
     await resetCrdtRegistryForTesting()
     resetClockRegistryForTesting()
     clearBeforeLogoutHooksForTesting()
+    localStorage.clear()
   })
 
   it('1. Write-time ECDSA signing verifies intact records, rejects mutated fields, and signs tombstones', async () => {

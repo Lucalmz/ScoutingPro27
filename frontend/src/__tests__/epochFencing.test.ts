@@ -97,6 +97,8 @@ vi.mock('@/services/api', async () => {
 })
 
 describe('Per-Event Epoch Store, Retained Epoch Beacon & Fencing Control Plane', () => {
+  const origRtcpc = global.RTCPeerConnection
+
   beforeEach(() => {
     localStorage.clear()
     resetClockRegistryForTesting()
@@ -133,6 +135,9 @@ describe('Per-Event Epoch Store, Retained Epoch Beacon & Fencing Control Plane',
   afterEach(() => {
     delete (globalThis as any).__TEST_PROBE_MS__
     delete (globalThis as any).__TEST_ALLOW_UNSIGNED_SIGNALING__
+    global.RTCPeerConnection = origRtcpc
+    vi.useRealTimers()
+    localStorage.clear()
     resetClockRegistryForTesting()
   })
 
@@ -279,9 +284,9 @@ describe('Per-Event Epoch Store, Retained Epoch Beacon & Fencing Control Plane',
     })
 
     await serviceA.host('ROOM-A', { id: 'uuid-a', name: 'Event A', inviteCode: 'ROOM-A', hostId: 'alice' }, 'Alice', 'alice')
-    await new Promise((r) => setTimeout(r, 80))
-
-    expect(onHostPromoted).toHaveBeenCalled()
+    await vi.waitFor(() => {
+      expect(onHostPromoted).toHaveBeenCalled()
+    })
     expect(serviceA.getHostEpoch()).toBe(1)
     expect(serviceA.isStandbyHost()).toBe(false)
     expect(serviceA.isHostMode()).toBe(true)
@@ -309,16 +314,20 @@ describe('Per-Event Epoch Store, Retained Epoch Beacon & Fencing Control Plane',
     serviceA.disconnect()
 
     // Also verify active Host yields upon receiving retained epoch_beacon with Epoch=3
+    const onHostPromoted2 = vi.fn()
     const onHostDemoted2 = vi.fn()
     const serviceA2 = createWebRtcService({
       onStatusChange: vi.fn(),
       onRecordsReceived: vi.fn().mockResolvedValue([]),
       onAckReceived: vi.fn(),
       onRequestSync: vi.fn(),
+      onHostPromoted: onHostPromoted2,
       onHostDemoted: onHostDemoted2
     })
     await serviceA2.host('ROOM-BEACON', undefined, 'Alice', 'alice')
-    await new Promise((r) => setTimeout(r, 80))
+    await vi.waitFor(() => {
+      expect(onHostPromoted2).toHaveBeenCalled()
+    })
     expect(serviceA2.getHostEpoch()).toBe(1)
 
     const mqttA2 = createdMqttClients[createdMqttClients.length - 1]!
@@ -358,14 +367,18 @@ describe('Per-Event Epoch Store, Retained Epoch Beacon & Fencing Control Plane',
       activeHostDeviceId: 'dev_previous_machine'
     })
 
+    const onHostPromotedWinner = vi.fn()
     const serviceWinner = createWebRtcService({
       onStatusChange: vi.fn(),
       onRecordsReceived: vi.fn().mockResolvedValue([]),
       onAckReceived: vi.fn(),
-      onRequestSync: vi.fn()
+      onRequestSync: vi.fn(),
+      onHostPromoted: onHostPromotedWinner
     })
     await serviceWinner.host('ROOM-TIE', { id: 'uuid-tie', name: 'Tie Event', inviteCode: 'ROOM-TIE', hostId: 'alice' }, 'Alice', 'alice')
-    await new Promise((r) => setTimeout(r, 80))
+    await vi.waitFor(() => {
+      expect(onHostPromotedWinner).toHaveBeenCalled()
+    })
 
     expect(serviceWinner.isStandbyHost()).toBe(false)
     expect(serviceWinner.getHostEpoch()).toBe(2)
@@ -400,21 +413,26 @@ describe('Per-Event Epoch Store, Retained Epoch Beacon & Fencing Control Plane',
   })
 
   it('discovers epoch_witness replies on host_discovery, promotes to maxSeen+1, aligns Host clock, and publishes retained beacon', async () => {
+    const onHostPromoted = vi.fn()
     const onWitnessMetadataDiscovered = vi.fn()
     const service = createWebRtcService({
       onStatusChange: vi.fn(),
       onRecordsReceived: vi.fn().mockResolvedValue([]),
       onAckReceived: vi.fn(),
       onRequestSync: vi.fn(),
+      onHostPromoted,
       onWitnessMetadataDiscovered
     })
 
     await service.host('ROOM-DISC', undefined, 'Alice', 'alice')
-    await new Promise((r) => setTimeout(r, 10))
-
     const mqttCli = createdMqttClients[createdMqttClients.length - 1]!
-    const sentDiscovery = mqttCli.published.some((f) => f.parsed?.type === 'host_discovery')
-    expect(sentDiscovery).toBe(true)
+    await vi.waitFor(
+      () => {
+        expect(mqttCli.published.some((f) => f.parsed?.type === 'host_discovery')).toBe(true)
+      },
+      { timeout: 3000, interval: 5 }
+    )
+    expect(onHostPromoted).not.toHaveBeenCalled()
 
     const witnessTime1 = Date.now() + 180_000 // +3 min offline advance
     const witnessTime2 = Date.now() + 184_000
@@ -444,17 +462,19 @@ describe('Per-Event Epoch Store, Retained Epoch Beacon & Fencing Control Plane',
       maxKnownHlcPt: witnessTime2
     })
 
-    await new Promise((r) => setTimeout(r, 60))
+    await vi.waitFor(() => {
+      expect(onHostPromoted).toHaveBeenCalled()
+      expect(onWitnessMetadataDiscovered).toHaveBeenCalledWith(
+        expect.objectContaining({
+          authoritativeEventId: 'uuid-disc-real',
+          hostUserId: 'alice',
+          highestSeenEpoch: 2
+        })
+      )
+    })
 
     expect(service.isStandbyHost()).toBe(false)
     expect(service.getHostEpoch()).toBe(3)
-    expect(onWitnessMetadataDiscovered).toHaveBeenCalledWith(
-      expect.objectContaining({
-        authoritativeEventId: 'uuid-disc-real',
-        hostUserId: 'alice',
-        highestSeenEpoch: 2
-      })
-    )
     expect(service.getCalibratedClock().now()).toBeGreaterThanOrEqual(witnessTime1 + 1)
 
     const beaconSent = mqttCli.published.find((f) => f.topic.endsWith('/epoch-beacon') && f.parsed?.hostEpoch === 3)
@@ -482,9 +502,11 @@ describe('Per-Event Epoch Store, Retained Epoch Beacon & Fencing Control Plane',
     })
 
     await client.join('ROOM-FENCE', 'ScoutSam', 'sam-id')
-    // Let initial join() setupClientConnection settle before testing zombie host isolation
-    await new Promise((r) => setTimeout(r, 30))
     const mqttClient = createdMqttClients[createdMqttClients.length - 1]!
+    // Deterministically wait for initial join() setupClientConnection broadcast offer to finish before clearing published buffer
+    await vi.waitFor(() => {
+      expect(mqttClient.published.some((f) => Boolean(f.parsed?.offer))).toBe(true)
+    }, { timeout: 3000 })
     mqttClient.published.length = 0
 
     // Zombie Host A (Epoch=1) wakes up and sends host_hello + host_heartbeat
@@ -503,7 +525,9 @@ describe('Per-Event Epoch Store, Retained Epoch Beacon & Fencing Control Plane',
       hostEpoch: 1,
       timestamp: Date.now()
     })
-    await new Promise((r) => setTimeout(r, 20))
+    await vi.waitFor(() => {
+      expect(mqttClient.published.some((f) => f.parsed?.type === 'epoch_superseded')).toBe(true)
+    }, { timeout: 3000 })
 
     expect(client.getCurrentHostSessionId()).not.toBe('zombie-sess-1')
 
