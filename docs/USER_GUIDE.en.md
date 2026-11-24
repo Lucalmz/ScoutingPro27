@@ -1,7 +1,7 @@
 # ScoutingPro 27 Beginner User Guide (BIOBUZZ Pit Wall Edition · Bleacher & Pit Field Manual)
 
 > **Welcome to ScoutingPro 27 (Pit Wall Edition)!** This manual is written for **first-time student scouts, parents, and bleacher volunteers** who have never used scouting software before.  
-> Upgraded to the **Cold Graphite Pit Wall** high-contrast theme (with automatic titlebar deduplication on Windows/macOS desktop shells and full headers on web/mobile PWA). Zero technical jargon—every chapter walks through exactly 4 practical steps: **Where to Tap (matching the colored callouts in each screenshot) → What to Enter → What Success Looks Like → What to Do If You Mis-Tap or Lose Signal**.
+> Upgraded to the **Cold Graphite Pit Wall** high-contrast theme (with custom titlebar header deduplication on Windows desktop shells, while macOS/Linux desktop and web/mobile PWA keep the full top header). Zero technical jargon—every chapter walks through exactly 4 practical steps: **Where to Tap (matching the colored callouts in each screenshot) → What to Enter → What Success Looks Like → What to Do If You Mis-Tap or Lose Signal**.
 >
 > 🌐 **需要中文版本？** Switch to the [**中文保姆级教程 (`USER_GUIDE.zh.md`)**](./USER_GUIDE.zh.md) or return to the [**Bilingual Hub (`USER_GUIDE.md`)**](./USER_GUIDE.md).
 
@@ -37,7 +37,7 @@ Check what role you are helping with today and jump straight to your chapters:
 12. [How to Edit & Fix Saved Match Records](#chapter-12-how-to-edit--fix-saved-match-records)
 13. [How to Bind an API Key & Use AI Copilot](#chapter-13-how-to-bind-an-api-key--use-ai-copilot)
 14. [How to Add & Manage Custom Fields](#chapter-14-how-to-add--manage-custom-fields)
-15. [Chapter 15: Official FTC Data Sync, Roll-Down Advancement, and Custom TURN](#chapter-15-official-ftc-data-sync-roll-down-advancement-and-custom-turn)
+15. [Official FTC Data Sync, Roll-Down Advancement, and Custom TURN](#chapter-15-official-ftc-data-sync-roll-down-advancement-and-custom-turn)
 16. [Emergency Troubleshooting FAQ](#chapter-16-emergency-troubleshooting-faq)
 
 ---
@@ -340,7 +340,7 @@ Before Alliance Selection, instead of manually scanning dozens of rows, bind an 
 
 1. **Click the ⚙ gear icon next to `AI Copilot` in the top bar** to open the **AI Configuration** dialog, then pick `(1)` your **Provider Protocol** (**OpenAI Compatible**, **Google Gemini**, or native **Anthropic Claude**).
 2. **Choose `(2)` Provider Preset & Multi-Profile Roster**:
-   - Pick a built-in preset (`DeepSeek`, `Moonshot / Kimi`, `OpenAI`, `Google Gemini`, `Anthropic Claude`, etc.) to auto-fill the Base URL and recommended model; you can save multiple profiles in the left roster and switch anytime.
+   - Pick a built-in preset (`DeepSeek`, `Moonshot / Kimi`, `OpenAI`, `Google Gemini`, `Anthropic Claude`, etc.) to auto-fill the Base URL and recommended model (local `Ollama` loopback endpoints work without an API key); you can save multiple profiles in the left roster and switch anytime.
 3. **Generate & Paste `(3)` `API Key`**:
    - Need a key? Click the green **`↗ Get API Key`** link above the input box to open the provider's console, copy your `sk-...` / `AIzaSy...` key, and paste it in (AES-256 encrypted per user).
 4. **Click `(4)` `Test Connection`, then green `Save Settings`**:
@@ -350,13 +350,13 @@ Before Alliance Selection, instead of manually scanning dozens of rows, bind an 
 
 ![AI Copilot side dock showing persona switcher, live event context meter, and @team /slash composer](images/userguide/en/14_ai_chat_assistant.png)
 
-1. **Click `AI Copilot` in the top bar (or press `Alt + I`)** to open the right-side dock alongside your main view without hiding Rankings or the Tactical Whiteboard (on mobile, open the bottom **`Chat with AI`** tab).
-2. **`(1)` Choose AI Coach Persona**: Switch instantly between specialized FTC personas (Alliance Picker, Strategy Coach, Pit Analyst, etc.).
+1. **Click `AI Copilot` in the top bar (or press `Alt + I`)** to open the right-side dock alongside your main view without hiding Rankings or the Tactical Whiteboard (on mobile, tap **`More → AI Chat`** in the bottom bar; once open, the 5th slot dynamically switches to **`AI Chat`**).
+2. **`(1)` Choose AI Coach Persona**: Switch instantly between the 5 built-in personas (**`Alliance Strategist`**, **`Pre-Match Coach`**, **`Brag & Risk Auditor`**, **`15-Sec Pit Brief`**, and **`Custom Prompt`**).
 3. **`(2)` `Live Data On` Toggle + `(3)` Live Telemetry Meter**:
    - **Zero copy-pasting spreadsheets!** Keep `(2)` enabled and `(3)` displays how many live rankings, schedules, and pit records are bundled with every question (expand the tune icon beside it to toggle individual data sections).
 4. **Type in `(4)` & Send (`@team` & `/slash` supported)**:
-   - Type **`@`** to tag and focus specific teams, **`/`** for quick analysis commands, or ask naturally—e.g., `"Compare #27570 and #11115 using our live data: whose Predict Cycle Time and Swarm RP look stronger for alliance selection?"`
-   - Any **`#team`** badge in AI responses supports instant hover preview and click-to-open Team Detail Drawer, plus multi-thread history and 1-click Markdown export.
+   - Type **`@`** to tag and focus specific teams, **`/`** for 5 quick analysis commands (`/pick`, `/match`, `/compare`, `/audit`, `/brief`), or ask naturally—e.g., `"Compare #27570 and #11115 using our live data: whose Predict Cycle Time and Swarm RP look stronger for alliance selection?"`
+   - Reasoning models' thinking tokens automatically collapse into a dedicated thinking drawer separate from the final answer; any **`#team`** badge supports hover preview and click-to-open Team Detail Drawer, plus multi-thread history and 1-click Markdown export.
 
 ---
 
@@ -425,7 +425,7 @@ Once you bind your official FTC Event Code, ScoutingPro 27 connects through its 
 | :--- | :--- |
 | **Q1: I tapped `Hit` one extra time by mistake!** | Tap **`↩ Undo`** under the big green button, or tap **`-`** next to that cycle in the cycle list below. |
 | **Q2: The bleachers have zero cellular/Wi-Fi signal when I click Submit.** | Submit anyway! Your data saves safely in your device's local queue and automatically uploads to the Host the second connectivity returns. |
-| **Q3: Neither Cloud nor Host Hotspot works in the venue—how do I move data?** | Click **`Offline USB Sync`** in the top bar to export a tiny `.json` file, send it via USB stick/AirDrop/Bluetooth to the Host laptop, and click **Import** in `Offline USB Sync`. |
+| **Q3: Neither Cloud nor Host Hotspot works in the venue—how do I move data?** | Click **`Offline USB Sync`** in the top bar (or **`More → Tools`** on mobile) to export a `.info` sync packet (Hosts can also export `.event` event setup packages, formatted internally as JSON), send it via USB stick/AirDrop/Bluetooth to the Host laptop, and click **Import** in `Offline USB Sync`. |
 | **Q4: Why does a team show `— (<6 cyc)` instead of seconds in Predict Cycle Time?** | Predict Cycle Time requires **at least 6 logged TeleOp cycles** (`≥ 5` valid cycle gaps ≤ `120s`) using **`Record New Cycle`** / **`+ Next Cycle`**, then drops the single fastest outlier and averages the next 4 gaps. |
 | **Q5: How do I remember BIOBUZZ Endgame rules quickly?** | **No climbing!** Only: **last-60s Nectars (+2)**, **Bottom Nectar Flowers (+5 each)**, **Pollens (+2)**, **Garden Balls (+1)**, **Loading Park (+5)**, **G418 Descore**, and check **G410** if a Nectar goes in before the 1:00 mark! |
 | **Q6: Binding fails with `"FTC official event not found"` or `"service unreachable"`!** | Double-check `ftc-events.firstinspires.org/<year>/<code>`—make sure you entered the season **start year** (`2025` for 2025–26, not `2026`). If the Host laptop is completely offline at the venue, use **`Import Schedule` → `CSV`** temporarily and click **`Update & Re-sync Official Data`** once internet returns. |

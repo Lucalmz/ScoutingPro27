@@ -3,14 +3,17 @@
 > 👋 **第一次拿手机或电脑做赛场记录？完全不懂专业术语也没关系！**  
 > 本手册已全面适配最新 **Cold Graphite Pit Wall** 界面与 **P2P 跨网直连 / 自定义 TURN** 体系，包含完整的中/英双语实机高清标注截图（`1440×900` 桌面端 + `414×896` 手机单手向导），手把手带你 3 分钟上手 **BIOBUZZ 赛季全流程**。
 
-| 选择你的阅读语言 / Choose Your Language | 直达完整保姆级手册 | 离线 PDF 版 | 包含截图套数 |
+| 选择你的阅读语言 / Choose Your Language | 直达完整保姆级手册 | 离线 PDF 版 *(本地导出，Git 忽略)* | 包含截图套数 |
 | :--- | :--- | :--- | :--- |
-| 🇨🇳 **简体中文完全零基础教程** | 👉 [**点击打开 `docs/USER_GUIDE.zh.md`**](./USER_GUIDE.zh.md) | 📄 [`ScoutingPro27_UserGuide_ZH.pdf`](./ScoutingPro27_UserGuide_ZH.pdf) | 17 张全中文高清实机标注图 (`images/userguide/zh/`) |
-| 🇬🇧 **English Beginner Step-by-Step Guide** | 👉 [**Open `docs/USER_GUIDE.en.md`**](./USER_GUIDE.en.md) | 📄 [`ScoutingPro27_UserGuide_EN.pdf`](./ScoutingPro27_UserGuide_EN.pdf) | 17 English Annotated Screenshots (`images/userguide/en/`) |
+| 🇨🇳 **简体中文完全零基础教程** | 👉 [**点击打开 `docs/USER_GUIDE.zh.md`**](./USER_GUIDE.zh.md) | 📄 `ScoutingPro27_UserGuide_ZH.pdf` *(运行 `npm run export:userguide-pdf` 生成)* | 17 张全中文高清实机标注图 (`images/userguide/zh/`) |
+| 🇬🇧 **English Beginner Step-by-Step Guide** | 👉 [**Open `docs/USER_GUIDE.en.md`**](./USER_GUIDE.en.md) | 📄 `ScoutingPro27_UserGuide_EN.pdf` *(generated via `npm run export:userguide-pdf`)* | 17 English Annotated Screenshots (`images/userguide/en/`) |
 
 ---
 
 ## ⚡ 30 秒赛场极速速查卡 / 30-Second Arena Cheat-Sheet
+
+### 0. 下载安装与桌面壳 / Download, Install & Desktop Shell
+- **Windows / macOS 安装包**：[第 0 章 下载与安装（含 macOS Gatekeeper 首次绕过）](./USER_GUIDE.zh.md#第-0-章下载与安装macos-用户必读) · [Chapter 0 Download & Install (macOS Gatekeeper)](./USER_GUIDE.en.md#chapter-0-download--install-macos-users-read-this-first)（Windows `.msi`、macOS Apple Silicon `.dmg`、看台手机/浏览器 PWA 免安装直连）。
 
 ### 1. 我该点哪个功能？（按赛场角色速查）
 

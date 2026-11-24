@@ -1,5 +1,6 @@
 # ScoutingPro27 AI Copilot 商业化重构与三流派协议工程实施规划
 
+> **实施状态**：已全面落地（Flyway `V9` / v1.1.0）；最新在线接口与字段契约请以仓库根目录 [`CONTRACT.md`](../../CONTRACT.md) §12 为准，本文保留作为历史架构设计记录。  
 > **文档定位**：独立架构与工程实施规划文档（已取代并移除已落地的 `CRDT_HLC_IMPLEMENTATION_PLAN.md`；仅作方案设计与工程契约，本文档落盘时不改动任何业务源码与测试）。  
 > **目标基线**：v1.0.4+（BIOBUZZ 2026–2027 · `frontend` Vue 3.5 + Vite 8.1 + TypeScript 6.0 + `Backend` Java 21 + Javalin 7.2 + H2 2.2.224 + Flyway `V1`–`V8` + JCEF Chromium 146）。
 

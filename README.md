@@ -6,7 +6,7 @@
   <img src="https://img.shields.io/badge/CRDT-TinyBase_10_%2B_HLC-8A2BE2?style=for-the-badge" alt="CRDT" />
   <img src="https://img.shields.io/badge/Architecture-Public_P2P_Mesh-00B0FF?style=for-the-badge&logo=webrtc&logoColor=white" alt="P2P" />
   <img src="https://img.shields.io/badge/Security-Zero_Trust_%26_ECDSA-00C853?style=for-the-badge&logo=auth0&logoColor=white" alt="Security" />
-  <img src="https://img.shields.io/badge/Tests-1023_Unit_%2B_18_E2E-10B981?style=for-the-badge&logo=checkmarx&logoColor=white" alt="Tests" />
+  <img src="https://img.shields.io/badge/Tests-1010_Unit_%2B_4_E2E-10B981?style=for-the-badge&logo=checkmarx&logoColor=white" alt="Tests" />
   <img src="https://img.shields.io/badge/Vue_3_%2B_Vite_8-35495E?style=for-the-badge&logo=vue.js&logoColor=4FC08D" alt="Vue.js" />
   <img src="https://img.shields.io/badge/TypeScript_6-007ACC?style=for-the-badge&logo=typescript&logoColor=white" alt="TypeScript" />
   <img src="https://img.shields.io/badge/Java_21_%2B_Javalin_7-ED8B00?style=for-the-badge&logo=openjdk&logoColor=white" alt="Java" />
@@ -22,9 +22,8 @@
   <a href="docs/USER_GUIDE.md"><b>双语总入口</b></a> ·
   <a href="docs/USER_GUIDE.zh.md"><b>中文保姆级手册</b></a> ·
   <a href="docs/USER_GUIDE.en.md"><b>English Guide</b></a> ·
-  <a href="docs/ScoutingPro27_UserGuide_ZH.pdf"><b>离线 PDF (ZH)</b></a> ·
-  <a href="docs/ScoutingPro27_UserGuide_EN.pdf"><b>Offline PDF (EN)</b></a> ·
-  <a href="docs/README.md"><b>完整文档索引</b></a>
+  <a href="docs/README.md"><b>完整文档索引</b></a> ·
+  <a href="CONTRACT.md"><b>API 与 JCEF 契约</b></a>
 </p>
 
 > 💡 **由 FIRST Tech Challenge (FTC) Team 27570 B.E.A.R. 中学生团队独立构思、架构并全栈开发。**  
@@ -54,11 +53,12 @@
 
 ## 📖 新手操作指南（独立文档）
 
-> 为保持本 README 聚焦于工程架构与技术实现，**零基础图文操作手册与工程文档已统一收纳至 `docs/`**。队员与领队请直接阅读：
+> 为保持本 README 聚焦于工程架构与技术实现，**零基础图文操作手册与工程文档已统一收纳至 `docs/`**（含 **第 0 章** Windows `.msi` / macOS Apple Silicon `.dmg` 下载安装与 Gatekeeper 首次绕过指引）。队员与领队请直接阅读：
 > - 📘 **[双语手册总入口 (docs/USER_GUIDE.md)](docs/USER_GUIDE.md)**
-> - 🇨🇳 **[中文保姆级图文教程 (docs/USER_GUIDE.zh.md)](docs/USER_GUIDE.zh.md)** / **[中文离线 PDF](docs/ScoutingPro27_UserGuide_ZH.pdf)**
-> - 🇺🇸 **[English Step-by-Step Guide (docs/USER_GUIDE.en.md)](docs/USER_GUIDE.en.md)** / **[English Offline PDF](docs/ScoutingPro27_UserGuide_EN.pdf)**
-> - 🗂️ **[完整文档目录（测试指南 / 发版记录 / 架构规划）(docs/README.md)](docs/README.md)**
+> - 🇨🇳 **[中文保姆级图文教程 (docs/USER_GUIDE.zh.md)](docs/USER_GUIDE.zh.md)**
+> - 🇺🇸 **[English Step-by-Step Guide (docs/USER_GUIDE.en.md)](docs/USER_GUIDE.en.md)**
+> - 📄 **离线 PDF 手册**（仓库不直接提交二进制 PDF，可在 `frontend/` 执行 `npm run export:userguide-pdf` 本地导出 `docs/ScoutingPro27_UserGuide_ZH.pdf` 与 `docs/ScoutingPro27_UserGuide_EN.pdf`）
+> - 🗂️ **[完整文档目录（测试指南 / 发版记录 / 架构规划）(docs/README.md)](docs/README.md)** · **[REST / WebSocket / CRDT / JCEF 协议契约 (CONTRACT.md)](CONTRACT.md)**
 
 ---
 
@@ -89,7 +89,7 @@
   - **Vite `^8.1.5`** (基于 Rolldown 高速打包引擎)
   - **Pinia `^4.0.2`** (响应式状态管理，与 CRDT 双向桥接)
   - **Vue Router `^4.6.4`** (SPA 路由与登录守卫)
-  - **Vue I18n `^9.14.5`** (中英双语 **1,313 组键值 1:1 对齐**，毫秒级热切换)
+  - **Vue I18n `^9.14.5`** (中英双语 **1,430 组键值 1:1 对齐**，毫秒级热切换)
 - **分布式 CRDT 协同与抗毒化时钟层**：
   - **TinyBase `^10.1.0`** (`MergeableStore` 单元格级 LWW-CRDT + `createCustomSynchronizer` + `persister-indexed-db` + `getHlcFunctions` 16 字符紧凑 HLC 编解码 + `maxClockSkewSeconds=300` 护栏)
   - **自研 `CalibratedMonotonicClock`**：3 样本最小 RTT 握手标定 + `performance.now()` 晶振单调走时 + `[0, 12h]` 离线休眠补偿与冷重启锚点 (`sp27_clock_anchor_${eventId}`) + 抗拜占庭 5 分钟聚类中位数对齐
@@ -100,11 +100,12 @@
     - **ECDH (P-256) + HKDF-SHA256 + AES-256-GCM**：信令与虚拟数据通道端到端加密
     - **ECDSA (P-256 / SHA-256)**：作者设备持久化签名密钥对、正赛记录写时签名 (`authorSig`) 与 Host 背书成员公钥绑定表 (`member_identities` `hostSig`) 双重验权
     - **PBKDF2-HMAC-SHA256 (100,000 次迭代)**：房间信令全载荷签名（含非 HTTPS 局域网纯 JS Midstate 加速回退）+ 5,000 容量 `NonceLruCache` 防重放 + 4 位 **SAS 短认证码** + **TOFU** 设备信任库
-- **离线存储、扫码、渲染与 UI 系统**：
+- **多协议 AI Copilot 工作台与离线存储渲染**：
+  - **AI Copilot 侧边停靠工作台 (`Alt+I`)**：原生支持 **OpenAI / Gemini / Anthropic** 三大流派、多配置档案、多会话线程、SSE 思考/正文/Usage 拆流、5 种 FTC 战术人设与 5 条 `/` 快捷指令（`@队号` 补全 + 可点击队号芯片）
   - **PWA & Service Worker (`vite-plugin-pwa ^1.3.0` / Workbox)**：57 项静态资源全量预缓存，断网刷新秒开
   - **IndexedDB**：CRDT 状态快照持久化 (`sp27_crdt_${eventId}`)、设备公私钥保险箱 (`scoutingpro_security_v1`)、移动端高清 WebP 照片离线队列 (`mobilePhotoCache.ts`)
   - **二维码与富文本**：`qrcode ^1.5.4` (动态入房码生成)、`jsqr ^1.4.0` (纯前端相机扫码)、`markdown-it ^15.0.0` + `highlight.js ^11.12.0` + `dompurify ^3.4.14` (AI 军师流式 Markdown 安全渲染)
-  - **视觉与动效**：Cold Graphite Pit Wall 工业风 CSS Token 系统 (`#0B0E10` + `#39FF14`)、本地内嵌 `Noto Sans SC` 可变字体、CSS `linear()` 物理弹簧动效与 Canvas 2D 60fps 激光轨迹白板引擎
+  - **视觉与动效**：Cold Graphite Pit Wall 工业风 CSS Token 系统 (`#0B0E10` + `#39FF14`)、本地内嵌 `Orbitron` / `Manrope` / `Noto Sans SC` 可变字体、CSS `linear()` 物理弹簧动效与 Canvas 2D 60fps 激光轨迹白板引擎
 
 ### 2.2 电脑主机后端与原生桌面容器 (`Backend/`)
 - **语言与Web 服务底座**：
@@ -116,18 +117,18 @@
   - **H2 Database `2.2.224`** (嵌入式本地关系型数据库，支持 `AUTO_SERVER` 回环 `127.0.0.1` 绑定与 `--data-dir` / `--no-auto-server` 多实例物理隔离)
   - **HikariCP `5.1.0`** (高性能 JDBC 连接池)
   - **Jdbi3 `3.45.1`** (`jdbi3-core` + `jdbi3-sqlobject` 声明式 DAO 与事务死锁自动重试)
-  - **Flyway `13.10.3`** (`V1`–`V8` 自动化版本迁移 + `CrdtProjectionService` 启动期幂等 Schema 自愈与脏行增量关系表投影)
+  - **Flyway `13.10.3`** (`V1`–`V9` 自动化版本迁移，含 `V8` Custom TURN / CRDT 与 `V9` AI Copilot 多档案/多会话表 + `CrdtProjectionService` 与 `AiSchemaBootstrap` 启动期幂等 Schema 自愈)
 - **安全鉴权与物理网卡自动穿透**：
   - **Auth0 `java-jwt 4.6.2`** (HMAC256 JWT 签发与确定性用户 UUID 自愈) + **jBCrypt `0.4`** (密码哈希) + **Java JCE AES-256-GCM** (本地 AI Key 与自定义 TURN 凭据落盘加密)
   - **Offbynull PortMapper `2.0.6`** (`PortForwardingService.java`：自动过滤 Clash TUN / WSL / VMware 等虚拟网卡，在真实物理网卡上以 12s 有界预算探测 **UPnP IGDv1/v2 含 `WANIPv6FirewallControl:1`、NAT-PMP、PCP**，为 `50000-50009/UDP` 申请短租约端口映射并自动续租/退出清理)
 - **桌面原生容器与打包**：
-  - **JCEF (`jcefmaven 146.0.10`)**：内嵌 Chromium 桌面原生容器，锁定 `webrtc.udp_port_range=50000-50099`，定制 Windows 无边框圆角 `CustomTitleBar`、`WindowResizer` 与 `SplashScreen` 启动动画
+  - **JCEF (`jcefmaven 146.0.10`)**：内嵌 Chromium 桌面原生容器，锁定 `webrtc.udp_port_range=50000-50099`；**Windows** 采用无边框圆角 `CustomTitleBar` + `WindowResizer`（`?shell=desktop` 自动去重顶栏品牌），**macOS / Linux** 采用系统原生窗口框与 `SplashScreen` 启动动画
   - **Maven Shade Plugin `3.6.0`** (构建单文件可执行 Fat JAR `ScoutingPro27.jar`) + GitHub Actions 自动打包 Windows `.msi` / macOS Apple Silicon `.dmg`
 
 ### 2.3 自动化测试与质量工程栈
-- **前端单测**：**Vitest `^2.1.9`** + **`@vue/test-utils ^2.4.11`** + **`@pinia/testing ^0.1.7`** + **`happy-dom ^15.11.7`** (**102 个测试套件 / 831 项单测**)
-- **后端单测**：**JUnit Jupiter `5.10.2`** + **AssertJ `3.27.7`** + **Javalin TestTools `7.2.2`** (**43 个测试类 / 192 项单测**)
-- **全栈极端容灾 E2E**：**Puppeteer `^25.5.0`** + 内存级 MQTT-over-WS Broker + 多 JVM 独立临时 H2 集群管理器 (`E2EClusterManager`) (**18 个 E2E 与视觉审计套件**)
+- **前端单测**：**Vitest `^2.1.9`** + **`@vue/test-utils ^2.4.11`** + **`@pinia/testing ^0.1.7`** + **`happy-dom ^15.11.7`** (**95 个测试文件 / 811 项单测**)
+- **后端单测**：**JUnit Jupiter `5.10.2`** + **AssertJ `3.27.7`** + **Javalin TestTools `7.2.3`** (**39 个测试类 / 199 项单测**)
+- **全栈极端容灾与交互 E2E**：**Puppeteer `^25.5.0`** + 内存级 MQTT-over-WS Broker + 多 JVM 独立临时 H2 集群管理器 (`E2EClusterManager`) (**4 个核心 E2E 套件**：12 步跨机灾难恢复 `multi-client.e2e.js`、移动端扫码 `qr-mobile-join.e2e.js`、收件箱离线投递 `inbox-lifecycle.e2e.js`、全交互闭环 `comprehensive-interactive.e2e.js`；另有 `frontend/generators/` 负责手册截图/PDF 生成与评委演示) + GitHub Actions CI 门禁 (`.github/workflows/ci.yml` / `build-installer.yml` / `deploy-pwa.yml`)
 
 ---
 
@@ -203,11 +204,15 @@ sequenceDiagram
 1. **BIOBUZZ 专属赛规与测速模型**：
    - **无爬升终局**：精准建模最后 60s `Nectar (+2, 上限 8)`、`Bottom Nectar (+5/朵, ≤ Nectar)`、`Pollen (+2)`、`Garden (+1)`、`Park (+5)`、`G418 合法花底掏球` 与 `G410 <60s 提前误投犯规`。
    - **Swarm RP 机动分**：自动追踪单车机动分（离墙 `3` + 自动停泊 `5` + 终局停泊 `5` = 最高 `13` 分），快速锁定双车合计 `≥ 16` 分的联盟搭档。
-   - **Predict Cycle Time**：手动阶段记满 `≥ 6` 轮有效 Cycle（间隔 `≤ 120s`）时，自动剔除最快 1 次异常脉冲后取次快 4 次均值。
+   - **Predict Cycle Time、最低 Cycle 数与 Cycle 数方差**：手动阶段记满 `≥ 6` 轮有效 Cycle（间隔 `≤ 120s`）时，自动剔除最快 1 次异常脉冲后取次快 4 次均值，并补充非损坏场次的**最低 Cycle 数（Min Cycles）**与**Cycle 数方差（Cycle Variance）**衡量场次波动底线。
 2. **FTC 官方 Rule A215 晋级积分与顺延引擎 (`AdvancementCalculator.java`)**：
    - 内置官方 FTC API v2.0 代理凭证（开箱即用无需自备 Key），实时汇算 **资格赛 (`invErf` 逆误差函数 2–16 分) + 蛇形选队 + 淘汰赛 + 评审奖项分**，同步 `/advancement` 官方顺延状态，在天梯榜首列固定展示 `晋级分 (Adv. Pts)` 与 `晋级区` / `顺延晋级` / `已保送` / `候选` 徽章，并支持剔除对手罚分后的净得分偏差核查。
 3. **“吹牛指数”量化对账 (`Brag Index`)**：
    - 按 $\text{OverallRatio} = \frac{\text{ClaimedTotalScore}}{\max(\text{MaxActualScore}, \text{AvgActualScore} \times 1.05, 1)}$（自动剔除 `isBroken` 故障场次）划分 **🎯 真实守信 (`≤1.25x`)**、**🟡 略偏乐观 (`1.25x~1.65x`)**、**⚠️ 夸大其词 (`1.65x~2.20x`)** 与 **🔥 吹破牛皮 (`>2.20x`)**，并核验实战 `rawData` 点亮 **`花朵已证实 🌸`** / **`停泊已证实 ✅`** 徽章。
+
+### 3.4 多协议 AI Copilot 战术工作台 (V9)
+- **三流派原生协议与多配置档案 (`ai_provider_profiles`)**：支持 **OpenAI / GPT 兼容**（含 DeepSeek / Kimi / 硅基流动 / 本地免 Key Ollama）、**Google Gemini (`v1beta` 含 `-latest` 别名与反代)** 与 **Anthropic Claude (`x-api-key`)**；API Key 使用主机 AES-256-GCM 加密存储并严格脱敏展示，内置 SSRF 私网地址拦截 (`AiUrlGuard`) 与在线模型探测 (`GET/POST /api/ai/test-connection`)。
+- **持久化停靠侧栏与多会话线程 (`ai_chat_threads`)**：桌面端点击顶栏 `AI 助手` 或按 `Alt+I` 展开右侧停靠工作台，切换排名/白板页签不断流；支持 5 种 FTC 战术人设（`联队策略总监` / `赛前战术教练` / `吹牛审计侦探` / `Pit 15秒极简速报` / `自定义提示词`）、5 条 `/` 指令（`/pick` `/match` `/compare` `/audit` `/brief`）、`@队号` 聚焦、SSE 思考过程 (`reasoning`) 与正文 (`text`) 折叠分离及一键导出 Markdown 战报。
 
 ---
 
@@ -231,22 +236,22 @@ sequenceDiagram
   ```
 
 ### 4.2 自动化测试与极端容灾 E2E 验证套件
-本项目严格执行**“命令 + 真实原始输出 + 客观结论”证据三要素闭环**：
+本项目严格执行**“命令 + 真实原始输出 + 客观结论”证据三要素闭环**，完整 REST / WebSocket / CRDT / JCEF 接口定义见 [`CONTRACT.md`](CONTRACT.md)：
 
 ```powershell
 # 1. 前端 TypeScript 6 强类型检查 (0 errors)
 cd frontend
 npm run type-check
 
-# 2. 前端 Vitest 单元测试套件 (102 个测试文件 / 831 项测试 100% 通过)
-npm test -- --run
+# 2. 前端 Vitest 单元测试套件 (95 个测试文件 / 811 项测试 100% 通过)
+npm test
 
-# 3. 后端 Maven JUnit 5 测试套件 (43 个测试类 / 192 项测试 100% 通过，含 Flyway V1-V8 与 CRDT 脏行投影)
+# 3. 后端 Maven JUnit 5 测试套件 (39 个测试类 / 199 项测试 100% 通过，含 Flyway V1-V9 与 CRDT 脏行投影)
 cd ../Backend
 mvn test
 
-# 4. 全栈 12 步极端容灾端到端测试 (并发拉起 3 个独立临时 H2 后端 + 5 个隔离浏览器)
-# 覆盖：3-RTT 晶振标定 -> +10年/-1年改表与 2036 毒包拦截 -> HostA 进程硬杀暴毙 -> 2h 离线并发改同队不同字段与离线刷新
+# 4. 全栈 E2E 自动化验证套件 (依次运行全部 4 个核心 E2E 套件；单独运行 12 步灾难恢复可用 npm run test:e2e:multi)
+# multi-client.e2e.js 覆盖：3-RTT 晶振标定 -> +10年/-1年改表与 2036 毒包拦截 -> HostA 进程硬杀暴毙 -> 2h 离线并发改同队不同字段与离线刷新
 # -> 共用库电脑 B 免邀请码直进接管 (Epoch=2) -> 旧主机复活 Fencing 压制与独占记录合流 -> 空库裸机 C 输邀请码 Witness 还原 (Epoch=3)
 # -> 队友手机代传恢复失联队员记录与双重伪造攻击拦截 -> U 盘 .info 幂等导入 -> 4 节点字节级一致终审 -> 临时 H2 100% 自动清理断言
 cd ../frontend
@@ -257,7 +262,7 @@ npm run test:e2e
 
 ## 📄 开源许可与致谢 (License & Acknowledgements)
 
-- **开源协议**：本项目基于 [MIT License](LICENSE) 开放源代码。
+- **开源协议**：本项目基于 **MIT License** 开放源代码。
 - **特别致谢**：感谢 **FIRST** 官方赛事舞台，感谢 Vue.js、TinyBase、Javalin、WebRTC、EMQX 与开源社区，感谢 **FTC Team 27570 B.E.A.R.** 每一位参与实战测试与演进的队员与导师！
 
 <p align="center">

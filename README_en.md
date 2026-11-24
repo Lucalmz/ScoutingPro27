@@ -6,7 +6,7 @@
   <img src="https://img.shields.io/badge/CRDT-TinyBase_10_%2B_HLC-8A2BE2?style=for-the-badge" alt="CRDT" />
   <img src="https://img.shields.io/badge/Architecture-Public_P2P_Mesh-00B0FF?style=for-the-badge&logo=webrtc&logoColor=white" alt="P2P" />
   <img src="https://img.shields.io/badge/Security-Zero_Trust_%26_ECDSA-00C853?style=for-the-badge&logo=auth0&logoColor=white" alt="Security" />
-  <img src="https://img.shields.io/badge/Tests-1023_Unit_%2B_18_E2E-10B981?style=for-the-badge&logo=checkmarx&logoColor=white" alt="Tests" />
+  <img src="https://img.shields.io/badge/Tests-1010_Unit_%2B_4_E2E-10B981?style=for-the-badge&logo=checkmarx&logoColor=white" alt="Tests" />
   <img src="https://img.shields.io/badge/Vue_3_%2B_Vite_8-35495E?style=for-the-badge&logo=vue.js&logoColor=4FC08D" alt="Vue.js" />
   <img src="https://img.shields.io/badge/TypeScript_6-007ACC?style=for-the-badge&logo=typescript&logoColor=white" alt="TypeScript" />
   <img src="https://img.shields.io/badge/Java_21_%2B_Javalin_7-ED8B00?style=for-the-badge&logo=openjdk&logoColor=white" alt="Java" />
@@ -22,9 +22,8 @@
   <a href="docs/USER_GUIDE.md"><b>Bilingual Hub</b></a> ·
   <a href="docs/USER_GUIDE.en.md"><b>English Guide</b></a> ·
   <a href="docs/USER_GUIDE.zh.md"><b>中文教程</b></a> ·
-  <a href="docs/ScoutingPro27_UserGuide_EN.pdf"><b>Offline PDF (EN)</b></a> ·
-  <a href="docs/ScoutingPro27_UserGuide_ZH.pdf"><b>离线 PDF (ZH)</b></a> ·
-  <a href="docs/README.md"><b>Docs Index</b></a>
+  <a href="docs/README.md"><b>Docs Index</b></a> ·
+  <a href="CONTRACT.md"><b>API & JCEF Contract</b></a>
 </p>
 
 > 💡 **Independently conceived, architected, and full-stack developed by middle and high school students of FIRST Tech Challenge (FTC) Team 27570 B.E.A.R.**  
@@ -54,11 +53,12 @@ It is **15 minutes before Playoff Alliance Selection**, and your scouting operat
 
 ## 📖 Standalone User Guide (For Scouts & Team Leads)
 
-> To keep this README focused on architecture and engineering, **step-by-step illustrated manuals and technical docs are organized under `docs/`**:
+> To keep this README focused on architecture and engineering, **step-by-step illustrated manuals and technical docs are organized under `docs/`** (including **Chapter 0** for Windows `.msi` / macOS Apple Silicon `.dmg` installation and Gatekeeper bypass instructions):
 > - 📘 **[Bilingual User Guide Hub (docs/USER_GUIDE.md)](docs/USER_GUIDE.md)**
-> - 🇺🇸 **[English Step-by-Step Illustrated Guide (docs/USER_GUIDE.en.md)](docs/USER_GUIDE.en.md)** / **[English Offline PDF](docs/ScoutingPro27_UserGuide_EN.pdf)**
-> - 🇨🇳 **[中文保姆级图文教程 (docs/USER_GUIDE.zh.md)](docs/USER_GUIDE.zh.md)** / **[中文离线 PDF](docs/ScoutingPro27_UserGuide_ZH.pdf)**
-> - 🗂️ **[Full Documentation Directory (QA, Releases, Plans) (docs/README.md)](docs/README.md)**
+> - 🇺🇸 **[English Step-by-Step Illustrated Guide (docs/USER_GUIDE.en.md)](docs/USER_GUIDE.en.md)**
+> - 🇨🇳 **[中文保姆级图文教程 (docs/USER_GUIDE.zh.md)](docs/USER_GUIDE.zh.md)**
+> - 📄 **Offline PDFs** *(gitignored locally generated artifacts — run `npm run export:userguide-pdf` inside `frontend/` to export `docs/ScoutingPro27_UserGuide_EN.pdf` and `docs/ScoutingPro27_UserGuide_ZH.pdf`)*
+> - 🗂️ **[Full Documentation Directory (QA, Releases, Plans) (docs/README.md)](docs/README.md)** · **[REST / WebSocket / CRDT / JCEF Contract (CONTRACT.md)](CONTRACT.md)**
 
 ---
 
@@ -88,7 +88,7 @@ ScoutingPro27 pairs a **Vue 3 + TypeScript 6 Offline-First PWA Frontend** with a
   - **TypeScript `~6.0.0`** + **`vue-tsc ^3.3.7`** (Strict static type checking)
   - **Vite `^8.1.5`** (Rolldown-powered production bundler)
   - **Pinia `^4.0.2`** (Reactive state stores bidirectionally bridged to CRDT)
-  - **Vue Router `^4.6.4`** & **Vue I18n `^9.14.5`** (**1,313 1:1 aligned bilingual keys** with instant hot-switching)
+  - **Vue Router `^4.6.4`** & **Vue I18n `^9.14.5`** (**1,430 1:1 aligned bilingual keys** with instant hot-switching)
 - **Distributed CRDT & Anti-Poisoning Clock Layer**:
   - **TinyBase `^10.1.0`** (`MergeableStore` cell-level LWW-CRDT, `createCustomSynchronizer`, `persister-indexed-db`, `getHlcFunctions` 16-char HLC codec, and `maxClockSkewSeconds=300` guard)
   - **`CalibratedMonotonicClock`**: 3-sample min-RTT handshake zero-point calibration + `performance.now()` monotonic crystal oscillator + `[0, 12h]` offline sleep compensation & cold-restart anchor (`sp27_clock_anchor_${eventId}`) + Byzantine-resilient 5-minute cluster median witness alignment
@@ -99,10 +99,11 @@ ScoutingPro27 pairs a **Vue 3 + TypeScript 6 Offline-First PWA Frontend** with a
     - **ECDH (P-256) + HKDF-SHA256 + AES-256-GCM**: End-to-end encryption for signaling and virtual channels
     - **ECDSA (P-256 / SHA-256)**: Persistent device signing keypair, write-time record signing (`authorSig`), and Host-countersigned `member_identities` (`hostSig`) dual verification
     - **PBKDF2-HMAC-SHA256 (100,000 iterations)**: Full-payload signaling authentication (with pure-JS midstate-accelerated HTTP LAN fallback) + 5,000-entry `NonceLruCache` replay defense + 4-digit **SAS** + **TOFU** trust store
-- **Offline Storage, Scanning & UI System**:
+- **Multi-Protocol AI Copilot, Offline Storage & UI System**:
+  - **AI Copilot Workspace (`Alt+I`)**: Persistent side dock supporting **OpenAI / Gemini / Anthropic** protocols, multi-profile roster, multi-thread sessions, separated SSE `reasoning` / `text` / `usage` streams, 5 FTC personas & 5 `/` commands (`@team` completion + clickable team chips)
   - **PWA (`vite-plugin-pwa ^1.3.0` / Workbox)** & **IndexedDB** (`sp27_crdt_${eventId}`, `scoutingpro_security_v1`, offline WebP photo queue)
   - **QR & Rich Markdown**: `qrcode ^1.5.4`, `jsqr ^1.4.0`, `markdown-it ^15.0.0`, `highlight.js ^11.12.0`, `dompurify ^3.4.14`
-  - **Design & Motion**: Cold Graphite Pit Wall token system (`#0B0E10` + `#39FF14`), bundled `Noto Sans SC` variable font, CSS `linear()` spring physics, and 60fps Canvas 2D laser trajectory whiteboard
+  - **Design & Motion**: Cold Graphite Pit Wall token system (`#0B0E10` + `#39FF14`), bundled `Orbitron` / `Manrope` / `Noto Sans SC` variable fonts, CSS `linear()` spring physics, and 60fps Canvas 2D laser trajectory whiteboard
 
 ### 2.2 Desktop Host Backend & Native Container (`Backend/`)
 - **Runtime & Microservice Core**:
@@ -111,18 +112,18 @@ ScoutingPro27 pairs a **Vue 3 + TypeScript 6 Offline-First PWA Frontend** with a
 - **Database, Connection Pool & Schema Migrations**:
   - **H2 Database `2.2.224`** (`127.0.0.1` loopback-bound `AUTO_SERVER` + multi-instance `--data-dir` / `--no-auto-server` isolation)
   - **HikariCP `5.1.0`** & **Jdbi3 `3.45.1`** (`jdbi3-core` + `jdbi3-sqlobject` with deadlock retry)
-  - **Flyway `13.10.3`** (`V1`–`V8` automated SQL migrations + `CrdtProjectionService` idempotent schema self-healing and incremental dirty-row relational projection)
+  - **Flyway `13.10.3`** (`V1`–`V9` automated SQL migrations incl. `V8` Custom TURN / CRDT & `V9` AI Copilot profiles/threads + `CrdtProjectionService` and `AiSchemaBootstrap` idempotent schema self-healing)
 - **Authentication & Physical-NIC NAT Traversal**:
   - **Auth0 `java-jwt 4.6.2`** + **jBCrypt `0.4`** + **AES-256-GCM** local secret vault
   - **Offbynull PortMapper `2.0.6`** (`PortForwardingService.java`: filters out Clash TUN / WSL / VMware virtual adapters and probes **UPnP IGDv1/v2 incl. `WANIPv6FirewallControl:1`, NAT-PMP, and PCP** on physical NICs for `50000-50009/UDP` short-lease port mappings)
 - **Native Desktop Shell & Packaging**:
-  - **JCEF (`jcefmaven 146.0.10`)** (Embedded Chromium desktop container with `webrtc.udp_port_range=50000-50099`, custom Windows frameless `CustomTitleBar`, and `SplashScreen`)
-  - **Maven Shade Plugin `3.6.0`** (Executable `ScoutingPro27.jar`) + GitHub Actions CI for Windows `.msi` & macOS `.dmg`
+  - **JCEF (`jcefmaven 146.0.10`)** (Embedded Chromium desktop container locking `webrtc.udp_port_range=50000-50099`; **Windows** uses frameless rounded `CustomTitleBar` + `WindowResizer` with `?shell=desktop` header dedup, while **macOS / Linux** use native OS window frames + `SplashScreen`)
+  - **Maven Shade Plugin `3.6.0`** (Executable `ScoutingPro27.jar`) + GitHub Actions CI for Windows `.msi` & macOS Apple Silicon `.dmg`
 
 ### 2.3 Automated Testing & Verification Stack
-- **Frontend Unit Tests**: **Vitest `^2.1.9`** + **`@vue/test-utils ^2.4.11`** + **`@pinia/testing ^0.1.7`** + **`happy-dom ^15.11.7`** (**102 test files / 831 tests**)
-- **Backend Unit Tests**: **JUnit Jupiter `5.10.2`** + **AssertJ `3.27.7`** + **Javalin TestTools `7.2.2`** (**43 test classes / 192 tests**)
-- **Full-Stack Disaster-Recovery E2E**: **Puppeteer `^25.5.0`** + in-process MQTT-over-WS broker + multi-JVM isolated H2 `E2EClusterManager` (**18 E2E & visual audit suites**)
+- **Frontend Unit Tests**: **Vitest `^2.1.9`** + **`@vue/test-utils ^2.4.11`** + **`@pinia/testing ^0.1.7`** + **`happy-dom ^15.11.7`** (**95 test files / 811 tests**)
+- **Backend Unit Tests**: **JUnit Jupiter `5.10.2`** + **AssertJ `3.27.7`** + **Javalin TestTools `7.2.3`** (**39 test classes / 199 tests**)
+- **Full-Stack Disaster-Recovery & Interactive E2E**: **Puppeteer `^25.5.0`** + in-process MQTT-over-WS broker + multi-JVM isolated H2 `E2EClusterManager` (**4 canonical E2E suites**: `multi-client.e2e.js`, `qr-mobile-join.e2e.js`, `inbox-lifecycle.e2e.js`, `comprehensive-interactive.e2e.js`; `frontend/generators/` houses guide screenshot/PDF tools & judge demos) + GitHub Actions CI gates (`.github/workflows/ci.yml` / `build-installer.yml` / `deploy-pwa.yml`)
 
 ---
 
@@ -194,6 +195,20 @@ sequenceDiagram
     Phones<-->HostC: "S1 relays offline teammate S2's ECDSA-signed historical records into empty HostC!"
 ```
 
+### 3.3 BIOBUZZ 2026–2027 Scoring Engine, FTC Rule A215 Advancement & Brag Index
+1. **BIOBUZZ Rules & Speed Telemetry**:
+   - **No-Climbing Endgame**: Models final-60s `Nectar (+2, max 8)`, `Bottom Nectar (+5/flower, ≤ Nectar)`, `Pollen (+2)`, `Garden (+1)`, `Park (+5)`, legal `G418` bottom descore, and `G410` early-Nectar (`>60s` remaining) foul tracking.
+   - **Swarm RP Mobility**: Tracks per-robot mobility (`Leave +3` + `Auto Park +5` + `Endgame Park +5` = max `13` pts) to pair alliances reaching `≥ 16` combined pts.
+   - **Predict Cycle Time, Min Cycles & Cycle Variance**: Once a match logs `≥ 6` TeleOp cycles (`≥ 5` valid intervals `≤ 120s`), automatically trims the fastest single outlier and averages the next 4 shortest gaps, paired with non-broken **Min Cycles** and **Cycle Variance**.
+2. **FTC Official Rule A215 Advancement Engine (`AdvancementCalculator.java`)**:
+   - Ships with pre-configured FTC Events API v2.0 proxy credentials (zero manual API key required) to compute **Qualification (`invErf` 2–16 pts) + Alliance Selection + Playoff + Judged Awards** and official `/advancement` roll-down status in sticky Column #1 (`Adv. Pts`), plus net-score discrepancy auditing excluding opponent penalties.
+3. **Brag Index Reality Auditor (`Brag Index`)**:
+   - Computes $\text{OverallRatio} = \frac{\text{ClaimedTotalScore}}{\max(\text{MaxActualScore}, \text{AvgActualScore} \times 1.05, 1)}$ (excluding `isBroken` matches when healthy matches exist) into **🎯 Realistic (`≤1.25x`)**, **🟡 Optimistic (`1.25x~1.65x`)**, **⚠️ Overclaimed (`1.65x~2.20x`)**, and **🔥 Mythical (`>2.20x`)**, and cross-checks match `rawData` to award **`Flower Verified 🌸`** / **`Park Verified ✅`** badges.
+
+### 3.4 Multi-Protocol AI Copilot Tactical Workspace (V9)
+- **Three Native Protocols & Multi-Profile Roster (`ai_provider_profiles`)**: Supports **OpenAI / GPT Compatible** (DeepSeek, Kimi, SiliconFlow, keyless local Ollama, etc.), **Google Gemini (`v1beta` with `-latest` aliases & custom proxies)**, and **Anthropic Claude (`x-api-key`)**. API keys are AES-256-GCM encrypted at rest, masked on read, protected by `AiUrlGuard` SSRF filtering, and live-probed via `GET/POST /api/ai/test-connection`.
+- **Persistent Dock & Multi-Thread Sessions (`ai_chat_threads`)**: Desktop top-bar `AI Copilot` (`Alt+I`) toggles a side dock alongside Rankings/Whiteboard without aborting SSE streams. Includes 5 FTC personas (`Alliance Strategist`, `Pre-Match Coach`, `Brag & Risk Auditor`, `15-Sec Pit Brief`, `Custom Prompt`), 5 slash commands (`/pick`, `/match`, `/compare`, `/audit`, `/brief`), `@team` focus pills, separated SSE `reasoning` / `text` / `usage` streaming, and 1-click Markdown export.
+
 ---
 
 ## 4. Developer & Automated Verification Guide
@@ -215,21 +230,23 @@ sequenceDiagram
   mvn package -DskipTests
   ```
 
-### 4.2 Automated Test & 12-Step Disaster-Recovery E2E Suite
+### 4.2 Automated Test & Disaster-Recovery E2E Suite
+See [`CONTRACT.md`](CONTRACT.md) for full REST, WebSocket, CRDT, and JCEF contracts.
+
 ```powershell
 # 1. Frontend TypeScript 6 static type check (0 errors)
 cd frontend
 npm run type-check
 
-# 2. Frontend Vitest unit & component tests (102 test files / 831 tests passing)
-npm test -- --run
+# 2. Frontend Vitest unit & component tests (95 test files / 811 tests passing)
+npm test
 
-# 3. Backend Maven JUnit 5 test suite (43 test classes / 192 tests passing, incl. Flyway V1-V8 & CRDT dirty-row projection)
+# 3. Backend Maven JUnit 5 test suite (39 test classes / 199 tests passing, incl. Flyway V1-V9 & CRDT dirty-row projection)
 cd ../Backend
 mvn test
 
-# 4. Full-Stack 12-Step Disaster-Recovery E2E Suite (3 isolated temporary H2 backends + 5 isolated browsers)
-# Verifies: 3-RTT crystal calibration -> +10yr/-1yr clock spoofing & 2036 HLC packet interception -> HostA hard kill
+# 4. Full-Stack E2E Suites (runs all 4 canonical suites; run `npm run test:e2e:multi` for the 12-step disaster-recovery suite alone)
+# multi-client.e2e.js covers: 3-RTT crystal calibration -> +10yr/-1yr clock spoofing & 2036 HLC packet interception -> HostA hard kill
 # -> 2h offline concurrent field-level Pit/Tag/Schedule edits & offline PWA reload -> Shared-DB HostB direct takeover (Epoch=2)
 # -> Revived HostA Epoch=1 fencing & exclusive record merge -> Bare-metal HostC invite-code Witness recovery (Epoch=3)
 # -> Teammate ECDSA-signed relay recovery & dual forgery rejection -> USB .info idempotency -> 4-node byte equality & temp H2 cleanup
@@ -241,7 +258,7 @@ npm run test:e2e
 
 ## 📄 License & Acknowledgements
 
-- **License**: Released under the open-source [MIT License](LICENSE).
+- **License**: Released under the open-source **MIT License**.
 - **Acknowledgements**: Special thanks to **FIRST**, the open-source communities behind Vue.js, TinyBase, Javalin, WebRTC, and EMQX, and every member and mentor of **FTC Team 27570 B.E.A.R.**!
 
 <p align="center">

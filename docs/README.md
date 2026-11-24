@@ -4,14 +4,25 @@
 
 ---
 
+## 🧭 核心入口与工程契约 (Core Entry & Contracts)
+
+| 文档 | 说明 |
+| --- | --- |
+| [**`../README.md`**](../README.md) · [**`../README_en.md`**](../README_en.md) | 简体中文 / English 项目总览、架构深度拆解与测试命令基线 |
+| [**`../CONTRACT.md`**](../CONTRACT.md) | 后端 REST API、WebSocket 信令、CRDT 投影协议、JCEF 桌面桥接与运行时启动契约（**单一接口真相来源**） |
+| [**`../AGENTS.md`**](../AGENTS.md) | 仓库协作、契约优先维护与严谨验证交付铁律 |
+| [**`../frontend/README.md`**](../frontend/README.md) | 前端开发脚本、测试指令、E2E 套件与文档生成器说明 |
+
+---
+
 ## 📖 新手手册与离线 PDF (User Guides)
 
 | 文档 | 说明 |
 | --- | --- |
-| [**`USER_GUIDE.md`**](./USER_GUIDE.md) | 中英双语速查总入口与 BIOBUZZ 赛规 30 秒备忘 |
-| [**`USER_GUIDE.zh.md`**](./USER_GUIDE.zh.md) | 简体中文零基础分步图文手册（附 `17` 张高清标注截图） |
-| [**`USER_GUIDE.en.md`**](./USER_GUIDE.en.md) | English Step-by-Step Illustrated User Guide (`17` annotated screenshots) |
-| **`ScoutingPro27_UserGuide_ZH.pdf`** / **`ScoutingPro27_UserGuide_EN.pdf`** | 由 `frontend/generators/export-userguide-pdf.js` 导出的离线 PDF 手册（Git 忽略生成产物） |
+| [**`USER_GUIDE.md`**](./USER_GUIDE.md) | 中英双语速查总入口（含安装指引与 BIOBUZZ 赛规 30 秒备忘） |
+| [**`USER_GUIDE.zh.md`**](./USER_GUIDE.zh.md) | 简体中文零基础分步图文手册（第 0–16 章，含 Windows `.msi`/macOS `.dmg` Gatekeeper 绕过与 `17` 张高清标注截图） |
+| [**`USER_GUIDE.en.md`**](./USER_GUIDE.en.md) | English Step-by-Step Illustrated User Guide (Ch 0–16 incl. Windows `.msi`/macOS `.dmg` Gatekeeper bypass & `17` annotated screenshots) |
+| **`ScoutingPro27_UserGuide_ZH.pdf`** / **`ScoutingPro27_UserGuide_EN.pdf`** | 由 `frontend/generators/export-userguide-pdf.js` 导出的离线 PDF 手册；`docs/*.pdf` 与 `docs/images/userguide/` 均为 Git 忽略的本地生成产物（`npm run capture:userguide` / `npm run export:userguide-pdf`） |
 
 ---
 
@@ -21,6 +32,7 @@
 | --- | --- |
 | [**`testing/MANUAL_TESTING_CHECKLIST.md`**](./testing/MANUAL_TESTING_CHECKLIST.md) | 赛前全功能双端（电脑主控 + 手机）实机手动核对清单 |
 | [**`testing/VPN_P2P_TEST_GUIDE.md`**](./testing/VPN_P2P_TEST_GUIDE.md) | VPN / 弱网 / ECDH 加密通道 / UPnP 物理开孔真机测试指南 |
+| [**`TEST_AUDIT_REPORT.md`**](./TEST_AUDIT_REPORT.md) | 2026-11-22 测试与 E2E 全量审计报告（历史整改前快照；当前实测基线见根目录 `README.md`） |
 
 ---
 
@@ -37,7 +49,7 @@
 
 | 文档 | 说明 |
 | --- | --- |
-| [**`plans/AI_COPILOT_IMPLEMENTATION_PLAN.md`**](./plans/AI_COPILOT_IMPLEMENTATION_PLAN.md) | AI Copilot 商业化重构与三流派协议工程实施规划 |
+| [**`plans/AI_COPILOT_IMPLEMENTATION_PLAN.md`**](./plans/AI_COPILOT_IMPLEMENTATION_PLAN.md) | AI Copilot 商业化重构与三流派协议工程实施规划（**已落地归档**，Flyway `V9` 实现完毕；最新接口契约以 [`CONTRACT.md`](../CONTRACT.md) §12 为准） |
 | [**`references/Javalin.md`**](./references/Javalin.md) | Javalin 7.2.3 框架使用规范与路由/配置速查参考 |
 
 ---

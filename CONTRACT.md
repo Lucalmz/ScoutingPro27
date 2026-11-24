@@ -819,6 +819,7 @@ interface CustomFieldDefinition {
 ## 11. FTC 官方数据代理与晋级分汇算模块 (`FtcProxyRoutes`)
 
 > 所有 `/api/ftc/{season}/*/{eventCode}` 接口均要求：`season` 为 `2000..2100` 的整数，`eventCode` 匹配 `/^[A-Za-z0-9_-]{1,32}$/`；参数不合法返回 `400`，上游异常返回 `500 ({ error: string })`。
+> 底层 `FtcApiClient` 内置 **45 秒内存 TTL 缓存** 与 `ETag` / `Last-Modified` HTTP `304` 协商缓存保护，并支持通过 `FTC_API_BASE_URL` / `FTC_API_USER` / `FTC_API_TOKEN`（及对应 `-Dftc.api.*` 系统属性）覆盖默认官方端点与凭证（见 `§14.4`）。
 
 ### `GET /api/ftc/{season}/matches/{eventCode}`
 - **说明**：获取归一化后的 FTC 官方比赛列表及净得分（扣除对方犯规送分后的 `totalPointsNp`）。
@@ -949,7 +950,9 @@ interface CustomFieldDefinition {
 
 ---
 
-## 12. AI Copilot 配置、连通性探测与多会话模块 (`AiRoutes`)
+## 12. AI Copilot 配置、连通性探测与多会话模块 (`AiRoutes` / `routes/ai/*`)
+
+> 路由入口由 `AiRoutes` 协调注册，具体实现拆分为 `AiProfileRoutes`（配置档案与旧版 `/ai-settings`）、`AiStreamAndProbeRoutes`（连通性探测与流式/非流式对话）、`AiThreadRoutes`（多会话线程与旧版 `/ai-chat`）、`AiUrlGuard`（SSRF 校验与 Key 脱敏）及 `AiSchemaBootstrap`（幂等建表自愈）。
 
 ```ts
 interface AiProviderProfile {
@@ -986,7 +989,7 @@ interface AiProviderProfile {
   - 错误码：`403` (`"Cannot access AI profiles of another user"`)
 
 ### `POST /api/users/{userId}/ai-profiles`
-- **说明**：创建或更新 AI 服务商配置档案（内置 SSRF 私网/元数据地址拦截；支持传脱敏 Key 沿用原已保存密钥；本地 Loopback OpenAI 兼容端点允许免 Key）。
+- **说明**：创建或更新 AI 服务商配置档案（内置 SSRF 私网/元数据地址拦截；支持传脱敏 Key 沿用原已保存密钥；本地 Loopback OpenAI 兼容端点允许免 Key；新建 `GEMINI` 档案且 `customModels` 为空时默认自动填充 `["gemini-flash-latest", "gemini-pro-latest", "gemini-flash-lite-latest"]`）。
 - **Request**：
   ```ts
   interface SaveAiProfileBody {
@@ -1071,7 +1074,7 @@ interface AiProviderProfile {
   - 错误码：`400` (`{ error: "Missing provider/protocol" | "Unsupported protocol..." | "Forbidden target URL: SSRF protection..." | "Invalid proxy port" }`)
 
 ### `POST /api/ai/chat`
-- **说明**：执行非流式 AI 对话请求。
+- **说明**：执行非流式 AI 对话请求（当仅传旧版 `provider` 而未传 `profileId` 时自动关闭深度思考 `enableThinking = false`）。
 - **Request**：
   ```ts
   interface AiChatBody {
@@ -1087,7 +1090,7 @@ interface AiProviderProfile {
   - 错误码：`400` (`{ error: "Missing provider or profileId" | "AI Settings not configured..." }`), `500` (`{ error: string }`)
 
 ### `POST /api/ai/chat/stream`
-- **说明**：执行三协议统一的 SSE（`text/event-stream`）流式 AI 对话（含 15 秒 `: heartbeat` 保活、深度思考 `reasoning` 块、正文 `text` 块与 Token `usage` 统计）。
+- **说明**：执行三协议统一的 SSE（`text/event-stream`）流式 AI 对话（含 15 秒 `: heartbeat` 保活、深度思考 `reasoning` 块、正文 `text` 块与 Token `usage` 统计；进入流式前对非空 `profile.baseUrl` 执行 SSRF 校验，拦截时返回 HTTP `400`）。
 - **Request**：同 `AiChatBody`
 - **Response**：`200 text/event-stream; charset=UTF-8`
   ```ts
@@ -1099,6 +1102,7 @@ interface AiProviderProfile {
   // data: {"error": string}
   // data: [DONE]
   ```
+  - 错误码：`400` (`{ error: "Missing provider or profileId" | "AI Settings not configured..." | "Forbidden baseUrl: SSRF protection blocked access" }`)
 
 ### `GET /api/events/{id}/ai-threads`
 - **说明**：赛事成员获取本人在该赛事下的 AI 战术会话线程摘要列表（若无线程但有旧版 `ai_chat_sessions` 记录则自动迁移生成）。
@@ -1202,9 +1206,10 @@ interface AiProviderProfile {
 - **说明**：JCEF 拦截前端所有 `console.log / warn / error` 输出，自动格式化为 `[<ISO_LOCAL_DATE_TIME>] [Frontend-Console] (<source>:<line>) <message>` 并追加落盘至桌面端 `<logDir>/scoutingpro_*.log`（`<logDir>` 解析规则见 `§14`）。
 
 ### `JCEF Bridge: CefDownloadHandler.onBeforeDownload`
-- **说明**：前端触发文件下载（如 CSV 导出、`.info` 离线同步包下载）时，JCEF 自动在 Swing EDT 线程弹出原生 `JFileChooser` 保存对话框，填入 `suggestedName` 并写入用户选定的本地路径。
+- **说明**：前端触发文件下载（如 `.csv` 导出、`.info` 离线同步包、`.event` 赛事配置包、`.md` AI 战报导出）时，JCEF 自动在 Swing EDT 线程弹出原生 `JFileChooser` 保存对话框，填入 `suggestedName` 并写入用户选定的本地路径。
 
-### `JCEF Profile & Bundle Storage`（目录隔离与原生库缓存）
+### `JCEF & Javalin Network / Profile / Bundle Storage`（端口、请求上限、目录隔离与原生库缓存）
+- **HTTP 请求体上限与端口开孔**：Javalin `config.http.maxRequestSize = 15_000_000L`（15 MB，支持移动端高清 Base64 照片上传）；JCEF 锁定 `webrtc.udp_port_range=50000-50099`，后台 `PortForwardingService` 在真实物理网卡上以 12 秒有界预算异步探测 UPnP IGDv1/v2（含 `WANIPv6FirewallControl:1`）、NAT-PMP、PCP，为 `50000-50009/UDP` 申请短租约映射（`<= 600s`，退出时自动清理）。
 - **Profile 隔离（`<dataDir>/jcef_profile*`）**：`Main.resolveJcefProfileDir()` 优先尝试锁定持久化主目录 `<dataDir>/jcef_profile`（通过 Chromium `lockfile` + `.instance.lock`）；若主目录已被运行中实例占用（多开场景），依次探测 `<dataDir>/jcef_profile_2` .. `jcef_profile_10`；全部占用时回退至 `java.io.tmpdir/scoutingpro-jcef-<timestamp>`（窗口关闭时自动递归删除，持久化目录保留）。
 - **原生二进制缓存**：`Main.ensureJcefBundle()` 固定使用 `~/.scoutingpro27/jcef-bundle`（不受 `--data-dir` 影响；Windows 防火墙放行规则 `ScoutingPro27 App JCEF` 指向其中的 `jcef_helper.exe`）。
 
@@ -1233,6 +1238,7 @@ interface AiProviderProfile {
   - 若环境变量 `DB_URL` 非空，直接返回该值（用于 E2E / 外部连接覆盖）。
   - 否则将 `resolveAppDbFile()` 路径中的 `\` 归一化为 `/`，默认构造 `jdbc:h2:<dbPath>;AUTO_SERVER=TRUE;LOCK_TIMEOUT=15000;AUTO_RECONNECT=TRUE`；若启用 `--no-auto-server` / `-Dscouting.noAutoServer=true` / `SCOUTING_NO_AUTO_SERVER=true`，则构造 `jdbc:h2:<dbPath>;AUTO_SERVER=FALSE;LOCK_TIMEOUT=15000`。
   - `AppConfig` 静态初始化块（及 `Main.initAndRun`）在未预设 `h2.bindAddress` 时强制设置为 `127.0.0.1`，防止 H2 `AUTO_SERVER` 绑定至 VPN/TUN 虚拟网卡阻塞本地进程通信。
+  - **Schema 迁移与启动期幂等自愈**：启动时依次执行 `Flyway.locations("classpath:db")`（`V1`–`V9`，含 `V8` Custom TURN + CRDT 与 `V9` AI Copilot 配置/会话表），随后执行 `CrdtProjectionService.ensureCrdtSchema(jdbi)`、`AiRoutes.ensureAiCopilotSchema(jdbi)` 与 `UserDeterministicIdMigrator.migrate(jdbi)` 保障老库幂等升级。
 - **`<dataDir>` 内标准子路径清单**：
   - `app_data.mv.db`（H2 数据库文件）、`jwt.secret`（HMAC-SHA256 密钥）、`master.key`（AES-256 主密钥）、`pit_photos/{eventId}/{key}.webp`、`jcef_profile`（及多开 `jcef_profile_2..10`）。
 
@@ -1259,3 +1265,6 @@ interface AiProviderProfile {
 | `SCOUTING_ENV` / `APP_ENV` / `-Dscouting.env` / `-Dapp.env` | 环境变量 / JVM 属性 | 显式覆盖运行环境（`DEV` / `PROD` / `TEST`）。 |
 | `ENABLE_TEST_CLEANUP` / `-DENABLE_TEST_CLEANUP` | 环境变量 / JVM 属性 | 设为 `"true"` 时注册 `/api/test/cleanup` 与 `/api/test/shutdown`（并加入 `/api/test/shutdown` 免鉴权白名单），同时跳过 Windows 自动防火墙检测。 |
 | `SKIP_FIREWALL_CHECK` / `-DSKIP_FIREWALL_CHECK` | 环境变量 / JVM 属性 | 设为 `"true"` 时跳过 Windows 启动防火墙检测与 UAC 提权弹窗（不注册测试接口）。 |
+| `FTC_API_BASE_URL` / `-Dftc.api.base.url` | 环境变量 / JVM 属性 | 覆盖 FTC 官方 API v2.0 基准地址（默认 `https://ftc-api.firstinspires.org`）。 |
+| `FTC_API_USER` / `-Dftc.api.user` | 环境变量 / JVM 属性 | 覆盖内置 FTC 官方 API Basic Auth 用户名。 |
+| `FTC_API_TOKEN` / `-Dftc.api.token` | 环境变量 / JVM 属性 | 覆盖内置 FTC 官方 API Basic Auth Token。 |
