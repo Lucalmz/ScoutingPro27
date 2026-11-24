@@ -809,6 +809,7 @@ export interface AiChatMessage {
   usage?: AiTokenUsage
   durationMs?: number
   contextSummary?: string
+  viaVoice?: boolean
   stopped?: boolean
   error?: string
 }

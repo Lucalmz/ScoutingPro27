@@ -14,6 +14,9 @@ const props = defineProps<{
   disabled?: boolean
   knownTeams: KnownTeamOption[]
   activeProfileLabel?: string
+  voiceSupported?: boolean
+  voiceActive?: boolean
+  voiceTooltip?: string
 }>()
 
 const emit = defineEmits<{
@@ -21,6 +24,7 @@ const emit = defineEmits<{
   send: [text: string]
   stop: []
   addFocusTeam: [teamNumber: number]
+  startVoice: []
 }>()
 
 const { t, locale } = useI18n()
@@ -214,17 +218,33 @@ function handleSendClick() {
           {{ t('ai.composer_shortcut_hint') }}
         </span>
 
-        <button
-          type="button"
-          class="btn-send-stop"
-          :class="{ stop: isStreaming }"
-          :disabled="!isStreaming && (!modelValue.trim() || disabled)"
-          @click="handleSendClick"
-          :title="isStreaming ? t('ai.btn_stop') : t('ai.btn_send')"
-        >
-          <span class="material-icons">{{ isStreaming ? 'stop_circle' : 'arrow_upward' }}</span>
-          <span>{{ isStreaming ? t('ai.btn_stop') : t('ai.btn_send') }}</span>
-        </button>
+        <div class="composer-actions">
+          <button
+            v-if="voiceSupported !== false"
+            type="button"
+            class="btn-voice-launch"
+            :class="{ active: voiceActive }"
+            :disabled="disabled"
+            :aria-label="voiceTooltip || t('ai.voice.btn_start')"
+            :title="voiceTooltip || t('ai.voice.btn_start')"
+            @click="emit('startVoice')"
+          >
+            <span class="material-icons" aria-hidden="true">graphic_eq</span>
+            <span>{{ voiceActive ? t('ai.voice.btn_live_active') : t('ai.voice.btn_short') }}</span>
+          </button>
+
+          <button
+            type="button"
+            class="btn-send-stop"
+            :class="{ stop: isStreaming }"
+            :disabled="!isStreaming && (!modelValue.trim() || disabled)"
+            @click="handleSendClick"
+            :title="isStreaming ? t('ai.btn_stop') : t('ai.btn_send')"
+          >
+            <span class="material-icons">{{ isStreaming ? 'stop_circle' : 'arrow_upward' }}</span>
+            <span>{{ isStreaming ? t('ai.btn_stop') : t('ai.btn_send') }}</span>
+          </button>
+        </div>
       </div>
     </div>
   </div>
@@ -357,6 +377,44 @@ function handleSendClick() {
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
+}
+
+.composer-actions {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  flex-shrink: 0;
+}
+
+.btn-voice-launch {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 5px 10px;
+  border-radius: 8px;
+  background: var(--status-ai-bg);
+  color: var(--status-ai);
+  border: 1px solid var(--status-ai-border);
+  font-size: 12px;
+  font-weight: 700;
+  cursor: pointer;
+  flex-shrink: 0;
+  transition: border-color 0.15s ease, background-color 0.15s ease;
+}
+
+.btn-voice-launch:hover:not(:disabled),
+.btn-voice-launch.active {
+  border-color: var(--status-ai);
+  background: color-mix(in srgb, var(--status-ai) 22%, var(--surface-elevated));
+}
+
+.btn-voice-launch:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+
+.btn-voice-launch .material-icons {
+  font-size: 16px;
 }
 
 .btn-send-stop {

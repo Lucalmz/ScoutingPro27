@@ -5,6 +5,7 @@ import { useToastStore } from '@/stores/toast'
 import type { AiChatMessage } from '@/types'
 import { renderMarkdown } from '@/utils/markdown'
 import { applyTeamChipsToHtml } from '@/components/ai/teamMatcher'
+import { StreamingSpeechSynthesizer } from '@/components/ai/voice/audioEngine'
 
 const props = defineProps<{
   message: AiChatMessage
@@ -24,8 +25,26 @@ const emit = defineEmits<{
   sendFollowUp: [prompt: string]
 }>()
 
-const { t } = useI18n()
+const { t, locale } = useI18n()
 const toastStore = useToastStore()
+
+const isSpeakingAloud = ref(false)
+const canSpeakAloud = computed(() => typeof window !== 'undefined' && 'speechSynthesis' in window)
+const localTts = new StreamingSpeechSynthesizer({
+  locale: locale.value,
+  onSpeakingChange: val => {
+    isSpeakingAloud.value = val
+  }
+})
+
+function toggleReadAloud() {
+  if (isSpeakingAloud.value) {
+    localTts.stop()
+    return
+  }
+  localTts.setLocale(locale.value)
+  localTts.speakText(props.message.content || '')
+}
 
 // Thinking panel toggle + live elapsed timer while reasoning streams
 const hasAutoCollapsed = ref(false)
@@ -69,6 +88,7 @@ watch(
 
 onUnmounted(() => {
   if (thinkingTimer) clearInterval(thinkingTimer)
+  localTts.stop()
 })
 
 const displayThinkingSec = computed(() => {
@@ -213,6 +233,10 @@ const durationText = computed(() => {
       <span v-if="message.role === 'assistant' && message.modelName" class="msg-model-pill">
         {{ message.modelName }}
       </span>
+      <span v-if="message.viaVoice" class="msg-voice-pill">
+        <span class="material-icons" aria-hidden="true">mic</span>
+        <span>{{ t('ai.voice.badge_voice') }}</span>
+      </span>
       <span v-if="message.contextSummary && message.role === 'assistant'" class="msg-ctx-pill">
         · {{ message.contextSummary }}
       </span>
@@ -322,6 +346,18 @@ const durationText = computed(() => {
           @click="copyWholeMessage"
         >
           <span class="material-icons">{{ copied ? 'check' : 'content_copy' }}</span>
+        </button>
+        <button
+          v-if="canSpeakAloud && message.role === 'assistant' && message.content"
+          type="button"
+          class="btn-msg-act"
+          :class="{ speaking: isSpeakingAloud }"
+          :aria-pressed="isSpeakingAloud"
+          :aria-label="isSpeakingAloud ? t('ai.voice.read_aloud_stop') : t('ai.voice.read_aloud')"
+          :title="isSpeakingAloud ? t('ai.voice.read_aloud_stop') : t('ai.voice.read_aloud')"
+          @click="toggleReadAloud"
+        >
+          <span class="material-icons" aria-hidden="true">{{ isSpeakingAloud ? 'stop_circle' : 'volume_up' }}</span>
         </button>
         <button
           v-if="message.role === 'assistant'"

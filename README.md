@@ -101,7 +101,7 @@
     - **ECDSA (P-256 / SHA-256)**：作者设备持久化签名密钥对、正赛记录写时签名 (`authorSig`) 与 Host 背书成员公钥绑定表 (`member_identities` `hostSig`) 双重验权
     - **PBKDF2-HMAC-SHA256 (100,000 次迭代)**：房间信令全载荷签名（含非 HTTPS 局域网纯 JS Midstate 加速回退）+ 5,000 容量 `NonceLruCache` 防重放 + 4 位 **SAS 短认证码** + **TOFU** 设备信任库
 - **多协议 AI Copilot 工作台与离线存储渲染**：
-  - **AI Copilot 侧边停靠工作台 (`Alt+I`)**：原生支持 **OpenAI / Gemini / Anthropic** 三大流派、多配置档案、多会话线程、SSE 思考/正文/Usage 拆流、5 种 FTC 战术人设与 5 条 `/` 快捷指令（`@队号` 补全 + 可点击队号芯片）
+  - **AI Copilot 侧边停靠工作台 (`Alt+I`)**：原生支持 **OpenAI / Gemini / Anthropic** 三大流派、多配置档案、多会话线程、SSE 思考/正文/Usage 拆流、5 种 FTC 战术人设、5 条 `/` 快捷指令（`@队号` 补全 + 可点击队号芯片），以及 **语音直接交流**（Gemini Live / OpenAI Realtime 原生全双工实时语音 + 全模型通用轮次语音与单条朗读）
   - **PWA & Service Worker (`vite-plugin-pwa ^1.3.0` / Workbox)**：57 项静态资源全量预缓存，断网刷新秒开
   - **IndexedDB**：CRDT 状态快照持久化 (`sp27_crdt_${eventId}`)、设备公私钥保险箱 (`scoutingpro_security_v1`)、移动端高清 WebP 照片离线队列 (`mobilePhotoCache.ts`)
   - **二维码与富文本**：`qrcode ^1.5.4` (动态入房码生成)、`jsqr ^1.4.0` (纯前端相机扫码)、`markdown-it ^15.0.0` + `highlight.js ^11.12.0` + `dompurify ^3.4.14` (AI 军师流式 Markdown 安全渲染)
@@ -110,7 +110,7 @@
 ### 2.2 电脑主机后端与原生桌面容器 (`Backend/`)
 - **语言与Web 服务底座**：
   - **Java 21 (LTS)**
-  - **Javalin `7.2.3`** (内置 Jetty 12 高性能异步 HTTP / RESTful API / WebSocket 局域网信令桥 / SSE AI 流式代理)
+  - **Javalin `7.2.3`** (内置 Jetty 12 高性能异步 HTTP / RESTful API / WebSocket 局域网信令桥 / SSE AI 流式代理 / `WS /ws/ai/voice` 实时语音中继与 `/api/ai/audio/transcribe` 语音转写代理)
   - **Gson `2.11.0`** (JSON 序列化与 TinyBase `MergeableContent` 树解析)
   - **SLF4J Simple `2.0.17`** (毫秒级双流控制台 + 独立实例文件日志系统)
 - **数据库、连接池与 Schema 迁移**：
@@ -126,8 +126,8 @@
   - **Maven Shade Plugin `3.6.0`** (构建单文件可执行 Fat JAR `ScoutingPro27.jar`) + GitHub Actions 自动打包 Windows `.msi` / macOS Apple Silicon `.dmg`
 
 ### 2.3 自动化测试与质量工程栈
-- **前端单测**：**Vitest `^2.1.9`** + **`@vue/test-utils ^2.4.11`** + **`@pinia/testing ^0.1.7`** + **`happy-dom ^15.11.7`** (**95 个测试文件 / 811 项单测**)
-- **后端单测**：**JUnit Jupiter `5.10.2`** + **AssertJ `3.27.7`** + **Javalin TestTools `7.2.3`** (**39 个测试类 / 199 项单测**)
+- **前端单测**：**Vitest `^2.1.9`** + **`@vue/test-utils ^2.4.11`** + **`@pinia/testing ^0.1.7`** + **`happy-dom ^15.11.7`** (**96 个测试文件 / 817 项单测**)
+- **后端单测**：**JUnit Jupiter `5.10.2`** + **AssertJ `3.27.7`** + **Javalin TestTools `7.2.3`** (**40 个测试类 / 204 项单测**)
 - **全栈极端容灾与交互 E2E**：**Puppeteer `^25.5.0`** + 内存级 MQTT-over-WS Broker + 多 JVM 独立临时 H2 集群管理器 (`E2EClusterManager`) (**4 个核心 E2E 套件**：12 步跨机灾难恢复 `multi-client.e2e.js`、移动端扫码 `qr-mobile-join.e2e.js`、收件箱离线投递 `inbox-lifecycle.e2e.js`、全交互闭环 `comprehensive-interactive.e2e.js`；另有 `frontend/generators/` 负责手册截图/PDF 生成与评委演示) + GitHub Actions CI 门禁 (`.github/workflows/ci.yml` / `build-installer.yml` / `deploy-pwa.yml`)
 
 ---
@@ -213,6 +213,9 @@ sequenceDiagram
 ### 3.4 多协议 AI Copilot 战术工作台 (V9)
 - **三流派原生协议与多配置档案 (`ai_provider_profiles`)**：支持 **OpenAI / GPT 兼容**（含 DeepSeek / Kimi / 硅基流动 / 本地免 Key Ollama）、**Google Gemini (`v1beta` 含 `-latest` 别名与反代)** 与 **Anthropic Claude (`x-api-key`)**；API Key 使用主机 AES-256-GCM 加密存储并严格脱敏展示，内置 SSRF 私网地址拦截 (`AiUrlGuard`) 与在线模型探测 (`GET/POST /api/ai/test-connection`)。
 - **持久化停靠侧栏与多会话线程 (`ai_chat_threads`)**：桌面端点击顶栏 `AI 助手` 或按 `Alt+I` 展开右侧停靠工作台，切换排名/白板页签不断流；支持 5 种 FTC 战术人设（`联队策略总监` / `赛前战术教练` / `吹牛审计侦探` / `Pit 15秒极简速报` / `自定义提示词`）、5 条 `/` 指令（`/pick` `/match` `/compare` `/audit` `/brief`）、`@队号` 聚焦、SSE 思考过程 (`reasoning`) 与正文 (`text`) 折叠分离及一键导出 Markdown 战报。
+- **语音直接交流与双档实时音频架构**：
+  - **原生全双工实时语音（Gemini Live / OpenAI Realtime）**：通过后端 `/ws/ai/voice` 全双工 WebSocket 中继直连 Google Gemini Live（默认 `gemini-3.8-live`，支持 `gemini-3.8-live-extended-thinking` 与 `Kore`/`Puck`/`Zephyr`/`Aoede`/`Charon`/`Fenrir` 等多音色）与 OpenAI Realtime（默认 `gpt-realtime`，GA 与 `*preview*` 双协议兼容），复用主机 AES-256-GCM 密钥与 `AiUrlGuard` SSRF 校验；前端基于 `AudioWorklet` + 无缝 PCM 播放器实现免提自动收音 (VAD)、随时插话打断 (Barge-in)、按住说话 (PTT / 空格键)、最小化悬浮通话条与实时双语字幕自动落盘至当前会话线程。
+  - **通用轮次语音与单条朗读（全模型覆盖）**：针对 DeepSeek / Claude / Ollama / Groq / SiliconFlow 等非原生实时语音模型，提供按住说话 → `POST /api/ai/audio/transcribe` 后端语音识别（自动或手动借用已保存的 Gemini / OpenAI / Groq / SiliconFlow 档案作为 STT 引擎，桌面端免依赖离线 Web Speech）+ AI 流式回复分句自动朗读，且任意历史 AI 消息均支持单条点击 🔊 朗读。
 
 ---
 
@@ -243,10 +246,10 @@ sequenceDiagram
 cd frontend
 npm run type-check
 
-# 2. 前端 Vitest 单元测试套件 (95 个测试文件 / 811 项测试 100% 通过)
+# 2. 前端 Vitest 单元测试套件 (96 个测试文件 / 817 项测试 100% 通过)
 npm test
 
-# 3. 后端 Maven JUnit 5 测试套件 (39 个测试类 / 199 项测试 100% 通过，含 Flyway V1-V9 与 CRDT 脏行投影)
+# 3. 后端 Maven JUnit 5 测试套件 (40 个测试类 / 204 项测试 100% 通过，含 Flyway V1-V9 与 CRDT 脏行投影)
 cd ../Backend
 mvn test
 

@@ -358,6 +358,19 @@ Before Alliance Selection, instead of manually scanning dozens of rows, bind an 
    - Type **`@`** to tag and focus specific teams, **`/`** for 5 quick analysis commands (`/pick`, `/match`, `/compare`, `/audit`, `/brief`), or ask naturally—e.g., `"Compare #27570 and #11115 using our live data: whose Predict Cycle Time and Swarm RP look stronger for alliance selection?"`
    - Reasoning models' thinking tokens automatically collapse into a dedicated thinking drawer separate from the final answer; any **`#team`** badge supports hover preview and click-to-open Team Detail Drawer, plus multi-thread history and 1-click Markdown export.
 
+### Step 3: Start a Direct Voice Call with AI Copilot
+
+1. **Click the `Voice` button next to Send in the composer** to start talking to AI Copilot without leaving your live event data. Click **`Minimize to bar`** anytime to keep chatting hands-free while browsing Rankings, Schedule, or the Whiteboard.
+2. **Google Gemini / OpenAI Profiles (Native Full-Duplex Realtime Voice)**:
+   - With **Google Gemini** (defaults to `gemini-3.8-live`, with `gemini-3.8-live-extended-thinking` and selectable **`Voice`** options like `Kore`, `Puck`, `Zephyr`, `Aoede`, `Charon`, and `Fenrir` in the call settings) or **OpenAI** (defaults to `gpt-realtime`), ScoutingPro 27 automatically opens a low-latency full-duplex live audio channel through the backend.
+   - Starts in **`Hands-Free VAD`** mode by default: just speak naturally and interrupt AI replies mid-sentence by talking or clicking **`Interrupt`**. In noisy bleachers, switch anytime to **`Push-to-Talk`** (hold the on-screen button or **Spacebar**, release to send).
+   - Live speech captions are saved automatically into the active chat thread with a **`Voice`** badge.
+3. **DeepSeek / Claude / Ollama & Other Providers (Universal Turn-Based Voice + Read Aloud)**:
+   - On models without a native realtime audio endpoint, the call switches cleanly to turn-based Voice Mode: hold to speak and the backend transcribes your audio via **`Speech Recognition (STT)`** (automatically or manually borrowing any saved Gemini, OpenAI, Groq, or SiliconFlow profile so desktop clients never stall on offline Web Speech), then reads streamed reply sentences aloud in real time.
+   - **Listen to any saved message**: every AI response card also includes a **`Read aloud`** (🔊) toggle button.
+4. **Microphone Access Tip**:
+   - The native desktop app accesses your microphone directly; when opening from a phone browser over LAN, mobile browsers require `HTTPS` or `localhost` to permit microphone capture.
+
 ---
 
 ## Chapter 14: How to Add & Manage Custom Fields

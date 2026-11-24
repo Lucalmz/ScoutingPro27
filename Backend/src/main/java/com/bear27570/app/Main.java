@@ -682,6 +682,11 @@ public class Main {
     private static Javalin createJavalinApp(ApiRoutes apiRoutes) {
         return Javalin.create(config -> {
             config.http.maxRequestSize = 15_000_000L; // 允许最大 15MB 请求体（支持移动端多张高清特写照片 Base64 批量回传）
+            config.jetty.modifyWebSocketServletFactory(factory -> {
+                factory.setMaxTextMessageSize(2 * 1024 * 1024);
+                factory.setMaxBinaryMessageSize(2 * 1024 * 1024);
+                factory.setIdleTimeout(java.time.Duration.ofMinutes(15));
+            });
             config.staticFiles.add(staticFiles -> {
                 staticFiles.hostedPath = "/";
                 staticFiles.directory = "/public";

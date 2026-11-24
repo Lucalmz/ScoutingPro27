@@ -93,15 +93,31 @@ public final class AiUrlGuard {
     }
 
     public static boolean isSafeUrl(String urlStr) {
+        return isSafeUrlWithSchemes(urlStr, "http", "https");
+    }
+
+    public static boolean isSafeWebSocketUrl(String urlStr) {
+        return isSafeUrlWithSchemes(urlStr, "ws", "wss");
+    }
+
+    private static boolean isSafeUrlWithSchemes(String urlStr, String schemeA, String schemeB) {
         if (urlStr == null || urlStr.isBlank()) return false;
         try {
             URI uri = new URI(urlStr.trim());
             String scheme = uri.getScheme();
             if (scheme == null) return false;
             scheme = scheme.toLowerCase(Locale.ROOT);
-            if (!scheme.equals("http") && !scheme.equals("https")) {
+            if (!scheme.equals(schemeA) && !scheme.equals(schemeB)) {
                 return false;
             }
+            return isSafeHost(uri);
+        } catch (Exception e) {
+            return false;
+        }
+    }
+
+    private static boolean isSafeHost(URI uri) {
+        try {
             String host = uri.getHost();
             if (host == null || host.isBlank()) return false;
             host = host.toLowerCase(Locale.ROOT);

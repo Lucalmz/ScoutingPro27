@@ -52,6 +52,7 @@ public class ApiRoutes {
         return t;
     });
     private final ScheduledThreadPoolExecutor heartbeatScheduler = createHeartbeatScheduler();
+    private volatile AiRoutes aiRoutes;
     private volatile Runnable shutdownCallback;
 
     public void setShutdownCallback(Runnable shutdownCallback) {
@@ -96,6 +97,9 @@ public class ApiRoutes {
     }
 
     public void shutdown() {
+        if (aiRoutes != null) {
+            aiRoutes.shutdown();
+        }
         gcScheduler.shutdownNow();
         heartbeatScheduler.shutdownNow();
     }
@@ -196,7 +200,8 @@ public class ApiRoutes {
         new PitScoutRoutes(jdbi, gson).register(routes);
         new CustomFieldRoutes(jdbi, gson).register(routes);
         new CrdtRoutes(jdbi, gson).register(routes);
-        new AiRoutes(jdbi, gson, heartbeatScheduler).register(routes);
+        this.aiRoutes = new AiRoutes(jdbi, gson, heartbeatScheduler);
+        this.aiRoutes.register(routes);
 
         // ==================== Test Cleanup & Shutdown ====================
         if (isTestCleanupEnabled()) {

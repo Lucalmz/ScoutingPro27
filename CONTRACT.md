@@ -8,7 +8,7 @@
 >   - `GET /api/events/{eventId}/pit/photos/{key}`（供原生 `<img>` 标签加载）
 >   - `POST /api/test/cleanup`（鉴权过滤器无条件放行；仅在 `ENABLE_TEST_CLEANUP=true` 环境变量或 `-DENABLE_TEST_CLEANUP=true` 时注册路由，未开启时返回 `404`）
 >   - `POST /api/test/shutdown`（仅在 `ENABLE_TEST_CLEANUP=true` 环境变量或 `-DENABLE_TEST_CLEANUP=true` 时注册路由并加入免鉴权白名单；未开启时无 Token 返回 `401`，携带有效 Token 返回 `404`）
->   - `WS /ws/signal/{room}`
+>   - `WS /ws/signal/{room}`、`WS /ws/ai/voice`（`/ws/ai/voice` 采用首帧 `start.token` JWT 鉴权，10 秒超时断开）
 > - **确定性用户 ID 自愈头**：当旧 UUID Token 对应用户已迁移为确定性 ID 时，后端自动按 `username` 匹配并在响应头下发 `X-Refreshed-Token: <new_jwt_token>`。
 > - **全局异常映射**：非法 JSON 体返回 `400 ("Invalid JSON body")`；未捕获异常返回 `500 ({ error: string })`。
 
@@ -950,9 +950,9 @@ interface CustomFieldDefinition {
 
 ---
 
-## 12. AI Copilot 配置、连通性探测与多会话模块 (`AiRoutes` / `routes/ai/*`)
+## 12. AI Copilot 配置、连通性探测、实时语音与多会话模块 (`AiRoutes` / `routes/ai/*`)
 
-> 路由入口由 `AiRoutes` 协调注册，具体实现拆分为 `AiProfileRoutes`（配置档案与旧版 `/ai-settings`）、`AiStreamAndProbeRoutes`（连通性探测与流式/非流式对话）、`AiThreadRoutes`（多会话线程与旧版 `/ai-chat`）、`AiUrlGuard`（SSRF 校验与 Key 脱敏）及 `AiSchemaBootstrap`（幂等建表自愈）。
+> 路由入口由 `AiRoutes` 协调注册，具体实现拆分为 `AiProfileRoutes`（配置档案与旧版 `/ai-settings`）、`AiStreamAndProbeRoutes`（连通性探测与流式/非流式对话）、`AiThreadRoutes`（多会话线程与旧版 `/ai-chat`）、`AiVoiceRoutes`（全双工实时语音中继 `WS /ws/ai/voice` 与语音识别 `POST /api/ai/audio/transcribe`）、`AiUrlGuard`（HTTP/WS SSRF 校验与 Key 脱敏）及 `AiSchemaBootstrap`（幂等建表自愈）。
 
 ```ts
 interface AiProviderProfile {
@@ -1104,6 +1104,68 @@ interface AiProviderProfile {
   ```
   - 错误码：`400` (`{ error: "Missing provider or profileId" | "AI Settings not configured..." | "Forbidden baseUrl: SSRF protection blocked access" }`)
 
+### `WS /ws/ai/voice`
+- **说明**：AI Copilot 原生全双工实时语音中继通道（Jetty WS 单帧上限 `2 MB`、空闲超时 `15 min`，支持每 20s 自动 Ping 保活）。客户端建立连接后须在 `10s` 内发送首帧 `start` 完成 JWT 鉴权与档案绑定；后端在本地服务端解密 API Key，按档案协议自动路由至 Google Gemini Live (`BidiGenerateContent` v1beta，默认 `gemini-3.8-live`、16kHz PCM16 上行 / 24kHz PCM16 下行) 或 OpenAI Realtime (`/v1/realtime`，GA 默认 `gpt-realtime` / `*preview*` 兼容 `OpenAI-Beta: realtime=v1`，24kHz PCM16 上下行)，并复用 `AiProxyResolver` 与 `AiUrlGuard.isSafeUrl` / `isSafeWebSocketUrl` SSRF 防护。
+- **Client → Server JSON 帧**：
+  ```ts
+  type AiVoiceClientFrame =
+    | {
+        type: 'start';
+        token: string;
+        profileId?: string;
+        provider?: 'GEMINI' | 'OPENAI' | string;
+        model?: string;        // 覆盖语音模型（GEMINI 默认 gemini-3.8-live；OPENAI 默认 gpt-realtime）
+        voice?: string;        // 音色名称（GEMINI 默认 Kore；OPENAI 默认 alloy）
+        systemPrompt?: string; // 含赛事上下文与人设的完整系统提示词
+        history?: Array<{ role: 'user' | 'assistant' | 'model'; content: string }>; // 最多截取最近 12 轮 / 12,000 字符
+      }
+    | { type: 'audio'; data: string }            // Base64 Raw PCM16 Little-Endian Mono
+    | { type: 'audio_end'; commit?: boolean }    // 暂停拾音 / PTT 结束提交（默认 commit = true）
+    | { type: 'text'; text: string }             // 通话中静默补充文字指令
+    | { type: 'interrupt' }                      // 主动打断 AI 当前语音输出
+    | { type: 'stop' };                          // 主动结束并关闭会话
+  ```
+- **Server → Client JSON 帧**：
+  ```ts
+  type AiVoiceServerFrame =
+    | {
+        type: 'ready';
+        engine: 'gemini-live' | 'openai-realtime';
+        model: string;
+        voice: string;
+        inputSampleRate: 16000 | 24000;
+        outputSampleRate: 24000;
+      }
+    | { type: 'audio'; data: string; sampleRate: number; mimeType: string }
+    | { type: 'transcript'; role: 'user' | 'assistant'; text: string; interim: boolean; replace?: boolean; final?: boolean }
+    | { type: 'interrupted' }
+    | { type: 'status'; interactionStatus: 'IN_PROGRESS' | 'IDLE' | string }
+    | { type: 'turn_complete'; turnComplete?: boolean; generationComplete?: boolean; interactionStatus?: string }
+    | { type: 'go_away'; timeLeft?: string }
+    | { type: 'usage'; usage: { promptTokens: number; completionTokens: number; totalTokens: number; thoughtsTokens?: number } }
+    | { type: 'error'; code: string; message: string };
+  ```
+- **错误码 (`error.code`)**：`AUTH_TIMEOUT`、`UNAUTHORIZED`、`MISSING_PROFILE`、`PROFILE_NOT_FOUND`、`FORBIDDEN_URL`、`KEY_DECRYPT_FAILED`、`API_KEY_REQUIRED`、`UNSUPPORTED_PROTOCOL`、`UPSTREAM_CONNECT_FAILED`、`UPSTREAM_ERROR`、`UPSTREAM_WS_ERROR`、`NOT_STARTED`。
+
+### `POST /api/ai/audio/transcribe`
+- **说明**：统一语音识别（STT）后端接口（供不支持原生实时语音 WebSocket 的 DeepSeek / Claude / Ollama 等档案在轮次语音模式下调用，避免暴露 Key 与绕过桌面容器离线语音限制；音频解码上限 `10 MB`，并对 `profile.baseUrl` 执行 `AiUrlGuard.isSafeUrl` SSRF 校验）。
+  - `GEMINI`：向 `:generateContent` 发送 `inline_data` 音频做逐字转录（默认回退模型 `gemini-flash-latest`）。
+  - `OPENAI`：向 `<baseUrl>/audio/transcriptions` 发送 `multipart/form-data`（默认模型按厂商自动选择：Groq → `whisper-large-v3-turbo`、SiliconFlow → `FunAudioLLM/SenseVoiceSmall`、OpenAI 官方 → `gpt-4o-mini-transcribe`、其余兼容网关 → `whisper-1`）。
+  - `ANTHROPIC`：返回 `400`（协议不支持音频转录）。
+- **Request**：
+  ```ts
+  interface AiTranscribeBody {
+    profileId?: string; // profileId 与 provider 二选一必填
+    provider?: string;
+    audioBase64: string; // Base64 编码或 data:audio/...;base64,...（解码后 <= 10 MB）
+    mimeType?: string;   // 默认 'audio/wav'
+    language?: string;   // 可选语言提示（如 'zh' / 'en'）
+    model?: string;      // 可选覆盖识别模型
+  }
+  ```
+- **Response**：`{ text: string }`
+  - 错误码：`400` (`"Missing provider or profileId"` / `"audioBase64 is required"` / `"Invalid audioBase64 encoding"` / `"Audio payload exceeds 10 MB limit"` / `"Forbidden baseUrl: SSRF protection blocked access"` / `"Anthropic protocol does not support audio transcription"`), `502` (`{ error: string }`)
+
 ### `GET /api/events/{id}/ai-threads`
 - **说明**：赛事成员获取本人在该赛事下的 AI 战术会话线程摘要列表（若无线程但有旧版 `ai_chat_sessions` 记录则自动迁移生成）。
 - **Request**：`Path: { id: string }`
@@ -1209,7 +1271,7 @@ interface AiProviderProfile {
 - **说明**：前端触发文件下载（如 `.csv` 导出、`.info` 离线同步包、`.event` 赛事配置包、`.md` AI 战报导出）时，JCEF 自动在 Swing EDT 线程弹出原生 `JFileChooser` 保存对话框，填入 `suggestedName` 并写入用户选定的本地路径。
 
 ### `JCEF & Javalin Network / Profile / Bundle Storage`（端口、请求上限、目录隔离与原生库缓存）
-- **HTTP 请求体上限与端口开孔**：Javalin `config.http.maxRequestSize = 15_000_000L`（15 MB，支持移动端高清 Base64 照片上传）；JCEF 锁定 `webrtc.udp_port_range=50000-50099`，后台 `PortForwardingService` 在真实物理网卡上以 12 秒有界预算异步探测 UPnP IGDv1/v2（含 `WANIPv6FirewallControl:1`）、NAT-PMP、PCP，为 `50000-50009/UDP` 申请短租约映射（`<= 600s`，退出时自动清理）。
+- **HTTP 请求体上限与端口开孔**：Javalin `config.http.maxRequestSize = 15_000_000L`（15 MB，支持移动端高清 Base64 照片上传）；Jetty WebSocket 配置 `maxTextMessageSize = 2 MB`、`maxBinaryMessageSize = 2 MB`、`idleTimeout = 15 min`（支撑 `/ws/ai/voice` 携带大上下文启动与实时音频流）；JCEF 锁定 `webrtc.udp_port_range=50000-50099`，后台 `PortForwardingService` 在真实物理网卡上以 12 秒有界预算异步探测 UPnP IGDv1/v2（含 `WANIPv6FirewallControl:1`）、NAT-PMP、PCP，为 `50000-50009/UDP` 申请短租约映射（`<= 600s`，退出时自动清理）。
 - **Profile 隔离（`<dataDir>/jcef_profile*`）**：`Main.resolveJcefProfileDir()` 优先尝试锁定持久化主目录 `<dataDir>/jcef_profile`（通过 Chromium `lockfile` + `.instance.lock`）；若主目录已被运行中实例占用（多开场景），依次探测 `<dataDir>/jcef_profile_2` .. `jcef_profile_10`；全部占用时回退至 `java.io.tmpdir/scoutingpro-jcef-<timestamp>`（窗口关闭时自动递归删除，持久化目录保留）。
 - **原生二进制缓存**：`Main.ensureJcefBundle()` 固定使用 `~/.scoutingpro27/jcef-bundle`（不受 `--data-dir` 影响；Windows 防火墙放行规则 `ScoutingPro27 App JCEF` 指向其中的 `jcef_helper.exe`）。
 

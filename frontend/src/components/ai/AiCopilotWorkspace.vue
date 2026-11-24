@@ -29,6 +29,8 @@ import AiChatComposer, { type KnownTeamOption } from './AiChatComposer.vue'
 import AiModelQuickSwitcher from './workspace/AiModelQuickSwitcher.vue'
 import AiContextRibbon from './workspace/AiContextRibbon.vue'
 import AiTeamHoverCard, { type TeamHoverPreview } from './workspace/AiTeamHoverCard.vue'
+import AiVoiceCallOverlay from './voice/AiVoiceCallOverlay.vue'
+import { useAiVoiceSession } from './voice/useAiVoiceSession'
 
 const props = withDefaults(
   defineProps<{
@@ -206,6 +208,27 @@ function buildBriefContextLabel(): string | undefined {
     return contextConfig.value.focusTeams.map(n => `#${n}`).join(',')
   }
   return `${contextStats.value.trackedTeamsCount}T`
+}
+
+const voiceSession = useAiVoiceSession({
+  eventId: () => props.eventId,
+  activeThread,
+  buildEffectiveSystemPrompt,
+  buildBriefContextLabel
+})
+
+const voiceTooltip = computed(() => {
+  if (voiceSession.engine.value === 'gemini-live') return t('ai.voice.tooltip_gemini')
+  if (voiceSession.engine.value === 'openai-realtime') return t('ai.voice.tooltip_openai')
+  return t('ai.voice.tooltip_turn')
+})
+
+function handleStartOrFocusVoice() {
+  if (voiceSession.isActive.value) {
+    voiceSession.isMinimized.value = false
+    return
+  }
+  void voiceSession.startSession()
 }
 
 async function handleSend(rawText: string) {
@@ -423,6 +446,9 @@ watch(
 watch(
   () => props.eventId,
   async newEvtId => {
+    if (voiceSession.isActive.value) {
+      voiceSession.stopSession()
+    }
     if (newEvtId) {
       await aiStore.loadEventThreads(newEvtId)
     }
@@ -448,6 +474,7 @@ onMounted(async () => {
 })
 
 onUnmounted(() => {
+  voiceSession.stopSession()
   resizeObserver?.disconnect()
   void aiStore.flushPendingSaves()
 })
@@ -612,14 +639,61 @@ const activeProfileLabel = computed(() => {
       </div>
     </div>
 
+    <AiVoiceCallOverlay
+      :is-active="voiceSession.isActive.value"
+      :is-minimized="voiceSession.isMinimized.value"
+      :status="voiceSession.status.value"
+      :engine="voiceSession.engine.value"
+      :capability="voiceSession.capability.value"
+      :is-native-live="voiceSession.isNativeLive.value"
+      :input-mode="voiceSession.inputMode.value"
+      :is-muted="voiceSession.isMuted.value"
+      :is-ptt-holding="voiceSession.isPttHolding.value"
+      :input-level="voiceSession.inputLevel.value"
+      :output-level="voiceSession.outputLevel.value"
+      :elapsed-seconds="voiceSession.elapsedSeconds.value"
+      :selected-model="voiceSession.selectedModel.value"
+      :selected-voice="voiceSession.selectedVoice.value"
+      :stt-helper-profile-id="voiceSession.sttHelperProfileId.value"
+      :stt-helpers="voiceSession.sttHelpers.value"
+      :active-stt-profile="voiceSession.activeSttProfile.value"
+      :auto-speak-turn-voice="voiceSession.autoSpeakTurnVoice.value"
+      :force-open-ai-realtime="voiceSession.forceOpenAiRealtime.value"
+      :can-use-browser-speech-rec="voiceSession.canUseBrowserSpeechRec"
+      :live-user-transcript="voiceSession.liveUserTranscript.value"
+      :live-assistant-transcript="voiceSession.liveAssistantTranscript.value"
+      :last-completed-turn="voiceSession.lastCompletedTurn.value"
+      :error-message="voiceSession.errorMessage.value"
+      :go-away-warning="voiceSession.goAwayWarning.value"
+      @update:is-minimized="v => (voiceSession.isMinimized.value = v)"
+      @update:input-mode="v => (voiceSession.inputMode.value = v)"
+      @update:selected-model="v => (voiceSession.selectedModel.value = v)"
+      @update:selected-voice="v => (voiceSession.selectedVoice.value = v)"
+      @update:stt-helper-profile-id="v => (voiceSession.sttHelperProfileId.value = v)"
+      @update:auto-speak-turn-voice="v => (voiceSession.autoSpeakTurnVoice.value = v)"
+      @toggle-force-realtime="v => voiceSession.setForceOpenAiRealtime(v)"
+      @apply-and-reconnect="voiceSession.applySettingsAndReconnect()"
+      @retry="voiceSession.startSession()"
+      @stop="voiceSession.stopSession()"
+      @toggle-mute="voiceSession.toggleMute()"
+      @begin-ptt="voiceSession.beginPtt()"
+      @end-ptt="voiceSession.endPtt()"
+      @interrupt="voiceSession.interrupt()"
+      @send-text="txt => voiceSession.sendTextInCall(txt)"
+    />
+
     <AiChatComposer
       v-model="draftText"
       :is-streaming="isStreaming"
       :known-teams="knownTeamOptions"
       :active-profile-label="activeProfileLabel"
+      :voice-supported="true"
+      :voice-active="voiceSession.isActive.value"
+      :voice-tooltip="voiceTooltip"
       @send="handleSend"
       @stop="aiStore.stopStreaming(activeThread?.id)"
       @add-focus-team="addFocusTeam"
+      @start-voice="handleStartOrFocusVoice"
     />
 
     <AiTeamHoverCard v-if="hoverPreview" :preview="hoverPreview" />

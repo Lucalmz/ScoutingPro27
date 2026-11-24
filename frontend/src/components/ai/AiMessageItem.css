@@ -61,6 +61,22 @@
   color: var(--status-info);
 }
 
+.msg-voice-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+  font-size: 10px;
+  padding: 1px 6px;
+  border-radius: 999px;
+  background: var(--status-ai-bg);
+  border: 1px solid var(--status-ai-border);
+  color: var(--status-ai);
+}
+
+.msg-voice-pill .material-icons {
+  font-size: 11px;
+}
+
 /* Message Bubble / Card */
 .msg-bubble {
   max-width: 100%;
@@ -458,6 +474,10 @@
 
 .btn-msg-act.copied {
   color: var(--status-success);
+}
+
+.btn-msg-act.speaking {
+  color: var(--status-ai);
 }
 
 .btn-msg-act .material-icons {

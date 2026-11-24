@@ -100,14 +100,14 @@ ScoutingPro27 pairs a **Vue 3 + TypeScript 6 Offline-First PWA Frontend** with a
     - **ECDSA (P-256 / SHA-256)**: Persistent device signing keypair, write-time record signing (`authorSig`), and Host-countersigned `member_identities` (`hostSig`) dual verification
     - **PBKDF2-HMAC-SHA256 (100,000 iterations)**: Full-payload signaling authentication (with pure-JS midstate-accelerated HTTP LAN fallback) + 5,000-entry `NonceLruCache` replay defense + 4-digit **SAS** + **TOFU** trust store
 - **Multi-Protocol AI Copilot, Offline Storage & UI System**:
-  - **AI Copilot Workspace (`Alt+I`)**: Persistent side dock supporting **OpenAI / Gemini / Anthropic** protocols, multi-profile roster, multi-thread sessions, separated SSE `reasoning` / `text` / `usage` streams, 5 FTC personas & 5 `/` commands (`@team` completion + clickable team chips)
+  - **AI Copilot Workspace (`Alt+I`)**: Persistent side dock supporting **OpenAI / Gemini / Anthropic** protocols, multi-profile roster, multi-thread sessions, separated SSE `reasoning` / `text` / `usage` streams, 5 FTC personas & 5 `/` commands (`@team` completion + clickable team chips), plus **Direct Voice Conversation** (native full-duplex `Gemini Live` / `OpenAI Realtime` + universal turn-based voice & message read-aloud)
   - **PWA (`vite-plugin-pwa ^1.3.0` / Workbox)** & **IndexedDB** (`sp27_crdt_${eventId}`, `scoutingpro_security_v1`, offline WebP photo queue)
   - **QR & Rich Markdown**: `qrcode ^1.5.4`, `jsqr ^1.4.0`, `markdown-it ^15.0.0`, `highlight.js ^11.12.0`, `dompurify ^3.4.14`
   - **Design & Motion**: Cold Graphite Pit Wall token system (`#0B0E10` + `#39FF14`), bundled `Orbitron` / `Manrope` / `Noto Sans SC` variable fonts, CSS `linear()` spring physics, and 60fps Canvas 2D laser trajectory whiteboard
 
 ### 2.2 Desktop Host Backend & Native Container (`Backend/`)
 - **Runtime & Microservice Core**:
-  - **Java 21 (LTS)** & **Javalin `7.2.3`** (Jetty 12 async REST API, LAN WebSocket signaling relay, and SSE AI streaming proxy)
+  - **Java 21 (LTS)** & **Javalin `7.2.3`** (Jetty 12 async REST API, LAN WebSocket signaling relay, SSE AI streaming proxy, `WS /ws/ai/voice` realtime voice relay & `/api/ai/audio/transcribe` speech transcription proxy)
   - **Gson `2.11.0`** & **SLF4J Simple `2.0.17`** (Dual console + isolated per-instance file logging)
 - **Database, Connection Pool & Schema Migrations**:
   - **H2 Database `2.2.224`** (`127.0.0.1` loopback-bound `AUTO_SERVER` + multi-instance `--data-dir` / `--no-auto-server` isolation)
@@ -121,8 +121,8 @@ ScoutingPro27 pairs a **Vue 3 + TypeScript 6 Offline-First PWA Frontend** with a
   - **Maven Shade Plugin `3.6.0`** (Executable `ScoutingPro27.jar`) + GitHub Actions CI for Windows `.msi` & macOS Apple Silicon `.dmg`
 
 ### 2.3 Automated Testing & Verification Stack
-- **Frontend Unit Tests**: **Vitest `^2.1.9`** + **`@vue/test-utils ^2.4.11`** + **`@pinia/testing ^0.1.7`** + **`happy-dom ^15.11.7`** (**95 test files / 811 tests**)
-- **Backend Unit Tests**: **JUnit Jupiter `5.10.2`** + **AssertJ `3.27.7`** + **Javalin TestTools `7.2.3`** (**39 test classes / 199 tests**)
+- **Frontend Unit Tests**: **Vitest `^2.1.9`** + **`@vue/test-utils ^2.4.11`** + **`@pinia/testing ^0.1.7`** + **`happy-dom ^15.11.7`** (**96 test files / 817 tests**)
+- **Backend Unit Tests**: **JUnit Jupiter `5.10.2`** + **AssertJ `3.27.7`** + **Javalin TestTools `7.2.3`** (**40 test classes / 204 tests**)
 - **Full-Stack Disaster-Recovery & Interactive E2E**: **Puppeteer `^25.5.0`** + in-process MQTT-over-WS broker + multi-JVM isolated H2 `E2EClusterManager` (**4 canonical E2E suites**: `multi-client.e2e.js`, `qr-mobile-join.e2e.js`, `inbox-lifecycle.e2e.js`, `comprehensive-interactive.e2e.js`; `frontend/generators/` houses guide screenshot/PDF tools & judge demos) + GitHub Actions CI gates (`.github/workflows/ci.yml` / `build-installer.yml` / `deploy-pwa.yml`)
 
 ---
@@ -208,6 +208,9 @@ sequenceDiagram
 ### 3.4 Multi-Protocol AI Copilot Tactical Workspace (V9)
 - **Three Native Protocols & Multi-Profile Roster (`ai_provider_profiles`)**: Supports **OpenAI / GPT Compatible** (DeepSeek, Kimi, SiliconFlow, keyless local Ollama, etc.), **Google Gemini (`v1beta` with `-latest` aliases & custom proxies)**, and **Anthropic Claude (`x-api-key`)**. API keys are AES-256-GCM encrypted at rest, masked on read, protected by `AiUrlGuard` SSRF filtering, and live-probed via `GET/POST /api/ai/test-connection`.
 - **Persistent Dock & Multi-Thread Sessions (`ai_chat_threads`)**: Desktop top-bar `AI Copilot` (`Alt+I`) toggles a side dock alongside Rankings/Whiteboard without aborting SSE streams. Includes 5 FTC personas (`Alliance Strategist`, `Pre-Match Coach`, `Brag & Risk Auditor`, `15-Sec Pit Brief`, `Custom Prompt`), 5 slash commands (`/pick`, `/match`, `/compare`, `/audit`, `/brief`), `@team` focus pills, separated SSE `reasoning` / `text` / `usage` streaming, and 1-click Markdown export.
+- **Direct Voice Conversation (Two-Tier Realtime Audio)**:
+  - **Native Full-Duplex Realtime Voice (`Gemini Live` / `OpenAI Realtime`)**: Streams live microphone PCM audio and model audio over the backend `/ws/ai/voice` WebSocket relay directly to Google Gemini Live (default `gemini-3.8-live`, plus `gemini-3.8-live-extended-thinking` and selectable voices such as `Kore`/`Puck`/`Zephyr`/`Aoede`/`Charon`/`Fenrir`) or OpenAI Realtime (default `gpt-realtime`, supporting both GA and `*preview*` protocols), reusing AES-256-GCM encrypted keys and `AiUrlGuard` SSRF checks. Frontend `AudioWorklet` capture + gapless PCM playback provide hands-free VAD with instant barge-in, push-to-talk (button or Spacebar), a minimized floating call bar, and live transcripts auto-saved to the active thread.
+  - **Universal Turn-Based Voice & Read-Aloud (All Models)**: For non-realtime providers (`DeepSeek` / `Claude` / `Ollama` / `Groq` / `SiliconFlow`), press-and-hold transcribes via `POST /api/ai/audio/transcribe` (automatically or manually borrowing any saved Gemini / OpenAI / Groq / SiliconFlow profile as the STT engine, avoiding offline Web Speech gaps in JCEF desktop), speaks streamed sentence chunks aloud in real time, and adds a 🔊 Read Aloud button on every AI response card.
 
 ---
 
@@ -238,10 +241,10 @@ See [`CONTRACT.md`](CONTRACT.md) for full REST, WebSocket, CRDT, and JCEF contra
 cd frontend
 npm run type-check
 
-# 2. Frontend Vitest unit & component tests (95 test files / 811 tests passing)
+# 2. Frontend Vitest unit & component tests (96 test files / 817 tests passing)
 npm test
 
-# 3. Backend Maven JUnit 5 test suite (39 test classes / 199 tests passing, incl. Flyway V1-V9 & CRDT dirty-row projection)
+# 3. Backend Maven JUnit 5 test suite (40 test classes / 204 tests passing, incl. Flyway V1-V9 & CRDT dirty-row projection)
 cd ../Backend
 mvn test
 
