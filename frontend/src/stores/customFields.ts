@@ -64,6 +64,22 @@ export const useCustomFieldsStore = defineStore('customFields', () => {
         field.options = []
       }
     }
+    if (field.configJson && !field.config) {
+      try {
+        const parsed = JSON.parse(field.configJson)
+        if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) {
+          field.config = parsed
+        }
+      } catch {
+        field.config = undefined
+      }
+    }
+    if (!field.aggregationMode) {
+      field.aggregationMode = 'avg'
+    }
+    if (!field.displayFormat) {
+      field.displayFormat = 'number'
+    }
     return field
   }
 

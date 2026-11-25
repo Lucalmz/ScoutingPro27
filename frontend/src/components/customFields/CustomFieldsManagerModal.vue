@@ -8,6 +8,7 @@ import type {
 import { useCustomFieldsStore } from '@/stores/customFields'
 import { useToastStore } from '@/stores/toast'
 import { useConfirm } from '@/composables/useConfirm'
+import { FORMULA_TEMPLATES, findDependentFormulas, type FormulaFieldTemplate } from '@/utils/formula'
 import { hapticLight, hapticSuccess } from '@/utils/haptics'
 import CustomFieldBuilderForm from './CustomFieldBuilderForm.vue'
 
@@ -20,7 +21,7 @@ const emit = defineEmits<{
   (e: 'update:visible', val: boolean): void
 }>()
 
-const { t } = useI18n()
+const { t, te } = useI18n()
 const store = useCustomFieldsStore()
 const toast = useToastStore()
 const { showConfirm } = useConfirm()
@@ -28,10 +29,19 @@ const { showConfirm } = useConfirm()
 const activeTab = ref<CustomFieldTarget>('MATCH')
 const isEditing = ref(false)
 const isSaving = ref(false)
+const showTemplatesDrawer = ref(false)
 const editingField = ref<CustomFieldDefinition | null>(null)
+
+const allEventFields = computed(() => {
+  return store.getFields(props.eventId)
+})
 
 const targetFields = computed(() => {
   return store.getFields(props.eventId, activeTab.value)
+})
+
+const existingKeySet = computed(() => {
+  return new Set(allEventFields.value.map((f) => `${f.target}:${f.fieldKey}`))
 })
 
 watch(
@@ -40,6 +50,7 @@ watch(
     if (val && props.eventId) {
       store.fetchFields(props.eventId)
       isEditing.value = false
+      showTemplatesDrawer.value = false
       editingField.value = null
     }
   }
@@ -48,18 +59,51 @@ watch(
 function openCreateDrawer() {
   hapticLight()
   editingField.value = null
+  showTemplatesDrawer.value = false
   isEditing.value = true
 }
 
 function openEditDrawer(f: CustomFieldDefinition) {
   hapticLight()
   editingField.value = f
+  showTemplatesDrawer.value = false
   isEditing.value = true
 }
 
 function cancelDrawer() {
   isEditing.value = false
   editingField.value = null
+}
+
+async function importTemplate(tpl: FormulaFieldTemplate) {
+  isSaving.value = true
+  try {
+    const payload: Partial<CustomFieldDefinition> = {
+      eventId: props.eventId,
+      target: tpl.target,
+      phase: tpl.phase,
+      name: tpl.name,
+      description: tpl.description,
+      fieldKey: tpl.fieldKey,
+      fieldType: tpl.fieldType,
+      formulaExpr: tpl.formulaExpr ?? null,
+      aggregationMode: tpl.aggregationMode ?? 'avg',
+      displayFormat: tpl.displayFormat ?? 'number',
+      unit: tpl.unit ?? null,
+      configJson: tpl.config ? JSON.stringify(tpl.config) : null,
+      optionsJson: tpl.options ? JSON.stringify(tpl.options) : null,
+      isActive: true
+    }
+    await store.createField(props.eventId, payload)
+    activeTab.value = tpl.target
+    showTemplatesDrawer.value = false
+    toast.showToast(t('custom_fields.toast_template_imported', { name: tpl.name }), 'success')
+    hapticSuccess()
+  } catch (err: any) {
+    toast.showError(err, t('custom_fields.toast_save_failed'))
+  } finally {
+    isSaving.value = false
+  }
 }
 
 async function handleSaveField(payload: Partial<CustomFieldDefinition>, editingId: string | null) {
@@ -83,9 +127,17 @@ async function handleSaveField(payload: Partial<CustomFieldDefinition>, editingI
 }
 
 async function handleDeleteField(f: CustomFieldDefinition) {
+  const dependents = findDependentFormulas(f.fieldKey, allEventFields.value)
+  const impactedNames = dependents.map((d) => d.name).join(', ')
+  const message = dependents.length > 0
+    ? (te('custom_fields.delete_impacted_msg')
+      ? t('custom_fields.delete_impacted_msg', { name: f.name, formulas: impactedNames })
+      : `${t('custom_fields.delete_confirm_msg', { name: f.name })} (${impactedNames})`)
+    : t('custom_fields.delete_confirm_msg', { name: f.name })
+
   const ok = await showConfirm({
     title: t('custom_fields.delete_title'),
-    message: t('custom_fields.delete_confirm_msg', { name: f.name }),
+    message,
     confirmText: t('custom_fields.btn_delete_confirm'),
     cancelText: t('common.cancel'),
     type: 'danger'
@@ -101,7 +153,27 @@ async function handleDeleteField(f: CustomFieldDefinition) {
   }
 }
 
-function handleToggleActive(f: CustomFieldDefinition) {
+async function handleToggleActive(f: CustomFieldDefinition) {
+  if (f.isActive) {
+    const dependents = findDependentFormulas(f.fieldKey, allEventFields.value)
+    if (dependents.length > 0) {
+      const impactedNames = dependents.map((d) => d.name).join(', ')
+      const ok = await showConfirm({
+        title: te('custom_fields.deactivate_title') ? t('custom_fields.deactivate_title') : t('custom_fields.inactive_status'),
+        message: te('custom_fields.deactivate_impacted_msg')
+          ? t('custom_fields.deactivate_impacted_msg', {
+              name: f.name,
+              formulas: impactedNames
+            })
+          : `${f.name} (${impactedNames})`,
+        confirmText: t('common.confirm'),
+        cancelText: t('common.cancel'),
+        type: 'warning'
+      })
+      if (!ok) return
+    }
+  }
+
   store.toggleFieldActive(props.eventId, f.id).catch((err) => {
     toast.showError(err, t('custom_fields.toast_toggle_failed'))
   })
@@ -138,7 +210,7 @@ function closeModal() {
           type="button"
           class="cf-tab-btn"
           :class="{ 'is-active': activeTab === 'MATCH' }"
-          @click="activeTab = 'MATCH'; isEditing = false;"
+          @click="activeTab = 'MATCH'; isEditing = false; showTemplatesDrawer = false;"
         >
           <span class="material-icons">sports_score</span>
           {{ t('custom_fields.tab_match') }}
@@ -147,25 +219,72 @@ function closeModal() {
           type="button"
           class="cf-tab-btn"
           :class="{ 'is-active': activeTab === 'PIT' }"
-          @click="activeTab = 'PIT'; isEditing = false;"
+          @click="activeTab = 'PIT'; isEditing = false; showTemplatesDrawer = false;"
         >
           <span class="material-icons">engineering</span>
           {{ t('custom_fields.tab_pit') }}
+        </button>
+        <button
+          type="button"
+          class="cf-tab-btn"
+          :class="{ 'is-active': activeTab === 'TEAM' }"
+          @click="activeTab = 'TEAM'; isEditing = false; showTemplatesDrawer = false;"
+        >
+          <span class="material-icons">functions</span>
+          {{ t('custom_fields.tab_team') }}
         </button>
       </div>
 
       <!-- 字段管理主区域 -->
       <div class="cf-modal-body">
+        <!-- 模板导入抽屉 -->
+        <div v-if="showTemplatesDrawer" class="templates-drawer">
+          <div class="templates-header">
+            <h4>{{ t('custom_fields.templates_title') }}</h4>
+            <button type="button" class="btn-back" @click="showTemplatesDrawer = false">
+              <span class="material-icons">arrow_back</span>
+              {{ t('custom_fields.btn_back_list') }}
+            </button>
+          </div>
+          <div class="templates-list">
+            <div v-for="tpl in FORMULA_TEMPLATES" :key="tpl.id" class="template-card">
+              <div class="template-info">
+                <div class="template-title-row">
+                  <span class="template-name">{{ tpl.name }}</span>
+                  <span class="cf-badge-phase">{{ tpl.target }}</span>
+                  <span class="cf-badge-type">{{ tpl.fieldType }}</span>
+                </div>
+                <p class="template-desc">{{ tpl.description }}</p>
+                <code v-if="tpl.formulaExpr" class="template-expr">{{ tpl.formulaExpr }}</code>
+              </div>
+              <button
+                type="button"
+                class="btn-import-tpl"
+                :disabled="isSaving || existingKeySet.has(`${tpl.target}:${tpl.fieldKey}`)"
+                @click="importTemplate(tpl)"
+              >
+                {{ existingKeySet.has(`${tpl.target}:${tpl.fieldKey}`) ? t('custom_fields.template_added') : t('custom_fields.btn_import_template') }}
+              </button>
+            </div>
+          </div>
+        </div>
+
         <!-- 字段列表视图 -->
-        <div v-if="!isEditing" class="fields-list-view">
+        <div v-else-if="!isEditing" class="fields-list-view">
           <div class="list-action-bar">
             <span class="list-summary">
               {{ t('custom_fields.configured_count', { count: targetFields.length }) }}
             </span>
-            <button class="btn-create-field" @click="openCreateDrawer">
-              <span class="material-icons">add</span>
-              {{ t('custom_fields.btn_create') }}
-            </button>
+            <div class="action-bar-btns">
+              <button type="button" class="btn-templates" @click="showTemplatesDrawer = true">
+                <span class="material-icons">auto_awesome</span>
+                {{ t('custom_fields.btn_import_templates') }}
+              </button>
+              <button class="btn-create-field" @click="openCreateDrawer">
+                <span class="material-icons">add</span>
+                {{ t('custom_fields.btn_create') }}
+              </button>
+            </div>
           </div>
 
           <div v-if="targetFields.length === 0" class="cf-empty-state">
@@ -186,10 +305,15 @@ function closeModal() {
                   <span class="cf-card-title">{{ f.name }}</span>
                   <span class="cf-badge-phase">{{ t(`custom_fields.badge_phase_${f.phase}`) || f.phase }}</span>
                   <span class="cf-badge-type">{{ t(`custom_fields.badge_type_${f.fieldType}`) || f.fieldType }}</span>
+                  <span v-if="f.aggregationMode" class="cf-badge-agg">{{ f.aggregationMode }}</span>
+                  <span v-if="f.displayFormat && f.displayFormat !== 'number'" class="cf-badge-fmt">{{ f.displayFormat }}</span>
                   <span v-if="f.unit" class="cf-badge-unit">{{ f.unit }}</span>
                 </div>
                 <div class="cf-card-sub">
                   <code>{{ f.fieldKey }}</code>
+                  <span v-if="f.fieldType === 'formula' && f.formulaExpr" class="formula-expr-preview">
+                    {{ f.formulaExpr }}
+                  </span>
                   <span v-if="f.required" class="required-text">{{ t('custom_fields.badge_required') }}</span>
                 </div>
               </div>
@@ -246,6 +370,7 @@ function closeModal() {
           :active-tab="activeTab"
           :editing-field="editingField"
           :is-saving="isSaving"
+          :existing-fields="allEventFields"
           @save="handleSaveField"
           @cancel="cancelDrawer"
         />
@@ -268,7 +393,7 @@ function closeModal() {
 
 .cf-modal-card {
   width: 100%;
-  max-width: 760px;
+  max-width: 780px;
   max-height: 90vh;
   background: var(--card);
   border: 1px solid var(--border);
@@ -364,11 +489,33 @@ function closeModal() {
   justify-content: space-between;
   align-items: center;
   margin-bottom: 14px;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.action-bar-btns {
+  display: flex;
+  align-items: center;
+  gap: 8px;
 }
 
 .list-summary {
   font-size: 13px;
   color: var(--muted-foreground);
+}
+
+.btn-templates {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  background: var(--surface-elevated);
+  color: var(--foreground);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 8px 12px;
+  font-size: 13px;
+  font-weight: 600;
+  cursor: pointer;
 }
 
 .btn-create-field {
@@ -388,6 +535,99 @@ function closeModal() {
 
 .btn-create-field:hover {
   opacity: 0.9;
+}
+
+.templates-drawer {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.templates-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  border-bottom: 1px solid var(--border);
+  padding-bottom: 10px;
+}
+
+.templates-header h4 {
+  margin: 0;
+  font-size: 15px;
+}
+
+.btn-back {
+  background: transparent;
+  border: none;
+  color: var(--primary);
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 12px;
+}
+
+.templates-list {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.template-card {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 12px;
+  border-radius: 10px;
+  border: 1px solid var(--border);
+  background: var(--surface-recessed);
+}
+
+.template-info {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.template-title-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-wrap: wrap;
+}
+
+.template-name {
+  font-weight: 700;
+  font-size: 13px;
+}
+
+.template-desc {
+  margin: 0;
+  font-size: 12px;
+  color: var(--muted-foreground);
+}
+
+.template-expr {
+  font-size: 11px;
+  color: var(--primary);
+}
+
+.btn-import-tpl {
+  padding: 6px 12px;
+  border-radius: 8px;
+  border: 1px solid var(--primary);
+  background: var(--status-success-bg);
+  color: var(--primary);
+  font-size: 12px;
+  font-weight: 700;
+  cursor: pointer;
+  white-space: nowrap;
+}
+
+.btn-import-tpl:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
 }
 
 .cf-empty-state {
@@ -448,7 +688,7 @@ function closeModal() {
   color: var(--foreground);
 }
 
-.cf-badge-phase, .cf-badge-type, .cf-badge-unit {
+.cf-badge-phase, .cf-badge-type, .cf-badge-unit, .cf-badge-agg, .cf-badge-fmt {
   font-size: 10px;
   padding: 2px 6px;
   border-radius: 4px;
@@ -465,6 +705,12 @@ function closeModal() {
   color: var(--primary);
 }
 
+.cf-badge-agg {
+  background: var(--status-ai-bg, var(--surface-hover));
+  color: var(--status-ai, var(--primary));
+}
+
+.cf-badge-fmt,
 .cf-badge-unit {
   background: var(--surface-hover);
   color: var(--muted-foreground);
@@ -476,10 +722,16 @@ function closeModal() {
   gap: 10px;
   font-size: 11px;
   color: var(--muted-foreground);
+  flex-wrap: wrap;
 }
 
 .cf-card-sub code {
   font-family: var(--font-mono);
+}
+
+.formula-expr-preview {
+  font-family: monospace;
+  color: var(--primary);
 }
 
 .required-text {

@@ -10,6 +10,7 @@ import TeamDetailDrawer from '@/components/common/TeamDetailDrawer.vue'
 import TeamDetailView from '@/views/TeamDetailView.vue'
 import {
   computeTeamMatchCustomMetrics,
+  computeTeamFormulaMetrics,
   computeTeamPitCustomSpecs,
   buildMatchCustomBadges
 } from '@/views/composables/useTeamCustomMetrics'
@@ -465,5 +466,204 @@ describe('TeamDetail & Rankings Decoupled Sub-components and Composables', () =>
     await backBtn.trigger('click')
 
     expect(mockRouterBack.mock.calls.length + mockRouterPush.mock.calls.length).toBeGreaterThanOrEqual(1)
+  })
+
+  it('computeTeamCustomStatsMap supports timer, weighted select, aggregationMode, MATCH/PIT/TEAM formulas, and tierThresholds', () => {
+    const fields: CustomFieldDefinition[] = [
+      {
+        id: 'f-timer',
+        eventId: 'evt-1',
+        target: 'MATCH',
+        phase: 'teleop',
+        name: 'Cycle Stopwatch',
+        fieldKey: 'cycle_sw',
+        fieldType: 'timer',
+        aggregationMode: 'median',
+        displayFormat: 'number',
+        unit: 's',
+        required: false,
+        orderSeq: 0,
+        isActive: true
+      },
+      {
+        id: 'f-weighted-sel',
+        eventId: 'evt-1',
+        target: 'MATCH',
+        phase: 'endgame',
+        name: 'Climb Tier',
+        fieldKey: 'climb_tier',
+        fieldType: 'select',
+        aggregationMode: 'max',
+        options: [
+          { label: 'Low', value: 'low', numericValue: 5 },
+          { label: 'High', value: 'high', numericValue: 20 }
+        ],
+        required: false,
+        orderSeq: 1,
+        isActive: true
+      },
+      {
+        id: 'f-match-fx',
+        eventId: 'evt-1',
+        target: 'MATCH',
+        phase: 'overall',
+        name: 'Net Efficiency',
+        fieldKey: 'net_eff',
+        fieldType: 'formula',
+        formulaExpr: 'match.totalScore + cf.climb_tier',
+        aggregationMode: 'avg',
+        displayFormat: 'number',
+        required: false,
+        orderSeq: 2,
+        isActive: true
+      },
+      {
+        id: 'f-team-fx',
+        eventId: 'evt-1',
+        target: 'TEAM',
+        phase: 'overall',
+        name: 'OPR Power',
+        fieldKey: 'opr_power',
+        fieldType: 'formula',
+        formulaExpr: 'opr.np + formula.net_eff * 0.1',
+        displayFormat: 'number',
+        config: { tierThresholds: { high: 50, mid: 30, direction: 'higher_better' } },
+        required: false,
+        orderSeq: 3,
+        isActive: true
+      }
+    ]
+
+    const testRecords: ScoutingRecord[] = [
+      {
+        id: 'r1',
+        eventId: 'evt-1',
+        scoutId: 's1',
+        scoutName: 'Scout1',
+        matchNumber: 1,
+        teamNumber: 27570,
+        autoScore: 10,
+        teleopScore: 20,
+        endgameScore: 10,
+        totalScore: 40,
+        notes: '',
+        rawData: JSON.stringify({ customFields: { cycle_sw: 4.0, climb_tier: 'low' } }),
+        syncStatus: 'SYNCED',
+        createdAt: '2026-01-01T00:00:00Z',
+        updatedAt: '2026-01-01T00:00:00Z',
+        isBroken: false,
+        version: 1
+      },
+      {
+        id: 'r2',
+        eventId: 'evt-1',
+        scoutId: 's1',
+        scoutName: 'Scout1',
+        matchNumber: 2,
+        teamNumber: 27570,
+        autoScore: 10,
+        teleopScore: 30,
+        endgameScore: 20,
+        totalScore: 60,
+        notes: '',
+        rawData: JSON.stringify({ customFields: { cycle_sw: 6.0, climb_tier: 'high' } }),
+        syncStatus: 'SYNCED',
+        createdAt: '2026-01-01T00:01:00Z',
+        updatedAt: '2026-01-01T00:01:00Z',
+        isBroken: false,
+        version: 1
+      },
+      {
+        id: 'r3',
+        eventId: 'evt-1',
+        scoutId: 's1',
+        scoutName: 'Scout1',
+        matchNumber: 3,
+        teamNumber: 27570,
+        autoScore: 10,
+        teleopScore: 30,
+        endgameScore: 10,
+        totalScore: 50,
+        notes: '',
+        rawData: JSON.stringify({ customFields: { cycle_sw: 10.0, climb_tier: 'low' } }),
+        syncStatus: 'SYNCED',
+        createdAt: '2026-01-01T00:02:00Z',
+        updatedAt: '2026-01-01T00:02:00Z',
+        isBroken: false,
+        version: 1
+      }
+    ]
+
+    const map = computeTeamCustomStatsMap(testRecords, fields, {
+      rankings: [
+        {
+          teamNumber: 27570,
+          matchCount: 3,
+          avgAutoScore: 10,
+          avgTeleopScore: 26.7,
+          avgEndgameScore: 13.3,
+          spNpOpr: 45,
+          maxScore: 60,
+          avgRating: 50,
+          brokenCount: 0,
+          trend: 'stable'
+        }
+      ]
+    })
+
+    const teamStats = map.get(27570)!
+    expect(teamStats.cycle_sw?.value).toBeCloseTo(6.0, 5) // median of [4, 6, 10]
+    expect(teamStats.climb_tier?.value).toBeCloseTo(20, 5) // max of [5, 20, 5]
+    // net_eff per match: [40+5=45, 60+20=80, 50+5=55] -> avg = 60
+    expect(teamStats.net_eff?.value).toBeCloseTo(60, 5)
+    // opr_power: 45 + 60 * 0.1 = 51 -> tier high (>= 50)
+    expect(teamStats.opr_power?.value).toBeCloseTo(51, 5)
+    expect(teamStats.opr_power?.tier).toBe('high')
+  })
+
+  it('TeamCustomMetricsCard renders TEAM formula metrics and cyclic error indicator', () => {
+    const teamFormulaField: CustomFieldDefinition = {
+      id: 'f-team-1',
+      eventId: 'evt-1',
+      target: 'TEAM',
+      phase: 'overall',
+      name: 'Combined Index',
+      fieldKey: 'combined_idx',
+      fieldType: 'formula',
+      formulaExpr: 'opr.np * 2',
+      displayFormat: 'number',
+      required: false,
+      orderSeq: 0,
+      isActive: true
+    }
+    const cyclicField: CustomFieldDefinition = {
+      id: 'f-team-cyc',
+      eventId: 'evt-1',
+      target: 'TEAM',
+      phase: 'overall',
+      name: 'Cyclic Metric',
+      fieldKey: 'cyc_a',
+      fieldType: 'formula',
+      formulaExpr: 'formula.cyc_a + 1',
+      displayFormat: 'number',
+      required: false,
+      orderSeq: 1,
+      isActive: true
+    }
+
+    const metrics = computeTeamFormulaMetrics([teamFormulaField, cyclicField], {
+      rankingRow: { teamNumber: 27570, spNpOpr: 32.5, matchCount: 2, avgAutoScore: 10, avgTeleopScore: 20, avgEndgameScore: 5, maxScore: 40, avgRating: 35, brokenCount: 0, trend: 'stable' },
+      matchRecords: []
+    })
+
+    const card = track(mount(TeamCustomMetricsCard, {
+      props: { metrics },
+      global: { plugins: [createTestI18n('en')] }
+    }))
+
+    expect(card.text()).toContain('Combined Index')
+    expect(card.text()).toContain('65.0')
+    expect(card.text()).toContain('Cyclic Metric')
+    expect(card.text()).toContain('Circular Dependency')
   })
 })

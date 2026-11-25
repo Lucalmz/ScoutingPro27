@@ -3,7 +3,7 @@ import { useI18n } from 'vue-i18n'
 import { useAiStore } from '@/stores/ai'
 import { useUserStore } from '@/stores/user'
 import { useToastStore } from '@/stores/toast'
-import type { AiChatMessage, AiChatThread, AiProviderProfile } from '@/types'
+import type { AiChatMessage, AiChatThread, AiProviderProfile, AiTokenUsage } from '@/types'
 import { DEFAULT_THREAD_TITLES, isZhLocale } from '@/components/ai/constants'
 import {
   PcmAudioCapture,
@@ -220,8 +220,28 @@ export function useAiVoiceSession(options: UseAiVoiceSessionOptions) {
   let turnPcmChunks: Int16Array[] = []
   let callTimer: ReturnType<typeof setInterval> | null = null
   let activeTurnCommitted = false
+  let pendingTurnUsage: AiTokenUsage | undefined = undefined
+  let lastCommittedAssistantMsgId: string | null = null
   let sessionToken = 0
   let stopWatchTurnStream: (() => void) | null = null
+
+  function parseVoiceUsage(raw: any): AiTokenUsage | undefined {
+    if (!raw || typeof raw !== 'object') return undefined
+    const usage: AiTokenUsage = {}
+    if (typeof raw.promptTokens === 'number' && Number.isFinite(raw.promptTokens)) {
+      usage.promptTokens = raw.promptTokens
+    }
+    if (typeof raw.completionTokens === 'number' && Number.isFinite(raw.completionTokens)) {
+      usage.completionTokens = raw.completionTokens
+    }
+    if (typeof raw.totalTokens === 'number' && Number.isFinite(raw.totalTokens)) {
+      usage.totalTokens = raw.totalTokens
+    }
+    if (typeof raw.thoughtsTokens === 'number' && Number.isFinite(raw.thoughtsTokens)) {
+      usage.thoughtsTokens = raw.thoughtsTokens
+    }
+    return Object.keys(usage).length > 0 ? usage : undefined
+  }
 
   watch(locale, newLoc => {
     tts.setLocale(newLoc)
@@ -275,9 +295,13 @@ export function useAiVoiceSession(options: UseAiVoiceSessionOptions) {
           modelName: selectedModel.value || activeProfile.value?.modelName,
           profileName: activeProfile.value?.name,
           contextSummary: options.buildBriefContextLabel(),
+          ...(pendingTurnUsage ? { usage: pendingTurnUsage } : {}),
           viaVoice: true
         }
         thread.messages.push(asstMsg)
+        lastCommittedAssistantMsgId = asstMsg.id
+      } else {
+        lastCommittedAssistantMsgId = null
       }
       thread.updatedAt = nowIso
       aiStore.scheduleSaveThread(thread)
@@ -287,6 +311,7 @@ export function useAiVoiceSession(options: UseAiVoiceSessionOptions) {
     userFinalText.value = ''
     userInterimText.value = ''
     assistantText.value = ''
+    pendingTurnUsage = undefined
     activeTurnCommitted = true
   }
 
@@ -294,6 +319,8 @@ export function useAiVoiceSession(options: UseAiVoiceSessionOptions) {
     userFinalText.value = ''
     userInterimText.value = ''
     assistantText.value = ''
+    pendingTurnUsage = undefined
+    lastCommittedAssistantMsgId = null
     activeTurnCommitted = false
   }
 
@@ -545,6 +572,29 @@ export function useAiVoiceSession(options: UseAiVoiceSessionOptions) {
             commitActiveTurnToThread()
             if (status.value === 'thinking') {
               status.value = 'listening'
+            }
+          }
+          break
+        }
+
+        case 'usage': {
+          const parsedUsage = parseVoiceUsage(msg.usage ?? msg)
+          if (!parsedUsage) break
+          if (!activeTurnCommitted) {
+            pendingTurnUsage = parsedUsage
+          } else {
+            const thread = options.activeThread.value
+            if (thread) {
+              const targetMsg =
+                (lastCommittedAssistantMsgId
+                  ? thread.messages.find(m => m.id === lastCommittedAssistantMsgId)
+                  : undefined) ||
+                [...thread.messages].reverse().find(m => m.role === 'assistant' && m.viaVoice)
+              if (targetMsg) {
+                targetMsg.usage = parsedUsage
+                thread.updatedAt = new Date().toISOString()
+                aiStore.scheduleSaveThread(thread)
+              }
             }
           }
           break

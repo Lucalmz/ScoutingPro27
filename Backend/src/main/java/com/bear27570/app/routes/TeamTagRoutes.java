@@ -33,6 +33,11 @@ public class TeamTagRoutes {
     public void register(RoutesConfig routes) {
         routes.get("/api/events/{id}/tags", ctx -> {
             String eventId = ctx.pathParam("id");
+            String userId = ctx.attribute("userId");
+            boolean isMember = jdbi.withExtension(EventDao.class, dao -> dao.isMember(eventId, userId));
+            if (!isMember) {
+                throw new io.javalin.http.ForbiddenResponse("Not a member of this event");
+            }
             List<TeamTag> tags = jdbi.withExtension(TeamTagDao.class, dao -> dao.findByEvent(eventId));
             ctx.result(gson.toJson(tags)).contentType("application/json");
         });
@@ -92,6 +97,9 @@ public class TeamTagRoutes {
                 if (event == null) {
                     throw new io.javalin.http.NotFoundResponse("Event not found");
                 }
+                if (userId == null || !eventDao.isMember(eventId, userId)) {
+                    throw new io.javalin.http.ForbiddenResponse("Not a member of this event");
+                }
 
                 TeamTagDao tagDao = handle.attach(TeamTagDao.class);
 
@@ -134,6 +142,9 @@ public class TeamTagRoutes {
                 ScoutingEvent event = eventDao.findById(eventId);
                 if (event == null) {
                     throw new io.javalin.http.NotFoundResponse("Event not found");
+                }
+                if (userId == null || !eventDao.isMember(eventId, userId)) {
+                    throw new io.javalin.http.ForbiddenResponse("Not a member of this event");
                 }
 
                 TeamTagDao tagDao = handle.attach(TeamTagDao.class);

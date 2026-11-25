@@ -36,10 +36,7 @@ public final class AiThreadRoutes {
         // Legacy event chat history endpoints
         routes.get("/api/events/{id}/ai-chat", ctx -> {
             String eventId = ctx.pathParam("id");
-            String userId = ctx.attribute("userId");
-            if (userId == null) {
-                throw new io.javalin.http.UnauthorizedResponse("Not logged in");
-            }
+            String userId = requireEventMember(ctx, eventId);
             AiChatSession session = jdbi.withExtension(
                     AiChatSessionDao.class,
                     dao -> dao.findSession(userId, eventId)
@@ -53,10 +50,7 @@ public final class AiThreadRoutes {
 
         routes.put("/api/events/{id}/ai-chat", ctx -> {
             String eventId = ctx.pathParam("id");
-            String userId = ctx.attribute("userId");
-            if (userId == null) {
-                throw new io.javalin.http.UnauthorizedResponse("Not logged in");
-            }
+            String userId = requireEventMember(ctx, eventId);
 
             String jsonBody = ctx.body();
             try {

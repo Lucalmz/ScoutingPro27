@@ -12,6 +12,7 @@ import { hapticLight, hapticMedium, hapticSuccess } from '@/utils/haptics'
 import { useBumpAnimation } from '@/composables/useBumpAnimation'
 import { useConfirm } from '@/composables/useConfirm'
 import type { PitScoutingRecord } from '@/types'
+import { buildPitFormulaContext } from '@/utils/formula'
 import {
   LAUNCHER_PRESETS,
   FLOWER_PRESETS,
@@ -180,6 +181,30 @@ const fileInput = ref<HTMLInputElement | null>(null)
 // 自动计算汇总自述总分
 const calculatedTotalScore = computed(() => {
   return claimedAutoScore.value + claimedTeleopScore.value + claimedEndgameScore.value
+})
+
+const allPitCustomDefinitions = computed(() => {
+  return customFieldsStore.getActiveFields(pitStore.currentEventId || '', 'PIT')
+})
+
+const pitFormulaContext = computed(() => {
+  if (!allPitCustomDefinitions.value.some((d) => d.fieldType === 'formula')) return undefined
+  return buildPitFormulaContext({
+    pitRecord: {
+      weightLbs: weightLbs.value,
+      claimedAutoScore: claimedAutoScore.value,
+      claimedTeleopCycles: claimedTeleopCycles.value,
+      claimedTeleopScore: claimedTeleopScore.value,
+      claimedEndgameScore: claimedEndgameScore.value,
+      claimedTotalScore: calculatedTotalScore.value,
+      hasColorSensor: hasColorSensor.value,
+      hasDescoreMech: hasDescoreMech.value,
+      hasApriltagVision: hasApriltagVision.value,
+      customFields: customFields.value
+    },
+    customFieldValues: customFields.value,
+    fieldDefinitions: allPitCustomDefinitions.value
+  })
 })
 
 function clampInt(val: unknown, min: number, max: number): number {
@@ -900,6 +925,8 @@ onUnmounted(() => {
           <!-- Pit Hardware Custom Fields -->
           <DynamicFieldsRenderer
             :definitions="customFieldsStore.getActiveFields(pitStore.currentEventId || '', 'PIT', 'hardware')"
+            :all-definitions="allPitCustomDefinitions"
+            :formula-context="pitFormulaContext"
             v-model="customFields"
           />
         </div>
@@ -1124,6 +1151,8 @@ onUnmounted(() => {
           <!-- Pit Strategy Custom Fields -->
           <DynamicFieldsRenderer
             :definitions="customFieldsStore.getActiveFields(pitStore.currentEventId || '', 'PIT', 'strategy')"
+            :all-definitions="allPitCustomDefinitions"
+            :formula-context="pitFormulaContext"
             v-model="customFields"
           />
         </div>
@@ -1167,6 +1196,8 @@ onUnmounted(() => {
           <h4 class="section-title">{{ t('pit_scout.drawer.sec_custom_overall') }}</h4>
           <DynamicFieldsRenderer
             :definitions="customFieldsStore.getActiveFields(pitStore.currentEventId || '', 'PIT', 'overall')"
+            :all-definitions="allPitCustomDefinitions"
+            :formula-context="pitFormulaContext"
             v-model="customFields"
           />
         </div>

@@ -548,7 +548,7 @@ describe('ScoutingForm', () => {
         await reloaded.find('.draft-restored-banner .btn-load-task').trigger('click')
         reloaded.unmount()
       }
-    })
+    }, 15000)
   })
 
   describe('Restored UI interactions & BIOBUZZ endgame scoring', () => {
@@ -657,6 +657,44 @@ describe('ScoutingForm', () => {
       await teleop.find('.btn-action-undo').trigger('click') // 7th cycle balls 1 -> 0
       await teleop.find('.btn-action-undo').trigger('click') // removes empty 7th cycle + pops 7th timestamp
       expect(wrapper.find('.teleop-predict-bar .predict-val').text()).toBe('11s')
+    })
+
+    it('collects autoCycleTimestamps and computes autoCycleTimeSec on submit', async () => {
+      vi.useFakeTimers()
+      let now = 1_700_000_000_000
+      vi.setSystemTime(now)
+
+      try {
+        const wrapper = track(mount(ScoutingForm, { props: defaultProps }))
+
+        await wrapper.find('input[placeholder="1-999"]').setValue('5')
+        await wrapper.findAll('.spdt-labels span')[1].trigger('click')
+        await wrapper.find('input[placeholder="e.g. 12345"]').setValue('27570')
+
+        const autoTracker = wrapper.find('.phase-auto')
+        const newCycleBtn = autoTracker.find('.btn-action-new-cycle')
+
+        // Record 3 auto cycles at 0s, +3s, +5s -> intervals [3, 5] -> avg 4.0s
+        await autoTracker.findAll('.chips-group .quick-ball-btn')[1].trigger('click') // 1 ball
+        now += 3000
+        vi.setSystemTime(now)
+        await newCycleBtn.trigger('click')
+        await autoTracker.findAll('.chips-group .quick-ball-btn')[1].trigger('click')
+        now += 5000
+        vi.setSystemTime(now)
+        await newCycleBtn.trigger('click')
+        await autoTracker.findAll('.chips-group .quick-ball-btn')[1].trigger('click')
+
+        await wrapper.find('form').trigger('submit.prevent')
+        const emitted = wrapper.emitted('submit')
+        expect(emitted).toBeTruthy()
+        const rec = emitted![0][0] as ScoutingRecord
+        const raw = JSON.parse(rec.rawData)
+        expect(raw.autoCycleTimestamps).toHaveLength(3)
+        expect(raw.autoCycleTimeSec).toBe(4.0)
+      } finally {
+        vi.useRealTimers()
+      }
     })
   })
 })

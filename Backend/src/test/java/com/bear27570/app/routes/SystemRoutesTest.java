@@ -74,4 +74,50 @@ class SystemRoutesTest {
             assertThat(body).contains("\"os\":");
         });
     }
+
+    @Test
+    void testRemoteFirewallBlockedLogPayloadLimitNewlineEscapeAndTestCleanupFlag() throws Exception {
+        String prevCleanup = System.getProperty("ENABLE_TEST_CLEANUP");
+        try {
+            System.setProperty("ENABLE_TEST_CLEANUP", "  TRUE  ");
+            assertThat(ApiRoutes.isTestCleanupEnabled()).isTrue();
+            System.setProperty("ENABLE_TEST_CLEANUP", "false");
+            assertThat(ApiRoutes.isTestCleanupEnabled()).isFalse();
+        } finally {
+            if (prevCleanup == null) {
+                System.clearProperty("ENABLE_TEST_CLEANUP");
+            } else {
+                System.setProperty("ENABLE_TEST_CLEANUP", prevCleanup);
+            }
+        }
+
+        Javalin lanApp = Javalin.create(config ->
+                new SystemRoutes(new Gson(), ctx -> "192.168.43.88").register(config.routes));
+
+        JavalinTest.test(lanApp, (server, client) -> {
+            // Even if remote peer spoofs X-Forwarded-For: 127.0.0.1, remoteAddr 192.168.43.88 MUST be rejected with 403
+            var blockedFirewall = client.post("/api/system/open-firewall-cmd", "",
+                    req -> req.header("X-Forwarded-For", "127.0.0.1"));
+            assertThat(blockedFirewall.code()).isEqualTo(403);
+            assertThat(blockedFirewall.body().string()).contains("restricted to local host loopback");
+
+            // > 16 KB remote log payload MUST be rejected with 400
+            var oversizedLog = client.post("/api/system/log", "L".repeat(16_385));
+            assertThat(oversizedLog.code()).isEqualTo(400);
+            assertThat(oversizedLog.body().string()).contains("exceeds 16 KB limit");
+
+            // Embedded CR/LF newlines MUST be escaped into a single log entry line
+            String marker = "MARKER_" + System.nanoTime();
+            var okLog = client.post("/api/system/log", marker + "_line1\r\n[2099-01-01] [FORGED] injected");
+            assertThat(okLog.code()).isEqualTo(200);
+
+            java.io.File logFile = com.bear27570.app.db.AppConfig.resolveLogFile();
+            String logContent = java.nio.file.Files.readString(logFile.toPath(), java.nio.charset.StandardCharsets.UTF_8);
+            String matchingLine = logContent.lines()
+                    .filter(l -> l.contains(marker))
+                    .findFirst()
+                    .orElse("");
+            assertThat(matchingLine).contains(marker + "_line1\\n[2099-01-01] [FORGED] injected");
+        });
+    }
 }

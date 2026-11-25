@@ -59,6 +59,20 @@ function maybeApplyRefreshedToken(res: Response): void {
   } catch {}
 }
 
+function handleUnauthorizedIfNeeded(res: Response): void {
+  if (res.status !== 401) return
+  if (typeof localStorage !== 'undefined') {
+    try {
+      localStorage.removeItem('scoutingpro-user')
+    } catch {}
+  }
+  if (typeof window !== 'undefined') {
+    try {
+      window.dispatchEvent(new Event('auth-unauthorized'))
+    } catch {}
+  }
+}
+
 export async function fetchCrdtState(eventId: string): Promise<CrdtLoadStateResponse | null> {
   if (!eventId) return null
   const token = readAuthToken()
@@ -73,6 +87,7 @@ export async function fetchCrdtState(eventId: string): Promise<CrdtLoadStateResp
     headers
   })
   maybeApplyRefreshedToken(res)
+  handleUnauthorizedIfNeeded(res)
 
   if (!res.ok) {
     throw new Error(`CRDT GET /api/events/${eventId}/crdt-state failed (${res.status})`)
@@ -100,6 +115,7 @@ export async function saveCrdtState(
     keepalive: Boolean(options?.keepalive)
   })
   maybeApplyRefreshedToken(res)
+  handleUnauthorizedIfNeeded(res)
 
   const text = await res.text()
   let parsed: CrdtSaveStateResponse | null = null

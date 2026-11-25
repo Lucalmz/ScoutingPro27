@@ -1,21 +1,27 @@
 <script setup lang="ts">
-import { ref, watch } from 'vue'
+import { computed, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import type {
+  CustomFieldAggregationMode,
+  CustomFieldConfig,
   CustomFieldDefinition,
-  CustomFieldTarget,
-  CustomFieldType,
+  CustomFieldDisplayFormat,
+  CustomFieldOption,
   CustomFieldPhase,
-  CustomFieldOption
+  CustomFieldTarget,
+  CustomFieldType
 } from '@/types'
+import type { FormulaValidationResult } from '@/utils/formula'
 import { useToastStore } from '@/stores/toast'
 import { hapticLight } from '@/utils/haptics'
+import FormulaEditorPanel from './FormulaEditorPanel.vue'
 
 const props = defineProps<{
   eventId: string
   activeTab: CustomFieldTarget
   editingField: CustomFieldDefinition | null
   isSaving: boolean
+  existingFields?: CustomFieldDefinition[]
 }>()
 
 const emit = defineEmits<{
@@ -27,6 +33,18 @@ const { t } = useI18n()
 const toast = useToastStore()
 
 const COLOR_PRESETS = ['blue', 'green', 'orange', 'red', 'purple', 'gray']
+const AGGREGATION_MODES: CustomFieldAggregationMode[] = [
+  'avg',
+  'median',
+  'max',
+  'min',
+  'sum',
+  'last3',
+  'trimmed_avg',
+  'stddev',
+  'rate'
+]
+const DISPLAY_FORMATS: CustomFieldDisplayFormat[] = ['number', 'integer', 'percent', 'boolean', 'tier']
 
 const editingId = ref<string | null>(null)
 const formName = ref('')
@@ -35,6 +53,8 @@ const formPhase = ref<CustomFieldPhase>('overall')
 const formType = ref<CustomFieldType>('number')
 const formRequired = ref(false)
 const formUnit = ref('')
+const formDescription = ref('')
+const formDefaultVal = ref('')
 const formMin = ref<number | null>(null)
 const formMax = ref<number | null>(null)
 const formStep = ref<number | null>(1)
@@ -42,6 +62,46 @@ const formLevelCount = ref(5)
 const formOptions = ref<CustomFieldOption[]>([])
 const newOptionLabel = ref('')
 const newOptionColor = ref('blue')
+const newOptionNumeric = ref<number | null>(null)
+
+const formAggregationMode = ref<CustomFieldAggregationMode>('avg')
+const formDisplayFormat = ref<CustomFieldDisplayFormat>('number')
+const formFormulaExpr = ref('')
+const formulaValidation = ref<FormulaValidationResult | null>(null)
+
+// Config fields
+const cfgInputMode = ref<'stepper' | 'slider' | 'counter' | 'direct'>('stepper')
+const cfgQuickStepsStr = ref('')
+const cfgShowTicks = ref(false)
+const cfgTristate = ref(false)
+const cfgTrueLabel = ref('')
+const cfgFalseLabel = ref('')
+const cfgLevelStyle = ref<'blocks' | 'stars'>('blocks')
+const cfgLevelLowLabel = ref('')
+const cfgLevelHighLabel = ref('')
+const cfgSelectStyle = ref<'chips' | 'dropdown'>('chips')
+const cfgMultiline = ref(true)
+const cfgPlaceholder = ref('')
+const cfgMaxLength = ref<number | null>(null)
+const cfgDecimalPlaces = ref<number | null>(null)
+const cfgTierHigh = ref<number | null>(null)
+const cfgTierMid = ref<number | null>(null)
+const cfgTierDirection = ref<'higher_better' | 'lower_better'>('higher_better')
+
+const isTeamTarget = computed(() => props.activeTab === 'TEAM')
+
+function parseConfig(f: CustomFieldDefinition): CustomFieldConfig {
+  if (f.config && typeof f.config === 'object') return f.config
+  if (typeof f.configJson === 'string' && f.configJson.trim()) {
+    try {
+      const parsed = JSON.parse(f.configJson)
+      if (parsed && typeof parsed === 'object') return parsed as CustomFieldConfig
+    } catch {
+      return {}
+    }
+  }
+  return {}
+}
 
 function initForm(f: CustomFieldDefinition | null) {
   if (f) {
@@ -49,35 +109,83 @@ function initForm(f: CustomFieldDefinition | null) {
     formName.value = f.name
     formKey.value = f.fieldKey
     formPhase.value = f.phase
-    formType.value = f.fieldType
+    formType.value = props.activeTab === 'TEAM' ? 'formula' : f.fieldType
     formRequired.value = f.required
     formUnit.value = f.unit || ''
+    formDescription.value = f.description || ''
+    formDefaultVal.value = f.defaultVal ?? ''
     formMin.value = f.minVal ?? null
     formMax.value = f.maxVal ?? null
     formStep.value = f.stepVal ?? 1
     formLevelCount.value = f.maxVal ? Math.round(f.maxVal) : 5
     formOptions.value = f.options ? JSON.parse(JSON.stringify(f.options)) : []
+    formAggregationMode.value = f.aggregationMode || 'avg'
+    formDisplayFormat.value = f.displayFormat || 'number'
+    formFormulaExpr.value = f.formulaExpr || ''
+
+    const cfg = parseConfig(f)
+    cfgInputMode.value = cfg.inputMode || 'stepper'
+    cfgQuickStepsStr.value = Array.isArray(cfg.quickSteps) ? cfg.quickSteps.join(', ') : ''
+    cfgShowTicks.value = !!cfg.showTicks
+    cfgTristate.value = !!cfg.tristate
+    cfgTrueLabel.value = cfg.trueLabel || ''
+    cfgFalseLabel.value = cfg.falseLabel || ''
+    cfgLevelStyle.value = cfg.levelStyle || 'blocks'
+    cfgLevelLowLabel.value = cfg.levelLowLabel || ''
+    cfgLevelHighLabel.value = cfg.levelHighLabel || ''
+    cfgSelectStyle.value = cfg.selectStyle || 'chips'
+    cfgMultiline.value = cfg.multiline !== false
+    cfgPlaceholder.value = cfg.placeholder || ''
+    cfgMaxLength.value = cfg.maxLength ?? null
+    cfgDecimalPlaces.value = cfg.decimalPlaces ?? null
+    cfgTierHigh.value = cfg.tierThresholds?.high ?? null
+    cfgTierMid.value = cfg.tierThresholds?.mid ?? null
+    cfgTierDirection.value = cfg.tierThresholds?.direction || 'higher_better'
   } else {
     editingId.value = null
     formName.value = ''
     formKey.value = ''
-    formPhase.value = props.activeTab === 'MATCH' ? 'teleop' : 'hardware'
-    formType.value = 'number'
+    formPhase.value = props.activeTab === 'MATCH' ? 'teleop' : (props.activeTab === 'PIT' ? 'hardware' : 'overall')
+    formType.value = props.activeTab === 'TEAM' ? 'formula' : 'number'
     formRequired.value = false
     formUnit.value = ''
+    formDescription.value = ''
+    formDefaultVal.value = ''
     formMin.value = 0
     formMax.value = null
     formStep.value = 1
     formLevelCount.value = 5
     formOptions.value = []
+    formAggregationMode.value = 'avg'
+    formDisplayFormat.value = 'number'
+    formFormulaExpr.value = ''
+
+    cfgInputMode.value = 'stepper'
+    cfgQuickStepsStr.value = ''
+    cfgShowTicks.value = false
+    cfgTristate.value = false
+    cfgTrueLabel.value = ''
+    cfgFalseLabel.value = ''
+    cfgLevelStyle.value = 'blocks'
+    cfgLevelLowLabel.value = ''
+    cfgLevelHighLabel.value = ''
+    cfgSelectStyle.value = 'chips'
+    cfgMultiline.value = true
+    cfgPlaceholder.value = ''
+    cfgMaxLength.value = null
+    cfgDecimalPlaces.value = null
+    cfgTierHigh.value = null
+    cfgTierMid.value = null
+    cfgTierDirection.value = 'higher_better'
   }
   newOptionLabel.value = ''
   newOptionColor.value = 'blue'
+  newOptionNumeric.value = null
 }
 
 watch(
-  () => props.editingField,
-  (f) => {
+  () => [props.editingField, props.activeTab] as const,
+  ([f]) => {
     initForm(f)
   },
   { immediate: true }
@@ -90,15 +198,60 @@ function addOption() {
   formOptions.value.push({
     label: lbl,
     value: val,
-    color: newOptionColor.value
+    color: newOptionColor.value,
+    numericValue: typeof newOptionNumeric.value === 'number' && Number.isFinite(newOptionNumeric.value)
+      ? newOptionNumeric.value
+      : null
   })
   newOptionLabel.value = ''
+  newOptionNumeric.value = null
   hapticLight()
 }
 
 function removeOption(idx: number) {
   formOptions.value.splice(idx, 1)
   hapticLight()
+}
+
+function buildConfigObject(): CustomFieldConfig {
+  const cfg: CustomFieldConfig = {}
+  if (formType.value === 'number') {
+    cfg.inputMode = cfgInputMode.value
+    const steps = cfgQuickStepsStr.value
+      .split(',')
+      .map((s) => Number(s.trim()))
+      .filter((n) => Number.isFinite(n) && n > 0)
+    if (steps.length > 0) cfg.quickSteps = steps
+    if (cfgInputMode.value === 'slider' && cfgShowTicks.value) cfg.showTicks = true
+  } else if (formType.value === 'boolean') {
+    if (cfgTristate.value) cfg.tristate = true
+    if (cfgTrueLabel.value.trim()) cfg.trueLabel = cfgTrueLabel.value.trim()
+    if (cfgFalseLabel.value.trim()) cfg.falseLabel = cfgFalseLabel.value.trim()
+  } else if (formType.value === 'level') {
+    cfg.levelStyle = cfgLevelStyle.value
+    if (cfgLevelLowLabel.value.trim()) cfg.levelLowLabel = cfgLevelLowLabel.value.trim()
+    if (cfgLevelHighLabel.value.trim()) cfg.levelHighLabel = cfgLevelHighLabel.value.trim()
+  } else if (formType.value === 'select') {
+    cfg.selectStyle = cfgSelectStyle.value
+  } else if (formType.value === 'text') {
+    cfg.multiline = cfgMultiline.value
+    if (cfgPlaceholder.value.trim()) cfg.placeholder = cfgPlaceholder.value.trim()
+    if (typeof cfgMaxLength.value === 'number' && cfgMaxLength.value > 0) cfg.maxLength = cfgMaxLength.value
+  }
+
+  if (typeof cfgDecimalPlaces.value === 'number' && Number.isFinite(cfgDecimalPlaces.value)) {
+    cfg.decimalPlaces = Math.max(0, Math.min(4, Math.trunc(cfgDecimalPlaces.value)))
+  }
+
+  if (formDisplayFormat.value === 'tier' && (cfgTierHigh.value !== null || cfgTierMid.value !== null)) {
+    cfg.tierThresholds = {
+      high: cfgTierHigh.value ?? undefined,
+      mid: cfgTierMid.value ?? undefined,
+      direction: cfgTierDirection.value
+    }
+  }
+
+  return cfg
 }
 
 function submitForm() {
@@ -108,24 +261,48 @@ function submitForm() {
     return
   }
 
+  const effectiveType: CustomFieldType = isTeamTarget.value ? 'formula' : formType.value
+  if (effectiveType === 'formula') {
+    if (!formFormulaExpr.value.trim()) {
+      toast.showToast(t('custom_fields.err_formula_required'), 'error')
+      return
+    }
+    if (formulaValidation.value && !formulaValidation.value.valid) {
+      toast.showToast(formulaValidation.value.error || t('custom_fields.err_formula_invalid'), 'error')
+      return
+    }
+  }
+
   let key = formKey.value.trim().toLowerCase()
   if (!key) {
     key = 'field_' + Math.random().toString(36).substring(2, 8)
   }
 
+  const configObj = buildConfigObject()
+  const configJson = Object.keys(configObj).length > 0 ? JSON.stringify(configObj) : null
+
   const payload: Partial<CustomFieldDefinition> = {
     eventId: props.eventId,
     target: props.activeTab,
-    phase: formPhase.value,
+    phase: isTeamTarget.value ? 'overall' : formPhase.value,
     name,
     fieldKey: key,
-    fieldType: formType.value,
-    required: formRequired.value,
+    fieldType: effectiveType,
+    required: effectiveType === 'formula' ? false : formRequired.value,
+    defaultVal: effectiveType === 'formula' ? null : (formDefaultVal.value.trim() || null),
     unit: formUnit.value.trim() || null,
-    minVal: formType.value === 'number' ? formMin.value : null,
-    maxVal: formType.value === 'number' ? formMax.value : (formType.value === 'level' ? formLevelCount.value : null),
-    stepVal: formType.value === 'number' ? formStep.value : null,
-    optionsJson: (formType.value === 'select' || formType.value === 'multi_select') ? JSON.stringify(formOptions.value) : null,
+    description: formDescription.value.trim() || null,
+    configJson,
+    minVal: effectiveType === 'number' ? formMin.value : null,
+    maxVal: effectiveType === 'number' ? formMax.value : (effectiveType === 'level' ? formLevelCount.value : null),
+    stepVal: effectiveType === 'number' ? formStep.value : null,
+    optionsJson: (effectiveType === 'select' || effectiveType === 'multi_select') ? JSON.stringify(formOptions.value) : null,
+    formulaExpr: effectiveType === 'formula' ? formFormulaExpr.value.trim() : null,
+    aggregationMode: formAggregationMode.value,
+    displayFormat: formDisplayFormat.value,
+    dependenciesJson: effectiveType === 'formula' && formulaValidation.value
+      ? JSON.stringify(formulaValidation.value.dependencies)
+      : null,
     isActive: true
   }
 
@@ -151,7 +328,18 @@ function submitForm() {
           v-model="formName"
           type="text"
           :placeholder="t('custom_fields.field_name_placeholder')"
-          maxlength="50"
+          maxlength="100"
+        />
+      </div>
+
+      <!-- 说明 -->
+      <div class="form-group full-width">
+        <label>{{ t('custom_fields.field_description') }}</label>
+        <input
+          v-model="formDescription"
+          type="text"
+          :placeholder="t('custom_fields.field_description_placeholder')"
+          maxlength="300"
         />
       </div>
 
@@ -161,6 +349,7 @@ function submitForm() {
         <input
           v-model="formKey"
           type="text"
+          :disabled="!!editingId"
           :placeholder="t('custom_fields.field_key_placeholder')"
         />
       </div>
@@ -168,23 +357,26 @@ function submitForm() {
       <!-- 挂载阶段 -->
       <div class="form-group">
         <label>{{ t('custom_fields.field_phase') }}</label>
-        <select v-model="formPhase">
+        <select v-model="formPhase" :disabled="isTeamTarget">
           <template v-if="activeTab === 'MATCH'">
             <option value="auto">{{ t('custom_fields.phase_auto') }}</option>
             <option value="teleop">{{ t('custom_fields.phase_teleop') }}</option>
             <option value="endgame">{{ t('custom_fields.phase_endgame') }}</option>
             <option value="overall">{{ t('custom_fields.phase_overall') }}</option>
           </template>
-          <template v-else>
+          <template v-else-if="activeTab === 'PIT'">
             <option value="hardware">{{ t('custom_fields.phase_hardware') }}</option>
             <option value="strategy">{{ t('custom_fields.phase_strategy') }}</option>
             <option value="overall">{{ t('custom_fields.phase_pit_overall') }}</option>
+          </template>
+          <template v-else>
+            <option value="overall">{{ t('custom_fields.phase_overall') }}</option>
           </template>
         </select>
       </div>
 
       <!-- 控件类型选择 -->
-      <div class="form-group full-width">
+      <div v-if="!isTeamTarget" class="form-group full-width">
         <label>{{ t('custom_fields.field_type') }}</label>
         <div class="types-selector-grid">
           <button
@@ -207,6 +399,17 @@ function submitForm() {
             <span class="material-icons">pin</span>
             <span class="choice-title">{{ t('custom_fields.type_number') }}</span>
             <span class="choice-desc">{{ t('custom_fields.type_number_desc') }}</span>
+          </button>
+
+          <button
+            type="button"
+            class="type-choice-btn"
+            :class="{ 'is-active': formType === 'timer' }"
+            @click="formType = 'timer'"
+          >
+            <span class="material-icons">timer</span>
+            <span class="choice-title">{{ t('custom_fields.type_timer') }}</span>
+            <span class="choice-desc">{{ t('custom_fields.type_timer_desc') }}</span>
           </button>
 
           <button
@@ -252,18 +455,109 @@ function submitForm() {
             <span class="choice-title">{{ t('custom_fields.type_text') }}</span>
             <span class="choice-desc">{{ t('custom_fields.type_text_desc') }}</span>
           </button>
+
+          <button
+            type="button"
+            class="type-choice-btn"
+            :class="{ 'is-active': formType === 'formula' }"
+            @click="formType = 'formula'"
+          >
+            <span class="material-icons">functions</span>
+            <span class="choice-title">{{ t('custom_fields.type_formula') }}</span>
+            <span class="choice-desc">{{ t('custom_fields.type_formula_desc') }}</span>
+          </button>
         </div>
       </div>
+
+      <!-- FORMULA 编辑器 -->
+      <div v-if="formType === 'formula' || isTeamTarget" class="form-group full-width">
+        <FormulaEditorPanel
+          v-model="formFormulaExpr"
+          :target="activeTab"
+          :field-key="formKey"
+          :existing-fields="existingFields || []"
+          :display-format="formDisplayFormat"
+          @validation-change="formulaValidation = $event"
+        />
+      </div>
+
+      <!-- 默认值 / 单位 -->
+      <div v-if="formType !== 'formula' && !isTeamTarget" class="form-group">
+        <label>{{ t('custom_fields.default_val_label') }}</label>
+        <input
+          v-model="formDefaultVal"
+          type="text"
+          :placeholder="t('custom_fields.default_val_placeholder')"
+        />
+      </div>
+
+      <div class="form-group">
+        <label>{{ t('custom_fields.unit_label') }}</label>
+        <input
+          v-model="formUnit"
+          type="text"
+          :placeholder="t('custom_fields.unit_placeholder')"
+        />
+      </div>
+
+      <!-- 聚合方式 & 展示格式 -->
+      <div class="form-group">
+        <label>{{ t('custom_fields.aggregation_mode_label') }}</label>
+        <select v-model="formAggregationMode">
+          <option v-for="m in AGGREGATION_MODES" :key="m" :value="m">
+            {{ t(`custom_fields.agg_${m}`) }}
+          </option>
+        </select>
+      </div>
+
+      <div class="form-group">
+        <label>{{ t('custom_fields.display_format_label') }}</label>
+        <select v-model="formDisplayFormat">
+          <option v-for="fmt in DISPLAY_FORMATS" :key="fmt" :value="fmt">
+            {{ t(`custom_fields.fmt_${fmt}`) }}
+          </option>
+        </select>
+      </div>
+
+      <!-- TIER 阈值配置 -->
+      <template v-if="formDisplayFormat === 'tier'">
+        <div class="form-group">
+          <label>{{ t('custom_fields.tier_high_label') }}</label>
+          <input v-model.number="cfgTierHigh" type="number" step="0.1" />
+        </div>
+        <div class="form-group">
+          <label>{{ t('custom_fields.tier_mid_label') }}</label>
+          <input v-model.number="cfgTierMid" type="number" step="0.1" />
+        </div>
+        <div class="form-group">
+          <label>{{ t('custom_fields.tier_direction_label') }}</label>
+          <select v-model="cfgTierDirection">
+            <option value="higher_better">{{ t('custom_fields.tier_higher_better') }}</option>
+            <option value="lower_better">{{ t('custom_fields.tier_lower_better') }}</option>
+          </select>
+        </div>
+      </template>
 
       <!-- NUMBER 专属配置 -->
       <template v-if="formType === 'number'">
         <div class="form-group">
-          <label>{{ t('custom_fields.unit_label') }}</label>
-          <input
-            v-model="formUnit"
-            type="text"
-            :placeholder="t('custom_fields.unit_placeholder')"
-          />
+          <label>{{ t('custom_fields.input_mode_label') }}</label>
+          <select v-model="cfgInputMode">
+            <option value="stepper">{{ t('custom_fields.input_mode_stepper') }}</option>
+            <option value="slider">{{ t('custom_fields.input_mode_slider') }}</option>
+            <option value="counter">{{ t('custom_fields.input_mode_counter') }}</option>
+            <option value="direct">{{ t('custom_fields.input_mode_direct') }}</option>
+          </select>
+        </div>
+        <div v-if="cfgInputMode === 'stepper'" class="form-group">
+          <label>{{ t('custom_fields.quick_steps_label') }}</label>
+          <input v-model="cfgQuickStepsStr" type="text" placeholder="5, 10" />
+        </div>
+        <div v-if="cfgInputMode === 'slider'" class="form-group">
+          <label class="checkbox-label">
+            <input v-model="cfgShowTicks" type="checkbox" />
+            <span>{{ t('custom_fields.show_ticks_label') }}</span>
+          </label>
         </div>
         <div class="form-group">
           <label>{{ t('custom_fields.min_val') }}</label>
@@ -279,6 +573,24 @@ function submitForm() {
         </div>
       </template>
 
+      <!-- BOOLEAN 专属配置 -->
+      <template v-if="formType === 'boolean'">
+        <div class="form-group full-width">
+          <label class="checkbox-label">
+            <input v-model="cfgTristate" type="checkbox" />
+            <span>{{ t('custom_fields.tristate_label') }}</span>
+          </label>
+        </div>
+        <div class="form-group">
+          <label>{{ t('custom_fields.true_label') }}</label>
+          <input v-model="cfgTrueLabel" type="text" />
+        </div>
+        <div class="form-group">
+          <label>{{ t('custom_fields.false_label') }}</label>
+          <input v-model="cfgFalseLabel" type="text" />
+        </div>
+      </template>
+
       <!-- LEVEL 专属配置 -->
       <template v-if="formType === 'level'">
         <div class="form-group">
@@ -287,21 +599,52 @@ function submitForm() {
             <option :value="3">{{ t('custom_fields.level_3_desc') }}</option>
             <option :value="5">{{ t('custom_fields.level_5_desc') }}</option>
             <option :value="7">{{ t('custom_fields.level_7_desc') }}</option>
+            <option :value="10">10</option>
           </select>
+        </div>
+        <div class="form-group">
+          <label>{{ t('custom_fields.level_style_label') }}</label>
+          <select v-model="cfgLevelStyle">
+            <option value="blocks">{{ t('custom_fields.level_style_blocks') }}</option>
+            <option value="stars">{{ t('custom_fields.level_style_stars') }}</option>
+          </select>
+        </div>
+        <div class="form-group">
+          <label>{{ t('custom_fields.level_low_label') }}</label>
+          <input v-model="cfgLevelLowLabel" type="text" />
+        </div>
+        <div class="form-group">
+          <label>{{ t('custom_fields.level_high_label') }}</label>
+          <input v-model="cfgLevelHighLabel" type="text" />
         </div>
       </template>
 
       <!-- SELECT / MULTI_SELECT 专属配置 -->
       <template v-if="formType === 'select' || formType === 'multi_select'">
+        <div v-if="formType === 'select'" class="form-group">
+          <label>{{ t('custom_fields.select_style_label') }}</label>
+          <select v-model="cfgSelectStyle">
+            <option value="chips">{{ t('custom_fields.select_style_chips') }}</option>
+            <option value="dropdown">{{ t('custom_fields.select_style_dropdown') }}</option>
+          </select>
+        </div>
+
         <div class="form-group full-width">
           <label>{{ t('custom_fields.options_section_title') }}</label>
-          
+
           <div class="option-add-row">
             <input
               v-model="newOptionLabel"
               type="text"
               :placeholder="t('custom_fields.option_input_placeholder')"
               @keyup.enter="addOption"
+            />
+            <input
+              v-model.number="newOptionNumeric"
+              type="number"
+              step="0.5"
+              class="option-numeric-input"
+              :placeholder="t('custom_fields.option_numeric_placeholder')"
             />
             <div class="color-picker-chips">
               <span
@@ -326,6 +669,13 @@ function submitForm() {
               :class="`chip-${opt.color || 'blue'}`"
             >
               <span class="opt-label">{{ opt.label }}</span>
+              <input
+                v-model.number="opt.numericValue"
+                type="number"
+                step="0.5"
+                class="opt-inline-numeric"
+                :placeholder="t('custom_fields.option_numeric_short')"
+              />
               <button type="button" class="btn-opt-del" @click="removeOption(oIdx)">
                 <span class="material-icons">close</span>
               </button>
@@ -334,8 +684,26 @@ function submitForm() {
         </div>
       </template>
 
+      <!-- TEXT 专属配置 -->
+      <template v-if="formType === 'text'">
+        <div class="form-group">
+          <label class="checkbox-label">
+            <input v-model="cfgMultiline" type="checkbox" />
+            <span>{{ t('custom_fields.multiline_label') }}</span>
+          </label>
+        </div>
+        <div class="form-group">
+          <label>{{ t('custom_fields.max_length_label') }}</label>
+          <input v-model.number="cfgMaxLength" type="number" min="1" />
+        </div>
+        <div class="form-group full-width">
+          <label>{{ t('custom_fields.placeholder_label') }}</label>
+          <input v-model="cfgPlaceholder" type="text" />
+        </div>
+      </template>
+
       <!-- 必填设置 -->
-      <div class="form-group full-width">
+      <div v-if="formType !== 'formula' && !isTeamTarget" class="form-group full-width">
         <label class="checkbox-label">
           <input v-model="formRequired" type="checkbox" />
           <span>{{ t('custom_fields.required_hint') }}</span>
@@ -454,7 +822,7 @@ function submitForm() {
 
 .types-selector-grid {
   display: grid;
-  grid-template-columns: repeat(3, 1fr);
+  grid-template-columns: repeat(4, 1fr);
   gap: 8px;
 }
 
@@ -493,7 +861,12 @@ function submitForm() {
 .option-add-row {
   display: flex;
   align-items: center;
+  flex-wrap: wrap;
   gap: 8px;
+}
+
+.option-numeric-input {
+  width: 90px;
 }
 
 .color-picker-chips {
@@ -551,6 +924,12 @@ function submitForm() {
   font-size: 12px;
 }
 
+.opt-inline-numeric {
+  width: 56px;
+  padding: 2px 4px !important;
+  font-size: 11px !important;
+}
+
 .btn-opt-del {
   background: transparent;
   border: none;
@@ -562,6 +941,7 @@ function submitForm() {
 
 .checkbox-label {
   display: flex;
+  flex-direction: row !important;
   align-items: center;
   gap: 8px;
   cursor: pointer;

@@ -3,11 +3,11 @@ package com.bear27570.app.model;
 public class CustomFieldDefinition {
     private String id;
     private String eventId;
-    private String target; // "MATCH" or "PIT"
+    private String target; // "MATCH", "PIT", or "TEAM"
     private String phase = "overall"; // "auto", "teleop", "endgame", "overall", "hardware", "strategy"
     private String name;
     private String fieldKey;
-    private String fieldType; // "boolean", "number", "level", "select", "multi_select", "text"
+    private String fieldType; // "boolean", "number", "timer", "level", "select", "multi_select", "text", "formula"
     private boolean required = false;
     private String defaultVal;
     private String optionsJson;
@@ -15,6 +15,12 @@ public class CustomFieldDefinition {
     private Double maxVal;
     private Double stepVal;
     private String unit;
+    private String description;
+    private String configJson;
+    private String formulaExpr;
+    private String aggregationMode = "avg";
+    private String displayFormat = "number";
+    private String dependenciesJson;
     private int orderSeq = 0;
     private boolean isActive = true;
     private String createdAt;
@@ -64,6 +70,24 @@ public class CustomFieldDefinition {
 
     public String getUnit() { return unit; }
     public void setUnit(String unit) { this.unit = unit; }
+
+    public String getDescription() { return description; }
+    public void setDescription(String description) { this.description = description; }
+
+    public String getConfigJson() { return configJson; }
+    public void setConfigJson(String configJson) { this.configJson = configJson; }
+
+    public String getFormulaExpr() { return formulaExpr; }
+    public void setFormulaExpr(String formulaExpr) { this.formulaExpr = formulaExpr; }
+
+    public String getAggregationMode() { return aggregationMode; }
+    public void setAggregationMode(String aggregationMode) { this.aggregationMode = aggregationMode; }
+
+    public String getDisplayFormat() { return displayFormat; }
+    public void setDisplayFormat(String displayFormat) { this.displayFormat = displayFormat; }
+
+    public String getDependenciesJson() { return dependenciesJson; }
+    public void setDependenciesJson(String dependenciesJson) { this.dependenciesJson = dependenciesJson; }
 
     public int getOrderSeq() { return orderSeq; }
     public void setOrderSeq(int orderSeq) { this.orderSeq = orderSeq; }

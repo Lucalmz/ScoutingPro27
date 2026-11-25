@@ -9,6 +9,7 @@ export interface TeamScoutData {
   autoBalls: number
   autoCycles: number[]
   autoMissedCycles: number[]
+  autoCycleTimestamps: number[]
   autoPark: boolean
 
   // TeleOp (Cycle Tracker)
@@ -39,6 +40,7 @@ export function createEmptyTeam(): TeamScoutData {
     autoBalls: 0,
     autoCycles: [],
     autoMissedCycles: [],
+    autoCycleTimestamps: [],
     autoPark: false,
     teleopCycles: [],
     teleopMissedCycles: [],
@@ -160,6 +162,9 @@ export function useScoutingDraft(options: UseScoutingDraftOptions) {
           const normalizedEndgame = parseBiobuzzEndgame(merged)
           return {
             ...merged,
+            autoCycleTimestamps: Array.isArray(rawTeam.autoCycleTimestamps)
+              ? [...rawTeam.autoCycleTimestamps]
+              : [],
             teleopCycleTimestamps: Array.isArray(rawTeam.teleopCycleTimestamps)
               ? [...rawTeam.teleopCycleTimestamps]
               : [],

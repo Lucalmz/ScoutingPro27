@@ -517,6 +517,12 @@ describe('AI Voice Catalog, Audio Engine, Components & Session', () => {
     await createdSocket!.onmessage?.({
       data: JSON.stringify({ type: 'turn_complete', turnComplete: true })
     })
+    await createdSocket!.onmessage?.({
+      data: JSON.stringify({
+        type: 'usage',
+        usage: { promptTokens: 120, completionTokens: 45, totalTokens: 165 }
+      })
+    })
     await nextTick()
 
     expect(thread.messages).toHaveLength(2)
@@ -529,7 +535,34 @@ describe('AI Voice Catalog, Audio Engine, Components & Session', () => {
       role: 'assistant',
       content: 'Team 12345 fits best.',
       viaVoice: true,
-      contextSummary: '12T'
+      contextSummary: '12T',
+      usage: { promptTokens: 120, completionTokens: 45, totalTokens: 165 }
+    })
+
+    // Second turn: usage frame arrives BEFORE turn_complete
+    await createdSocket!.onmessage?.({
+      data: JSON.stringify({ type: 'transcript', role: 'user', text: 'What about endgame?', interim: false })
+    })
+    await createdSocket!.onmessage?.({
+      data: JSON.stringify({ type: 'transcript', role: 'assistant', text: 'Strong flower nectars.', interim: false })
+    })
+    await createdSocket!.onmessage?.({
+      data: JSON.stringify({
+        type: 'usage',
+        usage: { promptTokens: 140, completionTokens: 30, totalTokens: 182, thoughtsTokens: 12 }
+      })
+    })
+    await createdSocket!.onmessage?.({
+      data: JSON.stringify({ type: 'turn_complete', turnComplete: true })
+    })
+    await nextTick()
+
+    expect(thread.messages).toHaveLength(4)
+    expect(thread.messages[3]).toMatchObject({
+      role: 'assistant',
+      content: 'Strong flower nectars.',
+      viaVoice: true,
+      usage: { promptTokens: 140, completionTokens: 30, totalTokens: 182, thoughtsTokens: 12 }
     })
 
     session.stopSession()

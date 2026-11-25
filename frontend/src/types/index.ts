@@ -111,6 +111,8 @@ export interface ScoutingFormData {
   autoBalls: number
   autoCycles?: number[]
   autoMissedCycles?: number[]
+  autoCycleTimestamps?: number[]
+  autoCycleTimeSec?: number | null
   autoPark: boolean
   autoPreload?: boolean
   autoSecondary?: boolean
@@ -744,8 +746,22 @@ export interface RankingRow {
   predictCycleMatches?: number        // 参与 predictCycleTime 计算的有效达标场次数（单场有效间隔 >= 5）
   predictCycleSpread?: number | null  // 有效循环耗时离散度（秒，样本不足为 null）
   estimatedMaxCycles?: number | null  // 基于 predictCycleTime 推算的理论手动可打轮次（无达标样本为 null）
+  autoCycleTime?: number | null       // Auto 阶段单轮循环平均耗时（秒）
+  autoCycleMatches?: number           // 参与 autoCycleTime 计算的有效场次数
+  teleopCycleTime?: number | null     // TeleOp 阶段单轮循环平均耗时（秒，等同 predictCycleTime）
   minCycles?: number | null           // 非损坏场次中的单场最低 TeleOp Cycle 数
   cycleVariance?: number | null       // 跨场 TeleOp Cycle 数总体方差
+  // SP-NP OPR (Scout-Prior Non-Penalty OPR)
+  spNpOpr?: number
+  rawNpOpr?: number | null
+  spNpOprAuto?: number | null
+  spNpOprTeleop?: number | null
+  spNpOprEndgame?: number | null
+  spNpOprDelta?: number | null
+  spNpOprConfidence?: 'high' | 'medium' | 'low' | 'scout_only'
+  spNpOprConfidenceScore?: number
+  spNpOprOfficialMatches?: number
+  spNpOprBrokenExcluded?: number
   maxScore: number
   avgRating: number
   brokenCount: number
@@ -957,14 +973,35 @@ export interface UnifiedTeamItem {
 }
 
 // --- Custom Field System ---
-export type CustomFieldTarget = 'MATCH' | 'PIT'
-export type CustomFieldType = 'boolean' | 'number' | 'level' | 'select' | 'multi_select' | 'text'
+export type CustomFieldTarget = 'MATCH' | 'PIT' | 'TEAM'
+export type CustomFieldType = 'boolean' | 'number' | 'timer' | 'level' | 'select' | 'multi_select' | 'text' | 'formula'
 export type CustomFieldPhase = 'auto' | 'teleop' | 'endgame' | 'overall' | 'hardware' | 'strategy'
+export type CustomFieldAggregationMode = 'avg' | 'median' | 'max' | 'min' | 'sum' | 'last3' | 'trimmed_avg' | 'stddev' | 'rate'
+export type CustomFieldDisplayFormat = 'number' | 'integer' | 'percent' | 'boolean' | 'tier'
 
 export interface CustomFieldOption {
   label: string
   value: string
   color?: string // 'green' | 'blue' | 'red' | 'orange' | 'purple' | 'gray'
+  numericValue?: number | null
+}
+
+export interface CustomFieldConfig {
+  inputMode?: 'stepper' | 'slider' | 'counter' | 'direct'
+  quickSteps?: number[]
+  showTicks?: boolean
+  tristate?: boolean
+  trueLabel?: string
+  falseLabel?: string
+  levelStyle?: 'blocks' | 'stars'
+  levelLowLabel?: string
+  levelHighLabel?: string
+  selectStyle?: 'chips' | 'dropdown'
+  multiline?: boolean
+  maxLength?: number
+  placeholder?: string
+  decimalPlaces?: number
+  tierThresholds?: { high?: number; mid?: number; direction?: 'higher_better' | 'lower_better' }
 }
 
 export interface CustomFieldDefinition {
@@ -983,6 +1020,13 @@ export interface CustomFieldDefinition {
   maxVal?: number | null
   stepVal?: number | null
   unit?: string | null
+  description?: string | null
+  configJson?: string | null
+  config?: CustomFieldConfig
+  formulaExpr?: string | null
+  aggregationMode?: CustomFieldAggregationMode | null
+  displayFormat?: CustomFieldDisplayFormat | null
+  dependenciesJson?: string | null
   orderSeq: number
   isActive: boolean
   createdAt?: string

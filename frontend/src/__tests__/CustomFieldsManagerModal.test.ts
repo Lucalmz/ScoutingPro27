@@ -75,7 +75,7 @@ describe('CustomFieldsManagerModal & CustomFieldBuilderForm', () => {
     expect(wrapper.find('.cf-empty-state').exists()).toBe(true)
 
     const tabs = wrapper.findAll('.cf-tab-btn')
-    expect(tabs).toHaveLength(2)
+    expect(tabs).toHaveLength(3)
     expect(tabs[0]!.classes()).toContain('is-active')
 
     await tabs[1]!.trigger('click')
@@ -150,14 +150,14 @@ describe('CustomFieldsManagerModal & CustomFieldBuilderForm', () => {
     expect(toastSpy).toHaveBeenCalledWith(expect.any(String), 'error')
     expect(createSpy).not.toHaveBeenCalled()
 
-    // Fill name, select 'select' type, add options, and save
+    // Fill name, key, select 'select' type, add options, and save
     const inputs = builder.findAll('.form-group input[type="text"]')
     await inputs[0]!.setValue('底盘风格')
-    await inputs[1]!.setValue('Drive_Style')
+    await inputs[2]!.setValue('Drive_Style')
 
     const typeBtns = builder.findAll('.type-choice-btn')
-    // 0: boolean, 1: number, 2: level, 3: select
-    await typeBtns[3]!.trigger('click')
+    // 0: boolean, 1: number, 2: timer, 3: level, 4: select
+    await typeBtns[4]!.trigger('click')
 
     const optInput = builder.find('.option-add-row input[type="text"]')
     await optInput.setValue('激进突破')
@@ -219,5 +219,62 @@ describe('CustomFieldsManagerModal & CustomFieldBuilderForm', () => {
         fieldKey: 'long_shot_hits'
       })
     )
+  })
+
+  it('supports TEAM tab with forced formula type, template import, and impacted formula warning on delete', async () => {
+    const store = useCustomFieldsStore()
+    const dependentFormula: CustomFieldDefinition = {
+      id: 'fm-1',
+      eventId: 'evt-1',
+      target: 'TEAM',
+      phase: 'overall',
+      name: 'Shot Power',
+      fieldKey: 'shot_power',
+      fieldType: 'formula',
+      formulaExpr: 'cf.long_shot_hits * 2',
+      required: false,
+      orderSeq: 1,
+      isActive: true
+    }
+    vi.spyOn(store, 'fetchFields').mockResolvedValue([sampleField, dependentFormula])
+    vi.spyOn(store, 'getFields').mockImplementation((_evtId, target) => {
+      if (target === 'MATCH') return [sampleField]
+      if (target === 'TEAM') return [dependentFormula]
+      return [sampleField, dependentFormula]
+    })
+    const createSpy = vi.spyOn(store, 'createField').mockResolvedValue(dependentFormula)
+    const deleteSpy = vi.spyOn(store, 'deleteField').mockResolvedValue(undefined)
+
+    const wrapper = track(mount(CustomFieldsManagerModal, {
+      props: { visible: true, eventId: 'evt-1' },
+      global: { plugins: [createTestI18n()] }
+    }))
+
+    // Delete sampleField -> mockShowConfirm should receive impacted formula name 'Shot Power'
+    await wrapper.find('.del-btn').trigger('click')
+    await flushPromises()
+    expect(mockShowConfirm).toHaveBeenCalledWith(
+      expect.objectContaining({
+        message: expect.stringContaining('Shot Power')
+      })
+    )
+    expect(deleteSpy).toHaveBeenCalledWith('evt-1', 'cf-1')
+
+    // Open template drawer and import first template
+    await wrapper.find('.btn-templates').trigger('click')
+    expect(wrapper.findAll('.template-card').length).toBeGreaterThan(0)
+    await wrapper.find('.btn-import-tpl').trigger('click')
+    await flushPromises()
+    expect(createSpy).toHaveBeenCalledTimes(1)
+
+    // Switch to TEAM tab and open builder -> FormulaEditorPanel is mounted & chips insert text
+    await wrapper.findAll('.cf-tab-btn')[2]!.trigger('click')
+    await wrapper.find('.btn-create-field').trigger('click')
+    const builder = wrapper.findComponent(CustomFieldBuilderForm)
+    expect(builder.find('.formula-editor-panel').exists()).toBe(true)
+
+    await builder.find('.var-chip').trigger('click')
+    const exprEl = builder.find('.formula-textarea').element as HTMLTextAreaElement
+    expect(exprEl.value.length).toBeGreaterThan(0)
   })
 })

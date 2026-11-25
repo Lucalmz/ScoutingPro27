@@ -516,4 +516,48 @@ describe('MobilePhaseWizardForm.vue', () => {
       vi.useRealTimers()
     }
   })
+
+  it('records autoCycleTimestamps and emits autoCycleTimeSec on mobile wizard submit', async () => {
+    vi.useFakeTimers()
+    let now = 1_700_000_000_000
+    vi.setSystemTime(now)
+
+    try {
+      const wrapper = track(mount(MobilePhaseWizardForm, {
+        props: {
+          eventId: 'evt_1',
+          scoutId: 'scout_1',
+          scoutName: 'Alice'
+        }
+      }))
+
+      await wrapper.find('.red-btn').trigger('click')
+      await wrapper.findAll('.giant-num-input')[1].setValue('27570')
+
+      const steps = wrapper.findAll('.stepper-step')
+      await steps[1].trigger('click') // Step 1: Auto
+
+      const autoHitBtn = wrapper.find('.auto-hero-hit')
+      const newAutoCycleBtn = wrapper.find('.step-auto .btn-new-cycle')
+      await autoHitBtn.trigger('click')
+      now += 2500
+      vi.setSystemTime(now)
+      await newAutoCycleBtn.trigger('click')
+      await autoHitBtn.trigger('click')
+      now += 3500
+      vi.setSystemTime(now)
+      await newAutoCycleBtn.trigger('click')
+      await autoHitBtn.trigger('click')
+
+      await steps[4].trigger('click') // Summary
+      await wrapper.find('.btn-wizard-submit').trigger('click')
+
+      const emitted = wrapper.emitted('submit')![0][0] as ScoutingRecord
+      const raw = JSON.parse(emitted.rawData || '{}')
+      expect(raw.autoCycleTimestamps).toHaveLength(3)
+      expect(raw.autoCycleTimeSec).toBe(3.0)
+    } finally {
+      vi.useRealTimers()
+    }
+  })
 })

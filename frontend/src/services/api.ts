@@ -274,8 +274,14 @@ export function register(body: LoginRequest): Promise<User> {
   return request<User>('POST', '/user/register', body)
 }
 
-export function verifyToken(token: string): Promise<{ valid: boolean; userId: string; username: string }> {
-  return request<{ valid: boolean; userId: string; username: string }>('POST', '/user/verify-token', { token })
+export function verifyToken(
+  token: string
+): Promise<{ valid: boolean; userId: string; username: string; token?: string }> {
+  return request<{ valid: boolean; userId: string; username: string; token?: string }>(
+    'POST',
+    '/user/verify-token',
+    { token }
+  )
 }
 
 export interface UpdateProfileParams {
@@ -353,8 +359,12 @@ export function syncExternalEvent(event: ScoutingEvent): Promise<ScoutingEvent> 
   return request<ScoutingEvent>('POST', '/events/external-sync', event)
 }
 
-export function updateEventFtcConfig(eventId: string, ftcYear: number, ftcEventCode: string): Promise<void> {
-  return request<void>('PUT', `/events/${eventId}/ftc-config`, { ftcYear, ftcEventCode })
+export function updateEventFtcConfig(
+  eventId: string,
+  ftcYear: number | null,
+  ftcEventCode: string | null
+): Promise<void> {
+  return request<void>('PUT', `/events/${encodeURIComponent(eventId)}/ftc-config`, { ftcYear, ftcEventCode })
 }
 
 export function updateEventTurnConfig(
@@ -493,11 +503,13 @@ export function fetchEventSchedule(eventId: string): Promise<{ schedules: MatchS
 export function saveScheduleBatch(
   eventId: string,
   items: MatchScheduleItem[],
-  replace = false
+  replace = false,
+  assignments?: ScoutAssignment[]
 ): Promise<{ success: boolean; count: number }> {
   return request<{ success: boolean; count: number }>('POST', `/events/${encodeURIComponent(eventId)}/schedule/batch`, {
     items,
-    replace
+    replace,
+    ...(assignments !== undefined ? { assignments } : {})
   })
 }
 
@@ -591,6 +603,11 @@ export async function getNetworkInfo(): Promise<{
   port: number
   joinBaseUrl: string
   joinBaseUrlIpv6?: string
+  os?: 'windows' | 'macos' | 'linux' | 'unknown'
+  isWindows?: boolean
+  isMac?: boolean
+  firewallCommand?: string
+  macFirewallCommand?: string
   firewallAllowed?: boolean
 } | null> {
   if (isStaticCloudHost()) return null

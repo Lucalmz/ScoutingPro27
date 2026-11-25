@@ -1,0 +1,336 @@
+{
+  "version": "1.0",
+  "grammarNotes": {
+    "maxExprLength": 1000,
+    "maxTokens": 256,
+    "maxAstDepth": 20,
+    "maxAstNodes": 200,
+    "powerAssociativity": "right",
+    "powerHigherThanUnary": true
+  },
+  "validCases": [
+    {
+      "name": "power_higher_than_unary_minus",
+      "target": "MATCH",
+      "expr": "-2 ^ 2",
+      "expectedDeps": [],
+      "context": {},
+      "expectedValue": -4
+    },
+    {
+      "name": "power_right_associative",
+      "target": "MATCH",
+      "expr": "2 ^ 3 ^ 2",
+      "expectedDeps": [],
+      "context": {},
+      "expectedValue": 512
+    },
+    {
+      "name": "arithmetic_precedence",
+      "target": "MATCH",
+      "expr": "1 + 2 * 3 - 4 / 2 + 10 % 3",
+      "expectedDeps": [],
+      "context": {},
+      "expectedValue": 6
+    },
+    {
+      "name": "logical_precedence_and_ternary",
+      "target": "MATCH",
+      "expr": "false || true && (1 < 2) ? (false ? 1 : true ? 2 : 3) : 99",
+      "expectedDeps": [],
+      "context": {},
+      "expectedValue": 2
+    },
+    {
+      "name": "math_functions_and_safe_div",
+      "target": "MATCH",
+      "expr": "ABS(-5) + ROUND(3.456, 2) + CLAMP(15, 0, 10) + SAFE_DIV(10, 0, -1)",
+      "expectedDeps": [],
+      "context": {},
+      "expectedValue": 17.46
+    },
+    {
+      "name": "match_cycle_times_and_custom_fields",
+      "target": "MATCH",
+      "expr": "SAFE_DIV(match.autoScore, COALESCE(match.autoCycleTime, 10), 0) + COALESCE(cf.driver_skill, 3)",
+      "expectedDeps": ["match.autoScore", "match.autoCycleTime", "cf.driver_skill"],
+      "context": {
+        "match": { "autoScore": 20, "autoCycleTime": 5 },
+        "cf": { "driver_skill": 4 }
+      },
+      "expectedValue": 8
+    },
+    {
+      "name": "pit_formula_uses_pit_and_pit_cf",
+      "target": "PIT",
+      "expr": "pit.claimedTotalScore - COALESCE(pit_cf.weight_penalty, 0)",
+      "expectedDeps": ["pit.claimedTotalScore", "pit_cf.weight_penalty"],
+      "context": {
+        "pit": { "claimedTotalScore": 85 },
+        "pit_cf": { "weight_penalty": 5 }
+      },
+      "expectedValue": 80
+    },
+    {
+      "name": "team_formula_with_sp_np_opr_and_stats",
+      "target": "TEAM",
+      "expr": "ROUND(opr.np * 0.6 + MEDIAN(match_cf.cycle_sec) * 2 + NORM(official.advancementPoints, 0, 100) * 0.2, 1)",
+      "expectedDeps": ["opr.np", "match_cf.cycle_sec", "official.advancementPoints"],
+      "context": {
+        "opr": { "np": 50 },
+        "match_cf": { "cycle_sec": [4, 6, 10] },
+        "official": { "advancementPoints": 50 }
+      },
+      "expectedValue": 52
+    },
+    {
+      "name": "team_formula_recent_and_trimmed_avg",
+      "target": "TEAM",
+      "expr": "RECENT_AVG(match_cf.balls, 3) + TRIMMED_AVG(match_cf.balls)",
+      "expectedDeps": ["match_cf.balls"],
+      "context": {
+        "match_cf": { "balls": [2, 8, 10, 12, 20] }
+      },
+      "expectedValue": 24
+    },
+    {
+      "name": "team_formula_references_pit_and_other_formula",
+      "target": "TEAM",
+      "expr": "IF(ISNULL(formula.base_power), 0, formula.base_power + COALESCE(pit.weightLbs, 0) * 0.1)",
+      "expectedDeps": ["formula.base_power", "pit.weightLbs"],
+      "context": {
+        "formula": { "base_power": 40 },
+        "pit": { "weightLbs": 30 }
+      },
+      "expectedValue": 43
+    },
+    {
+      "name": "null_literal_with_safe_div_and_coalesce",
+      "target": "MATCH",
+      "expr": "ISNULL(SAFE_DIV(10, 0, null)) ? COALESCE(null, 42) : 0",
+      "expectedDeps": [],
+      "context": {},
+      "expectedValue": 42
+    }
+  ],
+  "invalidCases": [
+    {
+      "name": "empty_formula",
+      "target": "TEAM",
+      "expr": "   ",
+      "expectedErrorCode": "EMPTY_FORMULA"
+    },
+    {
+      "name": "reject_proto_pollution",
+      "target": "TEAM",
+      "expr": "__proto__.polluted + 1",
+      "expectedErrorCode": "FORBIDDEN_IDENTIFIER"
+    },
+    {
+      "name": "reject_constructor_access",
+      "target": "TEAM",
+      "expr": "constructor + 1",
+      "expectedErrorCode": "FORBIDDEN_IDENTIFIER"
+    },
+    {
+      "name": "reject_case_insensitive_forbidden_constructor",
+      "target": "TEAM",
+      "expr": "Constructor + 1",
+      "expectedErrorCode": "FORBIDDEN_IDENTIFIER"
+    },
+    {
+      "name": "reject_prototype_access",
+      "target": "MATCH",
+      "expr": "cf.prototype + 1",
+      "expectedErrorCode": "FORBIDDEN_IDENTIFIER"
+    },
+    {
+      "name": "reject_window_alert",
+      "target": "TEAM",
+      "expr": "window.alert(1)",
+      "expectedErrorCode": "FORBIDDEN_IDENTIFIER"
+    },
+    {
+      "name": "reject_eval_call",
+      "target": "TEAM",
+      "expr": "eval(1)",
+      "expectedErrorCode": "FORBIDDEN_IDENTIFIER"
+    },
+    {
+      "name": "reject_case_insensitive_forbidden_eval",
+      "target": "TEAM",
+      "expr": "EVAL(1)",
+      "expectedErrorCode": "FORBIDDEN_IDENTIFIER"
+    },
+    {
+      "name": "reject_function_constructor",
+      "target": "TEAM",
+      "expr": "Function(1)",
+      "expectedErrorCode": "FORBIDDEN_IDENTIFIER"
+    },
+    {
+      "name": "reject_trailing_decimal_dot",
+      "target": "MATCH",
+      "expr": "1. + 2",
+      "expectedErrorCode": "INVALID_TOKEN"
+    },
+    {
+      "name": "reject_zero_arg_function_call",
+      "target": "MATCH",
+      "expr": "ABS()",
+      "expectedErrorCode": "INVALID_SYNTAX"
+    },
+    {
+      "name": "reject_zero_arg_variadic_function_call",
+      "target": "TEAM",
+      "expr": "SUM()",
+      "expectedErrorCode": "INVALID_SYNTAX"
+    },
+    {
+      "name": "reject_semicolon_statement_injection",
+      "target": "MATCH",
+      "expr": "1 + 1; 2",
+      "expectedErrorCode": "INVALID_TOKEN"
+    },
+    {
+      "name": "reject_string_literal",
+      "target": "MATCH",
+      "expr": "'alert(1)'",
+      "expectedErrorCode": "INVALID_TOKEN"
+    },
+    {
+      "name": "reject_backtick_template",
+      "target": "MATCH",
+      "expr": "`1+1`",
+      "expectedErrorCode": "INVALID_TOKEN"
+    },
+    {
+      "name": "reject_assignment_operator",
+      "target": "MATCH",
+      "expr": "match.autoScore = 99",
+      "expectedErrorCode": "INVALID_TOKEN"
+    },
+    {
+      "name": "reject_bracket_indexing",
+      "target": "TEAM",
+      "expr": "match['autoScore']",
+      "expectedErrorCode": "INVALID_TOKEN"
+    },
+    {
+      "name": "reject_deep_property_chain",
+      "target": "TEAM",
+      "expr": "match.a.b + 1",
+      "expectedErrorCode": "INVALID_SYNTAX"
+    },
+    {
+      "name": "reject_unknown_function",
+      "target": "TEAM",
+      "expr": "FETCH_URL(1)",
+      "expectedErrorCode": "DISALLOWED_FUNCTION"
+    },
+    {
+      "name": "reject_bare_identifier_without_namespace",
+      "target": "TEAM",
+      "expr": "secretKey + 1",
+      "expectedErrorCode": "DISALLOWED_NAMESPACE"
+    },
+    {
+      "name": "reject_unknown_namespace",
+      "target": "TEAM",
+      "expr": "system.env + 1",
+      "expectedErrorCode": "DISALLOWED_NAMESPACE"
+    },
+    {
+      "name": "reject_match_referencing_opr",
+      "target": "MATCH",
+      "expr": "opr.np + match.autoScore",
+      "expectedErrorCode": "CROSS_LAYER_REFERENCE"
+    },
+    {
+      "name": "reject_match_referencing_official",
+      "target": "MATCH",
+      "expr": "official.rank + 1",
+      "expectedErrorCode": "CROSS_LAYER_REFERENCE"
+    },
+    {
+      "name": "reject_pit_referencing_match",
+      "target": "PIT",
+      "expr": "match.totalScore + pit.claimedTotalScore",
+      "expectedErrorCode": "CROSS_LAYER_REFERENCE"
+    },
+    {
+      "name": "reject_expr_too_long",
+      "target": "TEAM",
+      "exprRepeat": { "prefix": "1", "unit": " + 1", "count": 340 },
+      "expectedErrorCode": "EXPR_TOO_LONG"
+    },
+    {
+      "name": "reject_token_limit_exceeded",
+      "target": "TEAM",
+      "exprRepeat": { "prefix": "1", "unit": " + 1", "count": 135 },
+      "expectedErrorCode": "TOKEN_LIMIT_EXCEEDED"
+    },
+    {
+      "name": "reject_ast_depth_exceeded",
+      "target": "TEAM",
+      "exprRepeat": { "open": "(", "core": "1", "close": ")", "count": 25 },
+      "expectedErrorCode": "AST_DEPTH_EXCEEDED"
+    }
+  ],
+  "graphCases": [
+    {
+      "name": "self_cycle_rejected",
+      "existingFields": [],
+      "candidate": { "target": "TEAM", "fieldKey": "power_a", "fieldType": "formula", "formulaExpr": "formula.power_a + 1" },
+      "expectedValid": false,
+      "expectedErrorCode": "CIRCULAR_DEPENDENCY",
+      "expectedCycleContains": ["power_a"]
+    },
+    {
+      "name": "two_node_cycle_rejected",
+      "existingFields": [
+        { "target": "TEAM", "fieldKey": "metric_a", "fieldType": "formula", "formulaExpr": "formula.metric_b * 2" }
+      ],
+      "candidate": { "target": "TEAM", "fieldKey": "metric_b", "fieldType": "formula", "formulaExpr": "formula.metric_a + 1" },
+      "expectedValid": false,
+      "expectedErrorCode": "CIRCULAR_DEPENDENCY",
+      "expectedCycleContains": ["metric_a", "metric_b"]
+    },
+    {
+      "name": "three_node_cycle_rejected",
+      "existingFields": [
+        { "target": "TEAM", "fieldKey": "f1", "fieldType": "formula", "formulaExpr": "formula.f2 + 1" },
+        { "target": "TEAM", "fieldKey": "f2", "fieldType": "formula", "formulaExpr": "formula.f3 + 1" }
+      ],
+      "candidate": { "target": "TEAM", "fieldKey": "f3", "fieldType": "formula", "formulaExpr": "formula.f1 + 1" },
+      "expectedValid": false,
+      "expectedErrorCode": "CIRCULAR_DEPENDENCY",
+      "expectedCycleContains": ["f1", "f2", "f3"]
+    },
+    {
+      "name": "match_referencing_team_formula_rejected",
+      "existingFields": [
+        { "target": "TEAM", "fieldKey": "team_opr_score", "fieldType": "formula", "formulaExpr": "opr.np * 2" }
+      ],
+      "candidate": { "target": "MATCH", "fieldKey": "match_derived", "fieldType": "formula", "formulaExpr": "formula.team_opr_score + 1" },
+      "expectedValid": false,
+      "expectedErrorCode": "CROSS_LAYER_REFERENCE"
+    },
+    {
+      "name": "team_referencing_match_formula_allowed",
+      "existingFields": [
+        { "target": "MATCH", "fieldKey": "match_eff", "fieldType": "formula", "formulaExpr": "match.autoScore + match.teleopScore" }
+      ],
+      "candidate": { "target": "TEAM", "fieldKey": "team_eff_index", "fieldType": "formula", "formulaExpr": "formula.match_eff + opr.np * 0.5" },
+      "expectedValid": true
+    },
+    {
+      "name": "re_edit_existing_formula_same_id_case_insensitive_allowed",
+      "existingFields": [
+        { "id": "cf-same-1", "target": "TEAM", "fieldKey": "metric_a", "fieldType": "formula", "formulaExpr": "opr.np + 1" }
+      ],
+      "candidate": { "id": "cf-same-1", "target": "TEAM", "fieldKey": "METRIC_A", "fieldType": "formula", "formulaExpr": "opr.np * 2" },
+      "expectedValid": true
+    }
+  ]
+}

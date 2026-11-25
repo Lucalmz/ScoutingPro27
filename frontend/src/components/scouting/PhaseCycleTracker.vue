@@ -77,9 +77,9 @@ const {
   emitModelValue: (val) => emit('update:modelValue', val),
   emitMissedValue: (val) => emit('update:missedValue', val),
   emitChange: (scored, missed) => emit('change', scored, missed),
-  getTimestampsValue: () => (props.phase === 'teleop' ? props.timestampsValue : undefined),
+  getTimestampsValue: () => props.timestampsValue,
   emitTimestampsValue: (val) => {
-    if (props.phase === 'teleop' && props.timestampsValue !== undefined) {
+    if (props.timestampsValue !== undefined) {
       emit('update:timestampsValue', val)
     }
   }

@@ -548,5 +548,64 @@ describe('rankings analytics', () => {
     expect(team200.minCycles).toBeNull()
     expect(team200.cycleVariance).toBeNull()
   })
+
+  it('computes autoCycleTime, autoCycleMatches, teleopCycleTime, and SP-NP OPR fields in calculateRankings', () => {
+    const baseMs = 1_700_000_000_000
+    const records: ScoutingRecord[] = [
+      {
+        id: 'auto-1',
+        eventId: 'e1',
+        matchNumber: 1,
+        teamNumber: 400,
+        scoutId: 's1',
+        scoutName: 'Alice',
+        autoScore: 15,
+        teleopScore: 25,
+        endgameScore: 10,
+        totalScore: 50,
+        rawData: JSON.stringify({
+          autoCycles: [2, 2, 2],
+          autoCycleTimestamps: [baseMs, baseMs + 3000, baseMs + 5000], // intervals: 3.0s, 2.0s -> mean 2.5s
+          teleopCycles: [2, 2, 2, 2, 2, 2],
+          teleopCycleTimestamps: [baseMs + 35000, baseMs + 40000, baseMs + 46000, baseMs + 53000, baseMs + 61000, baseMs + 70000] // 5,6,7,8,9 -> drop 5 -> 7.5s
+        }),
+        syncStatus: 'SYNCED',
+        createdAt: '2026-01-01T10:00:00Z',
+        updatedAt: '2026-01-01T10:00:00Z'
+      },
+      {
+        id: 'auto-2',
+        eventId: 'e1',
+        matchNumber: 2,
+        teamNumber: 400,
+        scoutId: 's1',
+        scoutName: 'Alice',
+        autoScore: 0,
+        teleopScore: 0,
+        endgameScore: 0,
+        totalScore: 0,
+        isBroken: true,
+        rawData: JSON.stringify({
+          autoCycles: [2, 2],
+          autoCycleTimestamps: [baseMs, baseMs + 20000] // broken match ignored
+        }),
+        syncStatus: 'SYNCED',
+        createdAt: '2026-01-01T10:05:00Z',
+        updatedAt: '2026-01-01T10:05:00Z'
+      }
+    ]
+
+    const parsed = parseScoutRawData(records[0]!.rawData)
+    expect(parsed.autoCycleTimestamps).toHaveLength(3)
+
+    const rankings = calculateRankings(records, [], {})
+    const row = rankings.find((r) => r.teamNumber === 400)!
+    expect(row.autoCycleTime).toBe(2.5)
+    expect(row.autoCycleMatches).toBe(1)
+    expect(row.teleopCycleTime).toBe(7.5)
+    expect(row.predictCycleTime).toBe(7.5)
+    expect(row.spNpOprConfidence).toBe('scout_only')
+    expect(row.spNpOpr).toBeCloseTo(50, 0)
+  })
 })
 

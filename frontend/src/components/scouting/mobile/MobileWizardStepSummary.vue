@@ -2,7 +2,7 @@
 import { computed } from 'vue'
 import { useI18n } from 'vue-i18n'
 import type { MobileTeamScoutData } from './useMobileWizardForm'
-import { calcMatchPredictCycleTime } from '@/utils/analytics/predictCycleTime'
+import { calcMatchAutoCycleTime, calcMatchPredictCycleTime } from '@/utils/analytics/predictCycleTime'
 
 const props = defineProps<{
   matchNumber: string
@@ -18,6 +18,10 @@ const props = defineProps<{
 }>()
 
 const { t } = useI18n()
+
+const autoCycleSec = computed(() =>
+  calcMatchAutoCycleTime(props.team.autoCycles, props.team.autoCycleTimestamps)
+)
 
 const predictCycleSec = computed(() =>
   calcMatchPredictCycleTime(props.team.teleopCycles, props.team.teleopCycleTimestamps)
@@ -66,6 +70,17 @@ const predictCycleSec = computed(() =>
           <span class="breakdown-val">{{ endgameScore }} {{ t('wizard.pts_unit') }}</span>
           <span class="breakdown-sub">{{ t('wizard.endgame_summary_v2', { nectars: team.flowerNectars, bottom: team.flowerBottomBonusCount, pollens: team.flowerPollens, garden: team.gardenBalls, park: team.teleopPark ? '✓' : '✕' }) }}</span>
         </div>
+      </div>
+
+      <div v-if="team.autoCycles.length > 0" class="predict-cycle-summary-row">
+        <span>{{ t('scouting.auto_cycle_time') }}:</span>
+        <strong>
+          {{
+            autoCycleSec !== null
+              ? t('scouting.predict_cycle_value', { sec: autoCycleSec })
+              : t('scouting.auto_cycle_insufficient')
+          }}
+        </strong>
       </div>
 
       <div v-if="team.teleopCycles.length > 0" class="predict-cycle-summary-row">

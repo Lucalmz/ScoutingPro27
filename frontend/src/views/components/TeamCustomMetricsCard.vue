@@ -27,20 +27,52 @@ const { t } = useI18n()
       >
         <div class="metric-header">
           <span class="metric-name">{{ metric.definition.name }}</span>
-          <span class="metric-phase-tag">{{ t(`custom_fields.badge_phase_${metric.definition.phase}`) || metric.definition.phase }}</span>
+          <span class="metric-phase-tag">
+            {{ metric.definition.target === 'TEAM' ? 'TEAM' : (t(`custom_fields.badge_phase_${metric.definition.phase}`) || metric.definition.phase) }}
+          </span>
         </div>
 
-        <!-- Number / Level metric display -->
-        <div v-if="metric.fieldType === 'number' || metric.fieldType === 'level'" class="metric-stat-row">
+        <!-- Formula metric display (MATCH / TEAM) -->
+        <div v-if="metric.fieldType === 'formula'" class="metric-stat-row">
+          <div v-if="metric.error" class="stat-col full formula-error-box">
+            <span class="formula-error-badge">
+              <span class="material-icons" style="font-size: 14px;">warning</span>
+              {{ metric.error === 'CIRCULAR_DEPENDENCY' ? t('custom_fields.formula_cycle_error') : t('custom_fields.formula_eval_error') }}
+            </span>
+            <span class="stat-detail">{{ metric.error }}</span>
+          </div>
+          <template v-else>
+            <div class="stat-col">
+              <span class="stat-label">{{ metric.definition.aggregationMode ? t(`custom_fields.agg_${metric.definition.aggregationMode}`) : t('custom_fields.formula_value_label') }}</span>
+              <span class="stat-value highlight" :class="metric.tier ? `tier-val-${metric.tier}` : ''">
+                {{ metric.aggregatedDisplay ?? '-' }}
+              </span>
+              <span v-if="metric.definition.unit && metric.definition.displayFormat !== 'percent'" class="stat-unit">{{ metric.definition.unit }}</span>
+            </div>
+            <div v-if="metric.max !== null && metric.max !== undefined" class="stat-col">
+              <span class="stat-label">{{ t('custom_fields.max_metric') }}</span>
+              <span class="stat-value">{{ metric.max.toFixed(1) }}</span>
+            </div>
+            <div class="stat-col">
+              <span class="stat-label">{{ t('custom_fields.renderer.matches_label') }}</span>
+              <span class="stat-value count">{{ metric.totalCount ?? 0 }}</span>
+            </div>
+          </template>
+        </div>
+
+        <!-- Number / Level / Timer metric display -->
+        <div v-else-if="metric.fieldType === 'number' || metric.fieldType === 'level' || metric.fieldType === 'timer'" class="metric-stat-row">
           <div class="stat-col">
-            <span class="stat-label">{{ t('custom_fields.avg_metric') }}</span>
-            <span class="stat-value highlight">{{ metric.avg !== null && metric.avg !== undefined ? metric.avg.toFixed(1) : '-' }}</span>
-            <span v-if="metric.definition.unit" class="stat-unit">{{ metric.definition.unit }}</span>
+            <span class="stat-label">{{ metric.aggregationMode && metric.aggregationMode !== 'avg' ? t(`custom_fields.agg_${metric.aggregationMode}`) : t('custom_fields.avg_metric') }}</span>
+            <span class="stat-value highlight" :class="metric.tier ? `tier-val-${metric.tier}` : ''">
+              {{ metric.aggregatedDisplay ?? (metric.avg !== null && metric.avg !== undefined ? metric.avg.toFixed(1) : '-') }}
+            </span>
+            <span v-if="metric.definition.unit || metric.fieldType === 'timer'" class="stat-unit">{{ metric.definition.unit || 's' }}</span>
           </div>
           <div class="stat-col">
             <span class="stat-label">{{ t('custom_fields.max_metric') }}</span>
-            <span class="stat-value">{{ metric.max !== null && metric.max !== undefined ? metric.max : '-' }}</span>
-            <span v-if="metric.definition.unit" class="stat-unit">{{ metric.definition.unit }}</span>
+            <span class="stat-value">{{ metric.max !== null && metric.max !== undefined ? (metric.fieldType === 'timer' ? metric.max.toFixed(1) : metric.max) : '-' }}</span>
+            <span v-if="metric.definition.unit || metric.fieldType === 'timer'" class="stat-unit">{{ metric.definition.unit || 's' }}</span>
           </div>
           <div class="stat-col">
             <span class="stat-label">{{ t('custom_fields.renderer.matches_label') }}</span>
@@ -66,6 +98,10 @@ const { t } = useI18n()
 
         <!-- Select / Multi Select metric display -->
         <div v-else-if="metric.fieldType === 'select' || metric.fieldType === 'multi_select'" class="metric-distribution">
+          <div v-if="metric.aggregatedDisplay" class="weighted-select-summary">
+            <span class="stat-label">{{ t('custom_fields.weighted_score_label') }}:</span>
+            <span class="stat-value highlight" :class="metric.tier ? `tier-val-${metric.tier}` : ''">{{ metric.aggregatedDisplay }}</span>
+          </div>
           <div
             v-for="opt in metric.distribution"
             :key="opt.label"
@@ -315,5 +351,42 @@ const { t } = useI18n()
   font-size: 10px;
   color: var(--muted-foreground);
   font-style: italic;
+}
+
+.formula-error-box {
+  border-color: var(--status-error-border);
+  background: var(--status-error-bg);
+}
+
+.formula-error-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 12px;
+  font-weight: 700;
+  color: var(--status-error);
+}
+
+.weighted-select-summary {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 4px 8px;
+  border-radius: 6px;
+  background: var(--g-900);
+  border: 1px solid var(--border-subtle);
+  margin-bottom: 4px;
+}
+
+.tier-val-high {
+  color: var(--status-success) !important;
+}
+
+.tier-val-mid {
+  color: var(--status-warning) !important;
+}
+
+.tier-val-low {
+  color: var(--status-error) !important;
 }
 </style>

@@ -309,7 +309,12 @@ export const useEventStore = defineStore('events', () => {
     loading.value = true
     error.value = null
     try {
-      const synced = await syncExternalEvent(event)
+      const existingLocal = events.value.find(e => e.id === event.id)
+      const lockedInviteCode =
+        existingLocal && !isPlaceholderEventId(existingLocal.id) && existingLocal.inviteCode
+          ? existingLocal.inviteCode
+          : event.inviteCode
+      const synced = await syncExternalEvent({ ...event, inviteCode: lockedInviteCode })
       const existingIdx = events.value.findIndex(e => e.id === synced.id)
       if (existingIdx >= 0) {
         events.value[existingIdx] = synced
@@ -388,6 +393,9 @@ export const useEventStore = defineStore('events', () => {
         localStorage.removeItem(`sp27_custom_fields_${eventId}`)
         localStorage.removeItem(`sp27_team_tags_${eventId}`)
         localStorage.removeItem(`sp27_known_scouts_${eventId}`)
+        localStorage.removeItem(`sp27_official_matches_${eventId}`)
+        localStorage.removeItem(`sp27_advancement_${eventId}`)
+        localStorage.removeItem(`sp27_banned_teams_${eventId}`)
         // 同步清理全局合并存储中属于该赛事的记录与标签
         try {
           const rawRecs = localStorage.getItem('scoutingpro_records')

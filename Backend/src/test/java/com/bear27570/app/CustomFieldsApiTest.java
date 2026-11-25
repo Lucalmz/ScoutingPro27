@@ -310,7 +310,7 @@ class CustomFieldsApiTest {
             // 3. Invalid target rejected
             var badTargetRes = client.post("/api/events/" + eventId + "/custom-fields", "{\"name\":\"Valid\", \"target\":\"ROBOT\"}", b -> b.header("Authorization", "Bearer " + hostToken));
             assertThat(badTargetRes.code()).isEqualTo(400);
-            assertThat(badTargetRes.body().string()).contains("must be 'MATCH' or 'PIT'");
+            assertThat(badTargetRes.body().string()).contains("Invalid target: must be 'MATCH', 'PIT', or 'TEAM'");
 
             // 4. Invalid fieldType rejected
             var badTypeRes = client.post("/api/events/" + eventId + "/custom-fields", "{\"name\":\"Valid\", \"fieldType\":\"magic_box\"}", b -> b.header("Authorization", "Bearer " + hostToken));
@@ -352,6 +352,177 @@ class CustomFieldsApiTest {
             // 8. Delete non-existent field returns 404
             var delete404 = client.delete("/api/events/" + eventId + "/custom-fields/non_existent_id", null, b -> b.header("Authorization", "Bearer " + hostToken));
             assertThat(delete404.code()).isEqualTo(404);
+        });
+    }
+
+    @Test
+    void testTeamFormulasTimerAndValidation400s() {
+        JavalinTest.test(app, (server, client) -> {
+            var hostReg = client.post("/api/user/register", "{\"username\":\"formula_host\", \"password\":\"pass123\"}");
+            assertThat(hostReg.code()).isEqualTo(200);
+            String hostToken = hostReg.body().string().split("\"token\":\"")[1].split("\"")[0];
+
+            var eventRes = client.post("/api/events", "{\"name\":\"Formula Event\"}", b -> b.header("Authorization", "Bearer " + hostToken));
+            assertThat(eventRes.code()).isEqualTo(200);
+            String eventId = eventRes.body().string().split("\"id\":\"")[1].split("\"")[0];
+
+            // 1. Timer field with description, configJson, aggregationMode, displayFormat
+            String timerJson = """
+                {
+                    "target": "MATCH",
+                    "phase": "teleop",
+                    "name": "Cycle Stopwatch",
+                    "fieldKey": "cycle_timer",
+                    "fieldType": "timer",
+                    "description": "Measure cycle time",
+                    "configJson": "{\\"decimalPlaces\\":2}",
+                    "aggregationMode": "median",
+                    "displayFormat": "number"
+                }
+            """;
+            var timerRes = client.post("/api/events/" + eventId + "/custom-fields", timerJson, b -> b.header("Authorization", "Bearer " + hostToken));
+            assertThat(timerRes.code()).isEqualTo(201);
+            String timerBody = timerRes.body().string();
+            assertThat(timerBody).contains("\"fieldType\":\"timer\"");
+            assertThat(timerBody).contains("\"description\":\"Measure cycle time\"");
+            assertThat(timerBody).contains("\"aggregationMode\":\"median\"");
+
+            // 2. TEAM target rejects non-formula fieldType
+            var teamNonFormula = client.post("/api/events/" + eventId + "/custom-fields", """
+                {"target":"TEAM","name":"Bad Team Field","fieldKey":"bad_team","fieldType":"number"}
+            """, b -> b.header("Authorization", "Bearer " + hostToken));
+            assertThat(teamNonFormula.code()).isEqualTo(400);
+            assertThat(teamNonFormula.body().string()).contains("TEAM custom fields must have fieldType 'formula'");
+
+            // 3. Description > 300 chars rejected
+            String longDesc = "d".repeat(301);
+            var longDescRes = client.post("/api/events/" + eventId + "/custom-fields",
+                    "{\"target\":\"MATCH\",\"name\":\"Desc Test\",\"fieldType\":\"number\",\"description\":\"" + longDesc + "\"}",
+                    b -> b.header("Authorization", "Bearer " + hostToken));
+            assertThat(longDescRes.code()).isEqualTo(400);
+
+            // 4. Invalid configJson (array instead of object, and > 8192 bytes)
+            var badCfgArray = client.post("/api/events/" + eventId + "/custom-fields",
+                    "{\"target\":\"MATCH\",\"name\":\"Cfg Test\",\"fieldType\":\"number\",\"configJson\":\"[1,2,3]\"}",
+                    b -> b.header("Authorization", "Bearer " + hostToken));
+            assertThat(badCfgArray.code()).isEqualTo(400);
+
+            String hugeCfg = "{\"k\":\"" + "x".repeat(8200) + "\"}";
+            var badCfgSize = client.post("/api/events/" + eventId + "/custom-fields",
+                    "{\"target\":\"MATCH\",\"name\":\"Cfg Size\",\"fieldType\":\"number\",\"configJson\":" + new com.google.gson.Gson().toJson(hugeCfg) + "}",
+                    b -> b.header("Authorization", "Bearer " + hostToken));
+            assertThat(badCfgSize.code()).isEqualTo(400);
+
+            // 5. Invalid aggregationMode & displayFormat
+            var badAgg = client.post("/api/events/" + eventId + "/custom-fields",
+                    "{\"target\":\"MATCH\",\"name\":\"Bad Agg\",\"fieldType\":\"number\",\"aggregationMode\":\"bogus\"}",
+                    b -> b.header("Authorization", "Bearer " + hostToken));
+            assertThat(badAgg.code()).isEqualTo(400);
+
+            var badFmt = client.post("/api/events/" + eventId + "/custom-fields",
+                    "{\"target\":\"MATCH\",\"name\":\"Bad Fmt\",\"fieldType\":\"number\",\"displayFormat\":\"bogus\"}",
+                    b -> b.header("Authorization", "Bearer " + hostToken));
+            assertThat(badFmt.code()).isEqualTo(400);
+
+            // 6. Valid MATCH formula
+            var matchFormulaRes = client.post("/api/events/" + eventId + "/custom-fields", """
+                {
+                    "target": "MATCH",
+                    "phase": "overall",
+                    "name": "Match Double Auto",
+                    "fieldKey": "match_double",
+                    "fieldType": "formula",
+                    "formulaExpr": "match.autoScore * 2"
+                }
+            """, b -> b.header("Authorization", "Bearer " + hostToken));
+            assertThat(matchFormulaRes.code()).isEqualTo(201);
+            assertThat(matchFormulaRes.body().string()).contains("match.autoScore");
+
+            // 7. Valid TEAM formula referencing MATCH formula + OPR
+            var teamFormulaRes = client.post("/api/events/" + eventId + "/custom-fields", """
+                {
+                    "target": "TEAM",
+                    "phase": "overall",
+                    "name": "Team Power Index",
+                    "fieldKey": "team_power",
+                    "fieldType": "formula",
+                    "formulaExpr": "formula.match_double + opr.np * 0.5",
+                    "aggregationMode": "trimmed_avg",
+                    "displayFormat": "tier"
+                }
+            """, b -> b.header("Authorization", "Bearer " + hostToken));
+            assertThat(teamFormulaRes.code()).isEqualTo(201);
+            String teamBody = teamFormulaRes.body().string();
+            assertThat(teamBody).contains("\"aggregationMode\":\"trimmed_avg\"");
+            assertThat(teamBody).contains("\"displayFormat\":\"tier\"");
+            assertThat(teamBody).contains("formula.match_double");
+            String teamFormulaId = teamBody.split("\"id\":\"")[1].split("\"")[0];
+
+            // 8. Cross-layer reference rejected (MATCH referencing TEAM formula)
+            var crossLayerRes = client.post("/api/events/" + eventId + "/custom-fields", """
+                {
+                    "target": "MATCH",
+                    "name": "Illegal Cross",
+                    "fieldKey": "illegal_cross",
+                    "fieldType": "formula",
+                    "formulaExpr": "formula.team_power + 1"
+                }
+            """, b -> b.header("Authorization", "Bearer " + hostToken));
+            assertThat(crossLayerRes.code()).isEqualTo(400);
+            assertThat(crossLayerRes.body().string()).contains("CROSS_LAYER_REFERENCE");
+
+            // 9. Injection rejected
+            var injectionRes = client.post("/api/events/" + eventId + "/custom-fields", """
+                {
+                    "target": "TEAM",
+                    "name": "Injection",
+                    "fieldKey": "inj_test",
+                    "fieldType": "formula",
+                    "formulaExpr": "__proto__.polluted + 1"
+                }
+            """, b -> b.header("Authorization", "Bearer " + hostToken));
+            assertThat(injectionRes.code()).isEqualTo(400);
+            assertThat(injectionRes.body().string()).contains("FORBIDDEN_IDENTIFIER");
+
+            // 10. Self-cycle rejected on POST
+            var selfCycleRes = client.post("/api/events/" + eventId + "/custom-fields", """
+                {
+                    "target": "TEAM",
+                    "name": "Self Cycle",
+                    "fieldKey": "self_cyc",
+                    "fieldType": "formula",
+                    "formulaExpr": "formula.self_cyc + 1"
+                }
+            """, b -> b.header("Authorization", "Bearer " + hostToken));
+            assertThat(selfCycleRes.code()).isEqualTo(400);
+            String selfCycleBody = selfCycleRes.body().string();
+            assertThat(selfCycleBody).contains("CIRCULAR_DEPENDENCY");
+            assertThat(selfCycleBody).contains("self_cyc");
+
+            // 11. Two-node cycle rejected on PUT
+            var f2Res = client.post("/api/events/" + eventId + "/custom-fields", """
+                {
+                    "target": "TEAM",
+                    "name": "Team Helper",
+                    "fieldKey": "team_helper",
+                    "fieldType": "formula",
+                    "formulaExpr": "formula.team_power + 1"
+                }
+            """, b -> b.header("Authorization", "Bearer " + hostToken));
+            assertThat(f2Res.code()).isEqualTo(201);
+
+            var cyclePutRes = client.put("/api/events/" + eventId + "/custom-fields/" + teamFormulaId, """
+                {
+                    "name": "Team Power Index",
+                    "fieldType": "formula",
+                    "formulaExpr": "formula.team_helper + 1"
+                }
+            """, b -> b.header("Authorization", "Bearer " + hostToken));
+            assertThat(cyclePutRes.code()).isEqualTo(400);
+            String cyclePutBody = cyclePutRes.body().string();
+            assertThat(cyclePutBody).contains("CIRCULAR_DEPENDENCY");
+            assertThat(cyclePutBody).contains("team_power");
+            assertThat(cyclePutBody).contains("team_helper");
         });
     }
 }

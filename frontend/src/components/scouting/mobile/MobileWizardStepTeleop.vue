@@ -1,10 +1,14 @@
 <script setup lang="ts">
+import { computed } from 'vue'
 import { useI18n } from 'vue-i18n'
 import DynamicFieldsRenderer from '@/components/customFields/DynamicFieldsRenderer.vue'
 import type { CustomFieldDefinition } from '@/types'
+import { buildMatchFormulaContext } from '@/utils/formula'
+import { calcMatchAutoCycleTime, calcMatchPredictCycleTime } from '@/utils/analytics/predictCycleTime'
+import { useCustomFieldsStore } from '@/stores/customFields'
 import type { MobileTeamScoutData } from './useMobileWizardForm'
 
-defineProps<{
+const props = defineProps<{
   team: MobileTeamScoutData
   teleopScore: number
   teleopBallsTotal: number
@@ -30,6 +34,37 @@ const emit = defineEmits<{
 }>()
 
 const { t } = useI18n()
+
+let customFieldsStore: ReturnType<typeof useCustomFieldsStore> | null = null
+try {
+  customFieldsStore = useCustomFieldsStore()
+} catch {
+  // Ignore if Pinia not mounted
+}
+
+const allDefinitions = computed(() => {
+  const evtId = props.teleopCustomDefinitions[0]?.eventId
+  if (evtId && customFieldsStore) {
+    return customFieldsStore.getActiveFields(evtId, 'MATCH')
+  }
+  return props.teleopCustomDefinitions
+})
+
+const formulaContext = computed(() =>
+  buildMatchFormulaContext({
+    formData: {
+      ...props.team,
+      teamNumber: parseInt(props.team.teamNumber) || 0,
+      autoCycleTimeSec: calcMatchAutoCycleTime(props.team.autoCycles, props.team.autoCycleTimestamps),
+      predictCycleTimeSec: calcMatchPredictCycleTime(props.team.teleopCycles, props.team.teleopCycleTimestamps)
+    },
+    record: {
+      teleopScore: props.teleopScore,
+      isBroken: props.team.isBroken
+    },
+    fieldDefinitions: allDefinitions.value
+  })
+)
 </script>
 
 <template>
@@ -181,7 +216,12 @@ const { t } = useI18n()
 
     <!-- Custom Fields (TeleOp) -->
     <div v-if="teleopCustomDefinitions.length > 0" class="custom-fields-box">
-      <DynamicFieldsRenderer :definitions="teleopCustomDefinitions" v-model="team.customFields" />
+      <DynamicFieldsRenderer
+        :definitions="teleopCustomDefinitions"
+        :all-definitions="allDefinitions"
+        :formula-context="formulaContext"
+        v-model="team.customFields"
+      />
     </div>
   </section>
 </template>

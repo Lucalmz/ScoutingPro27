@@ -19,11 +19,12 @@ import PitScoutFormDrawer from '@/components/pit/PitScoutFormDrawer.vue'
 import type { ScoutingRecord } from '@/types'
 import { sortRecordsChronologically, getMatchLevelPrefix } from '@/utils/tournament'
 import { parseScoutRawData } from '@/utils/analytics/rankings'
-import { calcMatchPredictCycleTime, aggregateTeamPredictCycleStats } from '@/utils/analytics/predictCycleTime'
+import { calcMatchPredictCycleTime, aggregateTeamPredictCycleStats, calcMatchAutoCycleTime, aggregateTeamAutoCycleStats } from '@/utils/analytics/predictCycleTime'
 import TeamPitProfileCard from './components/TeamPitProfileCard.vue'
 import TeamCustomMetricsCard from './components/TeamCustomMetricsCard.vue'
 import {
   computeTeamMatchCustomMetrics,
+  computeTeamFormulaMetrics,
   computeTeamPitCustomSpecs,
   buildMatchCustomBadges
 } from './composables/useTeamCustomMetrics'
@@ -96,17 +97,53 @@ const activePitFields = computed(() => {
   return props.eventId ? customFieldsStore.getActiveFields(props.eventId, 'PIT') : []
 })
 
+const activeTeamFields = computed(() => {
+  return props.eventId ? customFieldsStore.getActiveFields(props.eventId, 'TEAM') : []
+})
+
+const allEventCustomFields = computed(() => [
+  ...activeMatchFields.value,
+  ...activePitFields.value,
+  ...activeTeamFields.value
+])
+
+const teamRankingRow = computed(() => {
+  if (isNaN(teamNumVal.value)) return undefined
+  return recordStore.rankings?.find(r => r.teamNumber === teamNumVal.value)
+})
+
 const teamMatchCustomMetrics = computed(() => {
-  return computeTeamMatchCustomMetrics(activeMatchFields.value, teamMatches.value)
+  return [
+    ...computeTeamMatchCustomMetrics(activeMatchFields.value, teamMatches.value, allEventCustomFields.value),
+    ...computeTeamFormulaMetrics(activeTeamFields.value, {
+      rankingRow: teamRankingRow.value,
+      pitRecord: unifiedTeam.value?.pitRecord,
+      matchRecords: teamMatches.value,
+      allFields: allEventCustomFields.value
+    })
+  ]
 })
 
 const teamPitCustomSpecs = computed(() => {
-  return computeTeamPitCustomSpecs(activePitFields.value, unifiedTeam.value?.pitRecord, t)
+  return computeTeamPitCustomSpecs(activePitFields.value, unifiedTeam.value?.pitRecord, t, allEventCustomFields.value)
 })
 
 function getMatchCustomBadges(match: ScoutingRecord) {
-  return buildMatchCustomBadges(activeMatchFields.value, match, t)
+  return buildMatchCustomBadges(activeMatchFields.value, match, t, allEventCustomFields.value)
 }
+
+const teamAutoStats = computed(() => {
+  return aggregateTeamAutoCycleStats(
+    teamMatches.value.map(match => {
+      const parsed = parseScoutRawData(match.rawData)
+      return {
+        autoCycles: parsed.autoCycles,
+        autoCycleTimestamps: parsed.autoCycleTimestamps,
+        isBroken: match.isBroken
+      }
+    })
+  )
+})
 
 const teamPredictStats = computed(() => {
   return aggregateTeamPredictCycleStats(
@@ -123,12 +160,16 @@ const teamPredictStats = computed(() => {
 
 function getMatchBiobuzzMeta(match: ScoutingRecord) {
   const parsed = parseScoutRawData(match.rawData)
+  const autoCycleSec =
+    parsed.autoCycleTimeSec ??
+    calcMatchAutoCycleTime(parsed.autoCycles, parsed.autoCycleTimestamps)
   const predictCycleSec =
     parsed.predictCycleTimeSec ??
     calcMatchPredictCycleTime(parsed.teleopCycles, parsed.teleopCycleTimestamps)
   return {
     teleopCyclesCount: parsed.teleopCycles.length,
     endgame: parsed.endgame,
+    autoCycleSec,
     predictCycleSec
   }
 }
@@ -250,23 +291,106 @@ async function saveComment(match: ScoutingRecord) {
         <!-- 自定义指标表现卡片 -->
         <TeamCustomMetricsCard :metrics="teamMatchCustomMetrics" />
 
+        <!-- SP-NP OPR 评估卡片 -->
+        <div
+          v-if="teamRankingRow && teamRankingRow.spNpOpr !== undefined && teamRankingRow.spNpOpr !== null"
+          class="team-tags-card sp-np-opr-card"
+        >
+          <div class="opr-card-header">
+            <h3 style="margin: 0; display: flex; align-items: center; gap: 6px;">
+              <span class="material-icons" style="font-size: 18px; color: var(--primary);">insights</span>
+              {{ t('team_detail.sp_np_opr_title') }}
+            </h3>
+            <span
+              v-if="teamRankingRow.spNpOprConfidence"
+              class="opr-conf-pill"
+              :class="`conf-${teamRankingRow.spNpOprConfidence}`"
+            >
+              {{ t(`rankings.np_opr_conf_${teamRankingRow.spNpOprConfidence}`) }}
+              <template v-if="teamRankingRow.spNpOprConfidenceScore !== undefined">
+                ({{ Math.round(teamRankingRow.spNpOprConfidenceScore) }})
+              </template>
+            </span>
+          </div>
+
+          <div class="opr-metrics-grid">
+            <div class="opr-stat-box primary">
+              <span class="opr-stat-label">{{ t('rankings.sp_np_opr') }}</span>
+              <span class="opr-stat-value">{{ teamRankingRow.spNpOpr.toFixed(1) }}</span>
+            </div>
+            <div class="opr-stat-box">
+              <span class="opr-stat-label">{{ t('team_detail.raw_np_opr') }}</span>
+              <span class="opr-stat-value">
+                {{ teamRankingRow.rawNpOpr !== null && teamRankingRow.rawNpOpr !== undefined ? teamRankingRow.rawNpOpr.toFixed(1) : '—' }}
+              </span>
+            </div>
+            <div class="opr-stat-box">
+              <span class="opr-stat-label">{{ t('team_detail.scout_avg') }}</span>
+              <span class="opr-stat-value">
+                {{ teamRankingRow.matchCount > 0 ? teamRankingRow.avgRating.toFixed(1) : '—' }}
+              </span>
+            </div>
+            <div class="opr-stat-box">
+              <span class="opr-stat-label">{{ t('team_detail.opr_delta') }}</span>
+              <span class="opr-stat-value">
+                {{
+                  teamRankingRow.spNpOprDelta !== null && teamRankingRow.spNpOprDelta !== undefined
+                    ? `${teamRankingRow.spNpOprDelta >= 0 ? '+' : ''}${teamRankingRow.spNpOprDelta.toFixed(1)}`
+                    : '—'
+                }}
+              </span>
+            </div>
+          </div>
+
+          <div class="opr-splits-row">
+            <span class="opr-split-item">
+              {{ t('history.auto') }}:
+              <strong>{{ teamRankingRow.spNpOprAuto !== null && teamRankingRow.spNpOprAuto !== undefined ? teamRankingRow.spNpOprAuto.toFixed(1) : '—' }}</strong>
+            </span>
+            <span class="opr-split-item">
+              {{ t('history.teleop') }}:
+              <strong>{{ teamRankingRow.spNpOprTeleop !== null && teamRankingRow.spNpOprTeleop !== undefined ? teamRankingRow.spNpOprTeleop.toFixed(1) : '—' }}</strong>
+            </span>
+            <span class="opr-split-item">
+              {{ t('history.endgame') }}:
+              <strong>{{ teamRankingRow.spNpOprEndgame !== null && teamRankingRow.spNpOprEndgame !== undefined ? teamRankingRow.spNpOprEndgame.toFixed(1) : '—' }}</strong>
+            </span>
+            <span class="opr-split-item muted">
+              {{ t('team_detail.broken_excluded_count', { count: teamRankingRow.spNpOprBrokenExcluded ?? 0 }) }}
+            </span>
+          </div>
+        </div>
+
         <div v-if="teamMatches.length === 0" class="empty-state">
           <p>{{ t('team_detail.no_records') }}</p>
         </div>
 
         <div v-else class="matches-list">
           <div class="team-predict-banner">
-            <span class="predict-banner-label">
-              <span class="material-icons" style="font-size: 16px; color: var(--status-info);">speed</span>
-              {{ t('rankings.predict_cycle_time') }}:
-            </span>
-            <strong v-if="teamPredictStats.predictCycleTime !== null" class="predict-banner-val">
-              {{ t('rankings.predict_cycle_time_unit', { sec: teamPredictStats.predictCycleTime }) }}
-              <span class="predict-banner-sub">
-                ({{ t('rankings.predict_cycle_spread', { sec: teamPredictStats.predictCycleSpread ?? 0 }) }} · {{ t('rankings.estimated_max_cycles_unit', { cycles: teamPredictStats.estimatedMaxCycles ?? 0 }) }} · {{ t('rankings.predict_cycle_matches_count', { count: teamPredictStats.predictCycleMatches }) }})
+            <div class="predict-banner-item">
+              <span class="predict-banner-label">
+                <span class="material-icons" style="font-size: 16px; color: var(--status-info);">bolt</span>
+                {{ t('rankings.auto_cycle_time') }}:
               </span>
-            </strong>
-            <span v-else class="predict-banner-sub">{{ t('rankings.predict_cycle_insufficient') }}</span>
+              <strong v-if="teamAutoStats.autoCycleTime !== null" class="predict-banner-val">
+                {{ t('rankings.predict_cycle_time_unit', { sec: teamAutoStats.autoCycleTime }) }}
+                <span class="predict-banner-sub">({{ t('rankings.predict_cycle_matches_count', { count: teamAutoStats.autoCycleMatches }) }})</span>
+              </strong>
+              <span v-else class="predict-banner-sub">—</span>
+            </div>
+            <div class="predict-banner-item">
+              <span class="predict-banner-label">
+                <span class="material-icons" style="font-size: 16px; color: var(--status-info);">speed</span>
+                {{ t('rankings.predict_cycle_time') }}:
+              </span>
+              <strong v-if="teamPredictStats.predictCycleTime !== null" class="predict-banner-val">
+                {{ t('rankings.predict_cycle_time_unit', { sec: teamPredictStats.predictCycleTime }) }}
+                <span class="predict-banner-sub">
+                  ({{ t('rankings.predict_cycle_spread', { sec: teamPredictStats.predictCycleSpread ?? 0 }) }} · {{ t('rankings.estimated_max_cycles_unit', { cycles: teamPredictStats.estimatedMaxCycles ?? 0 }) }} · {{ t('rankings.predict_cycle_matches_count', { count: teamPredictStats.predictCycleMatches }) }})
+                </span>
+              </strong>
+              <span v-else class="predict-banner-sub">{{ t('rankings.predict_cycle_insufficient') }}</span>
+            </div>
           </div>
 
           <div v-for="match in teamMatches" :key="match.id" class="match-card" :class="{ 'is-broken': match.isBroken }">
@@ -306,6 +430,7 @@ async function saveComment(match: ScoutingRecord) {
                 getMatchBiobuzzMeta(match).endgame.teleopPark ||
                 getMatchBiobuzzMeta(match).endgame.flowerDescore ||
                 getMatchBiobuzzMeta(match).endgame.g410EarlyFlowerFoul ||
+                getMatchBiobuzzMeta(match).autoCycleSec !== null ||
                 getMatchBiobuzzMeta(match).predictCycleSec !== null ||
                 getMatchBiobuzzMeta(match).teleopCyclesCount > 0
               "
@@ -335,6 +460,10 @@ async function saveComment(match: ScoutingRecord) {
               </span>
               <span v-if="getMatchBiobuzzMeta(match).endgame.g410EarlyFlowerFoul" class="match-cf-badge cf-color-orange">
                 <span class="cf-val">G410 Foul</span>
+              </span>
+              <span v-if="getMatchBiobuzzMeta(match).autoCycleSec !== null" class="match-cf-badge cf-color-cyan">
+                <span class="cf-name">{{ t('scouting.auto_cycle_time') }}:</span>
+                <span class="cf-val">{{ getMatchBiobuzzMeta(match).autoCycleSec }}s</span>
               </span>
               <span v-if="getMatchBiobuzzMeta(match).predictCycleSec !== null" class="match-cf-badge cf-color-blue">
                 <span class="cf-name">{{ t('scouting.predict_cycle_time') }}:</span>
@@ -913,5 +1042,110 @@ async function saveComment(match: ScoutingRecord) {
   font-size: 12px;
   color: var(--muted-foreground);
   margin-left: 4px;
+}
+
+.predict-banner-item {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  flex-wrap: wrap;
+}
+
+.sp-np-opr-card {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.opr-card-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.opr-conf-pill {
+  font-size: 11px;
+  font-weight: 700;
+  padding: 2px 8px;
+  border-radius: 999px;
+  border: 1px solid var(--border);
+  background: var(--surface-elevated);
+  color: var(--muted-foreground);
+}
+
+.opr-conf-pill.conf-high {
+  background: var(--status-success-bg);
+  color: var(--status-success);
+  border-color: var(--status-success-border);
+}
+
+.opr-conf-pill.conf-medium {
+  background: var(--status-info-bg);
+  color: var(--status-info);
+  border-color: var(--status-info-border);
+}
+
+.opr-conf-pill.conf-low {
+  background: var(--status-warning-bg);
+  color: var(--status-warning);
+  border-color: var(--status-warning-border);
+}
+
+.opr-metrics-grid {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 8px;
+}
+
+@media (max-width: 600px) {
+  .opr-metrics-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+
+.opr-stat-box {
+  background: var(--surface-recessed);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 8px 10px;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.opr-stat-box.primary {
+  border-color: var(--primary);
+}
+
+.opr-stat-label {
+  font-size: 11px;
+  color: var(--muted-foreground);
+}
+
+.opr-stat-value {
+  font-size: 16px;
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+  color: var(--foreground);
+}
+
+.opr-stat-box.primary .opr-stat-value {
+  color: var(--primary);
+}
+
+.opr-splits-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px;
+  font-size: 12px;
+  color: var(--foreground);
+  padding-top: 4px;
+  border-top: 1px solid var(--border-subtle);
+}
+
+.opr-split-item.muted {
+  margin-left: auto;
+  color: var(--muted-foreground);
 }
 </style>

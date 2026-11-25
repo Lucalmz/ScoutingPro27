@@ -1,8 +1,11 @@
 package com.bear27570.app.service;
 
+import com.bear27570.app.model.PitScoutingRecord;
 import com.bear27570.app.model.ScoutingRecord;
+import com.bear27570.app.routes.PitScoutRoutes;
 import com.bear27570.app.util.DbUtil;
 import com.bear27570.app.util.EcdsaRecordVerifier;
+import com.bear27570.app.util.FormulaValidator;
 import com.google.gson.Gson;
 import com.google.gson.JsonArray;
 import com.google.gson.JsonElement;
@@ -84,6 +87,12 @@ public class CrdtProjectionService {
             handle.execute("ALTER TABLE scouting_records ADD COLUMN IF NOT EXISTS author_pub_key VARCHAR(256)");
             handle.execute("ALTER TABLE scouting_records ADD COLUMN IF NOT EXISTS author_sig     VARCHAR(256)");
             handle.execute("ALTER TABLE scouting_records ADD COLUMN IF NOT EXISTS host_sig       VARCHAR(256)");
+            handle.execute("ALTER TABLE event_custom_fields ADD COLUMN IF NOT EXISTS description       VARCHAR(300)");
+            handle.execute("ALTER TABLE event_custom_fields ADD COLUMN IF NOT EXISTS config_json       TEXT");
+            handle.execute("ALTER TABLE event_custom_fields ADD COLUMN IF NOT EXISTS formula_expr      TEXT");
+            handle.execute("ALTER TABLE event_custom_fields ADD COLUMN IF NOT EXISTS aggregation_mode  VARCHAR(30) DEFAULT 'avg'");
+            handle.execute("ALTER TABLE event_custom_fields ADD COLUMN IF NOT EXISTS display_format    VARCHAR(30) DEFAULT 'number'");
+            handle.execute("ALTER TABLE event_custom_fields ADD COLUMN IF NOT EXISTS dependencies_json TEXT");
         });
     }
 
@@ -188,6 +197,8 @@ public class CrdtProjectionService {
                 Set<String> rejectedScoutingRowIds = Collections.emptySet();
                 if (!isHost) {
                     JsonElement previousSnapshotEl = parseNullableJsonArray(existing != null ? existing.crdtSnapshotJson() : null);
+                    sanitizeNonHostMemberIdentities(
+                            handle, eventId, callerUserId, persistedSnapshotEl, previousSnapshotEl);
                     NonHostSanitizeResult sanitizeResult = sanitizeNonHostScoutingSnapshot(
                             handle, eventId, callerUserId, persistedSnapshotEl, previousSnapshotEl);
                     rejectedScoutingRowIds = sanitizeResult.rejectedRowIds();
@@ -302,6 +313,197 @@ public class CrdtProjectionService {
                 .mapTo(String.class)
                 .findFirst()
                 .orElse(null);
+    }
+
+    private static boolean isRegisteredUserWithPassword(Handle handle, String userId) {
+        if (handle == null || userId == null || userId.isBlank()) {
+            return false;
+        }
+        Integer count = handle.createQuery(
+                        "SELECT COUNT(*) FROM users WHERE id = :id AND password IS NOT NULL AND TRIM(password) <> ''")
+                .bind("id", userId)
+                .mapTo(Integer.class)
+                .findFirst()
+                .orElse(0);
+        return count != null && count > 0;
+    }
+
+    /**
+     * Validates `member_identities` rows when a non-Host member calls PUT /crdt-state:
+     * - Blocks non-Host callers from injecting a self-signed Host master-key bootstrap anchor
+     *   on the authoritative Host database (where eventHostId is a locally registered user with password).
+     * - Preserves cold-replica sync (e.g. standby laptop HostB where eventHostId is a passwordless placeholder)
+     *   by allowing at most one cryptographically valid self-signed Host anchor when no Host key is pinned yet.
+     * - Requires Host countersignature (`hostSig` verified against a trusted Host key) for any third-party
+     *   key binding, while allowing a non-Host caller to publish only their own unsigned self-row (`userId == callerUserId`).
+     * - Restores previously persisted `member_identities` rows of other users if tampered or omitted.
+     */
+    private void sanitizeNonHostMemberIdentities(
+            Handle handle,
+            String eventId,
+            String callerUserId,
+            JsonElement persistedSnapshotEl,
+            JsonElement previousSnapshotEl
+    ) {
+        Map<String, JsonObject> incomingPlainRows = extractTableRows(persistedSnapshotEl, "member_identities");
+        Map<String, JsonElement> incomingRawRows = extractRawTableRows(persistedSnapshotEl, "member_identities");
+        Map<String, JsonObject> previousPlainRows = extractTableRows(previousSnapshotEl, "member_identities");
+        Map<String, JsonElement> previousRawRows = extractRawTableRows(previousSnapshotEl, "member_identities");
+
+        if (incomingRawRows.isEmpty() && previousRawRows.isEmpty()) {
+            return;
+        }
+
+        MutableTableHandle tableHandle = getOrCreateMutableTable(persistedSnapshotEl, "member_identities");
+        if (tableHandle == null) {
+            return;
+        }
+
+        String eventHostId = queryEventHostId(handle, eventId);
+        boolean hostIsRegisteredLocalUser = isRegisteredUserWithPassword(handle, eventHostId);
+
+        Set<String> trustedHostKeys = new HashSet<>();
+        if (eventHostId != null && !eventHostId.isBlank()) {
+            List<String> dbHostKeys = handle.createQuery(
+                            "SELECT DISTINCT author_pub_key FROM scouting_records " +
+                            "WHERE event_id = :eventId AND scout_id = :hostId " +
+                            "AND author_pub_key IS NOT NULL AND TRIM(author_pub_key) <> ''")
+                    .bind("eventId", eventId)
+                    .bind("hostId", eventHostId)
+                    .mapTo(String.class)
+                    .list();
+            for (String k : dbHostKeys) {
+                if (k != null && !k.isBlank()) {
+                    trustedHostKeys.add(k.trim());
+                }
+            }
+
+            for (JsonObject prevRow : previousPlainRows.values()) {
+                String rowEventId = getStr(prevRow, "eventId", "").trim();
+                if (!rowEventId.isEmpty() && !eventId.equals(rowEventId)) continue;
+                String uId = getStr(prevRow, "userId", "").trim();
+                String devId = getStr(prevRow, "deviceId", "").trim();
+                String pubKey = getStr(prevRow, "signingPubKeyHex", "").trim();
+                String hPub = getStr(prevRow, "hostPubKey", "").trim();
+                String hSig = getStr(prevRow, "hostSig", "").trim();
+                if (eventHostId.equals(uId)
+                        && !pubKey.isEmpty()
+                        && pubKey.equals(hPub)
+                        && EcdsaRecordVerifier.verifyMemberIdentityCanonical(
+                                rowEventId.isEmpty() ? eventId : rowEventId,
+                                uId, devId, pubKey, hPub, hSig)) {
+                    trustedHostKeys.add(pubKey);
+                }
+            }
+
+            if (trustedHostKeys.isEmpty() && !hostIsRegisteredLocalUser) {
+                for (JsonObject incRow : incomingPlainRows.values()) {
+                    String rowEventId = getStr(incRow, "eventId", "").trim();
+                    if (!rowEventId.isEmpty() && !eventId.equals(rowEventId)) continue;
+                    String uId = getStr(incRow, "userId", "").trim();
+                    String devId = getStr(incRow, "deviceId", "").trim();
+                    String pubKey = getStr(incRow, "signingPubKeyHex", "").trim();
+                    String hPub = getStr(incRow, "hostPubKey", "").trim();
+                    String hSig = getStr(incRow, "hostSig", "").trim();
+                    if (eventHostId.equals(uId)
+                            && !pubKey.isEmpty()
+                            && pubKey.equals(hPub)
+                            && EcdsaRecordVerifier.verifyMemberIdentityCanonical(
+                                    rowEventId.isEmpty() ? eventId : rowEventId,
+                                    uId, devId, pubKey, hPub, hSig)) {
+                        trustedHostKeys.add(pubKey);
+                        break;
+                    }
+                }
+            }
+        }
+
+        boolean snapshotMutated = false;
+
+        for (String rowId : new ArrayList<>(incomingRawRows.keySet())) {
+            JsonElement incomingRaw = incomingRawRows.get(rowId);
+            JsonElement previousRaw = previousRawRows.get(rowId);
+            if (previousRaw != null && previousRaw.equals(incomingRaw)) {
+                continue;
+            }
+            JsonObject row = incomingPlainRows.get(rowId);
+            JsonObject prevPlain = previousPlainRows.get(rowId);
+            if (!isNonHostMemberIdentityAuthorized(
+                    eventId, callerUserId, trustedHostKeys, row, prevPlain)) {
+                if (previousRaw != null) {
+                    tableHandle.rowsObj().add(rowId, previousRaw.deepCopy());
+                } else {
+                    tableHandle.rowsObj().remove(rowId);
+                }
+                snapshotMutated = true;
+            }
+        }
+
+        for (Map.Entry<String, JsonElement> prevEntry : previousRawRows.entrySet()) {
+            String prevRowId = prevEntry.getKey();
+            if (incomingRawRows.containsKey(prevRowId)) {
+                continue;
+            }
+            JsonObject prevPlain = previousPlainRows.get(prevRowId);
+            String prevUserId = prevPlain != null ? getStr(prevPlain, "userId", "").trim() : "";
+            if (!Objects.equals(prevUserId, callerUserId)) {
+                tableHandle.rowsObj().add(prevRowId, prevEntry.getValue().deepCopy());
+                snapshotMutated = true;
+            }
+        }
+
+        if (snapshotMutated) {
+            trimStampHash(tableHandle.tableStamp());
+            trimStampHash(tableHandle.tablesStamp());
+        }
+    }
+
+    private static boolean isNonHostMemberIdentityAuthorized(
+            String eventId,
+            String callerUserId,
+            Set<String> trustedHostKeys,
+            JsonObject row,
+            JsonObject prevPlain
+    ) {
+        if (row == null) return false;
+        String rowEventId = getStr(row, "eventId", "").trim();
+        if (!rowEventId.isEmpty() && !eventId.equals(rowEventId)) {
+            return false;
+        }
+        String userId = getStr(row, "userId", "").trim();
+        String deviceId = getStr(row, "deviceId", "").trim();
+        String pubKey = getStr(row, "signingPubKeyHex", "").trim();
+        if (userId.isEmpty() || deviceId.isEmpty() || pubKey.isEmpty()) {
+            return false;
+        }
+        if (prevPlain != null) {
+            String prevUserId = getStr(prevPlain, "userId", "").trim();
+            if (!prevUserId.isEmpty() && !prevUserId.equals(userId)) {
+                return false;
+            }
+        }
+        String hostPubKey = getStr(row, "hostPubKey", "").trim();
+        String hostSig = getStr(row, "hostSig", "").trim();
+        if (hostPubKey.isEmpty() && hostSig.isEmpty()) {
+            if (!Objects.equals(userId, callerUserId)) {
+                return false;
+            }
+            if (prevPlain != null && !getStr(prevPlain, "hostSig", "").trim().isEmpty()) {
+                return false;
+            }
+            return true;
+        }
+        if (hostPubKey.isEmpty() || hostSig.isEmpty() || trustedHostKeys.isEmpty() || !trustedHostKeys.contains(hostPubKey)) {
+            return false;
+        }
+        return EcdsaRecordVerifier.verifyMemberIdentityCanonical(
+                rowEventId.isEmpty() ? eventId : rowEventId,
+                userId,
+                deviceId,
+                pubKey,
+                hostPubKey,
+                hostSig
+        );
     }
 
     private static ScoutingRecord queryExistingScoutingRecord(Handle handle, String id) {
@@ -558,6 +760,33 @@ public class CrdtProjectionService {
                 String robotName = truncateNullable(getStrOrNull(row, "robotName"), 100);
                 String drivetrain = truncate(nonBlankOr(getStr(row, "drivetrainType", ""), "mecanum"), 30);
 
+                PitScoutingRecord pitRec = new PitScoutingRecord();
+                pitRec.setId(id);
+                pitRec.setEventId(eventId);
+                pitRec.setTeamNumber(teamNum);
+                pitRec.setScoutId(scoutId);
+                pitRec.setScoutName(scoutName);
+                pitRec.setRobotName(robotName);
+                pitRec.setDrivetrainType(drivetrain);
+                pitRec.setWeightLbs(getDouble(row, "weightLbs", 0.0));
+                pitRec.setChassisSize(getStr(row, "chassisSize", ""));
+                pitRec.setOdometryType(truncate(nonBlankOr(getStr(row, "odometryType", ""), "none"), 30));
+                pitRec.setBallCompatibility(truncate(nonBlankOr(getStr(row, "ballCompatibility", ""), "universal"), 30));
+                pitRec.setLauncherType(truncate(getStr(row, "launcherType", ""), 100));
+                pitRec.setFlowerMechanism(truncate(getStr(row, "flowerMechanism", ""), 100));
+                pitRec.setClaimedAutoStrategy(getStr(row, "claimedAutoStrategy", ""));
+                pitRec.setClaimedAutoScore(getInt(row, "claimedAutoScore", 0));
+                pitRec.setClaimedTeleopCycles(getInt(row, "claimedTeleopCycles", 0));
+                pitRec.setClaimedTeleopScore(getInt(row, "claimedTeleopScore", 0));
+                pitRec.setClaimedTeleopPark(getBool(row, "claimedTeleopPark", false));
+                pitRec.setClaimedFlowerNectars(getInt(row, "claimedFlowerNectars", 0));
+                pitRec.setClaimedFlowerBottomBonus(getInt(row, "claimedFlowerBottomBonus", 0));
+                pitRec.setClaimedFlowerPollens(getInt(row, "claimedFlowerPollens", 0));
+                pitRec.setClaimedGardenBalls(getInt(row, "claimedGardenBalls", 0));
+                pitRec.setClaimedEndgameScore(getInt(row, "claimedEndgameScore", 0));
+                pitRec.setClaimedTotalScore(getInt(row, "claimedTotalScore", 0));
+                PitScoutRoutes.normalizePitRecord(pitRec);
+
                 handle.createUpdate("""
                         MERGE INTO pit_scouting_records (
                             id, event_id, team_number, scout_id, scout_name, robot_name,
@@ -588,27 +817,27 @@ public class CrdtProjectionService {
                         .bind("scoutId", scoutId)
                         .bind("scoutName", scoutName)
                         .bind("robotName", robotName)
-                        .bind("drivetrainType", drivetrain)
-                        .bind("weightLbs", getDouble(row, "weightLbs", 0.0))
-                        .bind("chassisSize", truncate(getStr(row, "chassisSize", ""), 64))
-                        .bind("odometryType", truncate(nonBlankOr(getStr(row, "odometryType", ""), "none"), 30))
-                        .bind("ballCompatibility", truncate(nonBlankOr(getStr(row, "ballCompatibility", ""), "universal"), 30))
-                        .bind("launcherType", truncate(getStr(row, "launcherType", ""), 100))
-                        .bind("flowerMechanism", truncate(getStr(row, "flowerMechanism", ""), 100))
+                        .bind("drivetrainType", truncate(pitRec.getDrivetrainType(), 30))
+                        .bind("weightLbs", pitRec.getWeightLbs())
+                        .bind("chassisSize", truncate(pitRec.getChassisSize(), 64))
+                        .bind("odometryType", truncate(pitRec.getOdometryType(), 30))
+                        .bind("ballCompatibility", truncate(pitRec.getBallCompatibility(), 30))
+                        .bind("launcherType", truncate(pitRec.getLauncherType(), 100))
+                        .bind("flowerMechanism", truncate(pitRec.getFlowerMechanism(), 100))
                         .bind("hasColorSensor", getBool(row, "hasColorSensor", false))
                         .bind("hasDescoreMech", getBool(row, "hasDescoreMech", false))
                         .bind("hasApriltagVision", getBool(row, "hasApriltagVision", false))
-                        .bind("claimedAutoStrategy", getStr(row, "claimedAutoStrategy", ""))
-                        .bind("claimedAutoScore", getInt(row, "claimedAutoScore", 0))
-                        .bind("claimedTeleopCycles", getInt(row, "claimedTeleopCycles", 0))
-                        .bind("claimedTeleopScore", getInt(row, "claimedTeleopScore", 0))
-                        .bind("claimedTeleopPark", getBool(row, "claimedTeleopPark", false))
-                        .bind("claimedFlowerNectars", getInt(row, "claimedFlowerNectars", 0))
-                        .bind("claimedFlowerBottomBonus", getInt(row, "claimedFlowerBottomBonus", 0))
-                        .bind("claimedFlowerPollens", getInt(row, "claimedFlowerPollens", 0))
-                        .bind("claimedGardenBalls", getInt(row, "claimedGardenBalls", 0))
-                        .bind("claimedEndgameScore", getInt(row, "claimedEndgameScore", 0))
-                        .bind("claimedTotalScore", getInt(row, "claimedTotalScore", 0))
+                        .bind("claimedAutoStrategy", pitRec.getClaimedAutoStrategy())
+                        .bind("claimedAutoScore", pitRec.getClaimedAutoScore())
+                        .bind("claimedTeleopCycles", pitRec.getClaimedTeleopCycles())
+                        .bind("claimedTeleopScore", pitRec.getClaimedTeleopScore())
+                        .bind("claimedTeleopPark", pitRec.isClaimedTeleopPark())
+                        .bind("claimedFlowerNectars", pitRec.getClaimedFlowerNectars())
+                        .bind("claimedFlowerBottomBonus", pitRec.getClaimedFlowerBottomBonus())
+                        .bind("claimedFlowerPollens", pitRec.getClaimedFlowerPollens())
+                        .bind("claimedGardenBalls", pitRec.getClaimedGardenBalls())
+                        .bind("claimedEndgameScore", pitRec.getClaimedEndgameScore())
+                        .bind("claimedTotalScore", pitRec.getClaimedTotalScore())
                         .bind("photoKeys", photoKeysJson)
                         .bind("version", Math.max(1, getInt(row, "version", 1)))
                         .bind("isDeleted", getBool(row, "isDeleted", false))
@@ -746,6 +975,24 @@ public class CrdtProjectionService {
             String name = truncate(nonBlankOr(getStr(row, "name", ""), "Field"), 100);
             String fieldKey = truncate(nonBlankOr(getStr(row, "fieldKey", ""), "field_" + Math.abs(id.hashCode())).toLowerCase(Locale.ROOT), 100);
             String fieldType = truncate(nonBlankOr(getStr(row, "fieldType", ""), "text").toLowerCase(Locale.ROOT), 30);
+            String description = truncateNullable(getStrOrNull(row, "description"), 300);
+            String configJson = getStrOrNull(row, "configJson");
+            String aggregationMode = truncate(nonBlankOr(getStr(row, "aggregationMode", ""), "avg").toLowerCase(Locale.ROOT), 30);
+            String displayFormat = truncate(nonBlankOr(getStr(row, "displayFormat", ""), "number").toLowerCase(Locale.ROOT), 30);
+
+            String formulaExpr = null;
+            String dependenciesJson = null;
+            if ("formula".equals(fieldType)) {
+                String rawFormula = getStrOrNull(row, "formulaExpr");
+                if (rawFormula != null && !rawFormula.isBlank()) {
+                    // Validate syntax/injection/DoS/namespace only; allow cyclic dependencies from offline CRDT merges
+                    FormulaValidator.ValidationResult valRes = FormulaValidator.validate(rawFormula, target);
+                    if (valRes.isValid()) {
+                        formulaExpr = rawFormula;
+                        dependenciesJson = gson.toJson(valRes.getDependencies());
+                    }
+                }
+            }
 
             handle.createUpdate(
                             "DELETE FROM event_custom_fields WHERE event_id = :eventId AND target = :target AND field_key = :fieldKey AND id <> :id")
@@ -759,12 +1006,14 @@ public class CrdtProjectionService {
                     MERGE INTO event_custom_fields (
                         id, event_id, target, phase, name, field_key, field_type,
                         required, default_val, options_json, min_val, max_val, step_val,
-                        unit, order_seq, is_active, updated_at
+                        unit, description, config_json, formula_expr, aggregation_mode,
+                        display_format, dependencies_json, order_seq, is_active, updated_at
                     ) KEY (id)
                     VALUES (
                         :id, :eventId, :target, :phase, :name, :fieldKey, :fieldType,
                         :required, :defaultVal, :optionsJson, :minVal, :maxVal, :stepVal,
-                        :unit, :orderSeq, :isActive, CURRENT_TIMESTAMP
+                        :unit, :description, :configJson, :formulaExpr, :aggregationMode,
+                        :displayFormat, :dependenciesJson, :orderSeq, :isActive, CURRENT_TIMESTAMP
                     )
                     """)
                     .bind("id", id)
@@ -781,6 +1030,12 @@ public class CrdtProjectionService {
                     .bind("maxVal", getNullableDouble(row, "maxVal"))
                     .bind("stepVal", getNullableDouble(row, "stepVal"))
                     .bind("unit", truncateNullable(getStrOrNull(row, "unit"), 30))
+                    .bind("description", description)
+                    .bind("configJson", configJson)
+                    .bind("formulaExpr", formulaExpr)
+                    .bind("aggregationMode", aggregationMode)
+                    .bind("displayFormat", displayFormat)
+                    .bind("dependenciesJson", dependenciesJson)
                     .bind("orderSeq", computedOrderSeq.getOrDefault(rowId, getInt(row, "orderSeq", 1)))
                     .bind("isActive", getBool(row, "isActive", true))
                     .execute();

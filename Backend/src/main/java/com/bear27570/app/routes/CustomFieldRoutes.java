@@ -4,30 +4,42 @@ import com.bear27570.app.dao.CustomFieldDao;
 import com.bear27570.app.dao.EventDao;
 import com.bear27570.app.model.CustomFieldDefinition;
 import com.bear27570.app.model.ScoutingEvent;
+import com.bear27570.app.util.FormulaValidator;
 import com.google.gson.Gson;
+import com.google.gson.JsonElement;
+import com.google.gson.JsonParser;
 import io.javalin.config.RoutesConfig;
+import io.javalin.http.Context;
 import io.javalin.http.ForbiddenResponse;
 import io.javalin.http.NotFoundResponse;
 import org.jdbi.v3.core.Jdbi;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
+import java.nio.charset.StandardCharsets;
 import java.util.*;
-
-import static com.bear27570.app.routes.ApiRoutes.asString;
 
 public class CustomFieldRoutes {
 
     private static final Logger logger = LoggerFactory.getLogger(CustomFieldRoutes.class);
+    private static final int MAX_DESCRIPTION_LENGTH = 300;
+    private static final int MAX_CONFIG_JSON_BYTES = 8192;
+
     private final Jdbi jdbi;
     private final Gson gson;
 
-    private static final Set<String> ALLOWED_TARGETS = Set.of("MATCH", "PIT");
+    private static final Set<String> ALLOWED_TARGETS = Set.of("MATCH", "PIT", "TEAM");
     private static final Set<String> ALLOWED_TYPES = Set.of(
-            "boolean", "number", "level", "select", "multi_select", "text"
+            "boolean", "number", "timer", "level", "select", "multi_select", "text", "formula"
     );
     private static final Set<String> ALLOWED_PHASES = Set.of(
             "auto", "teleop", "endgame", "overall", "hardware", "strategy"
+    );
+    private static final Set<String> ALLOWED_AGGREGATIONS = Set.of(
+            "avg", "median", "max", "min", "sum", "last3", "trimmed_avg", "stddev", "rate"
+    );
+    private static final Set<String> ALLOWED_FORMATS = Set.of(
+            "number", "integer", "percent", "boolean", "tier"
     );
 
     public CustomFieldRoutes(Jdbi jdbi, Gson gson) {
@@ -79,25 +91,29 @@ public class CustomFieldRoutes {
                 return;
             }
 
-            // Target 校验 (MATCH / PIT)
-            String target = incoming.getTarget() != null ? incoming.getTarget().trim().toUpperCase() : "MATCH";
+            // Target 校验 (MATCH / PIT / TEAM)
+            String target = incoming.getTarget() != null ? incoming.getTarget().trim().toUpperCase(Locale.ROOT) : "MATCH";
             if (!ALLOWED_TARGETS.contains(target)) {
-                ctx.status(400).result("Invalid target: must be 'MATCH' or 'PIT'");
+                ctx.status(400).result("Invalid target: must be 'MATCH', 'PIT', or 'TEAM'");
                 return;
             }
             incoming.setTarget(target);
 
             // Phase 校验
-            String phase = incoming.getPhase() != null ? incoming.getPhase().trim().toLowerCase() : "overall";
+            String phase = incoming.getPhase() != null ? incoming.getPhase().trim().toLowerCase(Locale.ROOT) : "overall";
             if (!ALLOWED_PHASES.contains(phase)) {
                 phase = "overall";
             }
             incoming.setPhase(phase);
 
             // Field Type 校验
-            String type = incoming.getFieldType() != null ? incoming.getFieldType().trim().toLowerCase() : "text";
+            String type = incoming.getFieldType() != null ? incoming.getFieldType().trim().toLowerCase(Locale.ROOT) : "text";
             if (!ALLOWED_TYPES.contains(type)) {
                 ctx.status(400).result("Invalid fieldType: " + type);
+                return;
+            }
+            if ("TEAM".equals(target) && !"formula".equals(type)) {
+                ctx.status(400).result("TEAM custom fields must have fieldType 'formula'");
                 return;
             }
             incoming.setFieldType(type);
@@ -105,10 +121,9 @@ public class CustomFieldRoutes {
             // Field Key 处理
             String rawKey = incoming.getFieldKey();
             if (rawKey == null || rawKey.trim().isEmpty()) {
-                // 默认生成 field_uuid
                 rawKey = "field_" + UUID.randomUUID().toString().replace("-", "").substring(0, 8);
             } else {
-                rawKey = rawKey.trim().toLowerCase();
+                rawKey = rawKey.trim().toLowerCase(Locale.ROOT);
             }
 
             if (!rawKey.matches("^[a-z0-9_]{1,100}$")) {
@@ -129,6 +144,10 @@ public class CustomFieldRoutes {
                 incoming.setId(UUID.randomUUID().toString());
             }
             incoming.setEventId(eventId);
+
+            if (!validateAndNormalizeExtendedFields(incoming, eventId, ctx)) {
+                return;
+            }
 
             // 计算 orderSeq
             int maxSeq = jdbi.withExtension(CustomFieldDao.class, dao -> dao.getMaxOrderSeq(eventId, target));
@@ -165,15 +184,34 @@ public class CustomFieldRoutes {
                 return;
             }
 
-            if (incoming.getName() != null && !incoming.getName().trim().isEmpty()) {
-                existing.setName(incoming.getName().trim());
+            if (incoming.getName() != null) {
+                String trimmedName = incoming.getName().trim();
+                if (trimmedName.isEmpty()) {
+                    ctx.status(400).result("Field name is required");
+                    return;
+                }
+                if (trimmedName.length() > 100) {
+                    ctx.status(400).result("Field name cannot exceed 100 characters");
+                    return;
+                }
+                existing.setName(trimmedName);
             }
-            if (incoming.getPhase() != null && ALLOWED_PHASES.contains(incoming.getPhase().trim().toLowerCase())) {
-                existing.setPhase(incoming.getPhase().trim().toLowerCase());
+            if (incoming.getPhase() != null && ALLOWED_PHASES.contains(incoming.getPhase().trim().toLowerCase(Locale.ROOT))) {
+                existing.setPhase(incoming.getPhase().trim().toLowerCase(Locale.ROOT));
             }
-            if (incoming.getFieldType() != null && ALLOWED_TYPES.contains(incoming.getFieldType().trim().toLowerCase())) {
-                existing.setFieldType(incoming.getFieldType().trim().toLowerCase());
+            if (incoming.getFieldType() != null) {
+                String type = incoming.getFieldType().trim().toLowerCase(Locale.ROOT);
+                if (!ALLOWED_TYPES.contains(type)) {
+                    ctx.status(400).result("Invalid fieldType: " + type);
+                    return;
+                }
+                existing.setFieldType(type);
             }
+            if ("TEAM".equals(existing.getTarget()) && !"formula".equals(existing.getFieldType())) {
+                ctx.status(400).result("TEAM custom fields must have fieldType 'formula'");
+                return;
+            }
+
             existing.setRequired(incoming.isRequired());
             existing.setDefaultVal(incoming.getDefaultVal());
             existing.setOptionsJson(incoming.getOptionsJson());
@@ -181,10 +219,20 @@ public class CustomFieldRoutes {
             existing.setMaxVal(incoming.getMaxVal());
             existing.setStepVal(incoming.getStepVal());
             existing.setUnit(incoming.getUnit());
+            existing.setDescription(incoming.getDescription());
+            existing.setConfigJson(incoming.getConfigJson());
+            existing.setFormulaExpr(incoming.getFormulaExpr());
+            existing.setAggregationMode(incoming.getAggregationMode());
+            existing.setDisplayFormat(incoming.getDisplayFormat());
+
             if (incoming.getOrderSeq() > 0) {
                 existing.setOrderSeq(incoming.getOrderSeq());
             }
             existing.setIsActive(incoming.isActive());
+
+            if (!validateAndNormalizeExtendedFields(existing, eventId, ctx)) {
+                return;
+            }
 
             jdbi.useExtension(CustomFieldDao.class, dao -> dao.update(existing));
             ctx.result(gson.toJson(existing)).contentType("application/json");
@@ -212,5 +260,76 @@ public class CustomFieldRoutes {
             jdbi.useExtension(CustomFieldDao.class, dao -> dao.delete(id));
             ctx.result(gson.toJson(Map.of("success", true, "id", id))).contentType("application/json");
         });
+    }
+
+    private boolean validateAndNormalizeExtendedFields(CustomFieldDefinition def, String eventId, Context ctx) {
+        if (def.getDescription() != null) {
+            String desc = def.getDescription().trim();
+            if (desc.length() > MAX_DESCRIPTION_LENGTH) {
+                ctx.status(400).result("Description cannot exceed " + MAX_DESCRIPTION_LENGTH + " characters");
+                return false;
+            }
+            def.setDescription(desc.isEmpty() ? null : desc);
+        }
+
+        if (def.getConfigJson() != null) {
+            String cfg = def.getConfigJson().trim();
+            if (cfg.isEmpty()) {
+                def.setConfigJson(null);
+            } else {
+                if (cfg.getBytes(StandardCharsets.UTF_8).length > MAX_CONFIG_JSON_BYTES) {
+                    ctx.status(400).result("configJson cannot exceed " + MAX_CONFIG_JSON_BYTES + " bytes");
+                    return false;
+                }
+                try {
+                    JsonElement parsed = JsonParser.parseString(cfg);
+                    if (!parsed.isJsonObject()) {
+                        ctx.status(400).result("configJson must be a valid JSON object");
+                        return false;
+                    }
+                } catch (Exception e) {
+                    ctx.status(400).result("configJson must be a valid JSON object");
+                    return false;
+                }
+                def.setConfigJson(cfg);
+            }
+        }
+
+        String aggMode = def.getAggregationMode() != null ? def.getAggregationMode().trim().toLowerCase(Locale.ROOT) : "avg";
+        if (aggMode.isEmpty()) {
+            aggMode = "avg";
+        }
+        if (!ALLOWED_AGGREGATIONS.contains(aggMode)) {
+            ctx.status(400).result("Invalid aggregationMode: " + aggMode);
+            return false;
+        }
+        def.setAggregationMode(aggMode);
+
+        String dispFormat = def.getDisplayFormat() != null ? def.getDisplayFormat().trim().toLowerCase(Locale.ROOT) : "number";
+        if (dispFormat.isEmpty()) {
+            dispFormat = "number";
+        }
+        if (!ALLOWED_FORMATS.contains(dispFormat)) {
+            ctx.status(400).result("Invalid displayFormat: " + dispFormat);
+            return false;
+        }
+        def.setDisplayFormat(dispFormat);
+
+        if ("formula".equals(def.getFieldType())) {
+            List<CustomFieldDefinition> eventFields = jdbi.withExtension(CustomFieldDao.class, dao -> dao.findByEvent(eventId));
+            FormulaValidator.ValidationResult valRes = FormulaValidator.validateWithGraph(def, eventFields);
+            if (!valRes.isValid()) {
+                ctx.status(400)
+                        .result(gson.toJson(valRes.toErrorResponseMap()))
+                        .contentType("application/json");
+                return false;
+            }
+            def.setDependenciesJson(gson.toJson(valRes.getDependencies()));
+        } else {
+            def.setFormulaExpr(null);
+            def.setDependenciesJson(null);
+        }
+
+        return true;
     }
 }

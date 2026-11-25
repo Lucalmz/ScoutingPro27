@@ -122,6 +122,40 @@ class TeamTagRoutesTest {
                     b -> b.header("Authorization", "Bearer " + f.hostToken));
             assertThat(finalTagsRes.code()).isEqualTo(200);
             assertThat(finalTagsRes.body().string()).isEqualTo("[]");
+
+            // 10. Member vs Non-member (outsider) isolation across GET / POST / DELETE
+            var seedRes = client.post(
+                    "/api/events/" + f.eventId + "/teams/27570/tags",
+                    "{\"tag\":\"protected_tag\",\"color\":\"blue\"}",
+                    b -> b.header("Authorization", "Bearer " + f.scoutAToken)
+            );
+            assertThat(seedRes.code()).isEqualTo(200);
+
+            var outsiderGet = client.get("/api/events/" + f.eventId + "/tags",
+                    b -> b.header("Authorization", "Bearer " + f.outsiderToken));
+            assertThat(outsiderGet.code()).isEqualTo(403);
+            assertThat(outsiderGet.body().string()).contains("Not a member of this event");
+
+            var outsiderPost = client.post(
+                    "/api/events/" + f.eventId + "/teams/27570/tags",
+                    "{\"tag\":\"outsider_injected\",\"color\":\"red\"}",
+                    b -> b.header("Authorization", "Bearer " + f.outsiderToken)
+            );
+            assertThat(outsiderPost.code()).isEqualTo(403);
+
+            var outsiderDelete = client.delete(
+                    "/api/events/" + f.eventId + "/teams/27570/tags/protected_tag",
+                    null,
+                    b -> b.header("Authorization", "Bearer " + f.outsiderToken)
+            );
+            assertThat(outsiderDelete.code()).isEqualTo(403);
+
+            var memberConfirm = client.get("/api/events/" + f.eventId + "/tags",
+                    b -> b.header("Authorization", "Bearer " + f.scoutAToken));
+            assertThat(memberConfirm.code()).isEqualTo(200);
+            String confirmBody = memberConfirm.body().string();
+            assertThat(confirmBody).contains("protected_tag");
+            assertThat(confirmBody).doesNotContain("outsider_injected");
         });
     }
 }

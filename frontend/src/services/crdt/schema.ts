@@ -1,7 +1,10 @@
 import type { Cell, MergeableStore } from 'tinybase'
 import type {
   BallCompatibility,
+  CustomFieldAggregationMode,
+  CustomFieldConfig,
   CustomFieldDefinition,
+  CustomFieldDisplayFormat,
   CustomFieldOption,
   CustomFieldPhase,
   CustomFieldTarget,
@@ -343,6 +346,58 @@ export function readPitRecordsFromCrdt(store: MergeableStore, eventId?: string):
       } catch {}
     }
 
+    const rawWeight = Number(row.weightLbs || 0)
+    const weightLbs = Number.isFinite(rawWeight) && rawWeight >= 0 ? rawWeight : 0
+    const rawChassis = typeof row.chassisSize === 'string' ? row.chassisSize.trim() : ''
+    const chassisSize = rawChassis.length > 64 ? rawChassis.slice(0, 64) : rawChassis
+
+    const claimedAutoScore = Math.max(0, Math.round(Number(row.claimedAutoScore || 0)))
+    const claimedTeleopCycles = Math.max(0, Math.round(Number(row.claimedTeleopCycles || 0)))
+    const claimedTeleopScore = Math.max(0, Math.round(Number(row.claimedTeleopScore || 0)))
+    const claimedTeleopPark = row.claimedTeleopPark === true
+    const claimedFlowerNectars = Math.max(0, Math.min(8, Math.round(Number(row.claimedFlowerNectars || 0))))
+    const claimedFlowerBottomBonus = Math.max(
+      0,
+      Math.min(4, Math.min(claimedFlowerNectars, Math.round(Number(row.claimedFlowerBottomBonus || 0))))
+    )
+    const claimedFlowerPollens = Math.max(0, Math.round(Number(row.claimedFlowerPollens || 0)))
+    const claimedGardenBalls = Math.max(0, Math.round(Number(row.claimedGardenBalls || 0)))
+
+    const originalEndgame = Math.round(Number(row.claimedEndgameScore || 0))
+    const structuredEndgame =
+      (claimedTeleopPark ? 5 : 0) +
+      claimedFlowerNectars * 2 +
+      claimedFlowerBottomBonus * 5 +
+      claimedFlowerPollens * 2 +
+      claimedGardenBalls
+    const hasStructuredEndgame =
+      claimedTeleopPark ||
+      claimedFlowerNectars > 0 ||
+      claimedFlowerBottomBonus > 0 ||
+      claimedFlowerPollens > 0 ||
+      claimedGardenBalls > 0
+
+    const claimedEndgameScore = hasStructuredEndgame
+      ? structuredEndgame
+      : Math.max(0, originalEndgame)
+
+    const originalTotal = Math.round(Number(row.claimedTotalScore || 0))
+    const componentSum = claimedAutoScore + claimedTeleopScore + claimedEndgameScore
+    let claimedTotalScore = originalTotal
+    if (originalTotal <= 0 && componentSum > 0) {
+      claimedTotalScore = componentSum
+    } else if (
+      hasStructuredEndgame &&
+      originalEndgame !== claimedEndgameScore &&
+      originalTotal === claimedAutoScore + claimedTeleopScore + originalEndgame
+    ) {
+      claimedTotalScore = componentSum
+    } else if (originalTotal > 0 && componentSum > originalTotal) {
+      claimedTotalScore = componentSum
+    } else if (originalTotal < 0) {
+      claimedTotalScore = 0
+    }
+
     out.push({
       id: typeof row.id === 'string' && row.id ? row.id : `${rowEventId || eventId || 'evt'}_pit_${teamNumber}`,
       eventId: rowEventId || eventId || '',
@@ -351,8 +406,8 @@ export function readPitRecordsFromCrdt(store: MergeableStore, eventId?: string):
       scoutName: typeof row.scoutName === 'string' ? row.scoutName : '',
       robotName: typeof row.robotName === 'string' ? row.robotName : '',
       drivetrainType: (typeof row.drivetrainType === 'string' && row.drivetrainType ? row.drivetrainType : 'mecanum') as PitScoutingRecord['drivetrainType'],
-      weightLbs: Number(row.weightLbs || 0),
-      chassisSize: typeof row.chassisSize === 'string' ? row.chassisSize : '',
+      weightLbs,
+      chassisSize,
       ballCompatibility: (typeof row.ballCompatibility === 'string' && row.ballCompatibility ? row.ballCompatibility : 'universal') as BallCompatibility,
       launcherType: typeof row.launcherType === 'string' ? row.launcherType : '',
       flowerMechanism: typeof row.flowerMechanism === 'string' ? row.flowerMechanism : '',
@@ -361,16 +416,16 @@ export function readPitRecordsFromCrdt(store: MergeableStore, eventId?: string):
       hasApriltagVision: row.hasApriltagVision === true,
       odometryType: typeof row.odometryType === 'string' && row.odometryType ? row.odometryType : 'none',
       claimedAutoStrategy: typeof row.claimedAutoStrategy === 'string' ? row.claimedAutoStrategy : '',
-      claimedAutoScore: Number(row.claimedAutoScore || 0),
-      claimedTeleopCycles: Number(row.claimedTeleopCycles || 0),
-      claimedTeleopScore: Number(row.claimedTeleopScore || 0),
-      claimedTeleopPark: row.claimedTeleopPark === true,
-      claimedFlowerNectars: Number(row.claimedFlowerNectars || 0),
-      claimedFlowerBottomBonus: Number(row.claimedFlowerBottomBonus || 0),
-      claimedFlowerPollens: Number(row.claimedFlowerPollens || 0),
-      claimedGardenBalls: Number(row.claimedGardenBalls || 0),
-      claimedEndgameScore: Number(row.claimedEndgameScore || 0),
-      claimedTotalScore: Number(row.claimedTotalScore || 0),
+      claimedAutoScore,
+      claimedTeleopCycles,
+      claimedTeleopScore,
+      claimedTeleopPark,
+      claimedFlowerNectars,
+      claimedFlowerBottomBonus,
+      claimedFlowerPollens,
+      claimedGardenBalls,
+      claimedEndgameScore,
+      claimedTotalScore,
       photoKeys: photosByTeam.get(teamNumber) ?? [],
       rawData,
       customFields,
@@ -400,6 +455,13 @@ export function writeCustomFieldToCrdt(
       ? JSON.stringify(field.options)
       : ''
 
+  const configJson =
+    typeof field.configJson === 'string' && field.configJson
+      ? field.configJson
+      : field.config && typeof field.config === 'object' && Object.keys(field.config).length > 0
+      ? JSON.stringify(field.config)
+      : ''
+
   const existingOrderKey = store.getCell(CRDT_TABLES.CUSTOM_FIELDS, rowId, 'orderKey')
   const orderKey =
     field.orderKey ||
@@ -420,6 +482,12 @@ export function writeCustomFieldToCrdt(
     maxVal: typeof field.maxVal === 'number' && Number.isFinite(field.maxVal) ? field.maxVal : '',
     stepVal: typeof field.stepVal === 'number' && Number.isFinite(field.stepVal) ? field.stepVal : '',
     unit: field.unit ?? '',
+    description: field.description ?? '',
+    configJson,
+    formulaExpr: field.formulaExpr ?? '',
+    aggregationMode: field.aggregationMode ?? 'avg',
+    displayFormat: field.displayFormat ?? 'number',
+    dependenciesJson: field.dependenciesJson ?? '',
     orderSeq: Number(field.orderSeq || 0),
     orderKey,
     isActive: field.isActive !== false,
@@ -449,6 +517,19 @@ export function readCustomFieldsFromCrdt(store: MergeableStore, eventId?: string
       }
     }
 
+    const configJson = typeof row.configJson === 'string' && row.configJson ? row.configJson : null
+    let config: CustomFieldConfig | undefined
+    if (configJson) {
+      try {
+        const parsed = JSON.parse(configJson)
+        if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) {
+          config = parsed as CustomFieldConfig
+        }
+      } catch {
+        config = undefined
+      }
+    }
+
     const orderSeq = Number(row.orderSeq || 0)
     const orderKey = typeof row.orderKey === 'string' && row.orderKey ? row.orderKey : orderKeyFromSeq(orderSeq)
 
@@ -468,6 +549,18 @@ export function readCustomFieldsFromCrdt(store: MergeableStore, eventId?: string
       maxVal: typeof row.maxVal === 'number' ? row.maxVal : null,
       stepVal: typeof row.stepVal === 'number' ? row.stepVal : null,
       unit: typeof row.unit === 'string' && row.unit !== '' ? row.unit : null,
+      description: typeof row.description === 'string' && row.description !== '' ? row.description : null,
+      configJson,
+      config,
+      formulaExpr: typeof row.formulaExpr === 'string' && row.formulaExpr !== '' ? row.formulaExpr : null,
+      aggregationMode: (
+        typeof row.aggregationMode === 'string' && row.aggregationMode !== '' ? row.aggregationMode : 'avg'
+      ) as CustomFieldAggregationMode,
+      displayFormat: (
+        typeof row.displayFormat === 'string' && row.displayFormat !== '' ? row.displayFormat : 'number'
+      ) as CustomFieldDisplayFormat,
+      dependenciesJson:
+        typeof row.dependenciesJson === 'string' && row.dependenciesJson !== '' ? row.dependenciesJson : null,
       orderSeq,
       isActive: row.isActive !== false,
       _orderKey: orderKey

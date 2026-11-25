@@ -303,7 +303,7 @@ describe('DynamicFieldsRenderer.vue', () => {
     expect(wrapperReq.emitted('update:modelValue')?.[0][0]).toEqual({ rating_req: 3 })
   })
 
-  it('level rating: dynamically clamps tick counts between 3 and 7', () => {
+  it('level rating: dynamically clamps tick counts between 3 and 10', () => {
     // maxVal: 1 -> clamped to min 3
     const wrapperSmall = track(mount(DynamicFieldsRenderer, {
       props: {
@@ -313,14 +313,14 @@ describe('DynamicFieldsRenderer.vue', () => {
     }))
     expect(wrapperSmall.findAll('.level-tick-btn')).toHaveLength(3)
 
-    // maxVal: 10 -> clamped to max 7
+    // maxVal: 15 -> clamped to max 10
     const wrapperLarge = track(mount(DynamicFieldsRenderer, {
       props: {
-        definitions: [createField({ fieldType: 'level', fieldKey: 'lvl2', maxVal: 10 })],
+        definitions: [createField({ fieldType: 'level', fieldKey: 'lvl2', maxVal: 15 })],
         modelValue: {}
       }
     }))
-    expect(wrapperLarge.findAll('.level-tick-btn')).toHaveLength(7)
+    expect(wrapperLarge.findAll('.level-tick-btn')).toHaveLength(10)
   })
 
   it('select capsule: toggles off to null when not required, but preserves selection when required', async () => {
@@ -401,5 +401,137 @@ describe('DynamicFieldsRenderer.vue', () => {
       props: { definitions: [], modelValue: {} }
     }))
     expect(wrapper.find('.dynamic-custom-fields').exists()).toBe(false)
+  })
+
+  it('renders number slider, counter, quickSteps, and initializes defaultVal', async () => {
+    const sliderField = createField({
+      fieldType: 'number',
+      fieldKey: 'slider_val',
+      minVal: 0,
+      maxVal: 100,
+      defaultVal: '25',
+      configJson: JSON.stringify({ inputMode: 'slider', showTicks: true })
+    })
+    const counterField = createField({
+      id: 'f2',
+      fieldType: 'number',
+      fieldKey: 'counter_val',
+      stepVal: 2,
+      configJson: JSON.stringify({ inputMode: 'counter' })
+    })
+    const quickField = createField({
+      id: 'f3',
+      fieldType: 'number',
+      fieldKey: 'quick_val',
+      configJson: JSON.stringify({ inputMode: 'stepper', quickSteps: [5] })
+    })
+
+    const wrapper = track(mount(DynamicFieldsRenderer, {
+      props: {
+        definitions: [sliderField, counterField, quickField],
+        modelValue: { counter_val: 0, quick_val: 10 }
+      }
+    }))
+
+    // defaultVal emitted for slider_val
+    expect(wrapper.emitted('update:modelValue')?.[0][0]).toMatchObject({ slider_val: 25 })
+    expect(wrapper.find('.slider-ticks').exists()).toBe(true)
+
+    await wrapper.find('.counter-plus-btn').trigger('click')
+    expect(wrapper.emitted('update:modelValue')?.[1][0]).toMatchObject({ counter_val: 2 })
+
+    await wrapper.find('.quick-step-btn.is-inc').trigger('click')
+    expect(wrapper.emitted('update:modelValue')?.[2][0]).toMatchObject({ quick_val: 15 })
+  })
+
+  it('timer stopwatch uses Date.now delta and flushes running elapsed seconds on unmount before cancelling RAF', async () => {
+    vi.useFakeTimers()
+    let now = 1_700_000_000_000
+    vi.setSystemTime(now)
+
+    const rafSpy = vi.spyOn(window, 'requestAnimationFrame').mockImplementation(() => 42)
+    const cancelSpy = vi.spyOn(window, 'cancelAnimationFrame').mockImplementation(() => {})
+
+    try {
+      const timerField = createField({
+        fieldType: 'timer',
+        fieldKey: 'align_sec',
+        unit: 's'
+      })
+
+      const wrapper = mount(DynamicFieldsRenderer, {
+        props: {
+          definitions: [timerField],
+          modelValue: {}
+        }
+      })
+
+      await wrapper.find('.timer-btn-start').trigger('click')
+      expect(rafSpy).toHaveBeenCalled()
+
+      // Simulate 3.45s wall-clock elapsed (even if mobile slept)
+      now += 3450
+      vi.setSystemTime(now)
+
+      wrapper.unmount()
+      const emitted = wrapper.emitted('update:modelValue')
+      expect(emitted).toBeTruthy()
+      const lastPayload = emitted![emitted!.length - 1][0] as Record<string, any>
+      expect(lastPayload.align_sec).toBeCloseTo(3.45, 2)
+      expect(cancelSpy).toHaveBeenCalledWith(42)
+    } finally {
+      rafSpy.mockRestore()
+      cancelSpy.mockRestore()
+      vi.useRealTimers()
+    }
+  })
+
+  it('renders tristate boolean, dropdown select with numericValue, and live formula preview with cycle detection', async () => {
+    const triField = createField({
+      id: 'b1',
+      fieldType: 'boolean',
+      fieldKey: 'tri_bool',
+      description: 'Three-state toggle',
+      configJson: JSON.stringify({ tristate: true, trueLabel: 'Yes!', falseLabel: 'No!' })
+    })
+    const dropField = createField({
+      id: 's1',
+      fieldType: 'select',
+      fieldKey: 'def_tier',
+      configJson: JSON.stringify({ selectStyle: 'dropdown' }),
+      options: [
+        { label: 'Strong', value: 'strong', numericValue: 7 }
+      ]
+    })
+    const formulaField = createField({
+      id: 'fm1',
+      fieldType: 'formula',
+      fieldKey: 'calc_bonus',
+      formulaExpr: 'ROUND(cf.def_tier * 2, 1)',
+      displayFormat: 'number'
+    })
+    const cyclicField = createField({
+      id: 'fm2',
+      fieldType: 'formula',
+      fieldKey: 'loop_a',
+      formulaExpr: 'formula.loop_a + 1'
+    })
+
+    const wrapper = track(mount(DynamicFieldsRenderer, {
+      props: {
+        definitions: [triField, dropField, formulaField, cyclicField],
+        modelValue: { def_tier: 'strong' }
+      }
+    }))
+
+    expect(wrapper.find('.field-description').text()).toBe('Three-state toggle')
+    const triBtns = wrapper.findAll('.tristate-btn')
+    expect(triBtns).toHaveLength(3)
+    await triBtns[2]!.trigger('click')
+    expect(wrapper.emitted('update:modelValue')?.[0][0]).toMatchObject({ tri_bool: false })
+
+    expect(wrapper.find('.dynamic-select-dropdown').exists()).toBe(true)
+    expect(wrapper.find('.formula-result-value').text()).toBe('14')
+    expect(wrapper.find('.formula-error-badge.is-cycle').exists()).toBe(true)
   })
 })

@@ -1,6 +1,7 @@
 import type { ScoutingRecord, OfficialMatch, RankingRow, AdvancementDetail } from '@/types'
 import { getRecordTournamentLevel, getTournamentLevelOrder } from '@/utils/tournament'
-import { aggregateTeamPredictCycleStats } from './predictCycleTime'
+import { aggregateTeamAutoCycleStats, aggregateTeamPredictCycleStats } from './predictCycleTime'
+import { calculateEventNpOpr } from './npOpr'
 
 export interface BiobuzzEndgameFields {
   flowerNectars: number
@@ -17,6 +18,9 @@ export interface BiobuzzEndgameFields {
 export interface ParsedScoutRawData {
   autoLeave: boolean
   autoBalls: number
+  autoCycles: number[]
+  autoCycleTimestamps: number[]
+  autoCycleTimeSec: number | null
   autoPark: boolean
   teleopCycles: number[]
   teleopMissedCycles: number[]
@@ -111,6 +115,15 @@ export function parseScoutRawData(rawData: unknown): ParsedScoutRawData {
   const autoBalls = typeof parsed.autoBalls === 'number'
     ? Math.max(0, Math.round(parsed.autoBalls))
     : ((parsed.autoPreload ? 1 : 0) + (parsed.autoSecondary ? 1 : 0))
+  const autoCycles = Array.isArray(parsed.autoCycles)
+    ? parsed.autoCycles.map((c: unknown) => Math.max(0, Number(c) || 0))
+    : []
+  const autoCycleTimestamps = Array.isArray(parsed.autoCycleTimestamps)
+    ? parsed.autoCycleTimestamps.map((ts: unknown) => Number(ts)).filter((ts: number) => Number.isFinite(ts) && ts > 0)
+    : []
+  const autoCycleTimeSec = typeof parsed.autoCycleTimeSec === 'number' && Number.isFinite(parsed.autoCycleTimeSec)
+    ? parsed.autoCycleTimeSec
+    : null
   const autoPark = Boolean(parsed.autoPark)
 
   const teleopCycles = Array.isArray(parsed.teleopCycles)
@@ -129,6 +142,9 @@ export function parseScoutRawData(rawData: unknown): ParsedScoutRawData {
   return {
     autoLeave,
     autoBalls,
+    autoCycles,
+    autoCycleTimestamps,
+    autoCycleTimeSec,
     autoPark,
     teleopCycles,
     teleopMissedCycles,
@@ -254,6 +270,8 @@ export function calculateRankings(
     teamRecs.push(r)
   }
 
+  const npOprMap = calculateEventNpOpr(records, officialMatches, scoutReliability, advancementMap)
+
   const rows: RankingRow[] = []
   for (const [teamNumber, teamRecs] of map) {
     // Sort records by tournament level progression (QUALIFICATION first, then PLAYOFF) and matchNumber ascending
@@ -281,6 +299,7 @@ export function calculateRankings(
     let realMaxScore = 0
     const totalRealScoreForTrend: number[] = []
     const cycleCounts: number[] = []
+    const autoCycleInputs: Array<{ autoCycles: number[]; autoCycleTimestamps: number[]; isBroken?: boolean }> = []
     const predictCycleInputs: Array<{ teleopCycles: number[]; teleopCycleTimestamps: number[]; isBroken?: boolean }> = []
     let brokenCount = 0
 
@@ -308,6 +327,11 @@ export function calculateRankings(
       totalWeightedDescore += (parsedRaw.endgame.flowerDescore ? 1 : 0) * weight
       totalWeightedG410Foul += (parsedRaw.endgame.g410EarlyFlowerFoul ? 1 : 0) * weight
       cycleCounts.push(parsedRaw.teleopCycles.length)
+      autoCycleInputs.push({
+        autoCycles: parsedRaw.autoCycles,
+        autoCycleTimestamps: parsedRaw.autoCycleTimestamps,
+        isBroken: r.isBroken
+      })
       predictCycleInputs.push({
         teleopCycles: parsedRaw.teleopCycles,
         teleopCycleTimestamps: parsedRaw.teleopCycleTimestamps,
@@ -398,6 +422,7 @@ export function calculateRankings(
       trend = 'new'
     }
 
+    const autoCycleStats = aggregateTeamAutoCycleStats(autoCycleInputs)
     const predictStats = aggregateTeamPredictCycleStats(predictCycleInputs)
     let minCycles: number | null = null
     let cycleVariance: number | null = null
@@ -412,6 +437,7 @@ export function calculateRankings(
       cycleVariance = Math.round(rawVariance * 10) / 10
     }
     const adv = advancementMap ? advancementMap.get(teamNumber) : undefined
+    const npOpr = npOprMap.get(teamNumber)
 
     rows.push({
       teamNumber,
@@ -446,38 +472,79 @@ export function calculateRankings(
       predictCycleMatches: predictStats.predictCycleMatches,
       predictCycleSpread: predictStats.predictCycleSpread,
       estimatedMaxCycles: predictStats.estimatedMaxCycles,
+      autoCycleTime: autoCycleStats.autoCycleTime,
+      autoCycleMatches: autoCycleStats.autoCycleMatches,
+      teleopCycleTime: predictStats.predictCycleTime,
       minCycles,
-      cycleVariance
+      cycleVariance,
+      spNpOpr: npOpr?.spNpOpr,
+      rawNpOpr: npOpr?.rawNpOpr ?? null,
+      spNpOprAuto: npOpr?.spNpOprAuto ?? null,
+      spNpOprTeleop: npOpr?.spNpOprTeleop ?? null,
+      spNpOprEndgame: npOpr?.spNpOprEndgame ?? null,
+      spNpOprDelta: npOpr?.spNpOprDelta ?? null,
+      spNpOprConfidence: npOpr?.spNpOprConfidence,
+      spNpOprConfidenceScore: npOpr?.spNpOprConfidenceScore,
+      spNpOprOfficialMatches: npOpr?.spNpOprOfficialMatches,
+      spNpOprBrokenExcluded: npOpr?.spNpOprBrokenExcluded
     })
   }
 
-  // 若传入了官方晋级数据，将尚未有记录的战队作为初始行加入列表
-  if (advancementMap) {
-    for (const [teamNum, adv] of advancementMap) {
-      if (!map.has(teamNum)) {
-        rows.push({
-          teamNumber: teamNum,
-          matchCount: 0,
-          advancementPoints: adv.totalAdvancementPoints,
-          advancementRank: adv.advancementRank,
-          advancementStatus: adv.advancementStatus,
-          advancementOfficialStatus: adv.officialStatus,
-          advancementDeclined: adv.declined,
-          advancementRolledDown: adv.rolledDown,
-          advancementSlot: adv.advancementSlot,
-          advancementCriteria: adv.advancementCriteria,
-          advancementAdvancesTo: adv.advancesTo,
-          advancementBreakdown: adv.breakdown,
-          avgAutoScore: 0,
-          avgTeleopScore: 0,
-          avgEndgameScore: 0,
-          maxScore: 0,
-          avgRating: 0,
-          brokenCount: 0,
-          trend: 'new'
-        })
+  // Include teams present in officialMatches or advancementMap that have no scouting records yet
+  const unscoutedTeams = new Set<number>()
+  for (const match of officialMatches) {
+    if (!Array.isArray(match.teams)) continue
+    for (const t of match.teams) {
+      if (t.teamNumber > 0 && !map.has(t.teamNumber)) {
+        unscoutedTeams.add(t.teamNumber)
       }
     }
+  }
+  if (advancementMap) {
+    for (const teamNum of advancementMap.keys()) {
+      if (teamNum > 0 && !map.has(teamNum)) {
+        unscoutedTeams.add(teamNum)
+      }
+    }
+  }
+
+  for (const teamNum of unscoutedTeams) {
+    const adv = advancementMap ? advancementMap.get(teamNum) : undefined
+    const npOpr = npOprMap.get(teamNum)
+    rows.push({
+      teamNumber: teamNum,
+      matchCount: 0,
+      advancementPoints: adv ? adv.totalAdvancementPoints : 0,
+      advancementRank: adv?.advancementRank,
+      advancementStatus: adv ? adv.advancementStatus : 'NONE',
+      advancementOfficialStatus: adv?.officialStatus,
+      advancementDeclined: adv?.declined,
+      advancementRolledDown: adv?.rolledDown,
+      advancementSlot: adv?.advancementSlot,
+      advancementCriteria: adv?.advancementCriteria,
+      advancementAdvancesTo: adv?.advancesTo,
+      advancementBreakdown: adv?.breakdown,
+      avgAutoScore: 0,
+      avgTeleopScore: 0,
+      avgEndgameScore: 0,
+      maxScore: 0,
+      avgRating: 0,
+      brokenCount: 0,
+      trend: 'new',
+      autoCycleTime: null,
+      autoCycleMatches: 0,
+      teleopCycleTime: null,
+      spNpOpr: npOpr?.spNpOpr,
+      rawNpOpr: npOpr?.rawNpOpr ?? null,
+      spNpOprAuto: npOpr?.spNpOprAuto ?? null,
+      spNpOprTeleop: npOpr?.spNpOprTeleop ?? null,
+      spNpOprEndgame: npOpr?.spNpOprEndgame ?? null,
+      spNpOprDelta: npOpr?.spNpOprDelta ?? null,
+      spNpOprConfidence: npOpr?.spNpOprConfidence,
+      spNpOprConfidenceScore: npOpr?.spNpOprConfidenceScore,
+      spNpOprOfficialMatches: npOpr?.spNpOprOfficialMatches,
+      spNpOprBrokenExcluded: npOpr?.spNpOprBrokenExcluded
+    })
   }
 
   const hasAdvancementData = rows.some(r => (r.advancementPoints ?? 0) > 0)

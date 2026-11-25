@@ -96,19 +96,20 @@ public class UserRoutes {
                 ctx.status(400).result("username and password required");
                 return;
             }
-            if (username.length() > 50 || password.length() > 72) {
+            String trimmedUsername = username.trim();
+            if (trimmedUsername.length() > 50 || password.length() > 72) {
                 ctx.status(400).result("username or password too long");
                 return;
             }
             try {
                 User user = jdbi.inTransaction(handle -> {
                     UserDao dao = handle.attach(UserDao.class);
-                    User existing = dao.findRegisteredByUsername(username);
+                    User existing = dao.findRegisteredByUsername(trimmedUsername);
                     if (existing != null) {
                         throw new RuntimeException("User already exists");
                     }
-                    String userId = UserUtil.generateDeterministicUserId(username.trim());
-                    User u = new User(userId, username.trim());
+                    String userId = UserUtil.generateDeterministicUserId(trimmedUsername);
+                    User u = new User(userId, trimmedUsername);
                     u.setPassword(BCrypt.hashpw(password, BCrypt.gensalt()));
                     dao.upsert(u);
                     return u;
@@ -213,6 +214,9 @@ public class UserRoutes {
                             // If changing password, verify old password
                             String newHashedPassword = null;
                             if (newPassword != null && !newPassword.isBlank()) {
+                                if (newPassword.length() > 72) {
+                                    throw new BadRequestResponse("newPassword too long");
+                                }
                                 if (existing.getPassword() != null && !existing.getPassword().isBlank()) {
                                     if (oldPassword == null || oldPassword.isBlank() || !BCrypt.checkpw(oldPassword, existing.getPassword())) {
                                         throw new UnauthorizedResponse("Incorrect old password");
@@ -279,8 +283,7 @@ public class UserRoutes {
                             if (target == null) {
                                 throw new NotFoundResponse("Target user not found");
                             }
-                            String cleanTargetPwd = targetPassword.trim();
-                            if (target.getPassword() == null || target.getPassword().isBlank() || !BCrypt.checkpw(cleanTargetPwd, target.getPassword())) {
+                            if (target.getPassword() == null || target.getPassword().isBlank() || !BCrypt.checkpw(targetPassword, target.getPassword())) {
                                 throw new UnauthorizedResponse("Invalid target account password");
                             }
                             if (target.getId().equals(sourceId)) {

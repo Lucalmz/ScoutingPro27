@@ -618,6 +618,21 @@ public class AiEndToEndVerificationTest {
                 assertThat(JsonParser.parseString(getThrRes.body().string()).getAsJsonObject().getAsJsonArray("messages").size()).isEqualTo(1);
 
                 assertThat(client.delete("/api/events/" + eventId + "/ai-threads/" + thr2Id, null, b -> b.header("Authorization", "Bearer " + token)).code()).isEqualTo(200);
+
+                // Legacy /ai-chat endpoint MUST enforce event membership (positive member 200 vs non-member 403)
+                assertThat(client.put("/api/events/" + eventId + "/ai-chat", "[{\"role\":\"user\",\"content\":\"legacy ok\"}]",
+                        b -> b.header("Authorization", "Bearer " + token)).code()).isEqualTo(200);
+                var memberLegacyGet = client.get("/api/events/" + eventId + "/ai-chat",
+                        b -> b.header("Authorization", "Bearer " + token));
+                assertThat(memberLegacyGet.code()).isEqualTo(200);
+                assertThat(memberLegacyGet.body().string()).contains("legacy ok");
+
+                var outsiderReg = client.post("/api/user/register", "{\"username\":\"ai_outsider_sec\",\"password\":\"pass123\"}");
+                String outsiderToken = outsiderReg.body().string().split("\"token\":\"")[1].split("\"")[0];
+                assertThat(client.get("/api/events/" + eventId + "/ai-chat",
+                        b -> b.header("Authorization", "Bearer " + outsiderToken)).code()).isEqualTo(403);
+                assertThat(client.put("/api/events/" + eventId + "/ai-chat", "[]",
+                        b -> b.header("Authorization", "Bearer " + outsiderToken)).code()).isEqualTo(403);
             });
         } finally {
             mockServer.stop(0);

@@ -98,6 +98,20 @@ class ScheduleAndPitAccessRoutesTest {
             String fetchBody = fetchRes.body().string();
             assertThat(fetchBody).contains("11111");
             assertThat(fetchBody).contains("Scout Alice");
+
+            // Nonexistent event MUST return 404 (not unreachable 403) across all write routes
+            var missingBatch = client.post("/api/events/evt_nonexistent_404/schedule/batch", validBatch,
+                    b -> b.header("Authorization", "Bearer " + f.hostToken));
+            assertThat(missingBatch.code()).isEqualTo(404);
+            assertThat(missingBatch.body().string()).contains("Event not found");
+
+            var missingDel = client.delete("/api/events/evt_nonexistent_404/schedule", null,
+                    b -> b.header("Authorization", "Bearer " + f.hostToken));
+            assertThat(missingDel.code()).isEqualTo(404);
+
+            var missingAssign = client.put("/api/events/evt_nonexistent_404/assignments", "{\"assignments\":[]}",
+                    b -> b.header("Authorization", "Bearer " + f.hostToken));
+            assertThat(missingAssign.code()).isEqualTo(404);
         });
     }
 }

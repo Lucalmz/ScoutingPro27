@@ -17,6 +17,7 @@ import {
   isCrdtTransportActive,
   measureUtf8Bytes,
   migrateEventCrdtId,
+  readCustomFieldsFromCrdt,
   readPitRecordsFromCrdt,
   readTeamTagsFromCrdt,
   resetCrdtRegistryForTesting,
@@ -25,6 +26,7 @@ import {
   setCrdtTransportActive,
   setPitPhotoKeyActive,
   setTeamTagActive,
+  writeCustomFieldToCrdt,
   writePitRecordToCrdt,
   writeTeamTagToCrdt,
   type CrdtHttpTransport
@@ -564,4 +566,154 @@ describe('CRDT Field-Level Merge, Star Sync, Chunking, HLC Guard & Persistence',
     expect(getExistingEventCrdt('uuid-real-event')).toBeUndefined()
     expect(isCrdtTransportActive('uuid-real-event')).toBe(false)
   }, 20000)
+
+  it('round-trips new custom field formula/config columns in CRDT and falls back safely on legacy rows', async () => {
+    const handle = getOrCreateEventCrdt('evt-cf-v2', {
+      inviteCode: 'CFV2',
+      deviceId: 'dev-cf',
+      enableHttp: false,
+      enableIndexedDb: false
+    })
+
+    writeCustomFieldToCrdt(handle.store, {
+      id: 'cf-v2-1',
+      eventId: 'evt-cf-v2',
+      target: 'TEAM',
+      phase: 'overall',
+      name: 'Power Index',
+      fieldKey: 'power_index',
+      fieldType: 'formula',
+      required: false,
+      description: 'Weighted OPR score',
+      configJson: JSON.stringify({ decimalPlaces: 1 }),
+      formulaExpr: 'ROUND(opr.np * 0.8, 1)',
+      aggregationMode: 'avg',
+      displayFormat: 'number',
+      dependenciesJson: JSON.stringify(['opr.np']),
+      orderSeq: 1,
+      isActive: true
+    })
+
+    // Simulate legacy CRDT row missing the 6 new columns
+    handle.store.setRow(CRDT_TABLES.CUSTOM_FIELDS, 'cf-legacy-1', {
+      id: 'cf-legacy-1',
+      eventId: 'evt-cf-v2',
+      target: 'MATCH',
+      phase: 'auto',
+      name: 'Legacy Bool',
+      fieldKey: 'legacy_bool',
+      fieldType: 'boolean',
+      required: false,
+      orderSeq: 2,
+      isActive: true,
+      isDeleted: false
+    })
+
+    const fields = readCustomFieldsFromCrdt(handle.store, 'evt-cf-v2')
+    const v2 = fields.find((f) => f.id === 'cf-v2-1')!
+    const legacy = fields.find((f) => f.id === 'cf-legacy-1')!
+
+    expect(v2.target).toBe('TEAM')
+    expect(v2.fieldType).toBe('formula')
+    expect(v2.description).toBe('Weighted OPR score')
+    expect(v2.config?.decimalPlaces).toBe(1)
+    expect(v2.formulaExpr).toBe('ROUND(opr.np * 0.8, 1)')
+    expect(v2.dependenciesJson).toBe(JSON.stringify(['opr.np']))
+
+    expect(legacy.aggregationMode).toBe('avg')
+    expect(legacy.displayFormat).toBe('number')
+    expect(legacy.description).toBeNull()
+    expect(legacy.formulaExpr).toBeNull()
+    expect(legacy.config).toBeUndefined()
+
+    await handle.destroy()
+  })
+
+  it('recomputes BIOBUZZ structured endgame and componentSum total after concurrent Pit cell merges and dispatches auth-unauthorized on 401', async () => {
+    let clockMs = 1_700_000_900_000
+    const peerA = createMergeableStore('pit-peer-a', () => clockMs, 300)
+    const peerB = createMergeableStore('pit-peer-b', () => clockMs, 300)
+
+    const basePit = makePitRecord({
+      eventId: 'evt-pit-norm',
+      teamNumber: 27570,
+      weightLbs: 30,
+      claimedAutoScore: 10,
+      claimedTeleopScore: 20,
+      claimedTeleopPark: false,
+      claimedFlowerNectars: 0,
+      claimedFlowerBottomBonus: 0,
+      claimedFlowerPollens: 0,
+      claimedGardenBalls: 0,
+      claimedEndgameScore: 0,
+      claimedTotalScore: 30
+    })
+    writePitRecordToCrdt(peerA, basePit)
+    peerB.merge(peerA)
+
+    // Peer A offline-edits claimedAutoScore: 10 -> 28 (Peer A's local total becomes 48)
+    clockMs += 1_000
+    writePitRecordToCrdt(peerA, {
+      ...basePit,
+      claimedAutoScore: 28,
+      claimedTotalScore: 48
+    })
+
+    // Peer B concurrently offline-edits endgame structure (with out-of-range bottomBonus=4 > nectars=2)
+    clockMs += 1_000
+    peerB.setCell(CRDT_TABLES.PIT_RECORDS, '27570', 'claimedTeleopPark', true)
+    peerB.setCell(CRDT_TABLES.PIT_RECORDS, '27570', 'claimedFlowerNectars', 2)
+    peerB.setCell(CRDT_TABLES.PIT_RECORDS, '27570', 'claimedFlowerBottomBonus', 4)
+    peerB.setCell(CRDT_TABLES.PIT_RECORDS, '27570', 'claimedTotalScore', 49)
+    peerB.setCell(CRDT_TABLES.PIT_RECORDS, '27570', 'weightLbs', -5)
+
+    peerA.merge(peerB)
+    const merged = readPitRecordsFromCrdt(peerA, 'evt-pit-norm')[0]!
+    expect(merged.weightLbs).toBe(0)
+    expect(merged.claimedAutoScore).toBe(28)
+    expect(merged.claimedTeleopScore).toBe(20)
+    expect(merged.claimedFlowerNectars).toBe(2)
+    expect(merged.claimedFlowerBottomBonus).toBe(2)
+    // 5 (park) + 2*2 (nectars) + 2*5 (bottomBonus) = 19
+    expect(merged.claimedEndgameScore).toBe(19)
+    // 28 + 20 + 19 = 67 (> stale 49)
+    expect(merged.claimedTotalScore).toBe(67)
+
+    // Verify crdtApi 401 handling clears scoutingpro-user and dispatches auth-unauthorized (unlike 500)
+    const { fetchCrdtState, saveCrdtState } = await import('@/services/crdt/crdtApi')
+    localStorage.setItem('scoutingpro-user', JSON.stringify({ id: 'u1', username: 'Scout', token: 'expired-jwt' }))
+    let authEvents = 0
+    const onUnauth = () => {
+      authEvents += 1
+    }
+    window.addEventListener('auth-unauthorized', onUnauth)
+    const origFetch = globalThis.fetch
+    try {
+      globalThis.fetch = vi.fn(async () => new Response('Server error', { status: 500 })) as any
+      await expect(fetchCrdtState('evt-pit-norm')).rejects.toThrow('500')
+      // Positive control: 500 does NOT log user out
+      expect(localStorage.getItem('scoutingpro-user')).not.toBeNull()
+      expect(authEvents).toBe(0)
+
+      globalThis.fetch = vi.fn(async () => new Response('Invalid or expired token', { status: 401 })) as any
+      await expect(fetchCrdtState('evt-pit-norm')).rejects.toThrow('401')
+      expect(localStorage.getItem('scoutingpro-user')).toBeNull()
+      expect(authEvents).toBe(1)
+
+      localStorage.setItem('scoutingpro-user', JSON.stringify({ id: 'u1', username: 'Scout', token: 'expired-jwt-2' }))
+      await expect(
+        saveCrdtState('evt-pit-norm', {
+          hostEpoch: 1,
+          snapshotRevision: 1,
+          snapshot: peerA.getMergeableContent(),
+          dirtyRows: {}
+        })
+      ).rejects.toThrow()
+      expect(localStorage.getItem('scoutingpro-user')).toBeNull()
+      expect(authEvents).toBe(2)
+    } finally {
+      globalThis.fetch = origFetch
+      window.removeEventListener('auth-unauthorized', onUnauth)
+    }
+  })
 })

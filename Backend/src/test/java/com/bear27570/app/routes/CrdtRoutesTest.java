@@ -814,4 +814,345 @@ class CrdtRoutesTest {
             });
         });
     }
+
+    @Test
+    void testCrdtProjectionCustomFieldsNewColumnsAndCycleTolerance() {
+        JavalinTest.test(app, (server, client) -> {
+            var alice = registerUser(client, "crdt_cf_host");
+            String aliceToken = (String) alice.get("token");
+            var event = createEvent(client, aliceToken, "CRDT Custom Field Event");
+            String eventId = (String) event.get("id");
+
+            Map<String, Map<String, Map<String, Object>>> tables = new LinkedHashMap<>();
+            tables.put("custom_fields", Map.of(
+                    "cf-timer", Map.ofEntries(
+                            Map.entry("id", "cf-timer"),
+                            Map.entry("eventId", eventId),
+                            Map.entry("target", "MATCH"),
+                            Map.entry("phase", "teleop"),
+                            Map.entry("name", "Cycle Timer"),
+                            Map.entry("fieldKey", "cycle_timer"),
+                            Map.entry("fieldType", "timer"),
+                            Map.entry("description", "Timer desc"),
+                            Map.entry("configJson", "{\"decimalPlaces\":1}"),
+                            Map.entry("aggregationMode", "median"),
+                            Map.entry("displayFormat", "number"),
+                            Map.entry("orderSeq", 1),
+                            Map.entry("isActive", true),
+                            Map.entry("isDeleted", false)
+                    ),
+                    "cf-cyc-a", Map.ofEntries(
+                            Map.entry("id", "cf-cyc-a"),
+                            Map.entry("eventId", eventId),
+                            Map.entry("target", "TEAM"),
+                            Map.entry("phase", "overall"),
+                            Map.entry("name", "Cycle A"),
+                            Map.entry("fieldKey", "cyc_a"),
+                            Map.entry("fieldType", "formula"),
+                            Map.entry("formulaExpr", "formula.cyc_b + 1"),
+                            Map.entry("aggregationMode", "avg"),
+                            Map.entry("displayFormat", "tier"),
+                            Map.entry("orderSeq", 2),
+                            Map.entry("isActive", true),
+                            Map.entry("isDeleted", false)
+                    ),
+                    "cf-cyc-b", Map.ofEntries(
+                            Map.entry("id", "cf-cyc-b"),
+                            Map.entry("eventId", eventId),
+                            Map.entry("target", "TEAM"),
+                            Map.entry("phase", "overall"),
+                            Map.entry("name", "Cycle B"),
+                            Map.entry("fieldKey", "cyc_b"),
+                            Map.entry("fieldType", "formula"),
+                            Map.entry("formulaExpr", "formula.cyc_a + 1"),
+                            Map.entry("aggregationMode", "avg"),
+                            Map.entry("displayFormat", "number"),
+                            Map.entry("orderSeq", 3),
+                            Map.entry("isActive", true),
+                            Map.entry("isDeleted", false)
+                    ),
+                    "cf-bad-inj", Map.ofEntries(
+                            Map.entry("id", "cf-bad-inj"),
+                            Map.entry("eventId", eventId),
+                            Map.entry("target", "MATCH"),
+                            Map.entry("phase", "overall"),
+                            Map.entry("name", "Bad Injection Formula"),
+                            Map.entry("fieldKey", "bad_inj"),
+                            Map.entry("fieldType", "formula"),
+                            Map.entry("formulaExpr", "__proto__.polluted + 1"),
+                            Map.entry("orderSeq", 4),
+                            Map.entry("isActive", true),
+                            Map.entry("isDeleted", false)
+                    )
+            ));
+            tables.put("team_tags", Map.of(
+                    "27570::fast", Map.of(
+                            "eventId", eventId,
+                            "teamNumber", 27570,
+                            "tag", "fast",
+                            "isDeleted", false
+                    )
+            ));
+
+            JsonObject reqBody = new JsonObject();
+            reqBody.addProperty("hostEpoch", 1);
+            reqBody.addProperty("snapshotRevision", 1);
+            reqBody.addProperty("fullProjection", true);
+            reqBody.add("snapshot", buildSnapshot(tables));
+
+            var putRes = client.put("/api/events/" + eventId + "/crdt-state", gson.toJson(reqBody),
+                    req -> req.header("Authorization", "Bearer " + aliceToken));
+            assertThat(putRes.code()).isEqualTo(200);
+            JsonObject putJson = JsonParser.parseString(putRes.body().string()).getAsJsonObject();
+            assertThat(putJson.get("saved").getAsBoolean()).isTrue();
+            JsonObject counts = putJson.getAsJsonObject("projectedCounts");
+            assertThat(counts.get("custom_fields").getAsInt()).isEqualTo(4);
+            assertThat(counts.get("team_tags").getAsInt()).isEqualTo(1);
+
+            jdbi.useHandle(h -> {
+                Map<String, Object> timerRow = h.createQuery(
+                        "SELECT description, config_json, aggregation_mode, display_format FROM event_custom_fields WHERE id = 'cf-timer'")
+                        .mapToMap().one();
+                assertThat(timerRow.get("description")).isEqualTo("Timer desc");
+                assertThat(timerRow.get("config_json")).isEqualTo("{\"decimalPlaces\":1}");
+                assertThat(timerRow.get("aggregation_mode")).isEqualTo("median");
+                assertThat(timerRow.get("display_format")).isEqualTo("number");
+
+                // Cyclic formulas from offline merge MUST persist without rollback
+                String cycAExpr = h.createQuery("SELECT formula_expr FROM event_custom_fields WHERE id = 'cf-cyc-a'")
+                        .mapTo(String.class).one();
+                String cycBExpr = h.createQuery("SELECT formula_expr FROM event_custom_fields WHERE id = 'cf-cyc-b'")
+                        .mapTo(String.class).one();
+                assertThat(cycAExpr).isEqualTo("formula.cyc_b + 1");
+                assertThat(cycBExpr).isEqualTo("formula.cyc_a + 1");
+
+                // Injection-violating formulaExpr MUST be sanitized to null without aborting sibling tables
+                String badExpr = h.createQuery("SELECT formula_expr FROM event_custom_fields WHERE id = 'cf-bad-inj'")
+                        .mapTo(String.class).one();
+                assertThat(badExpr).isNull();
+
+                int tagCount = h.createQuery("SELECT COUNT(*) FROM team_tags WHERE event_id = :eventId AND team_number = 27570")
+                        .bind("eventId", eventId)
+                        .mapTo(Integer.class).one();
+                assertThat(tagCount).isEqualTo(1);
+            });
+        });
+    }
+
+    @Test
+    void testNonHostCannotBootstrapForgedHostIdentityOrBypassPitNormalization() throws Exception {
+        java.security.KeyPairGenerator kpg = java.security.KeyPairGenerator.getInstance("EC");
+        kpg.initialize(new java.security.spec.ECGenParameterSpec("secp256r1"));
+        java.security.KeyPair realAliceHostKp = kpg.generateKeyPair();
+        java.security.KeyPair eveFakeHostKp = kpg.generateKeyPair();
+        java.security.KeyPair eveFakeCarolKp = kpg.generateKeyPair();
+        java.security.KeyPair eveOwnKp = kpg.generateKeyPair();
+
+        JavalinTest.test(app, (server, client) -> {
+            Map<?, ?> alice = registerUser(client, "host_alice_idguard");
+            String aliceId = (String) alice.get("id");
+            String aliceToken = (String) alice.get("token");
+            Map<?, ?> evt = createEvent(client, aliceToken, "Zero Trust Identity Event");
+            String eventId = (String) evt.get("id");
+            String inviteCode = (String) evt.get("inviteCode");
+
+            Map<?, ?> eve = registerUser(client, "attacker_eve");
+            String eveId = (String) eve.get("id");
+            String eveToken = (String) eve.get("token");
+            assertThat(client.post("/api/events/join", gson.toJson(Map.of("inviteCode", inviteCode)),
+                    req -> req.header("Authorization", "Bearer " + eveToken)).code()).isEqualTo(200);
+
+            Map<?, ?> carol = registerUser(client, "victim_carol");
+            String carolId = (String) carol.get("id");
+            String carolToken = (String) carol.get("token");
+            assertThat(client.post("/api/events/join", gson.toJson(Map.of("inviteCode", inviteCode)),
+                    req -> req.header("Authorization", "Bearer " + carolToken)).code()).isEqualTo(200);
+
+            String fakeHostPub = java.util.Base64.getEncoder().encodeToString(eveFakeHostKp.getPublic().getEncoded());
+            String fakeCarolPub = java.util.Base64.getEncoder().encodeToString(eveFakeCarolKp.getPublic().getEncoded());
+            String eveOwnPub = java.util.Base64.getEncoder().encodeToString(eveOwnKp.getPublic().getEncoded());
+
+            java.security.Signature fakeHostBootstrapSig = java.security.Signature.getInstance("SHA256withECDSAinP1363Format");
+            fakeHostBootstrapSig.initSign(eveFakeHostKp.getPrivate());
+            fakeHostBootstrapSig.update(EcdsaRecordVerifier
+                    .buildMemberIdentityCanonicalPayload(eventId, aliceId, "forged-host-dev", fakeHostPub)
+                    .getBytes(java.nio.charset.StandardCharsets.UTF_8));
+            String fakeHostSigB64 = java.util.Base64.getEncoder().encodeToString(fakeHostBootstrapSig.sign());
+
+            java.security.Signature fakeCarolBindSig = java.security.Signature.getInstance("SHA256withECDSAinP1363Format");
+            fakeCarolBindSig.initSign(eveFakeHostKp.getPrivate());
+            fakeCarolBindSig.update(EcdsaRecordVerifier
+                    .buildMemberIdentityCanonicalPayload(eventId, carolId, "forged-carol-dev", fakeCarolPub)
+                    .getBytes(java.nio.charset.StandardCharsets.UTF_8));
+            String fakeCarolSigB64 = java.util.Base64.getEncoder().encodeToString(fakeCarolBindSig.sign());
+
+            // Step 1: Before Host Alice has published any record or identity anchor, non-Host Eve attempts to
+            // bootstrap a fake Host master key in member_identities + countersign fakeCarolPub, alongside Eve's own unsigned row
+            Map<String, Map<String, Map<String, Object>>> step1Tables = new LinkedHashMap<>();
+            step1Tables.put("member_identities", Map.of(
+                    aliceId + "::forged-host-dev", Map.of(
+                            "eventId", eventId,
+                            "userId", aliceId,
+                            "deviceId", "forged-host-dev",
+                            "signingPubKeyHex", fakeHostPub,
+                            "hostPubKey", fakeHostPub,
+                            "hostSig", fakeHostSigB64
+                    ),
+                    carolId + "::forged-carol-dev", Map.of(
+                            "eventId", eventId,
+                            "userId", carolId,
+                            "deviceId", "forged-carol-dev",
+                            "signingPubKeyHex", fakeCarolPub,
+                            "hostPubKey", fakeHostPub,
+                            "hostSig", fakeCarolSigB64
+                    ),
+                    eveId + "::eve-own-dev", Map.of(
+                            "eventId", eventId,
+                            "userId", eveId,
+                            "deviceId", "eve-own-dev",
+                            "signingPubKeyHex", eveOwnPub
+                    )
+            ));
+            step1Tables.put("pit_records", Map.of(
+                    "27570", Map.ofEntries(
+                            Map.entry("id", eventId + "_pit_27570"),
+                            Map.entry("eventId", eventId),
+                            Map.entry("teamNumber", 27570),
+                            Map.entry("scoutId", eveId),
+                            Map.entry("scoutName", "Eve"),
+                            Map.entry("weightLbs", -15.5),
+                            Map.entry("claimedAutoScore", 20),
+                            Map.entry("claimedTeleopScore", 30),
+                            Map.entry("claimedTeleopPark", true),
+                            Map.entry("claimedFlowerNectars", 2),
+                            Map.entry("claimedFlowerBottomBonus", 4),
+                            Map.entry("claimedFlowerPollens", 3),
+                            Map.entry("claimedGardenBalls", 1),
+                            Map.entry("claimedEndgameScore", 0),
+                            Map.entry("claimedTotalScore", 50),
+                            Map.entry("version", 1),
+                            Map.entry("isDeleted", false)
+                    )
+            ));
+
+            JsonObject step1Req = new JsonObject();
+            step1Req.addProperty("hostEpoch", 1);
+            step1Req.addProperty("snapshotRevision", 1);
+            step1Req.add("snapshot", buildSnapshot(step1Tables));
+            step1Req.add("dirtyRows", JsonParser.parseString(gson.toJson(Map.of("pit_records", List.of("27570")))));
+
+            var step1Res = client.put("/api/events/" + eventId + "/crdt-state", gson.toJson(step1Req),
+                    req -> req.header("Authorization", "Bearer " + eveToken));
+            assertThat(step1Res.code()).isEqualTo(200);
+
+            var getAfterStep1 = client.get("/api/events/" + eventId + "/crdt-state",
+                    req -> req.header("Authorization", "Bearer " + aliceToken));
+            assertThat(getAfterStep1.code()).isEqualTo(200);
+            JsonElement snap1 = JsonParser.parseString(getAfterStep1.body().string()).getAsJsonObject().get("snapshot");
+            Map<String, JsonObject> idRows1 = com.bear27570.app.service.CrdtProjectionService.extractTableRows(snap1, "member_identities");
+            // Positive control: Eve's own unsigned device row is allowed
+            assertThat(idRows1).containsKey(eveId + "::eve-own-dev");
+            // Negative assertions: forged Host bootstrap anchor and forged Carol binding MUST be stripped
+            assertThat(idRows1).doesNotContainKey(aliceId + "::forged-host-dev");
+            assertThat(idRows1).doesNotContainKey(carolId + "::forged-carol-dev");
+
+            // Verify Pit projection BIOBUZZ normalization in H2
+            jdbi.useHandle(h -> {
+                Map<String, Object> pit = h.createQuery(
+                        "SELECT weight_lbs, claimed_flower_nectars, claimed_flower_bottom_bonus, claimed_endgame_score, claimed_total_score " +
+                        "FROM pit_scouting_records WHERE event_id = :eid AND team_number = 27570")
+                        .bind("eid", eventId)
+                        .mapToMap()
+                        .one();
+                assertThat(((Number) pit.get("weight_lbs")).doubleValue()).isEqualTo(0.0);
+                assertThat(((Number) pit.get("claimed_flower_nectars")).intValue()).isEqualTo(2);
+                assertThat(((Number) pit.get("claimed_flower_bottom_bonus")).intValue()).isEqualTo(2);
+                // 5 (park) + 2*2 (nectars) + 2*5 (bottomBonus) + 3*2 (pollens) + 1 (garden) = 26
+                assertThat(((Number) pit.get("claimed_endgame_score")).intValue()).isEqualTo(26);
+                // 20 + 30 + 26 = 76 (> stale 50)
+                assertThat(((Number) pit.get("claimed_total_score")).intValue()).isEqualTo(76);
+            });
+
+            // Step 2: Eve signs a forged record for Carol (or pre-seeds Carol unsigned then tries to overwrite) using fakeHostPub
+            jdbi.useHandle(h -> h.execute(
+                    "INSERT INTO scouting_records (id, event_id, scout_id, scout_name, match_number, team_number, total_score, raw_data, version, is_deleted) " +
+                    "VALUES ('rec-carol-1', ?, ?, 'Carol', 1, 27570, 40, '{}', 1, false)",
+                    eventId, carolId));
+
+            ScoutingRecord forgedCarolRec = new ScoutingRecord();
+            forgedCarolRec.setId("rec-carol-1");
+            forgedCarolRec.setEventId(eventId);
+            forgedCarolRec.setScoutId(carolId);
+            forgedCarolRec.setScoutName("Carol");
+            forgedCarolRec.setMatchNumber(1);
+            forgedCarolRec.setTeamNumber(27570);
+            forgedCarolRec.setAutoScore(0);
+            forgedCarolRec.setTeleopScore(0);
+            forgedCarolRec.setEndgameScore(0);
+            forgedCarolRec.setTotalScore(999);
+            forgedCarolRec.setNotes("hijacked");
+            forgedCarolRec.setRawData("{}");
+            forgedCarolRec.setIsBroken(false);
+            forgedCarolRec.setIsDeleted(false);
+            forgedCarolRec.setVersion(2);
+
+            java.security.Signature forgedRecSig = java.security.Signature.getInstance("SHA256withECDSAinP1363Format");
+            forgedRecSig.initSign(eveFakeCarolKp.getPrivate());
+            forgedRecSig.update(EcdsaRecordVerifier.buildCanonicalPayload(forgedCarolRec).getBytes(java.nio.charset.StandardCharsets.UTF_8));
+            forgedCarolRec.setAuthorPubKey(fakeCarolPub);
+            forgedCarolRec.setAuthorSig(java.util.Base64.getEncoder().encodeToString(forgedRecSig.sign()));
+
+            var syncAttempt = client.post("/api/records/sync", gson.toJson(List.of(forgedCarolRec)),
+                    req -> req.header("Authorization", "Bearer " + eveToken));
+            assertThat(syncAttempt.code()).isEqualTo(403);
+
+            jdbi.useHandle(h -> {
+                int score = h.createQuery("SELECT total_score FROM scouting_records WHERE id = 'rec-carol-1'")
+                        .mapTo(Integer.class).one();
+                assertThat(score).isEqualTo(40);
+            });
+
+            // Step 3: Host Alice publishes her genuine self-signed identity anchor; Eve tries to delete it in a subsequent PUT
+            String realAlicePub = java.util.Base64.getEncoder().encodeToString(realAliceHostKp.getPublic().getEncoded());
+            java.security.Signature realAliceAnchorSig = java.security.Signature.getInstance("SHA256withECDSAinP1363Format");
+            realAliceAnchorSig.initSign(realAliceHostKp.getPrivate());
+            realAliceAnchorSig.update(EcdsaRecordVerifier
+                    .buildMemberIdentityCanonicalPayload(eventId, aliceId, "alice-host-dev", realAlicePub)
+                    .getBytes(java.nio.charset.StandardCharsets.UTF_8));
+            String realAliceSigB64 = java.util.Base64.getEncoder().encodeToString(realAliceAnchorSig.sign());
+
+            Map<String, Map<String, Map<String, Object>>> aliceAnchorTables = new LinkedHashMap<>();
+            aliceAnchorTables.put("member_identities", Map.of(
+                    aliceId + "::alice-host-dev", Map.of(
+                            "eventId", eventId,
+                            "userId", aliceId,
+                            "deviceId", "alice-host-dev",
+                            "signingPubKeyHex", realAlicePub,
+                            "hostPubKey", realAlicePub,
+                            "hostSig", realAliceSigB64
+                    )
+            ));
+            JsonObject alicePutReq = new JsonObject();
+            alicePutReq.addProperty("hostEpoch", 2);
+            alicePutReq.addProperty("snapshotRevision", 1);
+            alicePutReq.add("snapshot", buildSnapshot(aliceAnchorTables));
+            assertThat(client.put("/api/events/" + eventId + "/crdt-state", gson.toJson(alicePutReq),
+                    req -> req.header("Authorization", "Bearer " + aliceToken)).code()).isEqualTo(200);
+
+            // Eve pushes rev=2 with empty member_identities trying to erase Alice's anchor
+            JsonObject eveTruncateReq = new JsonObject();
+            eveTruncateReq.addProperty("hostEpoch", 2);
+            eveTruncateReq.addProperty("snapshotRevision", 2);
+            eveTruncateReq.add("snapshot", buildSnapshot(Map.of()));
+            assertThat(client.put("/api/events/" + eventId + "/crdt-state", gson.toJson(eveTruncateReq),
+                    req -> req.header("Authorization", "Bearer " + eveToken)).code()).isEqualTo(200);
+
+            var getAfterEveTruncate = client.get("/api/events/" + eventId + "/crdt-state",
+                    req -> req.header("Authorization", "Bearer " + aliceToken));
+            JsonElement snapAfterTruncate = JsonParser.parseString(getAfterEveTruncate.body().string()).getAsJsonObject().get("snapshot");
+            Map<String, JsonObject> idRowsFinal = com.bear27570.app.service.CrdtProjectionService.extractTableRows(snapAfterTruncate, "member_identities");
+            assertThat(idRowsFinal).containsKey(aliceId + "::alice-host-dev");
+            assertThat(idRowsFinal.get(aliceId + "::alice-host-dev").get("signingPubKeyHex").getAsString()).isEqualTo(realAlicePub);
+        });
+    }
 }

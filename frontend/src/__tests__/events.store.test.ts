@@ -99,6 +99,28 @@ describe('Events Store', () => {
     expect(store.events[0].name).toBe('External Imported Event Renamed')
   })
 
+  it('syncExternal never mutates the inviteCode of an already-known authoritative event', async () => {
+    const store = useEventStore()
+    const authoritative = { id: 'uuid-auth-evt-1', name: 'Authoritative', inviteCode: 'KEEP11', hostId: 'u1' }
+    store.events = [authoritative]
+    vi.mocked(api.syncExternalEvent).mockImplementation(async (e: any) => e)
+
+    // Tampered / stale payload carrying a different inviteCode for the same event id
+    await store.syncExternal({ ...authoritative, inviteCode: 'HACK99', name: 'Renamed' })
+
+    expect(api.syncExternalEvent).toHaveBeenCalledTimes(1)
+    const sentPayload = vi.mocked(api.syncExternalEvent).mock.calls[0]![0] as any
+    expect(sentPayload.inviteCode).toBe('KEEP11')
+    expect(sentPayload.name).toBe('Renamed')
+    expect(store.events[0]!.inviteCode).toBe('KEEP11')
+
+    // Placeholder (ext_/evt-) stubs may still be promoted using the incoming code
+    store.events = [{ id: 'ext_NEW123', name: 'Remote', inviteCode: 'NEW123', hostId: 'external_host' }]
+    await store.syncExternal({ id: 'uuid-auth-evt-2', name: 'Real', inviteCode: 'NEW123', hostId: 'u2' })
+    const promoted = vi.mocked(api.syncExternalEvent).mock.calls[1]![0] as any
+    expect(promoted.inviteCode).toBe('NEW123')
+  })
+
   describe('isHost computation resilience', () => {
     it('correctly identifies desktop creator as host even when rtcService is just created with isHostMode false', async () => {
       const { useConnectionStore } = await import('../stores/connection')

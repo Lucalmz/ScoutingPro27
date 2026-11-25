@@ -47,6 +47,11 @@ function loadFromStorage<T>(key: string, defaultVal: T): T {
 import { getRecordTournamentLevel, getTournamentLevelOrder } from '@/utils/tournament'
 export { getRecordTournamentLevel, getTournamentLevelOrder }
 
+const ACTIVE_RECORDS_EVENT_KEY = 'sp27_records_active_event_id'
+const officialMatchesStorageKey = (eid: string) => `sp27_official_matches_${eid}`
+const advancementStorageKey = (eid: string) => `sp27_advancement_${eid}`
+const bannedTeamsStorageKey = (eid: string) => `sp27_banned_teams_${eid}`
+
 export const useRecordStore = defineStore('records', () => {
   const records = ref<ScoutingRecord[]>(loadFromStorage('scoutingpro_records', []))
   const officialMatches = ref<OfficialMatch[]>(loadFromStorage('scoutingpro_officialMatches', []))
@@ -78,12 +83,50 @@ export const useRecordStore = defineStore('records', () => {
     }
   }
 
+  function hydrateEventScopedCaches(eventId: string, isColdInitialLoad: boolean) {
+    const scopedMatchesKey = officialMatchesStorageKey(eventId)
+    const scopedAdvKey = advancementStorageKey(eventId)
+    const scopedBannedKey = bannedTeamsStorageKey(eventId)
+    let lastActiveEventId: string | null = null
+    try {
+      lastActiveEventId = localStorage.getItem(ACTIVE_RECORDS_EVENT_KEY)
+    } catch {}
+
+    const canReuseLegacy = lastActiveEventId === eventId || (isColdInitialLoad && !lastActiveEventId)
+
+    if (localStorage.getItem(scopedMatchesKey) !== null) {
+      officialMatches.value = loadFromStorage<OfficialMatch[]>(scopedMatchesKey, [])
+    } else if (!canReuseLegacy) {
+      officialMatches.value = []
+    }
+
+    if (localStorage.getItem(scopedAdvKey) !== null) {
+      officialAdvancement.value = loadFromStorage<AdvancementDetail[]>(scopedAdvKey, [])
+    } else if (!canReuseLegacy) {
+      officialAdvancement.value = []
+    }
+
+    if (localStorage.getItem(scopedBannedKey) !== null) {
+      bannedTeams.value = loadFromStorage<number[]>(scopedBannedKey, [])
+    } else if (!canReuseLegacy) {
+      bannedTeams.value = []
+    }
+  }
+
   function flushStorage() {
     saveToStorage('scoutingpro_records', records.value)
     saveToStorage('scoutingpro_officialMatches', officialMatches.value)
     saveToStorage('scoutingpro_advancement', officialAdvancement.value)
     saveToStorage('scoutingpro_bannedTeams', bannedTeams.value)
     saveToStorage('scoutingpro_tags', teamTags.value)
+    if (currentEventId.value) {
+      saveToStorage(officialMatchesStorageKey(currentEventId.value), officialMatches.value)
+      saveToStorage(advancementStorageKey(currentEventId.value), officialAdvancement.value)
+      saveToStorage(bannedTeamsStorageKey(currentEventId.value), bannedTeams.value)
+      try {
+        localStorage.setItem(ACTIVE_RECORDS_EVENT_KEY, currentEventId.value)
+      } catch {}
+    }
   }
 
   // Debounced watch
@@ -167,14 +210,13 @@ export const useRecordStore = defineStore('records', () => {
 
   // --- fetch ---
   async function fetchRecords(eventId: string, ftcYear?: number, ftcEventCode?: string) {
-    const isSwitchingEvent = currentEventId.value !== eventId
+    const prevEventId = currentEventId.value
+    const isSwitchingEvent = prevEventId !== eventId
     loading.value = true
     error.value = null
     currentEventId.value = eventId
     if (isSwitchingEvent) {
-      officialMatches.value = []
-      officialAdvancement.value = []
-      bannedTeams.value = []
+      hydrateEventScopedCaches(eventId, prevEventId === null)
     }
     try {
       const fetched = await listRecords(eventId)
@@ -229,19 +271,28 @@ export const useRecordStore = defineStore('records', () => {
         })
       }
       if (ftcYear && ftcEventCode) {
-        const [matches, adv] = await Promise.all([
-          fetchEventMatches(ftcYear, ftcEventCode),
-          fetchEventAdvancement(ftcYear, ftcEventCode).catch(() => [])
-        ])
-        officialMatches.value = matches
-        officialAdvancement.value = adv
+        try {
+          officialMatches.value = await fetchEventMatches(ftcYear, ftcEventCode)
+        } catch (err) {
+          console.warn('[fetchRecords] Failed to fetch official matches (using cached matches):', err)
+        }
+        try {
+          officialAdvancement.value = await fetchEventAdvancement(ftcYear, ftcEventCode)
+        } catch (err) {
+          console.warn('[fetchRecords] Failed to fetch advancement (using cached advancement):', err)
+        }
         flushStorage()
       } else {
         officialMatches.value = []
         officialAdvancement.value = []
         flushStorage()
       }
-      bannedTeams.value = await apiFetchBannedTeams(eventId).catch(() => [])
+      try {
+        bannedTeams.value = await apiFetchBannedTeams(eventId)
+        flushStorage()
+      } catch (err) {
+        console.warn('[fetchRecords] Failed to fetch banned teams (using cached banned teams):', err)
+      }
     } catch (e: any) {
       error.value = e.message ?? 'Failed to load records'
     } finally {
@@ -606,7 +657,10 @@ export const useRecordStore = defineStore('records', () => {
     try {
       const tags = await apiFetchEventTags(eventId)
       if (Array.isArray(tags)) {
-        teamTags.value = tags
+        const normalizedTags = tags.map((t) => ({ ...t, eventId: t.eventId || eventId }))
+        const otherEventsTags = teamTags.value.filter((t) => t.eventId !== eventId)
+        teamTags.value = [...otherEventsTags, ...normalizedTags]
+        flushStorage()
       }
     } catch (e: any) {
       console.warn('Failed to fetch event tags from backend (using local cached tags):', e)
@@ -813,6 +867,29 @@ export const useRecordStore = defineStore('records', () => {
       }
       return t
     })
+    try {
+      const oldMatches = localStorage.getItem(officialMatchesStorageKey(oldId))
+      if (oldMatches !== null && localStorage.getItem(officialMatchesStorageKey(newId)) === null) {
+        localStorage.setItem(officialMatchesStorageKey(newId), oldMatches)
+      }
+      localStorage.removeItem(officialMatchesStorageKey(oldId))
+
+      const oldAdv = localStorage.getItem(advancementStorageKey(oldId))
+      if (oldAdv !== null && localStorage.getItem(advancementStorageKey(newId)) === null) {
+        localStorage.setItem(advancementStorageKey(newId), oldAdv)
+      }
+      localStorage.removeItem(advancementStorageKey(oldId))
+
+      const oldBanned = localStorage.getItem(bannedTeamsStorageKey(oldId))
+      if (oldBanned !== null && localStorage.getItem(bannedTeamsStorageKey(newId)) === null) {
+        localStorage.setItem(bannedTeamsStorageKey(newId), oldBanned)
+      }
+      localStorage.removeItem(bannedTeamsStorageKey(oldId))
+
+      if (localStorage.getItem(ACTIVE_RECORDS_EVENT_KEY) === oldId) {
+        localStorage.setItem(ACTIVE_RECORDS_EVENT_KEY, newId)
+      }
+    } catch {}
     refreshDerivedConflictsLocal(newId)
     if (changed) {
       flushStorage()
@@ -863,6 +940,7 @@ export const useRecordStore = defineStore('records', () => {
   function clearMemoryOnly() {
     records.value = []
     officialMatches.value = []
+    officialAdvancement.value = []
     bannedTeams.value = []
     teamTags.value = []
     notifiedConflictCoords.clear()
@@ -875,8 +953,25 @@ export const useRecordStore = defineStore('records', () => {
     try {
       localStorage.removeItem('scoutingpro_records')
       localStorage.removeItem('scoutingpro_officialMatches')
+      localStorage.removeItem('scoutingpro_advancement')
       localStorage.removeItem('scoutingpro_bannedTeams')
       localStorage.removeItem('scoutingpro_tags')
+      localStorage.removeItem(ACTIVE_RECORDS_EVENT_KEY)
+      const keysToRemove: string[] = []
+      for (let i = 0; i < localStorage.length; i++) {
+        const k = localStorage.key(i)
+        if (
+          k &&
+          (k.startsWith('sp27_official_matches_') ||
+            k.startsWith('sp27_advancement_') ||
+            k.startsWith('sp27_banned_teams_'))
+        ) {
+          keysToRemove.push(k)
+        }
+      }
+      for (const k of keysToRemove) {
+        localStorage.removeItem(k)
+      }
     } catch {}
   }
 

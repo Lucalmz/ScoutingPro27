@@ -53,17 +53,12 @@ public class ScheduleRoutes {
         routes.post("/api/events/{id}/schedule/batch", ctx -> {
             String eventId = ctx.pathParam("id");
             String userId = ctx.attribute("userId");
-            if (userId != null) {
-                boolean isHost = jdbi.withExtension(EventDao.class, dao -> dao.isHost(eventId, userId));
-                if (!isHost) {
-                    throw new io.javalin.http.ForbiddenResponse("Only the event host can modify match schedule or assignments");
-                }
-            }
-
             ScoutingEvent event = jdbi.withExtension(EventDao.class, dao -> dao.findById(eventId));
             if (event == null) {
-                ctx.status(404).result("Event not found");
-                return;
+                throw new io.javalin.http.NotFoundResponse("Event not found");
+            }
+            if (userId == null || !userId.equals(event.getHostId())) {
+                throw new io.javalin.http.ForbiddenResponse("Only the event host can modify match schedule or assignments");
             }
 
             JsonObject body = gson.fromJson(ctx.body(), JsonObject.class);
@@ -148,11 +143,12 @@ public class ScheduleRoutes {
         routes.delete("/api/events/{id}/schedule", ctx -> {
             String eventId = ctx.pathParam("id");
             String userId = ctx.attribute("userId");
-            if (userId != null) {
-                boolean isHost = jdbi.withExtension(EventDao.class, dao -> dao.isHost(eventId, userId));
-                if (!isHost) {
-                    throw new io.javalin.http.ForbiddenResponse("Only the event host can modify match schedule or assignments");
-                }
+            ScoutingEvent event = jdbi.withExtension(EventDao.class, dao -> dao.findById(eventId));
+            if (event == null) {
+                throw new io.javalin.http.NotFoundResponse("Event not found");
+            }
+            if (userId == null || !userId.equals(event.getHostId())) {
+                throw new io.javalin.http.ForbiddenResponse("Only the event host can modify match schedule or assignments");
             }
 
             jdbi.useTransaction(handle -> {
@@ -167,11 +163,12 @@ public class ScheduleRoutes {
         routes.put("/api/events/{id}/assignments", ctx -> {
             String eventId = ctx.pathParam("id");
             String userId = ctx.attribute("userId");
-            if (userId != null) {
-                boolean isHost = jdbi.withExtension(EventDao.class, dao -> dao.isHost(eventId, userId));
-                if (!isHost) {
-                    throw new io.javalin.http.ForbiddenResponse("Only the event host can modify match schedule or assignments");
-                }
+            ScoutingEvent event = jdbi.withExtension(EventDao.class, dao -> dao.findById(eventId));
+            if (event == null) {
+                throw new io.javalin.http.NotFoundResponse("Event not found");
+            }
+            if (userId == null || !userId.equals(event.getHostId())) {
+                throw new io.javalin.http.ForbiddenResponse("Only the event host can modify match schedule or assignments");
             }
 
             JsonObject body = gson.fromJson(ctx.body(), JsonObject.class);

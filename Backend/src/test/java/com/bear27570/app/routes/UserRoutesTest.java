@@ -319,4 +319,50 @@ class UserRoutesTest {
             });
         });
     }
+
+    @Test
+    void testWhitespacePasswordMergeRename72CharLimitAndTrimmedUsernameLength() {
+        JavalinTest.test(support.app, (server, client) -> {
+            // 1. Trimmed username length <= 50 succeeds even with padding spaces; 51 trimmed chars fails with 400
+            String fiftyCharName = "u".repeat(50);
+            var paddedOk = client.post("/api/user/register",
+                    "{\"username\":\"  " + fiftyCharName + "  \", \"password\":\"ValidPass1\"}");
+            assertThat(paddedOk.code()).isEqualTo(200);
+
+            var fiftyOneFail = client.post("/api/user/register",
+                    "{\"username\":\"" + "z".repeat(51) + "\", \"password\":\"ValidPass1\"}");
+            assertThat(fiftyOneFail.code()).isEqualTo(400);
+
+            // 2. Password with leading/trailing spaces works consistently across register -> login -> merge
+            var targetReg = client.post("/api/user/register",
+                    "{\"username\":\"SpaceTarget\", \"password\":\"  SpaceSecret99  \"}");
+            assertThat(targetReg.code()).isEqualTo(200);
+            String targetId = targetReg.body().string().split("\"id\":\"")[1].split("\"")[0];
+
+            // Trimmed password MUST fail login (proving spaces are part of password)
+            assertThat(client.post("/api/user/login",
+                    "{\"username\":\"SpaceTarget\", \"password\":\"SpaceSecret99\"}").code()).isEqualTo(401);
+            assertThat(client.post("/api/user/login",
+                    "{\"username\":\"SpaceTarget\", \"password\":\"  SpaceSecret99  \"}").code()).isEqualTo(200);
+
+            var sourceReg = client.post("/api/user/register",
+                    "{\"username\":\"SpaceSource\", \"password\":\"TempPass\"}");
+            assertThat(sourceReg.code()).isEqualTo(200);
+            String sourceToken = sourceReg.body().string().split("\"token\":\"")[1].split("\"")[0];
+
+            // Rename > 72-char newPassword MUST return 400 instead of silently truncating
+            var overlongRename = client.post("/api/user/rename",
+                    "{\"oldPassword\":\"TempPass\",\"newPassword\":\"" + "P".repeat(73) + "\"}",
+                    b -> b.header("Authorization", "Bearer " + sourceToken));
+            assertThat(overlongRename.code()).isEqualTo(400);
+            assertThat(overlongRename.body().string()).contains("newPassword too long");
+
+            // Merge with exact untrimmed targetPassword succeeds
+            var mergeRes = client.post("/api/user/merge",
+                    "{\"targetUsername\":\"SpaceTarget\",\"targetPassword\":\"  SpaceSecret99  \"}",
+                    b -> b.header("Authorization", "Bearer " + sourceToken));
+            assertThat(mergeRes.code()).isEqualTo(200);
+            assertThat(mergeRes.body().string()).contains("\"id\":\"" + targetId + "\"");
+        });
+    }
 }

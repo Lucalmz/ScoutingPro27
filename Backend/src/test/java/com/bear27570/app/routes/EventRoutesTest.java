@@ -195,4 +195,85 @@ class EventRoutesTest {
             });
         });
     }
+
+    @Test
+    void testCreateEventNameBoundsExternalSyncAntiHijackAndMemberIsolation() {
+        JavalinTest.test(support.app, (server, client) -> {
+            RoomFixture f = RouteTestSupport.setupRoomFixture(client);
+
+            // 1. POST /api/events rejects blank and >100-char names with 400
+            var blankRes = client.post("/api/events", "{\"name\":\"   \"}",
+                    b -> b.header("Authorization", "Bearer " + f.hostToken));
+            assertThat(blankRes.code()).isEqualTo(400);
+            assertThat(blankRes.body().string()).contains("Event name is required");
+
+            var overlongRes = client.post("/api/events", "{\"name\":\"" + "X".repeat(101) + "\"}",
+                    b -> b.header("Authorization", "Bearer " + f.hostToken));
+            assertThat(overlongRes.code()).isEqualTo(400);
+            assertThat(overlongRes.body().string()).contains("Event name cannot exceed 100 characters");
+
+            // 2. Positive precondition: Host bans team 11115; ScoutA (member) can read banned-teams & members
+            assertThat(client.post("/api/events/" + f.eventId + "/banned-teams", "{\"teamNumber\":11115}",
+                    b -> b.header("Authorization", "Bearer " + f.hostToken)).code()).isEqualTo(200);
+
+            var memberBannedRes = client.get("/api/events/" + f.eventId + "/banned-teams",
+                    b -> b.header("Authorization", "Bearer " + f.scoutAToken));
+            assertThat(memberBannedRes.code()).isEqualTo(200);
+            assertThat(memberBannedRes.body().string()).contains("11115");
+
+            var memberListRes = client.get("/api/events/" + f.eventId + "/members",
+                    b -> b.header("Authorization", "Bearer " + f.scoutAToken));
+            assertThat(memberListRes.code()).isEqualTo(200);
+            assertThat(memberListRes.body().string()).contains(f.hostId);
+
+            // Negative assertions: Outsider (authenticated non-member) receives 403 on both
+            var outsiderBannedRes = client.get("/api/events/" + f.eventId + "/banned-teams",
+                    b -> b.header("Authorization", "Bearer " + f.outsiderToken));
+            assertThat(outsiderBannedRes.code()).isEqualTo(403);
+
+            var outsiderMembersRes = client.get("/api/events/" + f.eventId + "/members",
+                    b -> b.header("Authorization", "Bearer " + f.outsiderToken));
+            assertThat(outsiderMembersRes.code()).isEqualTo(403);
+
+            // 3. POST /api/events/external-sync anti-hijack guards
+            String hijackHostPayload = "{\"id\":\"" + f.eventId + "\",\"name\":\"Hijacked\",\"inviteCode\":\"" + f.inviteCode + "\",\"hostId\":\"" + f.scoutAId + "\"}";
+            var hijackRes = client.post("/api/events/external-sync", hijackHostPayload,
+                    b -> b.header("Authorization", "Bearer " + f.scoutAToken));
+            assertThat(hijackRes.code()).isEqualTo(403);
+            assertThat(hijackRes.body().string()).contains("Cannot hijack host ownership");
+
+            String overwriteLocalHostEvent = "{\"id\":\"" + f.eventId + "\",\"name\":\"Tampered Name\",\"inviteCode\":\"" + f.inviteCode + "\",\"hostId\":\"" + f.hostId + "\"}";
+            var overwriteRes = client.post("/api/events/external-sync", overwriteLocalHostEvent,
+                    b -> b.header("Authorization", "Bearer " + f.scoutAToken));
+            assertThat(overwriteRes.code()).isEqualTo(403);
+            assertThat(overwriteRes.body().string()).contains("Only the event host can modify an authoritative local event");
+
+            String stealInviteCodePayload = "{\"id\":\"evt_rogue_steal\",\"name\":\"Rogue Event\",\"inviteCode\":\"" + f.inviteCode + "\",\"hostId\":\"" + f.scoutAId + "\"}";
+            var stealCodeRes = client.post("/api/events/external-sync", stealInviteCodePayload,
+                    b -> b.header("Authorization", "Bearer " + f.scoutAToken));
+            assertThat(stealCodeRes.code()).isEqualTo(403);
+            assertThat(stealCodeRes.body().string()).contains("cannot overwrite invite code of an existing event");
+
+            // Even the event Host CANNOT mutate an existing event's inviteCode or reassign it to another event ID
+            String hostMutateInviteCode = "{\"id\":\"" + f.eventId + "\",\"name\":\"Host Rename\",\"inviteCode\":\"NEW999\",\"hostId\":\"" + f.hostId + "\"}";
+            var hostMutateRes = client.post("/api/events/external-sync", hostMutateInviteCode,
+                    b -> b.header("Authorization", "Bearer " + f.hostToken));
+            assertThat(hostMutateRes.code()).isEqualTo(400);
+            assertThat(hostMutateRes.body().string()).contains("inviteCode is immutable");
+
+            String hostReassignInviteCode = "{\"id\":\"evt_host_second\",\"name\":\"Second Event\",\"inviteCode\":\"" + f.inviteCode + "\",\"hostId\":\"" + f.hostId + "\"}";
+            var hostReassignRes = client.post("/api/events/external-sync", hostReassignInviteCode,
+                    b -> b.header("Authorization", "Bearer " + f.hostToken));
+            assertThat(hostReassignRes.code()).isEqualTo(403);
+            assertThat(hostReassignRes.body().string()).contains("inviteCode is immutable");
+
+            // Verify authoritative event remains intact in DB
+            support.jdbi.useHandle(h -> {
+                var row = h.createQuery("SELECT host_id, invite_code FROM events WHERE id = ?")
+                        .bind(0, f.eventId).mapToMap().one();
+                assertThat(row.get("host_id")).isEqualTo(f.hostId);
+                assertThat(row.get("invite_code")).isEqualTo(f.inviteCode);
+            });
+        });
+    }
 }

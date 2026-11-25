@@ -59,9 +59,13 @@ public class ApiRoutes {
         this.shutdownCallback = shutdownCallback;
     }
 
-    private static boolean isTestCleanupEnabled() {
-        return "true".equals(System.getenv("ENABLE_TEST_CLEANUP"))
-                || "true".equals(System.getProperty("ENABLE_TEST_CLEANUP"));
+    static boolean isTestCleanupEnabled() {
+        String envVal = System.getenv("ENABLE_TEST_CLEANUP");
+        if (envVal != null && "true".equalsIgnoreCase(envVal.trim())) {
+            return true;
+        }
+        String propVal = System.getProperty("ENABLE_TEST_CLEANUP");
+        return propVal != null && "true".equalsIgnoreCase(propVal.trim());
     }
 
     private static ScheduledThreadPoolExecutor createHeartbeatScheduler() {

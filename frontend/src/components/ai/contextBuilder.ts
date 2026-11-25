@@ -13,7 +13,7 @@ import { calculateBragIndex } from '@/utils/bragIndex'
 import { parseScoutRawData } from '@/utils/analytics/rankings'
 import { calcMatchPredictCycleTime } from '@/utils/analytics/predictCycleTime'
 import { getRecordTournamentLevel, getTournamentLevelOrder } from '@/utils/tournament'
-import { computeTeamMatchCustomMetrics } from '@/views/composables/useTeamCustomMetrics'
+import { computeTeamMatchCustomMetrics, computeTeamFormulaMetrics } from '@/views/composables/useTeamCustomMetrics'
 
 export interface ContextOptions {
   event?: ScoutingEvent | null
@@ -124,10 +124,18 @@ function appendRankingsSection(lines: string[], rankings: RankingRow[]): void {
   const hasAdvancement = rankings.some(
     r => (r.advancementPoints ?? 0) > 0 || (r.advancementStatus != null && r.advancementStatus !== 'NONE')
   )
+  const hasNpOpr = rankings.some(r => r.spNpOpr !== undefined && r.spNpOpr !== null)
+  const hasAutoCycle = rankings.some(r => r.autoCycleTime != null)
 
   const headerParts = ['Team', 'Matches', 'Avg Auto', 'Avg TeleOp', 'Avg Endgame']
   if (hasTips) headerParts.push('Avg Tips')
   headerParts.push('Overall Avg', 'Max Score', 'Broken Matches', 'Trend')
+  if (hasNpOpr) {
+    headerParts.push('SP-NP OPR', 'Raw NP OPR', 'OPR Splits (A/T/E)')
+  }
+  if (hasAutoCycle) {
+    headerParts.push('Auto Cycle')
+  }
   if (hasBiobuzzStats) {
     headerParts.push(
       'TeleOp Park %',
@@ -154,14 +162,27 @@ function appendRankingsSection(lines: string[], rankings: RankingRow[]): void {
     ]
     if (hasTips) rowParts.push(r.avgTipsPerMatch ?? 0)
     rowParts.push(r.avgRating, r.maxScore, r.brokenCount, r.trend)
+    if (hasNpOpr) {
+      const spStr = r.spNpOpr != null ? `${r.spNpOpr.toFixed(1)} (${r.spNpOprConfidence || '-'})` : '-'
+      const rawStr = r.rawNpOpr != null ? r.rawNpOpr.toFixed(1) : '-'
+      const splitStr = r.spNpOprAuto != null
+        ? `${r.spNpOprAuto.toFixed(1)}/${(r.spNpOprTeleop ?? 0).toFixed(1)}/${(r.spNpOprEndgame ?? 0).toFixed(1)}`
+        : '-'
+      rowParts.push(spStr, rawStr, splitStr)
+    }
+    if (hasAutoCycle) {
+      const autoCycleStr = r.autoCycleTime != null ? `${r.autoCycleTime.toFixed(1)}s (${r.autoCycleMatches ?? 0}m)` : '-'
+      rowParts.push(autoCycleStr)
+    }
     if (hasBiobuzzStats) {
       const parkPct = `${Math.round((r.teleopParkRate ?? 0) * 100)}%`
       const mobilityRp = r.avgMobilityRpPts ?? 0
       const flowerSummary = `N:${r.avgFlowerNectars ?? 0} B:${r.avgFlowerBottomBonus ?? 0} P:${r.avgFlowerPollens ?? 0} G:${r.avgGardenBalls ?? 0}`
       const g410Pct = `${Math.round((r.g410FoulRate ?? 0) * 100)}%`
+      const teleopCycleVal = r.teleopCycleTime ?? r.predictCycleTime
       const predictCycleStr =
-        r.predictCycleTime != null
-          ? `${r.predictCycleTime.toFixed(1)}s (${r.predictCycleMatches ?? 0}m)`
+        teleopCycleVal != null
+          ? `${teleopCycleVal.toFixed(1)}s (${r.predictCycleMatches ?? 0}m)`
           : 'Insufficient'
       const estMaxCyclesStr = r.estimatedMaxCycles != null ? r.estimatedMaxCycles : '-'
       rowParts.push(parkPct, mobilityRp, flowerSummary, g410Pct, predictCycleStr, estMaxCyclesStr)
@@ -352,10 +373,14 @@ function appendPitSection(
 function appendCustomMetricsSection(
   lines: string[],
   customFields: CustomFieldDefinition[] | undefined,
-  activeRecords: ScoutingRecord[]
+  activeRecords: ScoutingRecord[],
+  rankings: RankingRow[],
+  activePitRecords: PitScoutingRecord[]
 ): void {
-  const activeMatchFields = (customFields || []).filter(f => f.isActive && f.target === 'MATCH')
-  if (activeMatchFields.length === 0 || activeRecords.length === 0) return
+  const activeFields = (customFields || []).filter(f => f.isActive)
+  const activeMatchFields = activeFields.filter(f => f.target === 'MATCH')
+  const activeTeamFields = activeFields.filter(f => f.target === 'TEAM')
+  if (activeMatchFields.length === 0 && activeTeamFields.length === 0) return
 
   const byTeam = new Map<number, ScoutingRecord[]>()
   for (const r of activeRecords) {
@@ -364,14 +389,45 @@ function appendCustomMetricsSection(
     byTeam.set(r.teamNumber, list)
   }
 
+  const rankingByTeam = new Map<number, RankingRow>()
+  for (const row of rankings) {
+    rankingByTeam.set(row.teamNumber, row)
+  }
+
+  const pitByTeam = new Map<number, PitScoutingRecord>()
+  for (const pit of activePitRecords) {
+    pitByTeam.set(pit.teamNumber, pit)
+  }
+
+  const allTeamNums = new Set<number>([
+    ...byTeam.keys(),
+    ...(activeTeamFields.length > 0 ? rankingByTeam.keys() : [])
+  ])
+  if (allTeamNums.size === 0) return
+
   const customLines: string[] = []
-  for (const teamNum of Array.from(byTeam.keys()).sort((a, b) => a - b)) {
-    const summaries = computeTeamMatchCustomMetrics(activeMatchFields, byTeam.get(teamNum)!)
-    if (summaries.length === 0) continue
+  for (const teamNum of Array.from(allTeamNums).sort((a, b) => a - b)) {
+    const teamRecs = byTeam.get(teamNum) || []
+    const matchSummaries = teamRecs.length > 0
+      ? computeTeamMatchCustomMetrics(activeMatchFields, teamRecs, activeFields)
+      : []
+    const teamSummaries = activeTeamFields.length > 0
+      ? computeTeamFormulaMetrics(activeTeamFields, {
+          rankingRow: rankingByTeam.get(teamNum),
+          pitRecord: pitByTeam.get(teamNum),
+          matchRecords: teamRecs,
+          allFields: activeFields
+        })
+      : []
+
     const tokens: string[] = []
-    for (const s of summaries) {
+    for (const s of [...matchSummaries, ...teamSummaries]) {
+      if (s.error) continue
       if (s.fieldType === 'boolean' && s.rate != null) {
         tokens.push(`${s.definition.name}: ${Math.round(s.rate)}%`)
+      } else if (s.aggregatedDisplay != null) {
+        const unit = s.definition.unit && s.definition.displayFormat !== 'percent' ? s.definition.unit : ''
+        tokens.push(`${s.definition.name}: ${s.aggregatedDisplay}${unit}`)
       } else if (s.avg != null) {
         tokens.push(`${s.definition.name}: ${s.avg.toFixed(1)}${s.definition.unit || ''}`)
       }
@@ -526,7 +582,7 @@ function buildContextInternal(options: ContextOptions): {
   if (secSchedule) appendScheduleSection(lines, scheduleList, myTeamNumber, focusSet, focusMatch)
   if (secTags) appendTagsSection(lines, tags)
   if (secPit) appendPitSection(lines, activePitRecords, activeRecords)
-  if (secRankings) appendCustomMetricsSection(lines, customFields, activeRecords)
+  if (secRankings) appendCustomMetricsSection(lines, customFields, activeRecords, rankings, activePitRecords)
 
   const truncatedMatchesCount = secMatches
     ? appendBudgetedMatchesSection(lines, activeRecords, myTeamNumber, focusSet, focusMatch, maxCharsBudget)

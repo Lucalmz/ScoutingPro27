@@ -2,6 +2,7 @@ import { setActivePinia, createPinia } from 'pinia'
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
 import { useRecordStore } from '../stores/records'
 import * as api from '../services/api'
+import * as ftcApi from '../services/ftcApi'
 import type { ScoutingRecord } from '../types'
 
 vi.mock('../services/api', () => ({
@@ -9,7 +10,18 @@ vi.mock('../services/api', () => ({
   saveRecord: vi.fn(),
   syncRecords: vi.fn(),
   markRecordsSynced: vi.fn(),
-  isStaticCloudHost: vi.fn(() => false)
+  isStaticCloudHost: vi.fn(() => false),
+  fetchBannedTeams: vi.fn(async () => []),
+  banTeam: vi.fn(),
+  unbanTeam: vi.fn(),
+  fetchEventTags: vi.fn(async () => []),
+  addTeamTag: vi.fn(),
+  deleteTeamTag: vi.fn()
+}))
+
+vi.mock('../services/ftcApi', () => ({
+  fetchEventMatches: vi.fn(async () => []),
+  fetchEventAdvancement: vi.fn(async () => [])
 }))
 
 const createDummyRecord = (
@@ -599,6 +611,88 @@ describe('Records Store', () => {
     expect(store.records[0]?.eventId).toBe('550e8400-e29b-41d4-a716-446655440000')
     expect(store.teamTags[0]?.eventId).toBe('550e8400-e29b-41d4-a716-446655440000')
     expect(store.currentRecords).toHaveLength(1)
+  })
+
+  it('isolates tags/matches/advancement/bannedTeams across multiple events and preserves cached data on offline reload', async () => {
+    const store = useRecordStore()
+
+    vi.mocked(api.listRecords).mockResolvedValue([])
+    vi.mocked(ftcApi.fetchEventMatches).mockResolvedValue([
+      {
+        matchNum: 1,
+        tournamentLevel: 'QUALIFICATION',
+        scores: {
+          red: { penaltyPointsCommitted: 0, totalPointsNp: 90, finalScore: 90 },
+          blue: { penaltyPointsCommitted: 0, totalPointsNp: 70, finalScore: 70 }
+        },
+        teams: [{ teamNumber: 27570, alliance: 'Red' }]
+      }
+    ])
+    vi.mocked(ftcApi.fetchEventAdvancement).mockResolvedValue([
+      {
+        teamNumber: 27570,
+        advancementRank: 1,
+        totalAdvancementPoints: 58,
+        qualRank: 1,
+        qualPoints: 16,
+        alliancePoints: 20,
+        playoffPoints: 22,
+        awardPoints: 0,
+        advancementStatus: 'ADVANCING',
+        breakdown: { qualPoints: 16, alliancePoints: 20, playoffPoints: 22, awardPoints: 0 }
+      }
+    ])
+    vi.mocked(api.fetchBannedTeams).mockResolvedValue([27570])
+    vi.mocked(api.fetchEventTags).mockResolvedValue([
+      { id: 't-a-1', eventId: 'evt-A', teamNumber: 27570, tag: 'fast', color: 'green', isPreset: false }
+    ])
+
+    await store.fetchRecords('evt-A', 2026, 'CNCMP')
+    await store.fetchTags('evt-A')
+    expect(store.officialMatches).toHaveLength(1)
+    expect(store.officialAdvancement).toHaveLength(1)
+    expect(store.bannedTeams).toEqual([27570])
+    expect(store.getTagsForTeam(27570, 'evt-A').map((t) => t.tag)).toEqual(['fast'])
+
+    // Switch to evt-B (no FTC config, different banned team & tag): evt-A data must NOT bleed into evt-B,
+    // and evt-A tags must NOT be wiped from teamTags!
+    vi.mocked(api.fetchBannedTeams).mockResolvedValue([9999])
+    vi.mocked(api.fetchEventTags).mockResolvedValue([
+      { id: 't-b-1', eventId: 'evt-B', teamNumber: 1111, tag: 'defensive', color: 'blue', isPreset: false }
+    ])
+    await store.fetchRecords('evt-B')
+    await store.fetchTags('evt-B')
+
+    expect(store.officialMatches).toEqual([])
+    expect(store.officialAdvancement).toEqual([])
+    expect(store.bannedTeams).toEqual([9999])
+    expect(store.getTagsForTeam(27570, 'evt-A').map((t) => t.tag)).toEqual(['fast'])
+    expect(store.getTagsForTeam(1111, 'evt-B').map((t) => t.tag)).toEqual(['defensive'])
+
+    // Simulate cold offline page reload into evt-A: all network calls reject, yet evt-A's scoped caches MUST survive!
+    setActivePinia(createPinia())
+    const offlineStore = useRecordStore()
+    vi.mocked(api.listRecords).mockRejectedValue(new Error('Offline'))
+    vi.mocked(ftcApi.fetchEventMatches).mockRejectedValue(new Error('Offline'))
+    vi.mocked(ftcApi.fetchEventAdvancement).mockRejectedValue(new Error('Offline'))
+    vi.mocked(api.fetchBannedTeams).mockRejectedValue(new Error('Offline'))
+
+    await offlineStore.fetchRecords('evt-A', 2026, 'CNCMP')
+    expect(offlineStore.officialMatches).toHaveLength(1)
+    expect(offlineStore.officialAdvancement).toHaveLength(1)
+    expect(offlineStore.officialAdvancement[0]?.teamNumber).toBe(27570)
+    expect(offlineStore.bannedTeams).toEqual([27570])
+
+    // Verify clearMemoryOnly & clearRecords clean up officialAdvancement and scoped localStorage keys
+    offlineStore.clearMemoryOnly()
+    expect(offlineStore.officialAdvancement).toEqual([])
+    expect(localStorage.getItem('sp27_advancement_evt-A')).not.toBeNull()
+
+    offlineStore.clearRecords()
+    expect(localStorage.getItem('scoutingpro_advancement')).toBeNull()
+    expect(localStorage.getItem('sp27_advancement_evt-A')).toBeNull()
+    expect(localStorage.getItem('sp27_official_matches_evt-A')).toBeNull()
+    expect(localStorage.getItem('sp27_banned_teams_evt-A')).toBeNull()
   })
 })
 

@@ -1,11 +1,15 @@
 <script setup lang="ts">
+import { computed } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { hapticSelection } from '@/utils/haptics'
 import DynamicFieldsRenderer from '@/components/customFields/DynamicFieldsRenderer.vue'
 import type { CustomFieldDefinition } from '@/types'
+import { buildMatchFormulaContext } from '@/utils/formula'
+import { calcMatchAutoCycleTime } from '@/utils/analytics/predictCycleTime'
+import { useCustomFieldsStore } from '@/stores/customFields'
 import type { MobileTeamScoutData } from './useMobileWizardForm'
 
-defineProps<{
+const props = defineProps<{
   team: MobileTeamScoutData
   autoScore: number
   lastAutoCycleIndex: number
@@ -28,6 +32,40 @@ const emit = defineEmits<{
 }>()
 
 const { t } = useI18n()
+
+let customFieldsStore: ReturnType<typeof useCustomFieldsStore> | null = null
+try {
+  customFieldsStore = useCustomFieldsStore()
+} catch {
+  // Ignore if Pinia not mounted
+}
+
+const allDefinitions = computed(() => {
+  const evtId = props.autoCustomDefinitions[0]?.eventId
+  if (evtId && customFieldsStore) {
+    return customFieldsStore.getActiveFields(evtId, 'MATCH')
+  }
+  return props.autoCustomDefinitions
+})
+
+const autoCycleSec = computed(() =>
+  calcMatchAutoCycleTime(props.team.autoCycles, props.team.autoCycleTimestamps)
+)
+
+const formulaContext = computed(() =>
+  buildMatchFormulaContext({
+    formData: {
+      ...props.team,
+      teamNumber: parseInt(props.team.teamNumber) || 0,
+      autoCycleTimeSec: autoCycleSec.value
+    },
+    record: {
+      autoScore: props.autoScore,
+      isBroken: props.team.isBroken
+    },
+    fieldDefinitions: allDefinitions.value
+  })
+)
 </script>
 
 <template>
@@ -213,7 +251,12 @@ const { t } = useI18n()
 
     <!-- Custom Fields (Auto) -->
     <div v-if="autoCustomDefinitions.length > 0" class="custom-fields-box">
-      <DynamicFieldsRenderer :definitions="autoCustomDefinitions" v-model="team.customFields" />
+      <DynamicFieldsRenderer
+        :definitions="autoCustomDefinitions"
+        :all-definitions="allDefinitions"
+        :formula-context="formulaContext"
+        v-model="team.customFields"
+      />
     </div>
   </section>
 </template>

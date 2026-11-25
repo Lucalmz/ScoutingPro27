@@ -362,7 +362,7 @@ public class PitScoutRoutes {
      * - 当传入结构化自述终局字段时按 BIOBUZZ 公式同步 claimedEndgameScore（并保持 claimedFlowerBottomBonus <= claimedFlowerNectars）；
      * - 未传入结构化终局字段的旧端数据保留原 claimedEndgameScore。
      */
-    static void normalizePitRecord(PitScoutingRecord record) {
+    public static void normalizePitRecord(PitScoutingRecord record) {
         if (record == null) return;
         if (record.getDrivetrainType() == null || record.getDrivetrainType().isBlank()) {
             record.setDrivetrainType("mecanum");
@@ -382,7 +382,7 @@ public class PitScoutRoutes {
         if (record.getClaimedAutoStrategy() == null) {
             record.setClaimedAutoStrategy("");
         }
-        if (record.getWeightLbs() < 0) {
+        if (!Double.isFinite(record.getWeightLbs()) || record.getWeightLbs() < 0) {
             record.setWeightLbs(0.0);
         }
         if (record.getChassisSize() == null) {
@@ -429,11 +429,14 @@ public class PitScoutRoutes {
 
         int effectiveEndgame = record.getClaimedEndgameScore();
         int originalTotal = record.getClaimedTotalScore();
-        if (originalTotal <= 0 && (auto + teleop + effectiveEndgame) > 0) {
-            record.setClaimedTotalScore(auto + teleop + effectiveEndgame);
+        int componentSum = auto + teleop + effectiveEndgame;
+        if (originalTotal <= 0 && componentSum > 0) {
+            record.setClaimedTotalScore(componentSum);
         } else if (hasStructuredEndgame && originalEndgame != effectiveEndgame
                 && (originalTotal == auto + teleop + originalEndgame)) {
-            record.setClaimedTotalScore(auto + teleop + effectiveEndgame);
+            record.setClaimedTotalScore(componentSum);
+        } else if (originalTotal > 0 && componentSum > originalTotal) {
+            record.setClaimedTotalScore(componentSum);
         } else if (originalTotal < 0) {
             record.setClaimedTotalScore(0);
         }

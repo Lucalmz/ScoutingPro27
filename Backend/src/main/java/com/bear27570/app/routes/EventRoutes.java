@@ -64,10 +64,20 @@ public class EventRoutes {
                 ctx.status(400).result("Invalid JSON body");
                 return;
             }
+            String rawName = asString(body.get("name"));
+            if (rawName == null || rawName.isBlank()) {
+                ctx.status(400).result("Event name is required");
+                return;
+            }
+            String trimmedName = rawName.trim();
+            if (trimmedName.length() > 100) {
+                ctx.status(400).result("Event name cannot exceed 100 characters");
+                return;
+            }
             String userId = ctx.attribute("userId");
             ScoutingEvent event = new ScoutingEvent();
             event.setId(UUID.randomUUID().toString());
-            event.setName(asString(body.get("name")));
+            event.setName(trimmedName);
             event.setHostId(userId);
             jdbi.useExtension(EventDao.class, dao -> {
                 event.setInviteCode(generateInviteCode(dao));
@@ -162,7 +172,9 @@ public class EventRoutes {
                 throw new io.javalin.http.UnauthorizedResponse("Unauthorized");
             }
             ScoutingEvent incoming = gson.fromJson(ctx.body(), ScoutingEvent.class);
-            if (incoming == null || incoming.getId() == null || incoming.getInviteCode() == null) {
+            if (incoming == null
+                    || incoming.getId() == null || incoming.getId().isBlank()
+                    || incoming.getInviteCode() == null || incoming.getInviteCode().isBlank()) {
                 ctx.status(400).result("Invalid event payload");
                 return;
             }
@@ -171,17 +183,58 @@ public class EventRoutes {
                 UserDao userDao = handle.attach(UserDao.class);
                 EventDao eventDao = handle.attach(EventDao.class);
 
-                String hostId = incoming.getHostId() != null && !incoming.getHostId().isBlank() ? incoming.getHostId() : userId;
-                userDao.ensureScoutUserPlaceholder(hostId, "Host " + hostId.substring(0, Math.min(6, hostId.length())));
+                String normalizedCode = incoming.getInviteCode().trim().toUpperCase(Locale.ROOT);
+                String rawIncomingName = incoming.getName() != null ? incoming.getName().trim() : "";
+                String safeName = rawIncomingName.isEmpty()
+                        ? ("Event " + normalizedCode)
+                        : (rawIncomingName.length() > 100 ? rawIncomingName.substring(0, 100) : rawIncomingName);
+                incoming.setName(safeName);
 
-                String normalizedCode = incoming.getInviteCode().trim().toUpperCase();
+                String hostId = incoming.getHostId() != null && !incoming.getHostId().isBlank()
+                        ? incoming.getHostId().trim()
+                        : userId;
 
-                // If an existing event (such as a temporary distributed stub 'ext_...') is currently using this inviteCode,
-                // unbind its invite_code first so the UNIQUE constraint on invite_code is not violated when inserting/updating the authoritative event.
+                ScoutingEvent existing = eventDao.findById(incoming.getId());
+                String existingCode = "";
+                if (existing != null) {
+                    existingCode = existing.getInviteCode() != null
+                            ? existing.getInviteCode().trim().toUpperCase(Locale.ROOT)
+                            : "";
+                    if (!existingCode.isEmpty() && !existingCode.equals(normalizedCode)) {
+                        throw new io.javalin.http.BadRequestResponse("Event inviteCode is immutable and cannot be changed");
+                    }
+                    String existingHostId = existing.getHostId();
+                    boolean isPlaceholderHost = existingHostId == null
+                            || existingHostId.isBlank()
+                            || "external_host".equals(existingHostId);
+                    if (!isPlaceholderHost && !userId.equals(existingHostId)) {
+                        if (!hostId.equals(existingHostId)) {
+                            throw new io.javalin.http.ForbiddenResponse("Cannot hijack host ownership of an existing event");
+                        }
+                        User localHostUser = userDao.findById(existingHostId);
+                        if (localHostUser != null
+                                && localHostUser.getPassword() != null
+                                && !localHostUser.getPassword().isBlank()) {
+                            throw new io.javalin.http.ForbiddenResponse("Only the event host can modify an authoritative local event");
+                        }
+                    }
+                }
+
+                // Only temporary distributed stubs ('ext_...', 'evt-...', or 'external_host') may unbind & reparent
+                // their inviteCode into the authoritative event UUID; an authoritative event's inviteCode is immutable for everyone.
                 ScoutingEvent existingByCode = eventDao.findByInviteCode(normalizedCode);
                 if (existingByCode != null && !existingByCode.getId().equals(incoming.getId())) {
+                    String codeId = existingByCode.getId();
+                    boolean isDistributedStub = codeId.startsWith("ext_")
+                            || codeId.toLowerCase(Locale.ROOT).startsWith("evt-")
+                            || "external_host".equals(existingByCode.getHostId());
+                    if (!isDistributedStub) {
+                        throw new io.javalin.http.ForbiddenResponse("Event inviteCode is immutable; cannot overwrite invite code of an existing event");
+                    }
                     handle.execute("UPDATE events SET invite_code = NULL WHERE id = ?", existingByCode.getId());
                 }
+
+                userDao.ensureScoutUserPlaceholder(hostId, "Host " + hostId.substring(0, Math.min(6, hostId.length())));
 
                 String encryptedTurnConfig = null;
                 boolean shouldClearTurnConfig = false;
@@ -193,7 +246,6 @@ public class EventRoutes {
                     shouldClearTurnConfig = true;
                 }
 
-                ScoutingEvent existing = eventDao.findById(incoming.getId());
                 if (existing == null) {
                     incoming.setInviteCode(normalizedCode);
                     incoming.setHostId(hostId);
@@ -205,8 +257,13 @@ public class EventRoutes {
                     eventDao.insert(incoming);
                 } else {
                     eventDao.updateFtcConfig(incoming.getId(), incoming.getFtcYear(), incoming.getFtcEventCode());
-                    handle.execute("UPDATE events SET invite_code = ?, name = ?, host_id = ? WHERE id = ?",
-                            normalizedCode, incoming.getName(), hostId, incoming.getId());
+                    if (existingCode.isEmpty()) {
+                        handle.execute("UPDATE events SET invite_code = ?, name = ?, host_id = ? WHERE id = ?",
+                                normalizedCode, safeName, hostId, incoming.getId());
+                    } else {
+                        handle.execute("UPDATE events SET name = ?, host_id = ? WHERE id = ?",
+                                safeName, hostId, incoming.getId());
+                    }
                     if (encryptedTurnConfig != null) {
                         eventDao.updateTurnConfig(incoming.getId(), encryptedTurnConfig);
                     } else if (shouldClearTurnConfig) {
@@ -224,7 +281,7 @@ public class EventRoutes {
                 String stubId = "ext_" + normalizedCode;
                 if (!stubId.equals(incoming.getId())) {
                     ScoutingEvent stub = eventDao.findById(stubId);
-                    if (stub != null) {
+                    if (stub != null && ("external_host".equals(stub.getHostId()) || userId.equals(stub.getHostId()))) {
                         reparentEventData(handle, stubId, incoming.getId());
                         eventDao.delete(stubId);
                     }
@@ -392,6 +449,11 @@ public class EventRoutes {
 
         routes.get("/api/events/{id}/banned-teams", ctx -> {
             String eventId = ctx.pathParam("id");
+            String userId = ctx.attribute("userId");
+            boolean isMember = jdbi.withExtension(EventDao.class, dao -> dao.isMember(eventId, userId));
+            if (!isMember) {
+                throw new io.javalin.http.ForbiddenResponse("Not a member of this event");
+            }
             List<Integer> bannedTeams = jdbi.withExtension(BannedTeamDao.class, dao -> dao.getBannedTeams(eventId));
             ctx.result(gson.toJson(bannedTeams)).contentType("application/json");
         });
@@ -454,6 +516,11 @@ public class EventRoutes {
 
         routes.get("/api/events/{id}/members", ctx -> {
             String eventId = ctx.pathParam("id");
+            String userId = ctx.attribute("userId");
+            boolean isMember = jdbi.withExtension(EventDao.class, dao -> dao.isMember(eventId, userId));
+            if (!isMember) {
+                throw new io.javalin.http.ForbiddenResponse("Not a member of this event");
+            }
             List<EventMember> members = jdbi.withExtension(EventDao.class, dao -> dao.findMembersByEvent(eventId));
             ctx.result(gson.toJson(members)).contentType("application/json");
         });

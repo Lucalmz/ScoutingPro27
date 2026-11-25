@@ -170,3 +170,133 @@ export function aggregateTeamPredictCycleStats(
     estimatedMaxCycles
   }
 }
+
+// ============================================================
+// Auto Cycle Time (30s Autonomous period)
+// ============================================================
+
+export const AUTO_CYCLE_MIN_GAP_SEC = 0.3
+export const AUTO_CYCLE_MAX_GAP_SEC = 30
+export const AUTO_CYCLE_MIN_INTERVALS = 1
+
+export interface TeamAutoCycleStats {
+  autoCycleTime: number | null
+  autoCycleMatches: number
+}
+
+export interface AutoCycleMatchInput {
+  autoCycles?: number[]
+  autoCycleTimestamps?: number[]
+  rawData?: string | null
+  isBroken?: boolean
+}
+
+/**
+ * Extracts valid Auto inter-cycle intervals (seconds) for a single match.
+ * Filters strictly increasing timestamps and keeps intervals in (0.3s, 30s].
+ * Returns `null` when fewer than 1 valid interval exists.
+ */
+export function extractMatchAutoCycleIntervals(
+  autoCycles?: number[],
+  timestamps?: number[]
+): number[] | null {
+  if (!Array.isArray(timestamps) || timestamps.length < AUTO_CYCLE_MIN_INTERVALS + 1) {
+    return null
+  }
+
+  const alignedLength = Array.isArray(autoCycles) && autoCycles.length > 0
+    ? Math.min(autoCycles.length, timestamps.length)
+    : timestamps.length
+
+  if (alignedLength < AUTO_CYCLE_MIN_INTERVALS + 1) {
+    return null
+  }
+
+  const validTimestamps: number[] = []
+  for (let i = 0; i < alignedLength; i++) {
+    const ts = Number(timestamps[i])
+    if (!Number.isFinite(ts) || ts <= 0) continue
+    const lastValid = validTimestamps[validTimestamps.length - 1]
+    if (lastValid !== undefined && ts <= lastValid) continue
+    validTimestamps.push(ts)
+  }
+
+  if (validTimestamps.length < AUTO_CYCLE_MIN_INTERVALS + 1) {
+    return null
+  }
+
+  const validIntervals: number[] = []
+  for (let i = 1; i < validTimestamps.length; i++) {
+    const currTs = validTimestamps[i]
+    const prevTs = validTimestamps[i - 1]
+    if (currTs === undefined || prevTs === undefined) continue
+    const dtSec = (currTs - prevTs) / 1000
+    if (dtSec > AUTO_CYCLE_MIN_GAP_SEC && dtSec <= AUTO_CYCLE_MAX_GAP_SEC) {
+      validIntervals.push(dtSec)
+    }
+  }
+
+  if (validIntervals.length < AUTO_CYCLE_MIN_INTERVALS) {
+    return null
+  }
+  return validIntervals
+}
+
+/**
+ * Computes a single match's Auto Cycle Time (simple arithmetic mean of all valid intervals,
+ * rounded to 1 decimal place). Returns `null` if fewer than 1 valid interval exists.
+ */
+export function calcMatchAutoCycleTime(
+  autoCycles?: number[],
+  timestamps?: number[]
+): number | null {
+  const intervals = extractMatchAutoCycleIntervals(autoCycles, timestamps)
+  if (!intervals || intervals.length < AUTO_CYCLE_MIN_INTERVALS) {
+    return null
+  }
+  const sum = intervals.reduce((acc, sec) => acc + sec, 0)
+  return roundTo1Decimal(sum / intervals.length)
+}
+
+/**
+ * Aggregates Auto Cycle Time across a team's non-broken matches using the arithmetic mean
+ * of all valid Auto intervals.
+ */
+export function aggregateTeamAutoCycleStats(
+  matches: AutoCycleMatchInput[]
+): TeamAutoCycleStats {
+  const allIntervals: number[] = []
+  let autoCycleMatches = 0
+
+  for (const match of matches) {
+    if (match.isBroken) continue
+    let autoCycles = match.autoCycles
+    let timestamps = match.autoCycleTimestamps
+    if ((!timestamps || timestamps.length === 0) && match.rawData) {
+      try {
+        const parsed = JSON.parse(match.rawData) as Partial<Pick<ScoutingFormData, 'autoCycles' | 'autoCycleTimestamps'>>
+        if (Array.isArray(parsed.autoCycles)) autoCycles = parsed.autoCycles
+        if (Array.isArray(parsed.autoCycleTimestamps)) timestamps = parsed.autoCycleTimestamps
+      } catch {
+        // Ignore malformed rawData JSON
+      }
+    }
+    const intervals = extractMatchAutoCycleIntervals(autoCycles, timestamps)
+    if (!intervals || intervals.length < AUTO_CYCLE_MIN_INTERVALS) continue
+    autoCycleMatches++
+    allIntervals.push(...intervals)
+  }
+
+  if (autoCycleMatches === 0 || allIntervals.length === 0) {
+    return {
+      autoCycleTime: null,
+      autoCycleMatches: 0
+    }
+  }
+
+  const rawMean = allIntervals.reduce((acc, sec) => acc + sec, 0) / allIntervals.length
+  return {
+    autoCycleTime: roundTo1Decimal(rawMean),
+    autoCycleMatches
+  }
+}

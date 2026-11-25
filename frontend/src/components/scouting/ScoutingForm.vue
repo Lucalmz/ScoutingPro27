@@ -28,7 +28,8 @@ import {
 } from './composables/useScoutingDraft'
 import { useScoutingFormCycles } from './composables/useScoutingFormCycles'
 import { calcBiobuzzEndgameScore, parseBiobuzzEndgame } from '@/utils/analytics/rankings'
-import { calcMatchPredictCycleTime } from '@/utils/analytics/predictCycleTime'
+import { calcMatchAutoCycleTime, calcMatchPredictCycleTime } from '@/utils/analytics/predictCycleTime'
+import { buildMatchFormulaContext } from '@/utils/formula'
 
 const { t, te } = useI18n()
 
@@ -122,9 +123,48 @@ function adjustEndgameField(team: TeamScoutData, field: EndgameCounterField, del
   setEndgameField(team, field, (team[field] || 0) + delta)
 }
 
+function getTeamAutoCycleTime(team: TeamScoutData): number | null {
+  return calcMatchAutoCycleTime(team.autoCycles, team.autoCycleTimestamps)
+}
+
 function getTeamPredictCycleTime(team: TeamScoutData): number | null {
   return calcMatchPredictCycleTime(team.teleopCycles, team.teleopCycleTimestamps)
 }
+
+const activeMatchFields = computed(() => customFieldsStore.getActiveFields(props.eventId, 'MATCH'))
+const autoCustomFields = computed(() => activeMatchFields.value.filter((f) => f.phase === 'auto'))
+const teleopCustomFields = computed(() => activeMatchFields.value.filter((f) => f.phase === 'teleop'))
+const endgameCustomFields = computed(() => activeMatchFields.value.filter((f) => f.phase === 'endgame'))
+const overallCustomFields = computed(() => activeMatchFields.value.filter((f) => f.phase === 'overall'))
+const hasMatchFormulaFields = computed(() => activeMatchFields.value.some((d) => d.fieldType === 'formula'))
+
+const teamFormulaContexts = computed(() => {
+  if (!hasMatchFormulaFields.value) return []
+  return teamsData.value.map((team) => {
+    const auto = (team.autoLeave ? 3 : 0) + ((team.autoBalls || 0) * 3) + (team.autoPark ? 5 : 0)
+    const teleop = getCycleBallsTotal(team) * 2
+    const parsedEndgame = parseBiobuzzEndgame(team)
+    const endgame = calcBiobuzzEndgameScore(parsedEndgame)
+    return buildMatchFormulaContext({
+      formData: {
+        ...team,
+        teamNumber: parseInt(team.teamNumber) || 0,
+        matchNumber: parseInt(matchNumber.value) || 0,
+        allianceColor: allianceColor.value,
+        autoCycleTimeSec: getTeamAutoCycleTime(team),
+        predictCycleTimeSec: getTeamPredictCycleTime(team)
+      },
+      record: {
+        autoScore: auto,
+        teleopScore: teleop,
+        endgameScore: endgame,
+        totalScore: auto + teleop + endgame,
+        isBroken: team.isBroken
+      },
+      fieldDefinitions: activeMatchFields.value
+    })
+  })
+})
 
 // --- Form State ---
 const scoutMode = ref<'single' | 'alliance'>('single')
@@ -232,6 +272,7 @@ watch(() => props.editRecord, (rec: ScoutingRecord | null | undefined) => {
       autoBalls: autoBalls,
       autoCycles: autoCycles,
       autoMissedCycles: autoMissedCycles,
+      autoCycleTimestamps: Array.isArray(raw.autoCycleTimestamps) ? [...raw.autoCycleTimestamps] : [],
       autoPark: raw.autoPark ?? false,
       teleopCycles: Array.isArray(raw.teleopCycles) ? [...raw.teleopCycles] : [],
       teleopMissedCycles: teleopMissedCycles,
@@ -356,6 +397,10 @@ async function handleSubmit() {
       const parsedEndgame = parseBiobuzzEndgame(team)
       const endgame = calcBiobuzzEndgameScore(parsedEndgame)
       const total = auto + teleop + endgame
+      const autoTimestamps = Array.isArray(team.autoCycleTimestamps)
+        ? [...team.autoCycleTimestamps]
+        : []
+      const autoCycleTimeSec = calcMatchAutoCycleTime(team.autoCycles, autoTimestamps)
       const teleopTimestamps = Array.isArray(team.teleopCycleTimestamps)
         ? [...team.teleopCycleTimestamps]
         : []
@@ -371,6 +416,8 @@ async function handleSubmit() {
         autoBalls: team.autoBalls || 0,
         autoCycles: [...team.autoCycles],
         autoMissedCycles: [...team.autoMissedCycles],
+        autoCycleTimestamps: autoTimestamps,
+        autoCycleTimeSec,
         autoPreload: (team.autoBalls || 0) > 0,
         autoPark: team.autoPark,
         teleopCycles: [...team.teleopCycles],
@@ -596,8 +643,26 @@ const wrapperClass = computed(() => {
               :rate-text="t('scouting.auto_balls_rate')"
               v-model="team.autoCycles"
               v-model:missed-value="team.autoMissedCycles"
+              v-model:timestamps-value="team.autoCycleTimestamps"
               @change="syncAutoBalls(team)"
             />
+
+            <div v-if="team.autoCycles.length > 0" class="teleop-predict-bar">
+              <span class="predict-label">
+                <span class="material-icons" style="font-size: 14px;">speed</span>
+                {{ t('scouting.auto_cycle_time') }}:
+              </span>
+              <span
+                class="predict-val"
+                :class="{ 'is-insufficient': getTeamAutoCycleTime(team) === null }"
+              >
+                {{
+                  getTeamAutoCycleTime(team) !== null
+                    ? t('scouting.predict_cycle_value', { sec: getTeamAutoCycleTime(team) })
+                    : t('scouting.auto_cycle_insufficient')
+                }}
+              </span>
+            </div>
 
             <!-- Auto Toggles (Leave & Park) -->
             <div class="biobuzz-toggles-grid" style="margin-top: 12px;">
@@ -620,7 +685,9 @@ const wrapperClass = computed(() => {
 
             <!-- Custom Fields (Auto) -->
             <DynamicFieldsRenderer
-              :definitions="customFieldsStore.getActiveFields(props.eventId, 'MATCH', 'auto')"
+              :definitions="autoCustomFields"
+              :all-definitions="activeMatchFields"
+              :formula-context="teamFormulaContexts[index]"
               v-model="team.customFields"
             />
           </section>
@@ -656,7 +723,9 @@ const wrapperClass = computed(() => {
 
             <!-- Custom Fields (TeleOp) -->
             <DynamicFieldsRenderer
-              :definitions="customFieldsStore.getActiveFields(props.eventId, 'MATCH', 'teleop')"
+              :definitions="teleopCustomFields"
+              :all-definitions="activeMatchFields"
+              :formula-context="teamFormulaContexts[index]"
               v-model="team.customFields"
             />
           </section>
@@ -808,7 +877,9 @@ const wrapperClass = computed(() => {
 
             <!-- Custom Fields (Endgame) -->
             <DynamicFieldsRenderer
-              :definitions="customFieldsStore.getActiveFields(props.eventId, 'MATCH', 'endgame')"
+              :definitions="endgameCustomFields"
+              :all-definitions="activeMatchFields"
+              :formula-context="teamFormulaContexts[index]"
               v-model="team.customFields"
             />
             
@@ -824,7 +895,9 @@ const wrapperClass = computed(() => {
 
             <!-- Custom Fields (Overall) -->
             <DynamicFieldsRenderer
-              :definitions="customFieldsStore.getActiveFields(props.eventId, 'MATCH', 'overall')"
+              :definitions="overallCustomFields"
+              :all-definitions="activeMatchFields"
+              :formula-context="teamFormulaContexts[index]"
               v-model="team.customFields"
             />
           </section>

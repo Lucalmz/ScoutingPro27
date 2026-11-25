@@ -384,6 +384,27 @@ describe('CustomFields Store', () => {
       // broadcast should NOT be called because targetField was not found
       expect(broadcastSpy).not.toHaveBeenCalled()
     })
+
+    it('hydrates configJson into config and preserves formula/TEAM metadata with safe defaults', async () => {
+      const store = useCustomFieldsStore()
+      const formulaField = mockField({
+        id: 'cf-formula-1',
+        target: 'TEAM',
+        fieldKey: 'power_idx',
+        fieldType: 'formula',
+        formulaExpr: 'opr.np * 1.1',
+        description: 'Power index',
+        configJson: JSON.stringify({ decimalPlaces: 2, tierThresholds: { high: 60, mid: 35, direction: 'higher_better' } })
+      })
+      vi.mocked(api.fetchCustomFields).mockResolvedValue([formulaField])
+
+      const list = await store.fetchFields('evt-formula')
+      expect(list).toHaveLength(1)
+      expect(list[0]?.config?.decimalPlaces).toBe(2)
+      expect(list[0]?.config?.tierThresholds?.high).toBe(60)
+      expect(list[0]?.aggregationMode).toBe('avg')
+      expect(list[0]?.displayFormat).toBe('number')
+    })
   })
 })
 

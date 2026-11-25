@@ -803,4 +803,96 @@ describe('buildEventDataContext v2 enhancements', () => {
     expect(stats.text).toContain('Match 1 | Team 27570 | FocusScout')
     expect(stats.text).toContain('omitted to stay within')
   })
+
+  it('includes SP-NP OPR, Auto/TeleOp Cycle Time, and active TEAM/MATCH custom formulas in AI context', () => {
+    const context = buildEventDataContext({
+      event: null,
+      rankings: [
+        {
+          teamNumber: 27570,
+          matchCount: 3,
+          avgAutoScore: 20,
+          avgTeleopScore: 50,
+          avgEndgameScore: 15,
+          maxScore: 95,
+          avgRating: 85,
+          brokenCount: 0,
+          trend: 'up',
+          spNpOpr: 78.4,
+          rawNpOpr: 72.1,
+          spNpOprAuto: 19.6,
+          spNpOprTeleop: 45.2,
+          spNpOprEndgame: 13.6,
+          spNpOprConfidence: 'high',
+          autoCycleTime: 3.2,
+          autoCycleMatches: 2,
+          teleopCycleTime: 5.4,
+          predictCycleTime: 5.4,
+          predictCycleMatches: 3
+        }
+      ],
+      records: [
+        {
+          id: 'r-ctx-1',
+          eventId: 'evt-ctx',
+          scoutId: 's1',
+          scoutName: 'Scout1',
+          matchNumber: 1,
+          teamNumber: 27570,
+          autoScore: 20,
+          teleopScore: 50,
+          endgameScore: 15,
+          totalScore: 85,
+          notes: '',
+          rawData: JSON.stringify({ customFields: { bonus_pts: 5 } }),
+          syncStatus: 'SYNCED',
+          createdAt: '2026-01-01T00:00:00Z',
+          updatedAt: '2026-01-01T00:00:00Z',
+          isBroken: false,
+          version: 1
+        }
+      ],
+      customFields: [
+        {
+          id: 'cf-m1',
+          eventId: 'evt-ctx',
+          target: 'MATCH',
+          phase: 'overall',
+          name: 'Match Plus Bonus',
+          fieldKey: 'match_plus',
+          fieldType: 'formula',
+          formulaExpr: 'match.totalScore + cf.bonus_pts',
+          aggregationMode: 'avg',
+          displayFormat: 'number',
+          required: false,
+          orderSeq: 0,
+          isActive: true
+        },
+        {
+          id: 'cf-t1',
+          eventId: 'evt-ctx',
+          target: 'TEAM',
+          phase: 'overall',
+          name: 'Tactical OPR Index',
+          fieldKey: 'tactical_opr',
+          fieldType: 'formula',
+          formulaExpr: 'opr.np * 1.1',
+          displayFormat: 'number',
+          required: false,
+          orderSeq: 1,
+          isActive: true
+        }
+      ]
+    })
+
+    expect(context).toContain('SP-NP OPR')
+    expect(context).toContain('78.4 (high)')
+    expect(context).toContain('72.1')
+    expect(context).toContain('19.6/45.2/13.6')
+    expect(context).toContain('3.2s (2m)')
+    expect(context).toContain('5.4s (3m)')
+    expect(context).toContain('[Custom Metrics]')
+    expect(context).toContain('Match Plus Bonus: 90.0')
+    expect(context).toContain('Tactical OPR Index: 86.2')
+  })
 })

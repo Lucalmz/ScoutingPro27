@@ -20,7 +20,7 @@ import java.util.Map;
  *   - Canvas background : #0B0E10 (--g-900)
  *   - 1px inner border  : #1B2126 (--g-750) + top 1px #39FF14 center fade highlight
  *   - Dot grid texture  : #151A1E (--g-800), 20px pitch, 300px radial fade
- *   - Header            : pulsing 6px #39FF14 dot (#FF5577 static on failure) + "SYSTEM BOOT" (#6E7A84) | "v1.0.4" (#4B5660)
+ *   - Header            : pulsing 6px #39FF14 dot (#FF5577 static on failure) + "SYSTEM BOOT" (#6E7A84) | "v1.1.1" (#4B5660)
  *   - Center brand      : 72px V6 SP27 logo (/assets/logo_transparent.png), Orbitron wordmark "ScoutingPro27"
  *                         ("ScoutingPro" #E6EBEE + "27" #39FF14, 45ms/char typewriter + #39FF14 cursor),
  *                         subtitle "FTC MATCH & PIT SCOUTING" (#6E7A84)
@@ -37,7 +37,7 @@ public class SplashScreen extends JWindow {
     private static final String TITLE_PREFIX = "ScoutingPro";
     private static final String SUBTITLE = "FTC MATCH & PIT SCOUTING";
     private static final String HEADER_LEFT = "SYSTEM BOOT";
-    private static final String HEADER_VERSION = "v1.0.4";
+    private static final String HEADER_VERSION = "v1.1.1";
     private static final String CREDIT_TEXT = "Led by 27570";
     private static final String FOOTER_RIGHT = "B.E.A.R ROBOTICS";
     private static final String FAILURE_HINT = "See log/ directory";
@@ -381,7 +381,7 @@ public class SplashScreen extends JWindow {
             g2.fill(new Rectangle2D.Float(36f, 0f, w - 72f, 1.25f));
             g2.setPaint(oldPaint);
 
-            // 4. Header row: pulsing status dot + "SYSTEM BOOT" | "v1.0.4"
+            // 4. Header row: pulsing status dot + "SYSTEM BOOT" | "v1.1.1"
             int headerY = 28;
             float dotX = 24f;
             float dotY = headerY - 7.5f;

@@ -77,7 +77,7 @@ const {
   toggleCustomCol,
   selectAllCustomCols,
   clearAllCustomCols
-} = useRankingsCustomColumns()
+} = useRankingsCustomColumns(toRef(props, 'rankings'))
 
 function setSort(key: SortKey) {
   hapticLight()
@@ -85,7 +85,7 @@ function setSort(key: SortKey) {
     sortDir.value = sortDir.value === 'asc' ? 'desc' : 'asc'
   } else {
     sortKey.value = key
-    sortDir.value = (key === 'predictCycleTime' || key === 'cycleVariance') ? 'asc' : 'desc'
+    sortDir.value = (key === 'predictCycleTime' || key === 'teleopCycleTime' || key === 'autoCycleTime' || key === 'cycleVariance') ? 'asc' : 'desc'
   }
 }
 
@@ -109,12 +109,12 @@ const sorted = computed<RankingRow[]>(() => {
       const fieldKey = String(sortKey.value).substring(3)
       const aStat = teamCustomStats.value.get(a.teamNumber)?.[fieldKey]
       const bStat = teamCustomStats.value.get(b.teamNumber)?.[fieldKey]
-      const aHas = aStat !== undefined
-      const bHas = bStat !== undefined
+      const aHas = aStat !== undefined && Number.isFinite(aStat.value)
+      const bHas = bStat !== undefined && Number.isFinite(bStat.value)
       if (!aHas && !bHas) return 0
       if (!aHas) return 1
       if (!bHas) return -1
-      return sortDir.value === 'asc' ? aStat.value - bStat.value : bStat.value - aStat.value
+      return sortDir.value === 'asc' ? aStat!.value - bStat!.value : bStat!.value - aStat!.value
     }
     if (sortKey.value === 'advancementPoints') {
       const aPts = a.advancementPoints ?? 0
@@ -229,6 +229,33 @@ function getAdvancementTooltip(row: RankingRow): string {
     parts.push(t('rankings.advancement_ineligible_note'))
   }
   return parts.join(' · ')
+}
+
+function formatNpOprConfidence(conf?: RankingRow['spNpOprConfidence']): string {
+  if (!conf) return ''
+  return t(`rankings.np_opr_conf_${conf}`)
+}
+
+function getNpOprTooltip(row: RankingRow): string {
+  if (row.spNpOpr === undefined || row.spNpOpr === null) return ''
+  const rawStr = row.rawNpOpr !== null && row.rawNpOpr !== undefined ? row.rawNpOpr.toFixed(1) : '—'
+  const autoStr = row.spNpOprAuto !== null && row.spNpOprAuto !== undefined ? row.spNpOprAuto.toFixed(1) : '—'
+  const teleStr = row.spNpOprTeleop !== null && row.spNpOprTeleop !== undefined ? row.spNpOprTeleop.toFixed(1) : '—'
+  const endStr = row.spNpOprEndgame !== null && row.spNpOprEndgame !== undefined ? row.spNpOprEndgame.toFixed(1) : '—'
+  const deltaStr = row.spNpOprDelta !== null && row.spNpOprDelta !== undefined
+    ? `${row.spNpOprDelta >= 0 ? '+' : ''}${row.spNpOprDelta.toFixed(1)}`
+    : '—'
+  const confStr = formatNpOprConfidence(row.spNpOprConfidence)
+  const broken = row.spNpOprBrokenExcluded ?? 0
+  return t('rankings.sp_np_opr_tooltip', {
+    raw: rawStr,
+    auto: autoStr,
+    teleop: teleStr,
+    endgame: endStr,
+    delta: deltaStr,
+    confidence: confStr,
+    broken
+  })
 }
 
 const maxMetrics = computed(() => {
@@ -428,6 +455,9 @@ function enter(el: Element, done: () => void) {
               <th @click="setSort('avgFlowerNectars')" class="sortable">
                 {{ t('rankings.avg_flower_nectars') }}<span class="material-icons sort-icon" :class="{ 'is-active': sortKey === 'avgFlowerNectars', 'is-asc': sortKey === 'avgFlowerNectars' && sortDir === 'asc' }">arrow_drop_down</span>
               </th>
+              <th @click="setSort('autoCycleTime')" class="sortable" :title="t('rankings.auto_cycle_time_desc')">
+                {{ t('rankings.auto_cycle_time') }}<span class="material-icons sort-icon" :class="{ 'is-active': sortKey === 'autoCycleTime', 'is-asc': sortKey === 'autoCycleTime' && sortDir === 'asc' }">arrow_drop_down</span>
+              </th>
               <th @click="setSort('predictCycleTime')" class="sortable" :title="t('rankings.predict_cycle_time_desc')">
                 {{ t('rankings.predict_cycle_time') }}<span class="material-icons sort-icon" :class="{ 'is-active': sortKey === 'predictCycleTime', 'is-asc': sortKey === 'predictCycleTime' && sortDir === 'asc' }">arrow_drop_down</span>
               </th>
@@ -445,6 +475,9 @@ function enter(el: Element, done: () => void) {
               </th>
               <th @click="setSort('avgRating')" class="sortable">
                 {{ t('rankings.rating') }}<span class="material-icons sort-icon" :class="{ 'is-active': sortKey === 'avgRating', 'is-asc': sortKey === 'avgRating' && sortDir === 'asc' }">arrow_drop_down</span>
+              </th>
+              <th @click="setSort('spNpOpr')" class="sortable" :title="t('rankings.sp_np_opr_desc')">
+                {{ t('rankings.sp_np_opr') }}<span class="material-icons sort-icon" :class="{ 'is-active': sortKey === 'spNpOpr', 'is-asc': sortKey === 'spNpOpr' && sortDir === 'asc' }">arrow_drop_down</span>
               </th>
               <th :title="t('rankings.brag_index_desc')">
                 {{ t('rankings.brag_index') }}
@@ -547,6 +580,15 @@ function enter(el: Element, done: () => void) {
                 </div>
               </td>
               <td>
+                <div v-if="row.autoCycleTime !== null && row.autoCycleTime !== undefined" class="predict-cycle-cell">
+                  <span class="predict-cycle-main">{{ t('rankings.predict_cycle_time_unit', { sec: row.autoCycleTime }) }}</span>
+                  <span class="predict-cycle-sub">
+                    {{ t('rankings.predict_cycle_matches_count', { count: row.autoCycleMatches ?? 0 }) }}
+                  </span>
+                </div>
+                <span v-else class="empty-cell">-</span>
+              </td>
+              <td>
                 <div v-if="row.predictCycleTime !== null && row.predictCycleTime !== undefined" class="predict-cycle-cell">
                   <span class="predict-cycle-main">{{ t('rankings.predict_cycle_time_unit', { sec: row.predictCycleTime }) }}</span>
                   <span class="predict-cycle-sub">
@@ -576,6 +618,24 @@ function enter(el: Element, done: () => void) {
                   <div class="telemetry-bar-track"><div class="telemetry-bar-fill bar-primary" :style="{ width: barPct(row.avgRating, maxMetrics.rating) }"></div></div>
                 </div>
               </td>
+              <td :title="getNpOprTooltip(row)">
+                <div v-if="row.spNpOpr !== undefined && row.spNpOpr !== null" class="np-opr-cell">
+                  <span class="np-opr-main">{{ row.spNpOpr.toFixed(1) }}</span>
+                  <div class="np-opr-sub">
+                    <span
+                      v-if="row.spNpOprConfidence"
+                      class="np-opr-conf-badge"
+                      :class="`conf-${row.spNpOprConfidence}`"
+                    >
+                      {{ formatNpOprConfidence(row.spNpOprConfidence) }}
+                    </span>
+                    <span v-if="row.rawNpOpr !== null && row.rawNpOpr !== undefined" class="np-opr-raw">
+                      {{ t('rankings.raw_short', { val: row.rawNpOpr.toFixed(1) }) }}
+                    </span>
+                  </div>
+                </div>
+                <span v-else class="empty-cell">-</span>
+              </td>
               <td>
                 <span
                   v-if="bragInfoMap.get(row.teamNumber)"
@@ -591,10 +651,20 @@ function enter(el: Element, done: () => void) {
                 v-for="f in visibleCustomFields"
                 :key="f.fieldKey"
                 class="custom-col-td"
+                :title="teamCustomStats.get(row.teamNumber)?.[f.fieldKey]?.error || ''"
               >
-                <span v-if="teamCustomStats.get(row.teamNumber)?.[f.fieldKey]" class="custom-col-val">
+                <span
+                  v-if="teamCustomStats.get(row.teamNumber)?.[f.fieldKey]"
+                  class="custom-col-val"
+                  :class="[
+                    teamCustomStats.get(row.teamNumber)?.[f.fieldKey]?.tier
+                      ? `custom-tier-${teamCustomStats.get(row.teamNumber)?.[f.fieldKey]?.tier}`
+                      : '',
+                    teamCustomStats.get(row.teamNumber)?.[f.fieldKey]?.error ? 'custom-col-error' : ''
+                  ]"
+                >
                   {{ teamCustomStats.get(row.teamNumber)?.[f.fieldKey]?.display }}
-                  <span v-if="f.unit && f.fieldType !== 'boolean'" class="unit-text">{{ f.unit }}</span>
+                  <span v-if="f.unit && f.fieldType !== 'boolean' && f.displayFormat !== 'percent'" class="unit-text">{{ f.unit }}</span>
                 </span>
                 <span v-else class="empty-cell">-</span>
               </td>
@@ -1148,5 +1218,85 @@ td.custom-col-td {
 .details-btn.ai-ask-btn:hover {
   border-color: var(--status-ai);
   transform: translateY(-1px);
+}
+
+.np-opr-cell {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  white-space: nowrap;
+}
+
+.np-opr-main {
+  font-weight: 700;
+  color: var(--foreground);
+  font-variant-numeric: tabular-nums;
+}
+
+.np-opr-sub {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 10px;
+  color: var(--muted-foreground);
+}
+
+.np-opr-conf-badge {
+  padding: 1px 5px;
+  border-radius: 4px;
+  font-weight: 700;
+  border: 1px solid var(--border);
+}
+
+.np-opr-conf-badge.conf-high {
+  background: var(--status-success-bg);
+  color: var(--status-success);
+  border-color: var(--status-success-border);
+}
+
+.np-opr-conf-badge.conf-medium {
+  background: var(--status-info-bg);
+  color: var(--status-info);
+  border-color: var(--status-info-border);
+}
+
+.np-opr-conf-badge.conf-low {
+  background: var(--status-warning-bg);
+  color: var(--status-warning);
+  border-color: var(--status-warning-border);
+}
+
+.np-opr-conf-badge.conf-scout_only {
+  background: var(--surface-elevated);
+  color: var(--muted-foreground);
+}
+
+.custom-tier-high {
+  padding: 2px 6px;
+  border-radius: 4px;
+  background: var(--status-success-bg);
+  color: var(--status-success);
+  font-weight: 700;
+}
+
+.custom-tier-mid {
+  padding: 2px 6px;
+  border-radius: 4px;
+  background: var(--status-warning-bg);
+  color: var(--status-warning);
+  font-weight: 600;
+}
+
+.custom-tier-low {
+  padding: 2px 6px;
+  border-radius: 4px;
+  background: var(--status-error-bg);
+  color: var(--status-error);
+  font-weight: 600;
+}
+
+.custom-col-error {
+  color: var(--status-error);
+  font-weight: 700;
 }
 </style>

@@ -25,6 +25,18 @@ const { t } = useI18n()
 function formatTagLabel(tagKey?: string | null): string {
   return tagKey || ''
 }
+
+function getFieldBadge(f: CustomFieldDefinition): string {
+  const parts: string[] = []
+  if (f.target === 'TEAM') parts.push('TEAM')
+  else if (f.target === 'PIT') parts.push('PIT')
+  if (f.fieldType === 'formula') parts.push('fx')
+  else if (f.fieldType === 'boolean' || f.displayFormat === 'percent') parts.push('%')
+  else if (f.fieldType === 'timer') parts.push(f.unit || 's')
+  else if (f.unit) parts.push(f.unit)
+  else parts.push(t('custom_fields.renderer.numeric_unit'))
+  return parts.join(' · ')
+}
 </script>
 
 <template>
@@ -85,7 +97,7 @@ function formatTagLabel(tagKey?: string | null): string {
               @change="emit('toggleCustomCol', f.fieldKey)"
             />
             <span class="opt-name">{{ f.name }}</span>
-            <span class="opt-tag">{{ f.fieldType === 'boolean' ? '%' : (f.unit || t('custom_fields.renderer.numeric_unit')) }}</span>
+            <span class="opt-tag">{{ getFieldBadge(f) }}</span>
           </label>
         </div>
       </div>
