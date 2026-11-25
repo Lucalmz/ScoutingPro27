@@ -30,7 +30,7 @@
 | §13 | `[1572, 1599]` | JCEF 桌面容器、静态托管与前端全局桥接 | `Main.java`, `desktopShell.ts`, `stores/connection.ts` |
 | §14 | `[1603, 1657]` | 运行时存储路径、H2/HikariCP/Flyway 与 CLI/环境变量 | `Main.java`, `AppConfig.java`, `JdbiConfig.java` |
 | §15 | `[1661, 1820]` | H2 数据库 Schema 与索引契约（V1–V10 + 启动自愈） | `resources/db/V*.sql`, `CrdtProjectionService.java`, `AiSchemaBootstrap.java` |
-| §16 | `[1824, 1896]` | 前端持久化存储、Pinia Stores、路由、i18n 与离线同步格式 | `stores/*`, `router/index.ts`, `i18n.ts`, `offlineSync.ts` |
+| §16 | `[1824, 1898]` | 前端持久化存储、Pinia Stores、路由、i18n 与离线同步格式 | `stores/*`, `router/index.ts`, `i18n.ts`, `offlineSync.ts` |
 
 ### 0.2 统一模块文件与测试归属矩阵 (Unified Ownership Matrix)
 
@@ -50,7 +50,7 @@
 | **§11 FTC 代理与晋级分** | `routes/FtcProxyRoutes.java`, `util/{FtcApiClient,AdvancementCalculator}.java` | `services/api.ts`, `services/ftcApi.ts`, `utils/analytics/advancement.ts`, `types/index.ts` |
 | **§12 AI 路由与中继** | `routes/AiRoutes.java`, `routes/ai/{AiProfileRoutes,AiStreamAndProbeRoutes,AiThreadRoutes,AiVoiceRoutes,AiUrlGuard,AiSchemaBootstrap}.java`, `util/AiClient.java`, `util/ai/{AiProxyResolver,AiStreamSupport,AiVoiceRelaySession,AbstractVoiceWsRelay,GeminiLiveRelaySession,OpenAiRealtimeRelaySession,OpenAiProtocolAdapter,GeminiProtocolAdapter,AnthropicProtocolAdapter}.java`, `model/{AiProviderProfile,AiSettings,AiChatThread,AiChatSession}.java`, `dao/{AiProviderProfileDao,AiSettingsDao,AiChatThreadDao,AiChatSessionDao}.java` | `stores/ai.ts`, `stores/aiModules/{aiDockState,aiProfiles,aiThreads,aiStreaming}.ts`, `components/ai/{constants,personas,presets,protocolCatalog,keyMatcher,contextBuilder,useAiChatStream,teamMatcher,exportThread}.ts`, `components/ai/voice/{useAiVoiceSession,voiceCatalog,audioEngine}.ts`, `components/ai/**/*.vue`, `types/index.ts` |
 | **§13–§15 桌面/配置/DB** | `Main.java`, `SplashScreen.java`, `db/{AppConfig,JdbiConfig}.java`, `ui/{CustomTitleBar,WindowResizer}.java`, `Backend/src/main/resources/db/V*.sql` | `utils/desktopShell.ts` |
-| **§16 路由/存储/工具/分析** | — | `router/index.ts`, `i18n.ts`, `locales/{en,zh}.json`, `stores/{navigation,inbox,toast}.ts`, `utils/{identityStore,tournament,bragIndex,errorHelper,csvExport}.ts`, `utils/analytics/{npOpr,rankings,predictCycleTime,audit}.ts` |
+| **§16 路由/存储/工具/分析** | — | `router/index.ts`, `i18n.ts`, `locales/{en,zh}.json`, `stores/{navigation,inbox,toast}.ts`, `utils/{identityStore,tournament,bragIndex,errorHelper,csvExport,pwaUpdater}.ts`, `utils/analytics/{npOpr,rankings,predictCycleTime,audit}.ts` |
 
 - **测试目录约定**：
   - **后端测试 (`Backend/src/test/java/com/bear27570/app/`)**：按模块对应 `db/`、`routes/`（含 `RouteTestSupport.java` 与 `*RoutesTest.java`）、`ui/`、`util/`。
@@ -1879,6 +1879,7 @@ interface AiContextConfig {
 | `localStorage` | `sp27_device_identity` / `scoutingpro_verified_sas_<inviteCode>_<pubHex>` / `scoutingpro_verified_sas_<inviteCode>_<userId>_<pubHex>` / `sp27_epoch_<INVITE_CODE>` | `crdtStore.ts`, `sasManager.ts`, `epochStore.ts` | 设备标识、已验证 SAS 与 Host Epoch 缓存 |
 | `sessionStorage` | `sp27_nav_pos_<eventId>` | `stores/navigation.ts` | 页面跳转滚动位置与 Tab 上下文 |
 | `sessionStorage` | `sp27-active-broker` | `LoginView.vue`, `QrScannerModal.vue`, `webrtc/index.ts` | 当前会话激活的信令 Broker 地址 |
+| `sessionStorage` | `sp27_sw_reloaded_at` | `utils/pwaUpdater.ts` | PWA Service Worker 自动更新防循环重载冷却时间戳 |
 | `IndexedDB` | `scoutingpro_security_v1` (`device_identity`, `trusted_peers`) | `utils/identityStore.ts` | ECDH/ECDSA P-256 设备密钥对与 TOFU 信任库 |
 | `IndexedDB` | `sp27_crdt_<eventId>` | `services/crdt/crdtPersistence.ts` | TinyBase MergeableStore 本地持久化 |
 | `IndexedDB` | `ScoutingPro_MobileMedia` | `services/mobilePhotoCache.ts` | 移动端 Pit 照片离线二进制缓存 |
@@ -1894,3 +1895,4 @@ interface AiContextConfig {
   - `bragIndex.ts`：`calculateBragIndex(claimed, actualMatches)`（BIOBUZZ 2026-2027 展位自述与赛场实测对账，排除 `isBroken` 场次）。
   - `errorHelper.ts`：`ApiError` 与 `formatUserFriendlyError()`（网络离线、超时、鉴权失败等统一中文化/i18n 转译）。
   - `csvExport.ts`：`downloadCSV(filename, headers, rows)`（触发浏览器/JCEF 下载回调）。
+  - `pwaUpdater.ts`：`registerPwaServiceWorker()`（仅非桌面端 `isDesktopHost() === false` 时以 `updateViaCache: 'none'` 注册 `./sw.js`，监听 `visibilitychange`/`pageshow`/`online` 与周期探测 `registration.update()`，并在旧版控制器被新 SW 接管时经 `sp27_sw_reloaded_at` 5s 防循环冷却保护自动刷新页面）。
