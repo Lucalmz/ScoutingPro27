@@ -8,7 +8,7 @@
 
 | 文档 | 说明 |
 | --- | --- |
-| [**`../README.md`**](../README.md) · [**`../README_en.md`**](../README_en.md) | 简体中文 / English 项目总览、架构深度拆解与测试命令基线 |
+| [**`../README.md`**](../README.md) · [**`../README_zh.md`**](../README_zh.md) | English / 简体中文 项目总览、架构深度拆解与测试命令基线 |
 | [**`../CONTRACT.md`**](../CONTRACT.md) | 后端 REST API、WebSocket 信令、CRDT 投影协议、JCEF 桌面桥接与运行时启动契约（**单一接口真相来源**） |
 | [**`../AGENTS.md`**](../AGENTS.md) | 仓库协作、契约优先维护与严谨验证交付铁律 |
 | [**`../frontend/README.md`**](../frontend/README.md) | 前端开发脚本、测试指令、E2E 套件与文档生成器说明 |

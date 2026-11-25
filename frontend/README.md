@@ -2,7 +2,7 @@
 
 Vue 3 + TypeScript 6 + Vite 8 (Rolldown) offline-first PWA frontend for ScoutingPro27.
 
-- **Project Overview**: [README.md](../README.md) · [README_en.md](../README_en.md)
+- **Project Overview**: [README.md](../README.md) · [README_zh.md](../README_zh.md)
 - **API, WebSocket, CRDT & JCEF Contract**: [CONTRACT.md](../CONTRACT.md)
 - **User Guides**: [docs/USER_GUIDE.md](../docs/USER_GUIDE.md)
 

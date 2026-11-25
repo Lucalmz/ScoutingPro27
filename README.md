@@ -15,253 +15,266 @@
 
 <p align="left">
   <b>Language:</b>
-  <a href="README.md"><b>简体中文</b></a> |
-  <a href="README_en.md"><b>English</b></a>
+  <a href="README.md"><b>English</b></a> |
+  <a href="README_zh.md"><b>简体中文</b></a>
   &nbsp;|&nbsp;
-  <b>新手手册 / User Guide (独立图文教程):</b>
-  <a href="docs/USER_GUIDE.md"><b>双语总入口</b></a> ·
-  <a href="docs/USER_GUIDE.zh.md"><b>中文保姆级手册</b></a> ·
+  <b>Standalone User Guides (Illustrated Manuals):</b>
+  <a href="docs/USER_GUIDE.md"><b>Bilingual Hub</b></a> ·
   <a href="docs/USER_GUIDE.en.md"><b>English Guide</b></a> ·
-  <a href="docs/README.md"><b>完整文档索引</b></a> ·
-  <a href="CONTRACT.md"><b>API 与架构契约</b></a>
+  <a href="docs/USER_GUIDE.zh.md"><b>中文教程</b></a> ·
+  <a href="docs/README.md"><b>Docs Index</b></a> ·
+  <a href="CONTRACT.md"><b>API & Architecture Contract</b></a>
 </p>
 
-> **由 FIRST Tech Challenge (FTC) Team 27570 B.E.A.R. 独立构思、架构并全栈开发。**  
-> 专为高干扰、弱网/断网机器人赛场打造的 **本地优先（Local-First）+ WebRTC P2P + TinyBase CRDT/HLC 协同侦察与战术决策平台**。
+> **Independently conceived, architected, and full-stack developed by students of FIRST Tech Challenge (FTC) Team 27570 B.E.A.R.**  
+> A **Local-First + WebRTC P2P + TinyBase CRDT/HLC collaborative scouting & tactical intelligence platform** built for high-interference, offline/weak-network robotics competition arenas.
 
 ---
 
-## 📖 文档导航
+## 📸 Screenshots
 
-- **队员与领队快速上手**：请直接阅读独立图文手册 👉 **[双语总入口](docs/USER_GUIDE.md)** · **[中文保姆级教程](docs/USER_GUIDE.zh.md)** · **[English Step-by-Step Guide](docs/USER_GUIDE.en.md)**（含 Windows `.msi` / macOS `.dmg` 安装指引；可在 `frontend/` 执行 `npm run export:userguide-pdf` 导出离线 PDF）。
-- **开发者与架构契约**：完整 HTTP REST 路由、WebSocket 信令、TinyBase 8 表 Schema、ECDSA 验签与 JCEF 桌面桥接规范见 **[CONTRACT.md](CONTRACT.md)**；测试与发版记录见 **[docs/README.md](docs/README.md)**。
+<table>
+  <tr>
+    <td width="50%" align="center">
+      <img src="docs/promo/screenshots/05_pit_scout_view.png" alt="Pit Scouting & Brag Index Verification" width="100%" />
+      <br />
+      <sub><b>Pit Scouting &amp; Brag Index Verification</b> — Cell-level CRDT specs, claimed vs. actual consistency audit</sub>
+    </td>
+    <td width="50%" align="center">
+      <img src="docs/promo/screenshots/06_live_rankings_ladder.png" alt="Live Rankings Ladder & Telemetry" width="100%" />
+      <br />
+      <sub><b>Live Rankings Ladder &amp; Telemetry</b> — Predict Cycle Time, Swarm RP Mobility &amp; Rule A215 Advancement</sub>
+    </td>
+  </tr>
+</table>
 
 ---
 
-## 一、 赛场痛点与项目定位
+## 📖 Documentation Map
 
-在数千人密集连接 Wi-Fi、存在无线电管制与跨运营商 NAT 隔离的机器人赛场中，传统方案往往在淘汰赛选队前夕崩溃：
+- **For Scouts & Team Leads**: Start with the illustrated guides 👉 **[Bilingual User Guide Hub](docs/USER_GUIDE.md)** · **[English Step-by-Step Guide](docs/USER_GUIDE.en.md)** · **[中文保姆级教程](docs/USER_GUIDE.zh.md)** (includes Windows `.msi` / macOS `.dmg` installation; run `npm run export:userguide-pdf` in `frontend/` to generate offline PDFs).
+- **For Developers & Contributors**: Full HTTP REST routes, WebSocket signaling, TinyBase 8-table CRDT schema, ECDSA verification, and JCEF desktop bridge specifications live in **[CONTRACT.md](CONTRACT.md)**; QA & release docs live in **[docs/README.md](docs/README.md)**.
 
-1. **云端在线表格（飞书 / 腾讯文档 / Google Sheets）**：依赖中心化公网连接，场馆弱网下持续转圈无法保存；多人同改一行极易发生整格误覆盖。
-2. **传统局域网主从系统 / 云端 SaaS**：存在单点故障（SPOF）——一旦场馆断网或领队主笔记本蓝屏断电，全场侦察员手机立即报错停摆。
-3. **纯离线扫二维码方案（如 ScoutingPASS）**：抗断网但吞吐极低，无法实时共享排班、Pit 照片、战队标签与动态战术指标。
+---
 
-**ScoutingPro27 的核心设计哲学**：**“单机永远可读写、有路即可点对点合并、主机随时可无损接管”**。
+## 1. Arena Pain Points & Design Positioning
 
-| 对比维度 | ScoutingPro27 (本项目) | 在线协同表格 | 局域网主从系统 | 纯离线二维码方案 | 云端 SaaS 侦察站 |
+Under 3,000-person congested venue Wi-Fi, strict RF spectrum rules, and cross-carrier NAT isolation, traditional scouting setups routinely fail right before Alliance Selection:
+
+1. **Cloud Spreadsheets (Google Sheets / Feishu / Tencent Docs)**: Depend on centralized internet access — spinning endlessly when offline and prone to accidental whole-row overwrites when multiple scouts edit simultaneously.
+2. **Classic Master-Slave LAN Servers / Cloud SaaS**: Suffer from a Single Point of Failure (SPOF) — if the venue internet drops or the lead laptop crashes, every scout's phone immediately halts.
+3. **Static Offline QR Workflows (e.g., ScoutingPASS)**: Survive blackouts, but have low manual scanning throughput and cannot share live schedules, Pit photos, team tags, or custom derived metrics in real time.
+
+**ScoutingPro27's Core Design Principle**: **"Every device reads & writes locally at zero latency, merges peer-to-peer over any available path, and survives host failures with split-brain-proof takeover."**
+
+| Dimension | ScoutingPro27 (This Project) | Cloud Spreadsheets | Local Master-Slave LAN | Static Offline QR | Cloud SaaS Sites |
 | :--- | :---: | :---: | :---: | :---: | :---: |
-| **核心同步架构** | **WebRTC P2P + TinyBase CRDT/HLC** | 中心化云文档 | 本地 Server + 热点 | 赛后人工逐张扫码 | 中心化云端 CRUD |
-| **云服务器运维成本** | **0 元（无需自建公网后端）** | 依赖公网可用性 | 需维护局域网服务 | 0 元 | 需持续续费服务器与域名 |
-| **断网 / 弱网可用性** | **100% 离线秒存，恢复信号自动反熵合并** | 断网即卡死无法写入 | 脱离同局域网即断联 | 可用，但人工排队扫码慢 | 断网彻底不可用 |
-| **多人并发改同一战队** | **单元格级 LWW-HLC 无损合并 + 双录冲突派生** | 极易滑错行覆盖他人数据 | 粗粒度整行覆盖 | 人工合并易漏单 | 后提交直接覆盖先提交 |
-| **主电脑死机容灾** | **`hostEpoch` 防脑裂接管 + 队友手机签名代传** | 账号或网络异常即停摆 | 主机死机全员停摆 | 汇总机故障需重扫全部码 | 数据库掉线全员停摆 |
-| **时钟防篡改与零信任** | **3-RTT 晶振单调钟 + ECDH/SAS + ECDSA 签名** | 链接泄露即可被涂改 | 明文或基础口令 | 二维码易被截拍伪造 | 普通 HTTPS + 账密 |
-| **内置赛场决策引擎** | **SP-NP OPR + A215 晋级分 + 公式引擎 + AI 军师** | 原始数字堆砌不直观 | 需导出外部工具分析 | 需导出 Tableau 二次计算 | 仅基础均分/OPR |
+| **Core Sync Architecture** | **WebRTC P2P + TinyBase CRDT/HLC** | Centralized cloud doc | Local Server + Hotspot | Manual QR scanning | Centralized cloud CRUD |
+| **Cloud Hosting Cost** | **\$0 / yr (No cloud backend needed)** | Requires internet | Dedicated LAN setup | \$0 / yr | Recurring server fees |
+| **Blackout Resilience** | **100% Offline + Auto Anti-Entropy Merge** | Spins & fails to save | Fails outside local Wi-Fi | Works, slow manual queue | Total outage offline |
+| **Concurrent Team Edits** | **Cell-Level LWW-HLC + Derived Conflict** | Accidental row overwrites | Whole-record overwrite | Manual merge gaps | Last POST wins |
+| **Host Crash Recovery** | **`hostEpoch` Fencing + Signed Peer Relay** | Account/net lock halts | Host crash halts team | Master failure = rescan | DB outage halts team |
+| **Clock & Zero-Trust** | **3-RTT Crystal Clock + ECDH/SAS + ECDSA** | Leaked link vandalism | Plaintext / basic auth | QR easily photographed | Standard HTTPS + login |
+| **Built-In Analytics** | **SP-NP OPR + A215 Adv. + Formula AST + AI** | Raw number grid | External scripts needed | External Tableau needed | Basic averages / OPR |
 
 ---
 
-## 二、 系统运行原理全景解析（How It Works）
+## 2. End-to-End Operating Principles (How It Works)
 
-### 2.1 整体进程与网络拓扑
+### 2.1 Process & Network Topology
 
-ScoutingPro27 由两类节点组成：**桌面端主机/备机（Windows / macOS / Linux 原生安装包）** 与 **看台移动端（零安装离线 PWA 网页）**。两者运行同一套前端 Vue 3 代码，但按运行环境承担不同职责：
+ScoutingPro27 runs a unified Vue 3 codebase across two node roles: **Desktop Host / Standby Laptops (native installers)** and **Bleacher Mobile Devices (zero-install offline PWA)**.
 
 ```mermaid
 flowchart TB
-    subgraph DesktopHost["桌面端单进程容器 (Host / Standby Laptop)"]
-        JCEF["JCEF Chromium 146 桌面窗口 (Vue 3 + TinyBase MergeableStore)"]
-        Javalin["内嵌 Javalin 7 服务 (localhost 回环通信 + 局域网静态/信令服务)"]
-        H2["嵌入式 H2 关系数据库 (127.0.0.1 本机绑定 + Flyway V1-V10)"]
-        JCEF <-->|"http://localhost:8080 (本机回环)"| Javalin
+    subgraph DesktopHost["Single-Process Desktop Container (Host / Standby Laptop)"]
+        JCEF["JCEF Chromium 146 Window (Vue 3 + TinyBase MergeableStore)"]
+        Javalin["Embedded Javalin 7 Server (localhost loopback + LAN static/signal bridge)"]
+        H2["Embedded H2 Relational DB (127.0.0.1 loopback-only + Flyway V1-V10)"]
+        JCEF <-->|"http://localhost:8080 (Loopback)"| Javalin
         Javalin <-->|"JDBC / Jdbi3"| H2
     end
 
-    subgraph MobilePwa["看台手机 / 平板客户端 (Offline-First PWA)"]
-        PWA["手机浏览器 PWA (Service Worker 64 项全量预缓存)"]
-        IDB["浏览器本地存储 (IndexedDB CRDT 快照 / ECDSA 密钥 / WebP 照片队列)"]
+    subgraph MobilePwa["Bleacher Phones & Tablets (Offline-First PWA)"]
+        PWA["Mobile Browser PWA (Service Worker 64 precached assets)"]
+        IDB["Browser Storage (IndexedDB CRDT snapshots / ECDSA keys / WebP photo queue)"]
         PWA <--> IDB
     end
 
-    subgraph SignalPlane["双栈混合信令控制面 (仅传加密握手帧，禁传业务数据)"]
-        MQTT["公网多 Broker MQTT over WSS (含 epoch-beacon 保留信标)"]
-        LANWS["主机局域网伴随信令桥 (/ws/signal/{room})"]
+    subgraph SignalPlane["Dual-Stack Signaling Plane (Signed handshakes only, zero business data)"]
+        MQTT["Public Multi-Broker MQTT over WSS (with retained epoch-beacon)"]
+        LANWS["Companion LAN WebSocket Relay (/ws/signal/{room})"]
     end
 
-    subgraph DataPlane["点对点加密数据面 (CRDT 反熵增量与照片分片)"]
-        UDP["原生 WebRTC DataChannel (UDP 50000-50099 直连 / 物理网卡 UPnP)"]
-        VDC["VirtualDataChannel (3.8s 自动降级 ECDH AES-256-GCM 加密隧道)"]
+    subgraph DataPlane["Peer-to-Peer Encrypted Data Plane (CRDT anti-entropy & photo chunks)"]
+        UDP["Native WebRTC DataChannel (UDP 50000-50099 + Physical-NIC UPnP)"]
+        VDC["VirtualDataChannel (3.8s auto-fallback ECDH AES-256-GCM encrypted tunnel)"]
     end
 
     JCEF <--> SignalPlane
     PWA <--> SignalPlane
     JCEF <--> DataPlane
     PWA <--> DataPlane
-    PWA -.->|"纯离线场馆可选连电脑热点扫码秒装"| Javalin
+    PWA -.->|"Optional zero-internet QR onboarding over Host hotspot"| Javalin
 ```
 
-### 2.2 桌面端 `localhost` 通信边界与网络监听机制
+### 2.2 Desktop `localhost` Boundary vs. LAN Onboarding Listener
 
-1. **本机前后端走 `localhost` 回环，公网零暴露**：
-   - 桌面端启动时，内嵌的 JCEF Chromium 浏览器直接加载 `http://localhost:8080/index.html` 与同进程的 Javalin 后端通信；嵌入式 H2 数据库强制锁定 `h2.bindAddress=127.0.0.1`。
-   - 后台路由器端口映射服务（`PortForwardingService`）**只映射 WebRTC 所需的 10 个 UDP 端口（`50000-50009/UDP`），绝不向公网映射 TCP `8080` 端口**。因此公网上的外部设备根本无法触达或干涉主机内部的 JCEF ↔ Javalin 通信。
-2. **为什么 Javalin 同时监听局域网网卡（`::` / `0.0.0.0:8080`）？**
-   - 设想场馆**完全没有外网**且新队员手机此前从未缓存过云端 PWA：此时领队只需开启电脑移动热点（如 `192.168.137.1`）或连入同一局域网，手机扫主机二维码即可直接从主机 `:8080` 拉取完整的离线 PWA 前端包，并通过主机自带的 `/ws/signal/{room}` 完成纯局域网无外网 WebRTC 组网。
-   - 为确保同一公共赛场 Wi-Fi 下的安全性：所有 `/api/*` 业务路由默认强制校验 HMAC-SHA256 JWT 与赛事成员身份（`isMember`），而涉及宿主机的系统接口（如触发防火墙配置）额外严格校验底层 Socket 来源必须为本机回环地址（`127.0.0.1` / `::1`）。
-3. **云端静态 PWA 零后端模式（GitHub Pages / Cloudflare Pages）**：
-   - 当手机从公网静态托管域名打开前端时，`services/api.ts` 自动识别静态宿主环境并接管本地 API 调用（所有侦察记录与照片写入请求强制导向本地 IndexedDB + WebRTC P2P 通道），无需额外部署任何中心化云后端。
+1. **Internal Desktop Traffic Uses `localhost` Loopback with Zero WAN Exposure**:
+   - Inside the desktop app, JCEF loads `http://localhost:8080/index.html` over local loopback, while the embedded H2 database binds strictly to `127.0.0.1`.
+   - `PortForwardingService` **only maps 10 WebRTC UDP ports (`50000-50009/UDP`) on the router and never maps TCP `8080`**. External machines on the Internet cannot reach or interfere with JCEF ↔ Javalin communication.
+2. **Why Javalin Also Listens on `::` / `0.0.0.0:8080` on the Local Network**:
+   - In a **zero-Internet arena** where a new scout's phone has not yet cached the cloud PWA, the lead can turn on a Windows Mobile Hotspot (`192.168.137.1`) or join a local router: scanning the Host QR code serves the offline PWA bundle directly from `:8080` and connects WebRTC over the companion LAN relay `/ws/signal/{room}`.
+   - To keep shared venue Wi-Fi secure, all `/api/*` data routes enforce HMAC-SHA256 JWT + event membership (`isMember`), and host-level system endpoints (such as triggering firewall setup) strictly verify that the underlying socket `remoteAddr` is local loopback (`127.0.0.1` / `::1`).
+3. **Zero-Backend Static Cloud PWA Mode (GitHub Pages / Cloudflare Pages)**:
+   - When opened from a static cloud host, `services/api.ts` automatically synthesizes lightweight read/session fallbacks while routing all scouting records and Pit photos through local IndexedDB + WebRTC DataChannels.
 
-### 2.3 网络穿透原理：Windows UAC 防火墙放行与无损绕行 TUN 代理
+### 2.3 NAT & TUN Proxy Traversal: Why Windows UAC Runs & How TUN Conflicts Are Avoided
 
-在复杂的国内网络与赛场环境中，WebRTC P2P 打洞通常面临两大阻碍：**Windows 公用网络防火墙拦截入站 UDP 包**，以及 **电脑开启 Clash / Mihomo / Sing-box 等 TUN 虚拟网卡劫持默认路由**。项目通过职责清晰的分层机制解决：
+Real-world WebRTC hole-punching on Windows laptops faces two classic obstacles: **Windows Firewall blocking inbound UDP on Public Wi-Fi profiles**, and **TUN proxy virtual adapters (Clash / Mihomo / Sing-box) hijacking default routes**. ScoutingPro27 addresses them cleanly without side effects:
 
-1. **Windows UAC 提权的真实作用——仅为当前进程配置防火墙入站与 NAT 边缘穿透规则**：
-   - 赛场 Wi-Fi 与手机热点几乎都会被 Windows 归类为“公用网络（Public Profile）”，默认丢弃非本机主动发起五元组的 WebRTC STUN/ICE 入站打洞包。
-   - 因此 Windows 端首次启动时唤起一次 UAC 提权（`NetworkUtil.ensureWindowsFirewallPort`），**仅针对当前 `java.exe` 与内置 `jcef_helper.exe` 写入作用域限定的入站允许规则**——包含局域网扫码所需的 `TCP 8080`，以及带 **`edge=yes`（允许 NAT 边缘穿透）** 的 WebRTC UDP 入站规则。
-   - **严守边界**：UAC 脚本**只改防火墙规则，绝不修改 Windows 系统路由表、网卡跃点数（`InterfaceMetric`）或 `WeakHost` 模型**，从而保证电脑上正在运行的代理软件不会因路由表被篡改而断网。
-2. **TUN 虚拟网卡环境下的三层无损穿透机制**：
-   - **第一层（Chromium Socket 级物理网卡绑定）**：JCEF 启动参数注入 `--force-fieldtrials=WebRTC-IPv6Default/Enabled/WebRTC-BindUsingInterfaceIndex/Enabled/...` 并关闭 mDNS 主机名隐藏，使 `libwebrtc` 直接按物理网卡索引绑定 `50000-50099/UDP` Socket，从源头绕开虚拟 TUN 网卡的流量劫持。
-   - **第二层（虚拟网卡精准识别与物理网卡 UPnP/IPv6 直连）**：`NetworkUtil` 与 `PortForwardingService` 自动过滤 `wintun`、`sing-tun`、`clash`、`mihomo`、`198.18.*`（Fake-IP 段）、`wsl`、`vmware`、`tailscale` 等虚拟接口（同时显式保留 Windows 移动热点使用的 `Wi-Fi Direct` 适配器），提取真实物理局域网 IPv4 与全球单播公网 IPv6（`2000::/3`，优先国内三大运营商 `240e:`/`2408:`/`2409:`），并在物理网卡上以 12 秒预算向路由器申请 `50000-50009/UDP` 短租约映射（退出自动清理）。
-   - **第三层（`VirtualDataChannel` 3.8 秒加密隧道热切换兜底）**：若手机端挂了全局 VPN 或处于严格对称型 NAT 导致原生 UDP 在 `3.8s` 内未能连通，前端自动无缝启用 `VirtualDataChannel`，将业务分片用 ECDH 协商出的 AES-256-GCM 密钥端到端加密后经 WSS/MQTT 信令通道透传；同时后台持续非破坏性探测原生 UDP，一旦打通即通过 `startDrain` 排空缓冲平滑热切回原生低延迟通道。
+1. **What Windows UAC Elevation Actually Does (Scoped Firewall Rules Only)**:
+   - Venue Wi-Fi and mobile hotspots default to the Windows *Public* firewall profile, which drops unsolicited inbound WebRTC STUN/ICE packets and NAT edge-traversed UDP traffic.
+   - On startup, `NetworkUtil.ensureWindowsFirewallPort` requests UAC once (if rules are missing) to add **application-scoped inbound Allow rules bound exclusively to the current `java.exe` and bundled `jcef_helper.exe`** — permitting `TCP 8080` for LAN QR onboarding and WebRTC UDP with **`edge=yes` (NAT Edge Traversal)**.
+   - **Strict Non-Interference**: The UAC script **never modifies OS routing tables, `InterfaceMetric`, or `WeakHost` settings**, ensuring active proxy/VPN clients on the host laptop are never disrupted.
+2. **Three-Layer Non-Invasive TUN Bypass & Connectivity Fallback**:
+   - **Layer 1 (Per-Socket Physical NIC Binding in Chromium)**: JCEF launches with `--force-fieldtrials=WebRTC-IPv6Default/Enabled/WebRTC-BindUsingInterfaceIndex/Enabled/...`, instructing `libwebrtc` (`50000-50099/UDP`) to bind ICE sockets directly by physical interface index rather than routing through virtual TUN adapters.
+   - **Layer 2 (Virtual Adapter Filtering & Physical-NIC UPnP / Global IPv6)**: `NetworkUtil` and `PortForwardingService` filter out `wintun`, `sing-tun`, `clash`, `mihomo`, `198.18.*` Fake-IP ranges, `wsl`, `vmware`, and `tailscale` (while preserving Windows `Wi-Fi Direct` hotspot adapters), extract real LAN IPv4 + Global Unicast IPv6 (`2000::/3`), and request short-lease `50000-50009/UDP` mappings via UPnP IGDv1/v2 (including `WANIPv6FirewallControl:1`), NAT-PMP, and PCP.
+   - **Layer 3 (`VirtualDataChannel` 3.8s Encrypted WSS Tunnel)**: If a mobile VPN or symmetric carrier NAT completely blocks UDP, WebRTC automatically activates `VirtualDataChannel` after `3.8s` — encrypting frames end-to-end with ECDH AES-256-GCM over WSS/MQTT signaling — while running non-destructive background probes to hot-upgrade back to native UDP via `startDrain` with zero packet loss.
 
-### 2.4 双码隔离体系：终身不可变的 `inviteCode` vs 自由绑定的 `ftcEventCode`
+### 2.4 Dual-Code Separation: Immutable `inviteCode` vs. Configurable `ftcEventCode`
 
-系统在模型设计上将 **“P2P 协同房间身份”** 与 **“FTC 官方赛事数据源”** 彻底解耦：
+- **Room Invite Code `inviteCode` (Auto-Generated · Globally Immutable)**:
+  - Generated once on `POST /api/events` as a 6-character uppercase code from an unambiguous 32-character alphabet excluding `I/O/0/1` ($32^6 = 1,073,741,824$ combinations, verified unique in DB).
+  - **Immutable for Everyone**: Once created, **nobody (including the Event Host) can ever modify an event's `inviteCode` or reassign it to another authoritative event ID**.
+  - **Three Architectural Roles**: (1) QR / manual room entry key; (2) cryptographic salt anchor for deriving the `SHA-256` signaling topic and 100,000-iteration PBKDF2-HMAC signaling signature key; (3) temporary offline stub key (`ext_<CODE>` / `evt-<CODE>`) that atomically reparents all 12 tables and local Pit photos into the authoritative UUID once connected to the Host.
+- **Official FTC Event Code `ftcEventCode` (Freely Bound / Updated / Cleared by Host)**:
+  - Configured via `PUT /api/events/{id}/ftc-config` (e.g., `2026` + `CNCMP`) solely to pull official schedules, net scores, and Rule A215 advancement points from the FTC Events API v2.0 proxy without affecting P2P room identity.
 
-- **房间邀请码 `inviteCode`（自动生成 · 全局任何人不可更改）**：
-  - Host 创建赛事时，后端从剔除易混淆字符（`I/O/0/1`）的 32 字符集中随机生成 6 位大写码（理论空间 $32^6 = 1,073,741,824 \approx 10.7$ 亿，并在本地库判重）。
-  - **终身不可变铁律**：`inviteCode` 一旦随赛事生成，**包括赛事 Host 本人在内的任何人均不可修改，也不可将其解绑转移至其他赛事 ID**（`EventRoutes` 在服务端强校验拦截）。
-  - **三重核心用途**：① 队员扫码/输码入房凭证；② 派生 MQTT 信令房间 Topic（`SHA-256`）与 100,000 次迭代 PBKDF2-HMAC 信令签名密钥的密码学盐值锚点；③ 队员在离线状态下先行输入邀请码创建临时存根赛事（`ext_<CODE>` / `evt-<CODE>`）正常打分，待连上 Host 获取权威赛事 UUID 后，系统自动把 12 张关联表与本地照片目录原子过户（Reparent）至权威 UUID。
-- **官方赛事代码 `ftcEventCode`（Host 按需绑定 / 更换 / 清空）**：
-  - 如绑定 `2026` 赛季 `CNCMP`，仅用于通过内置 FTC Events API v2.0 代理拉取官方对阵表、参赛名录、扣除对手罚分后的净得分以及 Rule A215 官方晋级积分，随时解绑或更换均不影响团队已录侦察数据与 P2P 同步。
+### 2.5 Five-Step Collaborative Data Pipeline
 
-### 2.5 从看台指尖录入到全队落盘分析的五步数据流
-
-1. **双栈信令握手与 4 位 SAS 零信任门禁**：节点通过公网多 Broker MQTT over WSS（自动主备切换）与局域网 `/ws/signal/{room}` 双栈交换 HMAC 签名信令（含 `NonceLruCache` 防重放），完成 ECDH P-256 密钥交换；首次见面的设备强制挂起业务收发并弹出 **4 位 SAS 短认证码**，人工核对一致后写入 IndexedDB TOFU 信任库，杜绝赛场伪造基站或中间人窃听。
-2. **抗毒化晶振单调时钟（`CalibratedMonotonicClock`）**：SAS 通过后执行 3 轮 `CLOCK_SYNC_REQ/RES` 取最小 RTT 标定时间零点；此后运行期**完全停用系统 `Date.now()`**，仅靠硬件 `performance.now()` 晶振单调推进生成 TinyBase 16 字符紧凑 **HLC（混合逻辑时钟）**。即便某台手机系统时间被误改到 2036 年，入站 `decodeHlc` 预检器也会拦截 `>300s` 未来偏移毒包并下发 `FORCE_CLOCK_RESYNC`。
-3. **TinyBase 8 表单元格级 CRDT 合并与写时 ECDSA 签名**：
-   - 全部协同状态建模为 `MergeableStore` 内的 8 张规范化表：`scouting_records`、`pit_records`、`pit_photo_keys`、`team_tags`、`custom_fields`、`schedules`、`assignments`、`member_identities`。
-   - **Pit 展位与标签协同**：A 侦察员离线改车重与自动分、B 侦察员离线改花朵终局结构与标签，重连后按**单元格级 LWW-HLC** 自动无损合并，并在前后端三端统一自动重算 BIOBUZZ 结构化终局分与总分。
-   - **正赛记录防篡改与冲突派生**：每条正赛记录在落盘瞬间由作者设备 ECDSA P-256 私钥签发 `authorSig`（设备公钥由 Host 在 `member_identities` 表签发 `hostSig` 背书）；两人同场误录同一战队时，两条记录因各自 ID 独立而**同时完整保留**，前端通过纯计算属性派生冲突徽章供队长复核。
-4. **控制面纪元防脑裂（`hostEpoch` Fencing）与队友代传恢复**：见下文 `§3.1`。
-5. **Host 防抖快照与脏行增量关系投影（`CrdtProjectionService`）**：Host 前端以 `1500ms` 防抖（`5000ms` 最大等待，`beforeunload`/`logout` 立即冲刷）调用 `PUT /api/events/{id}/crdt-state`；后端在单事务内净化非 Host 快照、保存全量 CRDT JSON，并仅对发生变化的 `dirtyRows` 增量 `MERGE` 投影至 6 张 H2 关系表，无缝驱动后续 SQL 查询、CSV 导出与 AI 上下文组装。
+1. **Dual-Stack Signaling & 4-Digit SAS Zero-Trust Gate**: Peers exchange PBKDF2-HMAC-signed signaling frames (`NonceLruCache` replay defense) over multi-broker MQTT over WSS + LAN `/ws/signal/{room}`, run ECDH P-256 key exchange, and gate all business traffic behind a **4-digit SAS verification prompt** persisted in an IndexedDB TOFU trust store.
+2. **Crystal-Oscillator Monotonic Clock (`CalibratedMonotonicClock`)**: Post-SAS, 3 rounds of `CLOCK_SYNC_REQ/RES` anchor zero-point time using minimum RTT; runtime HLC generation **never calls `Date.now()`**, advancing strictly via `performance.now()` and rejecting inbound packets with `>300s` future HLC skew.
+3. **TinyBase 8-Table Cell-Level CRDT Merge & Write-Time ECDSA Signatures**:
+   - State lives in 8 normalized `MergeableStore` tables (`scouting_records`, `pit_records`, `pit_photo_keys`, `team_tags`, `custom_fields`, `schedules`, `assignments`, `member_identities`).
+   - Concurrent Pit edits merge at the **individual cell level** with automatic BIOBUZZ endgame/total score normalization across REST, CRDT read, and H2 projection.
+   - Match records are signed at write time with the scout device's ECDSA P-256 key (`authorSig`, backed by Host-countersigned `member_identities` `hostSig`); duplicate same-match team entries are preserved side-by-side with derived conflict badges.
+4. **Control-Plane `hostEpoch` Fencing & Signed Teammate Relay**: Detailed in `§3.1` below.
+5. **Debounced Snapshot & Dirty-Row H2 Projection (`CrdtProjectionService`)**: The Host flushes `PUT /api/events/{id}/crdt-state` (`1500ms` debounce / `5000ms` maxWait, immediate flush on `beforeunload`/`logout`), sanitizing non-Host snapshots and incrementally projecting `dirtyRows` into 6 relational H2 tables.
 
 ---
 
-## 三、 核心子系统深潜
+## 3. Core Subsystems Deep Dive
 
-### 3.1 控制面纪元防脑裂（`hostEpoch` Fencing）与双入口灾难恢复
+### 3.1 Control-Plane Epoch Fencing (`hostEpoch`) & Dual-Entry Disaster Recovery
 
-系统严格执行**控制面纪元（`hostEpoch`）与数据面时间戳（`HLC`）解耦**：仅桌面端允许担任 Host；`hostEpoch` 只裁决谁是当前唯一合法主机，绝不覆盖单元格级 HLC 时间戳（避免新晋升的空电脑用高纪元空状态抹掉队员旧纪元离线数据）。
+Control-plane authority (`hostEpoch`, desktop-only) is strictly decoupled from data-plane timestamps (`HLC`), ensuring a newly promoted empty laptop never overwrites older offline scouting cells.
 
 ```mermaid
 sequenceDiagram
     autonumber
-    participant HostA as "原主机电脑 A (H2 #1)"
-    participant HostB as "队友备机电脑 B (H2 #2)"
-    participant MQTT as "MQTT 信令与 epoch-beacon"
-    participant Phones as "看台手机群 S1/S2 (Witness + CRDT)"
-    participant HostC as "全新空库电脑 C (H2 #3)"
+    participant HostA as "Primary Host A (H2 #1)"
+    participant HostB as "Backup Laptop B (H2 #2)"
+    participant MQTT as "MQTT Signaling & epoch-beacon"
+    participant Phones as "Scout Phones S1/S2 (Witness + CRDT)"
+    participant HostC as "Empty Laptop C (H2 #3)"
 
-    Note over HostA,Phones: "阶段 1: HostA 建赛 (Epoch=1)，发布保留信标，全员完成 SAS 与 3-RTT 晶振标定"
-    HostA->>MQTT: "发布 retained epoch-beacon (epoch=1, eventId=UUID, inviteCode)"
-    Note over HostA: "阶段 2: HostA 录完 1 条本地独占记录后突然断电死机"
-    Note over Phones,HostB: "阶段 3: 无主机离线窗口期 — 手机并发改 Pit 不同字段、录带 ECDSA 签名的正赛记录"
-    Phones->>Phones: "S1 改车重并离线刷新；S2 改发射机构、贴标签、录签名比赛记录"
-    HostB->>HostB: "队友在电脑 B 离线排班打分，退出账号前自动 flush 快照至本地 H2 #2"
+    Note over HostA,Phones: "Stage 1: HostA creates event (Epoch=1), publishes retained beacon, completes SAS & 3-RTT calibration"
+    HostA->>MQTT: "publish retained epoch-beacon (epoch=1, eventId=UUID, inviteCode)"
+    Note over HostA: "Stage 2: HostA logs 1 exclusive local record, then suffers sudden power loss"
+    Note over Phones,HostB: "Stage 3: Hostless Window — phones edit different Pit cells & log ECDSA-signed match records"
+    Phones->>Phones: "S1 edits weight + offline reload; S2 edits launcher, tags & signed match record"
+    HostB->>HostB: "Assistant logs offline schedule & scores; logout() flushes CRDT snapshot to H2 #2"
 
-    Note over HostB,Phones: "阶段 4 (主路径): 领队在备机 B 登录原账号 — 面板直接点击原赛事免输码接管 (Epoch=2)"
-    HostB->>MQTT: "1.5s HOST_DISCOVERY 收集手机 EPOCH_WITNESS -> 递增晋升 Epoch=2"
-    Phones<-->HostB: "CRDT 反熵双向合流：车重 + 发射机构 + 照片键 + 标签 + 排班全部无损合并"
+    Note over HostB,Phones: "Stage 4 (Primary Path): Lead logs into Laptop B — 1-click Dashboard takeover (Epoch=2)"
+    HostB->>MQTT: "1.5s HOST_DISCOVERY collects mobile EPOCH_WITNESS -> promotes to Epoch=2"
+    Phones<-->HostB: "CRDT anti-entropy merges weight + launcher + photos + tags + schedule losslessly"
 
-    Note over HostA,HostB: "阶段 5 (防脑裂压制): 旧主机 A 恢复供电广播旧 Epoch=1 心跳"
+    Note over HostA,HostB: "Stage 5 (Split-Brain Fencing): Revived HostA broadcasts stale Epoch=1 heartbeat"
     HostA->>MQTT: "host_heartbeat (epoch=1)"
     HostB-->>HostA: "epoch_superseded (epoch=2)"
-    HostA->>HostA: "自动降级为 Standby 从机连入 HostB，并将断电前独占记录反熵补齐至全场"
+    HostA->>HostA: "Auto-demotes to Standby Client & merges pre-crash exclusive record into HostB"
 
-    Note over HostC,Phones: "阶段 6 (极限兜底): 若仅剩全新空电脑 C，输入 6 位不可变 inviteCode 接管 (Epoch=3)"
-    HostC->>MQTT: "从在场手机 S1 的 EPOCH_WITNESS 还原权威赛事 UUID 落盘 H2 #3"
-    Phones<-->HostC: "S1 将已离场队友 S2 带 ECDSA 签名的历史记录安全代传恢复至空电脑 C"
+    Note over HostC,Phones: "Stage 6 (Fallback Path): Brand-new Laptop C enters immutable 6-char inviteCode (Epoch=3)"
+    HostC->>MQTT: "Recovers authoritative UUID from S1 EPOCH_WITNESS into H2 #3"
+    Phones<-->HostC: "S1 safely relays offline teammate S2's ECDSA-signed records into Laptop C"
 ```
 
-### 3.2 BIOBUZZ 2026–2027 战术量化引擎与双端同构公式系统
+### 3.2 BIOBUZZ 2026–2027 Analytics & Isomorphic Formula Engine
 
-1. **SP-NP OPR（侦察先验去罚分贡献值，`npOpr.ts`）与节奏稳定性测速**：
-   - 结合 FTC 官方联盟净得分（自动剥离对手犯规送分）与本队侦察员实录分项先验求解岭回归线性方程组，分解出单车自动、手动、终局真实净贡献值及置信度等级。
-   - **Predict Cycle Time**：单场手动阶段有效循环间隔 `≥ 5` 个（即 `≥ 6` 轮、`≤ 120s`）时，自动剔除最快 1 次异常值后取次快 4 次均值，并配套输出非故障场次的 **最低 Cycle 数（Min Cycles）** 与 **Cycle 方差（Cycle Variance）**。
-   - **Swarm RP 机动分**：自动核算单车机动得分（离墙 `3` + 自动停泊 `5` + 终局停泊 `5` = 满分 `13`），辅助筛选双车合计 `≥ 16` 分的稳定拿点搭档。
-2. **FTC 官方 Rule A215 晋级积分与顺延引擎（`AdvancementCalculator.java` & `advancement.ts`）**：
-   - Java 后端与 TS 前端双端同步实现 A215 逆误差函数 `invErf` 资格赛赋分（`2..16` 分）、蛇形选队顺位分、双败淘汰赛分与评委奖项分，实时解析官方保送/放弃顺延（Roll-down）状态并在排行榜首列高亮展示。
-3. **自定义字段与前后端同构安全公式引擎（`V10`，`FormulaValidator.java` & `utils/formula/*`）**：
-   - 支持按赛事动态创建布尔、步进数值、毫秒计时器、星级/档位、单选/多选（带数值权重）及 **派生公式列（`MATCH` / `PIT` / `TEAM` 三层作用域）**。
-   - 手写词法/递归下降 AST 解析器与求值器（严禁 `eval` / `Function` / 原型链访问），强制单向跨层引用与 3 色 DFS 环路检测，内置 `SAFE_DIV`、`COALESCE`、`TRIMMED_AVG`、`RECENT_AVG`、`PERCENTILE`、`WEIGHTED_AVG`、`NORM` 等 25 个统计与数学函数，由 [`shared/formula-conformance-cases.json`](shared/formula-conformance-cases.json) 锁定前后端 100% 行为一致。
-4. **“吹牛指数（Brag Index）”展位自述审计**：
-   - 按 $\text{OverallRatio} = \frac{\text{ClaimedTotalScore}}{\max(\text{MaxActualScore}, \text{AvgActualScore} \times 1.05, 1)}$（自动排除 `isBroken` 故障场次）将展位自述划分为 **🎯 真实守信（`≤1.25x`）**、**🟡 略偏乐观（`1.25x~1.65x`）**、**⚠️ 夸大其词（`1.65x~2.20x`）** 与 **🔥 吹破牛皮（`>2.20x`）**，并自动交叉核验正赛实绩点亮 **`花朵已证实 🌸`** 与 **`停泊已证实 ✅`** 徽章。
+1. **SP-NP OPR (`npOpr.ts`) & Cycle Consistency Telemetry**:
+   - Solves ridge-regularized non-penalty OPR using scout-recorded phase scores as priors against official penalty-free alliance totals, paired with outlier-trimmed **Predict Cycle Time** (`≥ 6` cycles), **Min Cycles**, **Cycle Variance**, and **Swarm RP Mobility** (`Leave +3` / `Auto Park +5` / `Endgame Park +5`).
+2. **FTC Official Rule A215 Advancement Engine (`AdvancementCalculator.java` & `advancement.ts`)**:
+   - Synchronized Java + TypeScript implementation of A215 `invErf` qualification points (`2..16`), alliance selection, playoff, and judged award points with live roll-down status badges.
+3. **Custom Fields & Isomorphic AST Formula Engine (`V10`, `FormulaValidator.java` & `utils/formula/*`)**:
+   - Supports dynamic `boolean`, `number`, `timer`, `level`, weighted `select`/`multi_select`, and **derived `formula` columns (`MATCH` / `PIT` / `TEAM` scopes)**.
+   - Hand-written lexer/recursive-descent AST parser (zero `eval`/`Function`), cross-layer reference guards, 3-color DFS cycle detection, 500-step runtime budget, and 25 statistical/math functions verified identically across Java and TypeScript via [`shared/formula-conformance-cases.json`](shared/formula-conformance-cases.json).
+4. **Brag Index Reality Auditor**:
+   - Evaluates $\text{OverallRatio} = \frac{\text{ClaimedTotalScore}}{\max(\text{MaxActualScore}, \text{AvgActualScore} \times 1.05, 1)}$ (excluding `isBroken` matches) into **🎯 Realistic (`≤1.25x`)**, **🟡 Optimistic (`1.25x~1.65x`)**, **⚠️ Overclaimed (`1.65x~2.20x`)**, and **🔥 Mythical (`>2.20x`)**, with verified **`Flower 🌸`** and **`Park ✅`** badges.
 
-### 3.3 多协议 AI Copilot 战术工作台与实时语音通话（`V9`）
+### 3.3 Multi-Protocol AI Copilot & Full-Duplex Live Voice (`V9`)
 
-- **三协议原生适配与安全密钥仓**：支持 **OpenAI 兼容流派**（GPT / DeepSeek / Kimi / SiliconFlow / 本地 Ollama）、**Google Gemini（`v1beta`）** 与 **Anthropic Claude**；API Key 经主机 `AES-256-GCM` 加密落盘，配合 `AiUrlGuard` 阻断私网 SSRF 探测。
-- **赛事上下文预算组装（`contextBuilder.ts`）**：在 `28,000` 字符预算内按优先级自动组装我方队号、禁选名单、天梯 SP-NP OPR 与晋级分、相关排班、标签、Pit 硬件、自定义公式指标及近期场次明细，支持 5 种战术人设与 `/pick` `/match` `/compare` `/audit` `/brief` 快捷指令。
-- **双档语音直接对话**：
-  - **全双工原生实时语音（`Gemini Live` / `OpenAI Realtime`）**：经后端 `/ws/ai/voice` 中继，前端基于音频流捕获与无缝 PCM 队列实现免提 VAD 自动收音、随时打断（Barge-in）、按住说话（PTT）、实时双语字幕与 Token 用量（`usage`）自动归档入当前会话线程。
-  - **全模型通用轮次语音**：针对无原生实时语音接口的模型，支持按住录音经 `/api/ai/audio/transcribe` 转写提问并分句流式朗读回复。
+- **Native Multi-Protocol Profiles**: Supports **OpenAI-compatible** (GPT / DeepSeek / Kimi / SiliconFlow / local Ollama), **Google Gemini (`v1beta`)**, and **Anthropic Claude**, with `AES-256-GCM` encrypted keys at rest and `AiUrlGuard` SSRF protection.
+- **Budgeted Tactical Context (`contextBuilder.ts`)**: Packs focus teams, banned teams, SP-NP OPR & advancement rankings, schedules, tags, Pit specs, custom formula metrics, and match logs within a `28,000`-char budget across 5 personas and 5 `/` commands.
+- **Two-Tier Direct Voice**: Full-duplex native **`Gemini Live` / `OpenAI Realtime`** via `/ws/ai/voice` (VAD, barge-in, PTT, live captions, and automatic `usage` token persistence) plus universal `/api/ai/audio/transcribe` turn-based voice for all other models.
 
 ---
 
-## 四、 技术栈与仓库结构速览
+## 4. Tech Stack & Repository Overview
 
-| 层级 | 核心技术与模块职责 |
+| Layer | Core Technologies & Responsibilities |
 | :--- | :--- |
-| **前端与离线 PWA (`frontend/`)** | **Vue 3.5** + **TypeScript 6** + **Vite 8** + **Pinia 4** + **Vue I18n 9**（中英双语全量对齐）+ **Workbox PWA** |
-| **CRDT 与密码学层 (`frontend/src/services/`)** | **TinyBase 10.1** `MergeableStore`、自研 `CalibratedMonotonicClock`、WebRTC 分片同步器、Web Crypto `ECDH`/`ECDSA P-256`/`PBKDF2-HMAC` |
-| **主机后端与桌面壳 (`Backend/`)** | **Java 21 LTS** + **Javalin 7.2** (Jetty 12) + **JCEF Chromium 146**（Windows 自定义圆角无边框标题栏 / macOS & Linux 原生窗口） |
-| **存储与网络穿透 (`Backend/src/main/`)** | **H2 2.2** + **HikariCP** + **Jdbi3** + **Flyway 13 (`V1`–`V10`)** + **Auth0 JWT / jBCrypt / AES-256-GCM** + **Offbynull PortMapper** |
-| **共享契约与测试 (`shared/`, `e2e/`)** | 双端公式契约集 `shared/formula-conformance-cases.json`、**Vitest**（98 文件 / 887 单测）、**JUnit 5**（42 类 / 214 单测）、**Puppeteer**（4 套多节点容灾 E2E） |
+| **Frontend & Offline PWA (`frontend/`)** | **Vue 3.5** + **TypeScript 6** + **Vite 8** + **Pinia 4** + **Vue I18n 9** (bilingual parity) + **Workbox PWA** |
+| **CRDT & Cryptography (`frontend/src/services/`)** | **TinyBase 10.1** `MergeableStore`, `CalibratedMonotonicClock`, chunked WebRTC sync, Web Crypto `ECDH`/`ECDSA P-256`/`PBKDF2-HMAC` |
+| **Desktop Host & Container (`Backend/`)** | **Java 21 LTS** + **Javalin 7.2** (Jetty 12) + **JCEF Chromium 146** (custom frameless rounded title bar on Windows; native frame on macOS/Linux) |
+| **Storage & NAT Traversal (`Backend/src/main/`)** | **H2 2.2** + **HikariCP** + **Jdbi3** + **Flyway 13 (`V1`–`V10`)** + **Auth0 JWT / jBCrypt / AES-256-GCM** + **Offbynull PortMapper** |
+| **Shared Conformance & QA (`shared/`, `e2e/`)** | `shared/formula-conformance-cases.json`, **Vitest** (98 files / 887 tests), **JUnit 5** (42 classes / 214 tests), **Puppeteer** (4 multi-node E2E suites) |
 
 ---
 
-## 五、 快速启动与自动化验证
+## 5. Quick Start & Automated Verification
 
-### 5.1 环境要求与本地运行
-- **环境要求**：JDK 21+、Maven 3.8+、Node.js `>=22.18.0` 或 `>=24.12.0`
-- **构建与启动**：
+### 5.1 Prerequisites & Local Run
+- **Requirements**: JDK 21+, Maven 3.8+, Node.js `>=22.18.0` or `>=24.12.0`
+- **Build & Launch**:
   ```powershell
-  # 1. 构建前端生产静态资源与 PWA Service Worker（自动输出至 Backend 静态资源目录）
+  # 1. Build frontend production assets & PWA Service Worker into Backend static resources
   cd frontend
   npm install
   npm run build
 
-  # 2. 启动桌面主机（加 --headless 可跳过 JCEF 桌面窗口以纯服务模式运行）
+  # 2. Launch backend host (--headless skips JCEF desktop window and serves on port 8080)
   cd ../Backend
   mvn compile exec:java -Dexec.mainClass="com.bear27570.app.Main" -Dexec.args="--headless --port=8080"
 
-  # 3. 打包单文件可执行 Fat JAR (target/ScoutingPro27.jar)
+  # 3. Package standalone executable Fat JAR (target/ScoutingPro27.jar)
   mvn package -DskipTests
   ```
 
-### 5.2 全量测试套件执行
+### 5.2 Automated Verification Suites
 ```powershell
-# 1. 前端 TypeScript 6 严格类型检查
+# 1. Frontend TypeScript 6 strict type check
 cd frontend
 npm run type-check
 
-# 2. 前端 Vitest 单元测试套件（98 个测试文件 / 887 项单测）
+# 2. Frontend Vitest unit & component suite (98 test files / 887 tests)
 npx vitest run
 
-# 3. 后端 Maven JUnit 5 测试套件（42 个测试类 / 214 项单测，覆盖 Flyway V1-V10、零信任验签与 CRDT 脏行投影）
+# 3. Backend Maven JUnit 5 suite (42 test classes / 214 tests, incl. Flyway V1-V10, ECDSA & CRDT projection)
 cd ../Backend
 mvn test
 
-# 4. 全栈多实例容灾与交互 E2E 套件（4 套核心 E2E；单独运行 12 步跨机灾难恢复可执行 npm run test:e2e:multi）
+# 4. Full-stack multi-node disaster-recovery & interactive E2E suites
 cd ../frontend
 npm run test:e2e
 ```
 
 ---
 
-## 📄 开源许可与致谢
+## 📄 License & Acknowledgements
 
-- **开源协议**：本项目基于 **MIT License** 开放源代码。
-- **特别致谢**：感谢 **FIRST** 官方赛事舞台，感谢 Vue.js、TinyBase、Javalin、WebRTC、EMQX 与开源社区，感谢 **FTC Team 27570 B.E.A.R.** 每一位参与实战检验与持续演进的队员与导师！
+- **License**: Released under the open-source **MIT License**.
+- **Acknowledgements**: Special thanks to **FIRST**, the open-source communities behind Vue.js, TinyBase, Javalin, WebRTC, and EMQX, and every member and mentor of **FTC Team 27570 B.E.A.R.**!
 
 <p align="center">
   <b>Designed & Built with ❤️ by FTC Team 27570 B.E.A.R.</b><br/>
