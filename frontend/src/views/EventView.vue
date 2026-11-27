@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref, reactive, onMounted, onUnmounted, watch, computed } from 'vue'
+import { ref, reactive, onMounted, onUnmounted, watch, computed, nextTick } from 'vue'
 import { useRoute, useRouter, onBeforeRouteLeave, onBeforeRouteUpdate } from 'vue-router'
 import { useUserStore } from '@/stores/user'
 import { useEventStore } from '@/stores/events'
@@ -135,6 +135,8 @@ const {
 })
 
 const workspaceRef = ref<HTMLElement | null>(null)
+const isTeamDetailOpen = computed(() => route.name === 'team-detail')
+let headerResizeObserver: ResizeObserver | null = null
 
 function syncWorkspaceTopOffset() {
   if (typeof document === 'undefined' || !workspaceRef.value) return
@@ -143,7 +145,7 @@ function syncWorkspaceTopOffset() {
 }
 
 function handleCopilotHotkeys(e: KeyboardEvent) {
-  if (isMobile.value) return
+  if (isMobile.value || isTeamDetailOpen.value) return
   if (e.altKey && (e.key === 'i' || e.key === 'I')) {
     e.preventDefault()
     aiStore.toggleDock()
@@ -159,6 +161,16 @@ onMounted(async () => {
   if (!userStore.isLoggedIn) {
     router.replace('/')
     return
+  }
+
+  void nextTick(() => {
+    syncWorkspaceTopOffset()
+  })
+  if (typeof ResizeObserver !== 'undefined' && headerRef.value) {
+    headerResizeObserver = new ResizeObserver(() => {
+      syncWorkspaceTopOffset()
+    })
+    headerResizeObserver.observe(headerRef.value)
   }
 
   eventStore.restoreFromCache()
@@ -238,18 +250,16 @@ onMounted(async () => {
   void aiStore.fetchProfiles()
 })
 
-let navigatingToTeamDetail = false
-
 onUnmounted(() => {
   window.removeEventListener('beforeunload', handleAiBeforeUnload)
   window.removeEventListener('keydown', handleCopilotHotkeys)
   window.removeEventListener('resize', syncWorkspaceTopOffset)
+  headerResizeObserver?.disconnect()
+  headerResizeObserver = null
   document.documentElement.style.setProperty('--ai-dock-right-offset', '0px')
   void aiStore.flushPendingSaves()
-  if (!navigatingToTeamDetail) {
-    cleanupWebRTC()
-    void disposeEventCrdtSession()
-  }
+  cleanupWebRTC()
+  void disposeEventCrdtSession()
 })
 
 watch(
@@ -274,19 +284,23 @@ watch(
 
 onBeforeRouteLeave((to) => {
   if (to.name === 'team-detail' && to.params.eventId === eventId.value) {
-    navigatingToTeamDetail = true
     saveLeavePosition(to.params.teamNumber ? Number(to.params.teamNumber) : null)
   } else {
-    navigatingToTeamDetail = false
     cleanupWebRTC()
     void disposeEventCrdtSession()
     if (to.name !== 'team-detail') {
       eventStore.setCurrentEvent(null)
+      pitStore.clearLocalCache()
+      scheduleStore.clearLocalCache()
     }
   }
 })
 
 onBeforeRouteUpdate((to, from) => {
+  if (to.name === 'team-detail' && to.params.eventId === eventId.value) {
+    saveLeavePosition(to.params.teamNumber ? Number(to.params.teamNumber) : null)
+    return
+  }
   if (to.params.eventId !== from.params.eventId) {
     const fromIdUpper = typeof from.params.eventId === 'string' ? from.params.eventId.trim().toUpperCase() : ''
     const codeUpper = eventStore.currentEvent?.inviteCode?.trim().toUpperCase() || ''
@@ -304,6 +318,8 @@ onBeforeRouteUpdate((to, from) => {
     cleanupWebRTC()
     void disposeEventCrdtSession()
     eventStore.setCurrentEvent(null)
+    pitStore.clearLocalCache()
+    scheduleStore.clearLocalCache()
   }
 })
 
@@ -318,6 +334,8 @@ async function goBack() {
   cleanupWebRTC()
   await disposeEventCrdtSession()
   eventStore.setCurrentEvent(null)
+  pitStore.clearLocalCache()
+  scheduleStore.clearLocalCache()
   if (event.value) {
     transitionState.startSharedTransition(`event-card-${event.value.id}`)
   }
@@ -354,8 +372,13 @@ async function handleTakeoverHost() {
       :invite-code="event?.inviteCode"
     />
 
-    <!-- Header -->
-    <header ref="headerRef" class="topbar" :style="{ viewTransitionName: 'event-topbar' }">
+    <div
+      class="event-stage-shell"
+      :class="{ 'is-detail-open': isTeamDetailOpen }"
+      :aria-hidden="isTeamDetailOpen ? 'true' : undefined"
+    >
+      <!-- Header -->
+      <header ref="headerRef" class="topbar" :style="{ viewTransitionName: 'event-topbar' }">
       <div class="topbar-left">
         <button class="btn-back" @click="goBack" style="display: flex; align-items: center; gap: 4px;">
           <span class="material-icons" style="font-size: 18px;">arrow_back</span>{{ t('event.back') }}
@@ -558,6 +581,7 @@ async function handleTakeoverHost() {
       </div>
 
       <AiCopilotDock v-if="!isMobile && eventId" :event-id="eventId" />
+      </div>
     </div>
 
     <AiSettingsModal />
@@ -580,6 +604,13 @@ async function handleTakeoverHost() {
       @open-offline-sync="showOfflineSyncModal = true"
       @exit-event="goBack"
     />
+
+    <!-- Nested TeamDetailView sheet rendered over the live blurred EventView -->
+    <router-view v-slot="{ Component }">
+      <Transition name="team-detail-sheet">
+        <component :is="Component" v-if="Component" />
+      </Transition>
+    </router-view>
   </div>
 </template>
 

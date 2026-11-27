@@ -241,6 +241,31 @@
 }
 
 /* Tab Content */
+.event-stage-shell {
+  flex: 1;
+  min-height: 0;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  transform-origin: center top;
+  transition:
+    transform 420ms var(--motion-profile-ease-flight),
+    border-radius 420ms var(--motion-profile-ease-flight);
+}
+
+.event-stage-shell.is-detail-open {
+  pointer-events: none;
+  user-select: none;
+}
+
+@media (min-width: 769px) {
+  .event-stage-shell.is-detail-open {
+    transform: scale(0.972);
+    border-radius: 14px;
+    overflow: hidden;
+  }
+}
+
 .event-workspace {
   flex: 1;
   display: flex;

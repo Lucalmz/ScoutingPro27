@@ -1210,7 +1210,9 @@ export function createClientSession(ctx: ClientSessionContext) {
               if (isBogusOrTunCandidate(candidateObj.candidate, true)) {
                 continue
               }
-              candidateObj.candidate = optimizeCandidatePriority(candidateObj.candidate)
+              candidateObj.candidate = optimizeCandidatePriority(candidateObj.candidate, {
+                preserveRemoteSrflxTier: true
+              })
               log.info(`Remote ICE Candidate (pending) added from Host: ${candidateObj.candidate.trim()}`)
             }
             await clientPc.addIceCandidate(toIceCandidate(candidateObj))
@@ -1271,7 +1273,9 @@ export function createClientSession(ctx: ClientSessionContext) {
           log.info('Dropped remote bogus/TUN poison candidate on Client:', candidateData.candidate)
           return
         }
-        candidateData.candidate = optimizeCandidatePriority(candidateData.candidate)
+        candidateData.candidate = optimizeCandidatePriority(candidateData.candidate, {
+          preserveRemoteSrflxTier: true
+        })
       }
 
       if (targetProbePc ? activeProbePeers.get(data.clientSessionId) !== clientPc : ctx.getClientPc() !== clientPc) {

@@ -1,4 +1,3 @@
-import { DataChannelSender } from '@/services/dataChannelSender'
 import type { ChannelMessageHandlerContext } from './channelMessageHandler'
 
 const IDENTITY_AND_TAKEOVER_MESSAGE_TYPES = new Set([
@@ -204,11 +203,10 @@ export async function handleChannelIdentityAndTakeoverMessage(
             ctx.clientIdToScoutId.set(senderId, msg.newScoutId)
             ctx.clientIdToScoutName.set(senderId, msg.newScoutName)
           }
-          // Broadcast IDENTITY_MIGRATION to all other clients
-          ctx.clients.forEach((c, cid) => {
-            if (cid !== senderId && c.dc && c.dc.readyState === 'open') {
-              if (!c.sender) c.sender = new DataChannelSender(c.dc)
-              c.sender.enqueueSendQuiet(JSON.stringify(msg), 'IDENTITY_MIGRATION broadcast')
+          // Broadcast IDENTITY_MIGRATION to all other clients through SAS-gated sendMessage
+          ctx.clients.forEach((_c, cid) => {
+            if (cid !== senderId) {
+              void ctx.sendMessage(msg, cid).catch(() => {})
             }
           })
           if (senderId) {
@@ -235,11 +233,11 @@ export async function handleChannelIdentityAndTakeoverMessage(
       const { requestId, targetUsername, targetPassword, sourceUserId } = msg
       try {
         const cleanUser = (targetUsername || '').trim()
-        const cleanPwd = (targetPassword || '').trim()
+        const rawPwd = targetPassword ?? ''
         const { login: apiLogin } = await import('@/services/api')
         const authRes = await apiLogin({
           username: cleanUser,
-          password: cleanPwd
+          password: rawPwd
         })
 
         if (!authRes || !authRes.id) {
@@ -284,10 +282,9 @@ export async function handleChannelIdentityAndTakeoverMessage(
             newScoutName: authRes.username,
             authCode: currentInviteCode
           }
-          ctx.clients.forEach((c, cid) => {
-            if (cid !== senderId && c.dc && c.dc.readyState === 'open') {
-              if (!c.sender) c.sender = new DataChannelSender(c.dc)
-              c.sender.enqueueSendQuiet(JSON.stringify(migrationMsg), 'IDENTITY_MIGRATION broadcast')
+          ctx.clients.forEach((_c, cid) => {
+            if (cid !== senderId) {
+              void ctx.sendMessage(migrationMsg, cid).catch(() => {})
             }
           })
         }

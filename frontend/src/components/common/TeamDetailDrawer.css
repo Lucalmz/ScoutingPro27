@@ -2,7 +2,7 @@
 .drawer-overlay {
   position: fixed;
   inset: 0;
-  z-index: 1000;
+  z-index: 1050;
   background: color-mix(in srgb, var(--g-950) 82%, transparent);
   pointer-events: auto;
 }

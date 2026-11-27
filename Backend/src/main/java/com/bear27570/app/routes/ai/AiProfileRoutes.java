@@ -70,7 +70,42 @@ public final class AiProfileRoutes {
                 ctx.status(400).result(gson.toJson(Map.of("error", "Invalid JSON body or missing provider"))).contentType("application/json");
                 return;
             }
+            String normalizedProvider = newSettings.getProvider().trim().toUpperCase(Locale.ROOT);
+            if (!"OPENAI".equals(normalizedProvider) && !"GEMINI".equals(normalizedProvider) && !"ANTHROPIC".equals(normalizedProvider)) {
+                ctx.status(400).result(gson.toJson(Map.of("error", "Unsupported AI protocol: " + normalizedProvider))).contentType("application/json");
+                return;
+            }
+            newSettings.setProvider(normalizedProvider);
             newSettings.setUserId(sessionUserId);
+
+            String legacyBaseUrl = newSettings.getBaseUrl() != null ? newSettings.getBaseUrl().trim() : "";
+            if (!legacyBaseUrl.isEmpty() && !AiUrlGuard.isSafeUrl(legacyBaseUrl)) {
+                ctx.status(400).result(gson.toJson(Map.of("error", "Forbidden baseUrl: SSRF protection blocked access"))).contentType("application/json");
+                return;
+            }
+            if (legacyBaseUrl.length() > 500) {
+                ctx.status(400).result(gson.toJson(Map.of("error", "baseUrl exceeds 500 characters"))).contentType("application/json");
+                return;
+            }
+            newSettings.setBaseUrl(legacyBaseUrl);
+
+            String legacyProxyHost = newSettings.getProxyHost() != null ? newSettings.getProxyHost().trim() : "";
+            if (!AiUrlGuard.isSafeProxyHost(legacyProxyHost)) {
+                ctx.status(400).result(gson.toJson(Map.of("error", "Forbidden proxyHost: SSRF protection blocked access"))).contentType("application/json");
+                return;
+            }
+            if (legacyProxyHost.length() > 255) {
+                ctx.status(400).result(gson.toJson(Map.of("error", "proxyHost exceeds 255 characters"))).contentType("application/json");
+                return;
+            }
+            newSettings.setProxyHost(legacyProxyHost);
+            if (newSettings.getProxyPort() != null && (newSettings.getProxyPort() < 1 || newSettings.getProxyPort() > 65535)) {
+                ctx.status(400).result(gson.toJson(Map.of("error", "Invalid proxy port"))).contentType("application/json");
+                return;
+            }
+            if (newSettings.getModelName() != null) {
+                newSettings.setModelName(AiUrlGuard.truncate(newSettings.getModelName().trim(), 100));
+            }
 
             try {
                 jdbi.useExtension(AiSettingsDao.class, dao -> {
@@ -78,13 +113,19 @@ public final class AiProfileRoutes {
 
                     String submittedKey = newSettings.getApiKeyEncrypted();
                     if (AiUrlGuard.isBlankOrMasked(submittedKey)) {
-                        if (existing != null && existing.getApiKeyEncrypted() != null && !existing.getApiKeyEncrypted().isBlank()) {
+                        if (existing != null && AiUrlGuard.isDecryptableEncryptedKey(existing.getApiKeyEncrypted()) && !"ERR_KEY_LOST".equals(submittedKey)) {
                             newSettings.setApiKeyEncrypted(existing.getApiKeyEncrypted());
+                        } else if (existing != null && existing.getApiKeyEncrypted() != null && !existing.getApiKeyEncrypted().isBlank()) {
+                            throw new IllegalArgumentException("Saved API key could not be decrypted; please re-enter your API key");
                         } else {
                             throw new IllegalArgumentException("API Key is required for new provider configuration");
                         }
                     } else {
-                        newSettings.setApiKeyEncrypted(AESUtil.encrypt(submittedKey.trim()));
+                        String cleanKey = submittedKey.trim();
+                        if (AiUrlGuard.hasControlChars(cleanKey)) {
+                            throw new IllegalArgumentException("API Key contains invalid control characters");
+                        }
+                        newSettings.setApiKeyEncrypted(AESUtil.encrypt(cleanKey));
                     }
 
                     dao.upsert(newSettings);
@@ -135,7 +176,11 @@ public final class AiProfileRoutes {
 
             AiProviderProfile incoming;
             try {
+                validateProfileBodyTypes(bodyObj);
                 incoming = gson.fromJson(bodyObj, AiProviderProfile.class);
+            } catch (IllegalArgumentException e) {
+                ctx.status(400).result(gson.toJson(Map.of("error", e.getMessage()))).contentType("application/json");
+                return;
             } catch (Exception e) {
                 ctx.status(400).result(gson.toJson(Map.of("error", "Invalid profile fields: " + e.getMessage()))).contentType("application/json");
                 return;
@@ -143,6 +188,15 @@ public final class AiProfileRoutes {
             if (incoming == null) {
                 ctx.status(400).result(gson.toJson(Map.of("error", "Missing profile payload"))).contentType("application/json");
                 return;
+            }
+
+            if (incoming.getId() != null) {
+                String trimmedId = incoming.getId().trim();
+                if (trimmedId.length() > 128) {
+                    ctx.status(400).result(gson.toJson(Map.of("error", "Profile id exceeds 128 characters"))).contentType("application/json");
+                    return;
+                }
+                incoming.setId(trimmedId);
             }
 
             String protocol = incoming.getProtocol() != null ? incoming.getProtocol().trim().toUpperCase(Locale.ROOT) : "";
@@ -153,17 +207,53 @@ public final class AiProfileRoutes {
             incoming.setProtocol(protocol);
             incoming.setUserId(sessionUserId);
 
-            if (incoming.getBaseUrl() != null && !incoming.getBaseUrl().isBlank() && !AiUrlGuard.isSafeUrl(incoming.getBaseUrl().trim())) {
+            String rawBaseUrl = incoming.getBaseUrl() != null ? incoming.getBaseUrl().trim() : "";
+            if (rawBaseUrl.length() > 500) {
+                ctx.status(400).result(gson.toJson(Map.of("error", "baseUrl exceeds 500 characters"))).contentType("application/json");
+                return;
+            }
+            if (!rawBaseUrl.isEmpty() && !AiUrlGuard.isSafeUrl(rawBaseUrl)) {
                 ctx.status(400).result(gson.toJson(Map.of("error", "Forbidden baseUrl: SSRF protection blocked access"))).contentType("application/json");
                 return;
             }
-            incoming.setBaseUrl(incoming.getBaseUrl() != null ? incoming.getBaseUrl().trim() : "");
+            incoming.setBaseUrl(rawBaseUrl);
 
-            normalizeProfileDefaults(incoming, protocol, bodyObj);
+            String rawProxyHost = incoming.getProxyHost() != null ? incoming.getProxyHost().trim() : "";
+            if (rawProxyHost.length() > 255) {
+                ctx.status(400).result(gson.toJson(Map.of("error", "proxyHost exceeds 255 characters"))).contentType("application/json");
+                return;
+            }
+            if (!AiUrlGuard.isSafeProxyHost(rawProxyHost)) {
+                ctx.status(400).result(gson.toJson(Map.of("error", "Forbidden proxyHost: SSRF protection blocked access"))).contentType("application/json");
+                return;
+            }
+            incoming.setProxyHost(rawProxyHost);
+            if (incoming.getProxyPort() != null && (incoming.getProxyPort() < 1 || incoming.getProxyPort() > 65535)) {
+                ctx.status(400).result(gson.toJson(Map.of("error", "Invalid proxy port"))).contentType("application/json");
+                return;
+            }
 
-            String submittedKey = bodyObj.has("apiKey") && !bodyObj.get("apiKey").isJsonNull()
-                    ? bodyObj.get("apiKey").getAsString()
-                    : incoming.getApiKeyEncrypted();
+            if (incoming.getTemperature() != null && (!Double.isFinite(incoming.getTemperature()) || incoming.getTemperature() < 0.0 || incoming.getTemperature() > 2.0)) {
+                ctx.status(400).result(gson.toJson(Map.of("error", "temperature must be between 0 and 2"))).contentType("application/json");
+                return;
+            }
+
+            try {
+                normalizeProfileDefaults(incoming, protocol, bodyObj);
+            } catch (IllegalArgumentException e) {
+                ctx.status(400).result(gson.toJson(Map.of("error", e.getMessage()))).contentType("application/json");
+                return;
+            }
+
+            String submittedKey;
+            try {
+                submittedKey = bodyObj.has("apiKey") && !bodyObj.get("apiKey").isJsonNull()
+                        ? AiUrlGuard.getOptionalString(bodyObj, "apiKey")
+                        : incoming.getApiKeyEncrypted();
+            } catch (IllegalArgumentException e) {
+                ctx.status(400).result(gson.toJson(Map.of("error", e.getMessage()))).contentType("application/json");
+                return;
+            }
 
             try {
                 AiProviderProfile saved = jdbi.inTransaction(handle -> {
@@ -172,24 +262,44 @@ public final class AiProfileRoutes {
 
                     AiProviderProfile existing = null;
                     if (incoming.getId() != null && !incoming.getId().isBlank()) {
-                        existing = dao.findByIdAndUserId(incoming.getId().trim(), sessionUserId);
+                        AiProviderProfile globalExisting = dao.findById(incoming.getId());
+                        if (globalExisting != null && !sessionUserId.equals(globalExisting.getUserId())) {
+                            throw new io.javalin.http.ForbiddenResponse("Cannot overwrite AI profile of another user");
+                        }
+                        existing = globalExisting;
                     } else {
                         incoming.setId("prof-" + UUID.randomUUID());
                     }
 
                     boolean isLocalOpenAi = "OPENAI".equals(protocol) && AiClient.isLoopbackUrl(incoming.getBaseUrl());
+                    boolean existingKeyDecryptable = existing != null && AiUrlGuard.isDecryptableEncryptedKey(existing.getApiKeyEncrypted());
+                    boolean existingKeyCorrupted = existing != null
+                            && existing.getApiKeyEncrypted() != null
+                            && !existing.getApiKeyEncrypted().isBlank()
+                            && !existingKeyDecryptable;
+                    boolean explicitClearLocal = isLocalOpenAi
+                            && bodyObj.has("clearApiKey")
+                            && bodyObj.get("clearApiKey").isJsonPrimitive()
+                            && bodyObj.get("clearApiKey").getAsBoolean();
+
                     if (AiUrlGuard.isBlankOrMasked(submittedKey)) {
-                        if (existing != null && existing.getApiKeyEncrypted() != null && !existing.getApiKeyEncrypted().isBlank() && !"ERR_KEY_LOST".equals(submittedKey)) {
+                        if (explicitClearLocal) {
+                            incoming.setApiKeyEncrypted("");
+                        } else if (existingKeyDecryptable && !"ERR_KEY_LOST".equals(submittedKey)) {
                             incoming.setApiKeyEncrypted(existing.getApiKeyEncrypted());
-                        } else if (isLocalOpenAi && (submittedKey == null || submittedKey.isBlank())) {
+                        } else if (isLocalOpenAi && (submittedKey == null || submittedKey.isBlank() || "ERR_KEY_LOST".equals(submittedKey))) {
                             incoming.setApiKeyEncrypted("");
-                        } else if (existing != null && isLocalOpenAi && (existing.getApiKeyEncrypted() == null || existing.getApiKeyEncrypted().isBlank())) {
-                            incoming.setApiKeyEncrypted("");
+                        } else if (existingKeyCorrupted) {
+                            throw new IllegalArgumentException("Saved API key could not be decrypted; please re-enter your API key");
                         } else {
                             throw new IllegalArgumentException("API Key is required for non-local AI provider profile");
                         }
                     } else {
-                        incoming.setApiKeyEncrypted(AESUtil.encrypt(submittedKey.trim()));
+                        String cleanKey = submittedKey.trim();
+                        if (AiUrlGuard.hasControlChars(cleanKey)) {
+                            throw new IllegalArgumentException("API Key contains invalid control characters");
+                        }
+                        incoming.setApiKeyEncrypted(AESUtil.encrypt(cleanKey));
                     }
 
                     if (existing == null && "GEMINI".equals(protocol) && incoming.getCustomModels().isEmpty()) {
@@ -203,12 +313,18 @@ public final class AiProfileRoutes {
                         incoming.setIsActive(true);
                     }
 
-                    dao.upsert(incoming);
+                    if (existing != null) {
+                        dao.updateScoped(incoming);
+                    } else {
+                        dao.insert(incoming);
+                    }
                     return dao.findByIdAndUserId(incoming.getId(), sessionUserId);
                 });
 
                 prepareProfileForResponse(saved);
                 ctx.status(200).result(gson.toJson(saved)).contentType("application/json");
+            } catch (io.javalin.http.ForbiddenResponse e) {
+                throw e;
             } catch (IllegalArgumentException e) {
                 ctx.status(400).result(gson.toJson(Map.of("error", e.getMessage()))).contentType("application/json");
             } catch (Exception e) {
@@ -337,24 +453,53 @@ public final class AiProfileRoutes {
                     p.setIsActive(true);
                     activatedOne = true;
                 }
-                profileDao.upsert(p);
+                profileDao.insert(p);
             }
             return profileDao.findByUserId(userId);
         });
     }
 
+    private static void validateProfileBodyTypes(JsonObject bodyObj) {
+        AiUrlGuard.getOptionalString(bodyObj, "id");
+        AiUrlGuard.getOptionalString(bodyObj, "name");
+        AiUrlGuard.getOptionalString(bodyObj, "presetId");
+        AiUrlGuard.getOptionalString(bodyObj, "protocol");
+        AiUrlGuard.getOptionalString(bodyObj, "apiKey");
+        AiUrlGuard.getOptionalString(bodyObj, "apiKeyEncrypted");
+        AiUrlGuard.getOptionalString(bodyObj, "baseUrl");
+        AiUrlGuard.getOptionalString(bodyObj, "modelName");
+        AiUrlGuard.getOptionalString(bodyObj, "systemPrompt");
+        AiUrlGuard.getOptionalString(bodyObj, "anthropicVersion");
+        AiUrlGuard.getOptionalString(bodyObj, "proxyHost");
+        AiUrlGuard.getOptionalDouble(bodyObj, "temperature");
+        AiUrlGuard.getOptionalInt(bodyObj, "maxTokens");
+        AiUrlGuard.getOptionalInt(bodyObj, "thinkingBudget");
+        AiUrlGuard.getOptionalInt(bodyObj, "maxContextMsgs");
+        AiUrlGuard.getOptionalInt(bodyObj, "proxyPort");
+        AiUrlGuard.getOptionalBoolean(bodyObj, "enableThinking");
+        AiUrlGuard.getOptionalBoolean(bodyObj, "isActive");
+    }
+
     private static void normalizeProfileDefaults(AiProviderProfile incoming, String protocol, JsonObject bodyObj) {
         if (incoming.getName() == null || incoming.getName().isBlank()) {
-            incoming.setName(defaultProfileName(protocol, incoming.getBaseUrl()));
+            incoming.setName(AiUrlGuard.truncate(defaultProfileName(protocol, incoming.getBaseUrl()), 120));
         } else {
-            incoming.setName(incoming.getName().trim());
+            incoming.setName(AiUrlGuard.truncate(incoming.getName().trim(), 120));
         }
         if (incoming.getPresetId() == null || incoming.getPresetId().isBlank()) {
             incoming.setPresetId("custom");
+        } else {
+            incoming.setPresetId(AiUrlGuard.truncate(incoming.getPresetId().trim(), 48));
         }
-        incoming.setModelName(incoming.getModelName() != null ? incoming.getModelName().trim() : "");
+        incoming.setModelName(incoming.getModelName() != null ? AiUrlGuard.truncate(incoming.getModelName().trim(), 200) : "");
         if (incoming.getAnthropicVersion() == null || incoming.getAnthropicVersion().isBlank()) {
             incoming.setAnthropicVersion("2023-06-01");
+        } else {
+            String av = incoming.getAnthropicVersion().trim();
+            if (AiUrlGuard.hasControlChars(av)) {
+                throw new IllegalArgumentException("anthropicVersion contains invalid control characters");
+            }
+            incoming.setAnthropicVersion(AiUrlGuard.truncate(av, 32));
         }
         if (incoming.getTemperature() == null) {
             incoming.setTemperature(0.4);

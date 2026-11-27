@@ -452,16 +452,16 @@ export async function uploadOfflineSyncFileViaUi(
 
     if (expectApplyError) {
       await page.waitForFunction(
-        () =>
-          Boolean(document.querySelector('.offline-sync-modal .import-error-banner')) ||
-          !document.querySelector('.offline-sync-modal'),
+        () => {
+          const banner = document.querySelector('.offline-sync-modal .import-error-banner');
+          return Boolean(banner && (banner.textContent || '').trim().length > 0);
+        },
         { timeout: 10000 }
       );
-      const stillOpen = await page.$('.offline-sync-modal');
-      if (stillOpen) {
-        await page.click('.offline-sync-modal .btn-close');
-        await page.waitForFunction(() => !document.querySelector('.offline-sync-modal'), { timeout: 5000 });
-      }
+      const modalOpen = await page.$('.offline-sync-modal');
+      assert.ok(modalOpen, 'Expected .offline-sync-modal to stay open when import fails');
+      await page.click('.offline-sync-modal .btn-close');
+      await page.waitForFunction(() => !document.querySelector('.offline-sync-modal'), { timeout: 5000 });
       return { applied: false, previewMatched: previewInfo.matchedNames };
     }
 

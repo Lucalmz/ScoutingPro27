@@ -51,10 +51,7 @@ public final class GeminiProtocolAdapter {
         if (baseUrl == null || baseUrl.isBlank()) {
             return DEFAULT_GEMINI_BASE_URL;
         }
-        String bUrl = baseUrl.trim();
-        while (bUrl.endsWith("/")) {
-            bUrl = bUrl.substring(0, bUrl.length() - 1);
-        }
+        String bUrl = com.bear27570.app.routes.ai.AiUrlGuard.stripQueryAndFragment(baseUrl);
         if (bUrl.matches(".*/v[0-9]+([a-zA-Z0-9_-]*)?$")) {
             return bUrl;
         }
@@ -85,23 +82,48 @@ public final class GeminiProtocolAdapter {
             Consumer<StreamChunk> chunkConsumer,
             AtomicBoolean isCancelled
     ) throws Exception {
+        streamChat(
+                profile, apiKey, modelName, temperature, systemPrompt, messages,
+                profile.getEnableThinking(), profile.getThinkingBudget(), chunkConsumer, isCancelled
+        );
+    }
+
+    public static void streamChat(
+            AiProviderProfile profile,
+            String apiKey,
+            String modelName,
+            Double temperature,
+            String systemPrompt,
+            List<Map<String, String>> messages,
+            boolean enableThinking,
+            Integer thinkingBudget,
+            Consumer<StreamChunk> chunkConsumer,
+            AtomicBoolean isCancelled
+    ) throws Exception {
         String model = (modelName != null && !modelName.isBlank()) ? modelName.trim() : "gemini-flash-latest";
         String endpoint = resolveGenerateEndpoint(profile.getBaseUrl(), model, true);
         HttpClient client = AiProxyResolver.buildHttpClient(profile.getProxyHost(), profile.getProxyPort(), endpoint);
 
-        boolean tryThinkingConfig = profile.getEnableThinking();
+        boolean includeThinkingConfig = true;
+        Integer currentBudget = enableThinking
+                ? ((thinkingBudget != null && thinkingBudget > 0) ? thinkingBudget : 4096)
+                : ((thinkingBudget != null && thinkingBudget > 0) ? thinkingBudget : 0);
         HttpResponse<InputStream> response = null;
         CompletableFuture<HttpResponse<InputStream>> activeFuture = null;
 
-        for (int attempt = 0; attempt < 2; attempt++) {
-            JsonObject payload = buildPayload(systemPrompt, messages, temperature, profile.getMaxTokens(), tryThinkingConfig);
+        for (int attempt = 0; attempt < 3; attempt++) {
+            JsonObject payload = buildPayload(
+                    systemPrompt, messages, temperature, profile.getMaxTokens(),
+                    enableThinking, currentBudget, includeThinkingConfig
+            );
             HttpRequest.Builder reqBuilder = HttpRequest.newBuilder()
                     .uri(URI.create(endpoint))
                     .header("Content-Type", "application/json")
                     .POST(HttpRequest.BodyPublishers.ofString(AiStreamSupport.GSON.toJson(payload)))
                     .timeout(Duration.ofSeconds(120));
-            if (!apiKey.isEmpty()) {
-                reqBuilder.header("x-goog-api-key", apiKey);
+            String cleanApiKey = com.bear27570.app.routes.ai.AiUrlGuard.stripControlChars(apiKey);
+            if (!cleanApiKey.isEmpty()) {
+                reqBuilder.header("x-goog-api-key", cleanApiKey);
             }
 
             activeFuture = client.sendAsync(reqBuilder.build(), HttpResponse.BodyHandlers.ofInputStream());
@@ -120,10 +142,20 @@ public final class GeminiProtocolAdapter {
                 body = new String(is.readAllBytes(), StandardCharsets.UTF_8);
             }
 
-            if (attempt == 0 && code == 400 && tryThinkingConfig && body.toLowerCase(Locale.ROOT).contains("thinking")) {
-                tryThinkingConfig = false;
-                logger.info("[AiClient] Gemini model/gateway rejected thinkingConfig (HTTP 400), retrying without thinkingConfig.");
-                continue;
+            String lower = body.toLowerCase(Locale.ROOT);
+            if (attempt < 2 && code == 400 && includeThinkingConfig) {
+                if (!enableThinking && currentBudget == 0
+                        && (lower.contains("budget") || lower.contains("minimum") || lower.contains("zero"))
+                        && !lower.contains("not enabled")) {
+                    currentBudget = 128;
+                    logger.info("[AiClient] Gemini model rejected thinkingBudget=0 (HTTP 400), retrying with minimal thinkingBudget=128.");
+                    continue;
+                }
+                if (lower.contains("thinking") || lower.contains("budget")) {
+                    includeThinkingConfig = false;
+                    logger.info("[AiClient] Gemini model/gateway rejected thinkingConfig (HTTP 400), retrying without thinkingConfig.");
+                    continue;
+                }
             }
 
             if (code == 404) {
@@ -157,11 +189,13 @@ public final class GeminiProtocolAdapter {
         }
     }
 
-    private static JsonObject buildPayload(
+    public static JsonObject buildPayload(
             String systemPrompt,
             List<Map<String, String>> messages,
             Double temperature,
             Integer maxTokens,
+            boolean enableThinking,
+            Integer thinkingBudget,
             boolean includeThinkingConfig
     ) {
         JsonObject payload = new JsonObject();
@@ -198,7 +232,15 @@ public final class GeminiProtocolAdapter {
         }
         if (includeThinkingConfig) {
             JsonObject thinkingConfig = new JsonObject();
-            thinkingConfig.addProperty("includeThoughts", true);
+            if (enableThinking) {
+                int budget = (thinkingBudget != null && thinkingBudget > 0) ? thinkingBudget : 4096;
+                thinkingConfig.addProperty("includeThoughts", true);
+                thinkingConfig.addProperty("thinkingBudget", budget);
+            } else {
+                int budget = (thinkingBudget != null && thinkingBudget > 0) ? thinkingBudget : 0;
+                thinkingConfig.addProperty("includeThoughts", false);
+                thinkingConfig.addProperty("thinkingBudget", budget);
+            }
             generationConfig.add("thinkingConfig", thinkingConfig);
         }
         if (generationConfig.size() > 0) {

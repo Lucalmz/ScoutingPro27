@@ -40,10 +40,7 @@ public final class AnthropicProtocolAdapter {
         if (baseUrl == null || baseUrl.isBlank()) {
             return "https://api.anthropic.com/v1/messages";
         }
-        String bUrl = baseUrl.trim();
-        while (bUrl.endsWith("/")) {
-            bUrl = bUrl.substring(0, bUrl.length() - 1);
-        }
+        String bUrl = com.bear27570.app.routes.ai.AiUrlGuard.stripQueryAndFragment(baseUrl);
         if (bUrl.endsWith("/v1/messages") || bUrl.endsWith("/messages")) {
             return bUrl;
         }
@@ -57,10 +54,7 @@ public final class AnthropicProtocolAdapter {
         if (baseUrl == null || baseUrl.isBlank()) {
             return "https://api.anthropic.com/v1/models";
         }
-        String bUrl = baseUrl.trim();
-        while (bUrl.endsWith("/")) {
-            bUrl = bUrl.substring(0, bUrl.length() - 1);
-        }
+        String bUrl = com.bear27570.app.routes.ai.AiUrlGuard.stripQueryAndFragment(baseUrl);
         if (bUrl.endsWith("/models")) {
             return bUrl;
         }
@@ -126,6 +120,24 @@ public final class AnthropicProtocolAdapter {
             Consumer<StreamChunk> chunkConsumer,
             AtomicBoolean isCancelled
     ) throws Exception {
+        streamChat(
+                profile, apiKey, modelName, temperature, systemPrompt, messages,
+                profile.getEnableThinking(), profile.getThinkingBudget(), chunkConsumer, isCancelled
+        );
+    }
+
+    public static void streamChat(
+            AiProviderProfile profile,
+            String apiKey,
+            String modelName,
+            Double temperature,
+            String systemPrompt,
+            List<Map<String, String>> messages,
+            boolean enableThinking,
+            Integer thinkingBudget,
+            Consumer<StreamChunk> chunkConsumer,
+            AtomicBoolean isCancelled
+    ) throws Exception {
         String model = (modelName != null && !modelName.isBlank()) ? modelName.trim() : "claude-sonnet-4-20250514";
         String endpoint = resolveMessagesEndpoint(profile.getBaseUrl());
         String anthropicVersion = (profile.getAnthropicVersion() != null && !profile.getAnthropicVersion().isBlank())
@@ -133,20 +145,21 @@ public final class AnthropicProtocolAdapter {
                 : AiStreamSupport.DEFAULT_ANTHROPIC_VERSION;
         HttpClient client = AiProxyResolver.buildHttpClient(profile.getProxyHost(), profile.getProxyPort(), endpoint);
 
-        boolean tryThinking = profile.getEnableThinking();
+        boolean tryThinking = enableThinking;
         HttpResponse<InputStream> response = null;
         CompletableFuture<HttpResponse<InputStream>> activeFuture = null;
 
         for (int attempt = 0; attempt < 2; attempt++) {
-            JsonObject payload = buildPayload(model, systemPrompt, messages, temperature, profile.getMaxTokens(), tryThinking, profile.getThinkingBudget());
+            JsonObject payload = buildPayload(model, systemPrompt, messages, temperature, profile.getMaxTokens(), tryThinking, thinkingBudget);
             HttpRequest.Builder reqBuilder = HttpRequest.newBuilder()
                     .uri(URI.create(endpoint))
                     .header("content-type", "application/json")
-                    .header("anthropic-version", anthropicVersion)
+                    .header("anthropic-version", com.bear27570.app.routes.ai.AiUrlGuard.stripControlChars(anthropicVersion))
                     .POST(HttpRequest.BodyPublishers.ofString(AiStreamSupport.GSON.toJson(payload)))
                     .timeout(Duration.ofSeconds(120));
-            if (!apiKey.isEmpty()) {
-                reqBuilder.header("x-api-key", apiKey);
+            String cleanApiKey = com.bear27570.app.routes.ai.AiUrlGuard.stripControlChars(apiKey);
+            if (!cleanApiKey.isEmpty()) {
+                reqBuilder.header("x-api-key", cleanApiKey);
             }
 
             activeFuture = client.sendAsync(reqBuilder.build(), HttpResponse.BodyHandlers.ofInputStream());
@@ -214,7 +227,7 @@ public final class AnthropicProtocolAdapter {
         }
     }
 
-    private static JsonObject buildPayload(
+    public static JsonObject buildPayload(
             String model,
             String systemPrompt,
             List<Map<String, String>> messages,

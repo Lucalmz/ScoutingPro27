@@ -1,5 +1,7 @@
 package com.bear27570.app.util.ai;
 
+import com.google.gson.Gson;
+import com.google.gson.GsonBuilder;
 import com.google.gson.JsonObject;
 import com.google.gson.JsonParser;
 import org.slf4j.Logger;
@@ -29,8 +31,11 @@ import java.util.concurrent.atomic.AtomicBoolean;
  */
 abstract class AbstractVoiceWsRelay implements AiVoiceRelaySession {
     private static final Logger logger = LoggerFactory.getLogger(AbstractVoiceWsRelay.class);
+    private static final Gson GSON_SERIALIZE_NULLS = new GsonBuilder().serializeNulls().create();
     protected static final int MAX_HISTORY_TURNS = 12;
     protected static final int MAX_HISTORY_CHARS = 12_000;
+    protected static final int MAX_INBOUND_FRAME_BYTES = 4 * 1024 * 1024;
+    private static final int MAX_PENDING_OUTBOUND = 128;
 
     protected final String wsUrl;
     protected final String rawApiKey;
@@ -39,6 +44,8 @@ abstract class AbstractVoiceWsRelay implements AiVoiceRelaySession {
     protected final RelayEventListener listener;
 
     private final AtomicBoolean closed = new AtomicBoolean(false);
+    private final Object pendingLock = new Object();
+    private final List<String> pendingOutbound = new ArrayList<>();
     private final ExecutorService sendExecutor = Executors.newSingleThreadExecutor(r -> {
         Thread t = new Thread(r, "ai-voice-ws-send");
         t.setDaemon(true);
@@ -55,7 +62,7 @@ abstract class AbstractVoiceWsRelay implements AiVoiceRelaySession {
             RelayEventListener listener
     ) {
         this.wsUrl = wsUrl;
-        this.rawApiKey = rawApiKey != null ? rawApiKey.trim() : "";
+        this.rawApiKey = com.bear27570.app.routes.ai.AiUrlGuard.stripControlChars(rawApiKey != null ? rawApiKey.trim() : "");
         this.proxyHost = proxyHost;
         this.proxyPort = proxyPort;
         this.listener = listener;
@@ -90,27 +97,50 @@ abstract class AbstractVoiceWsRelay implements AiVoiceRelaySession {
                         close();
                         return;
                     }
-                    if (closed.get()) {
-                        try {
-                            ws.sendClose(WebSocket.NORMAL_CLOSURE, "Session closed");
-                        } catch (Exception ignored) {}
-                        return;
+                    List<String> preConnect;
+                    synchronized (pendingLock) {
+                        if (closed.get()) {
+                            closeWebSocketQuietly(ws);
+                            return;
+                        }
+                        preConnect = new ArrayList<>(pendingOutbound);
+                        pendingOutbound.clear();
+                        this.upstreamWs = ws;
+                        ws.request(1);
+                        onUpstreamConnected();
+                        for (String jsonStr : preConnect) {
+                            submitSendToExecutor(ws, jsonStr);
+                        }
                     }
-                    this.upstreamWs = ws;
-                    ws.request(1);
-                    onUpstreamConnected();
                 });
     }
 
     protected void sendJson(JsonObject payload) {
         if (closed.get() || payload == null) return;
-        final String jsonStr = AiStreamSupport.GSON.toJson(payload);
-        if (sendExecutor.isShutdown()) return;
+        final String jsonStr = GSON_SERIALIZE_NULLS.toJson(payload);
+        enqueueSendRaw(jsonStr);
+    }
+
+    private void enqueueSendRaw(String jsonStr) {
+        WebSocket ws;
+        synchronized (pendingLock) {
+            if (closed.get() || sendExecutor.isShutdown()) return;
+            ws = this.upstreamWs;
+            if (ws == null) {
+                if (pendingOutbound.size() < MAX_PENDING_OUTBOUND) {
+                    pendingOutbound.add(jsonStr);
+                }
+                return;
+            }
+        }
+        submitSendToExecutor(ws, jsonStr);
+    }
+
+    private void submitSendToExecutor(WebSocket ws, String jsonStr) {
+        if (closed.get() || sendExecutor.isShutdown()) return;
         try {
             sendExecutor.execute(() -> {
                 if (closed.get()) return;
-                WebSocket ws = this.upstreamWs;
-                if (ws == null) return;
                 try {
                     ws.sendText(jsonStr, true).join();
                 } catch (Exception e) {
@@ -142,21 +172,30 @@ abstract class AbstractVoiceWsRelay implements AiVoiceRelaySession {
 
     @Override
     public void close() {
-        if (!closed.compareAndSet(false, true)) {
-            return;
-        }
-        WebSocket ws = this.upstreamWs;
-        this.upstreamWs = null;
-        if (ws != null) {
-            try {
-                ws.sendClose(WebSocket.NORMAL_CLOSURE, "Client closed");
-            } catch (Exception ignored) {
-                try {
-                    ws.abort();
-                } catch (Exception ignored2) {}
+        WebSocket ws;
+        synchronized (pendingLock) {
+            if (!closed.compareAndSet(false, true)) {
+                return;
             }
+            ws = this.upstreamWs;
+            this.upstreamWs = null;
+            pendingOutbound.clear();
+        }
+        if (ws != null) {
+            closeWebSocketQuietly(ws);
         }
         sendExecutor.shutdownNow();
+    }
+
+    private static void closeWebSocketQuietly(WebSocket ws) {
+        if (ws == null) return;
+        try {
+            ws.sendClose(WebSocket.NORMAL_CLOSURE, "Client closed");
+        } catch (Exception ignored) {
+            try {
+                ws.abort();
+            } catch (Exception ignored2) {}
+        }
     }
 
     protected static String toHttpProxyProbeUrl(String wsUrl) {
@@ -237,6 +276,13 @@ abstract class AbstractVoiceWsRelay implements AiVoiceRelaySession {
 
         @Override
         public CompletionStage<?> onText(WebSocket webSocket, CharSequence data, boolean last) {
+            if (textBuffer.length() + data.length() > MAX_INBOUND_FRAME_BYTES) {
+                textBuffer.setLength(0);
+                logger.warn("[{}] Inbound text frame exceeded {} bytes limit", getRelayName(), MAX_INBOUND_FRAME_BYTES);
+                listener.onError("UPSTREAM_WS_ERROR", "Inbound WebSocket frame exceeded 4 MB limit");
+                close();
+                return null;
+            }
             textBuffer.append(data);
             if (last) {
                 String payload = textBuffer.toString();
@@ -249,7 +295,15 @@ abstract class AbstractVoiceWsRelay implements AiVoiceRelaySession {
 
         @Override
         public CompletionStage<?> onBinary(WebSocket webSocket, ByteBuffer data, boolean last) {
-            byte[] bytes = new byte[data.remaining()];
+            int remaining = data.remaining();
+            if (binaryBuffer.size() + remaining > MAX_INBOUND_FRAME_BYTES) {
+                binaryBuffer.reset();
+                logger.warn("[{}] Inbound binary frame exceeded {} bytes limit", getRelayName(), MAX_INBOUND_FRAME_BYTES);
+                listener.onError("UPSTREAM_WS_ERROR", "Inbound WebSocket binary frame exceeded 4 MB limit");
+                close();
+                return null;
+            }
+            byte[] bytes = new byte[remaining];
             data.get(bytes);
             binaryBuffer.write(bytes, 0, bytes.length);
             if (last) {

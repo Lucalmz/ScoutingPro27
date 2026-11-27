@@ -69,7 +69,28 @@ const editingMatchId = ref<string | null>(null)
 const editCommentText = ref('')
 const isSaving = ref(false)
 
+function canEditRecord(rec: ScoutingRecord): boolean {
+  if (eventStore.isHost) return true
+  const currentUserId =
+    userStore.userId ||
+    (() => {
+      try {
+        const raw = localStorage.getItem('scoutingpro-user')
+        return raw ? (JSON.parse(raw)?.id as string | undefined) : undefined
+      } catch {
+        return undefined
+      }
+    })()
+  if (currentUserId && rec.scoutId && rec.scoutId !== currentUserId) {
+    return false
+  }
+  if (currentUserId && rec.scoutId === currentUserId) return true
+  if (!currentUserId) return true
+  return false
+}
+
 function startEditComment(match: ScoutingRecord) {
+  if (!canEditRecord(match)) return
   editingMatchId.value = match.id
   editCommentText.value = match.notes || ''
 }
@@ -226,6 +247,7 @@ onBeforeRouteLeave((to) => {
 })
 
 async function saveComment(match: ScoutingRecord) {
+  if (!canEditRecord(match)) return
   isSaving.value = true
   try {
     const updatedRecord = { ...match, notes: editCommentText.value, updatedAt: new Date().toISOString() }
@@ -494,8 +516,8 @@ async function saveComment(match: ScoutingRecord) {
                 {{ t('team_detail.comments') }}
                 
                 <button 
-                  v-if="editingMatchId !== match.id" 
-                  @click="startEditComment(match)" 
+                  v-if="editingMatchId !== match.id && canEditRecord(match)" 
+                  @click="startEditComment(match)"  
                   class="btn-icon" 
                   style="margin-left: auto;"
                   title="Edit Evaluation"
@@ -531,9 +553,10 @@ async function saveComment(match: ScoutingRecord) {
 .team-detail-backdrop {
   position: fixed;
   inset: 0;
-  background: color-mix(in srgb, var(--g-950) 65%, transparent);
-  backdrop-filter: blur(4px);
-  z-index: 1000;
+  background-color: color-mix(in srgb, var(--g-950) 56%, transparent);
+  backdrop-filter: blur(10px);
+  -webkit-backdrop-filter: blur(10px);
+  z-index: 1020;
   display: flex;
   justify-content: center;
   align-items: flex-end;
@@ -550,8 +573,46 @@ async function saveComment(match: ScoutingRecord) {
   border-bottom: none;
   display: flex;
   flex-direction: column;
-  view-transition-name: modal-sheet;
   box-shadow: var(--shadow-3);
+}
+
+.team-detail-backdrop.team-detail-sheet-enter-active {
+  transition:
+    background-color 420ms var(--motion-profile-ease-flight),
+    backdrop-filter 420ms var(--motion-profile-ease-flight),
+    -webkit-backdrop-filter 420ms var(--motion-profile-ease-flight);
+}
+
+.team-detail-backdrop.team-detail-sheet-leave-active {
+  transition:
+    background-color 280ms var(--motion-profile-ease-exit),
+    backdrop-filter 280ms var(--motion-profile-ease-exit),
+    -webkit-backdrop-filter 280ms var(--motion-profile-ease-exit);
+}
+
+.team-detail-backdrop.team-detail-sheet-enter-active .team-detail-view {
+  transition:
+    transform 420ms var(--motion-profile-ease-flight),
+    opacity 260ms var(--motion-ease-out);
+}
+
+.team-detail-backdrop.team-detail-sheet-leave-active .team-detail-view {
+  transition:
+    transform 280ms var(--motion-profile-ease-exit),
+    opacity 220ms var(--motion-profile-ease-exit);
+}
+
+.team-detail-backdrop.team-detail-sheet-enter-from,
+.team-detail-backdrop.team-detail-sheet-leave-to {
+  background-color: rgba(7, 9, 10, 0);
+  backdrop-filter: blur(0px);
+  -webkit-backdrop-filter: blur(0px);
+}
+
+.team-detail-backdrop.team-detail-sheet-enter-from .team-detail-view,
+.team-detail-backdrop.team-detail-sheet-leave-to .team-detail-view {
+  transform: translate3d(0, 100%, 0);
+  opacity: 0.92;
 }
 
 .sheet-drag-handle {

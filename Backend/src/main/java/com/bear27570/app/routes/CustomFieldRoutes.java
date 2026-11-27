@@ -7,6 +7,7 @@ import com.bear27570.app.model.ScoutingEvent;
 import com.bear27570.app.util.FormulaValidator;
 import com.google.gson.Gson;
 import com.google.gson.JsonElement;
+import com.google.gson.JsonObject;
 import com.google.gson.JsonParser;
 import io.javalin.config.RoutesConfig;
 import io.javalin.http.Context;
@@ -178,14 +179,27 @@ public class CustomFieldRoutes {
                 throw new NotFoundResponse("Custom field not found");
             }
 
-            CustomFieldDefinition incoming = gson.fromJson(ctx.body(), CustomFieldDefinition.class);
+            JsonObject bodyObj;
+            CustomFieldDefinition incoming;
+            try {
+                JsonElement el = JsonParser.parseString(ctx.body());
+                if (el == null || !el.isJsonObject()) {
+                    ctx.status(400).result("Invalid JSON body");
+                    return;
+                }
+                bodyObj = el.getAsJsonObject();
+                incoming = gson.fromJson(bodyObj, CustomFieldDefinition.class);
+            } catch (Exception e) {
+                ctx.status(400).result("Invalid JSON body");
+                return;
+            }
             if (incoming == null) {
                 ctx.status(400).result("Invalid JSON body");
                 return;
             }
 
-            if (incoming.getName() != null) {
-                String trimmedName = incoming.getName().trim();
+            if (bodyObj.has("name") && !bodyObj.get("name").isJsonNull()) {
+                String trimmedName = incoming.getName() != null ? incoming.getName().trim() : "";
                 if (trimmedName.isEmpty()) {
                     ctx.status(400).result("Field name is required");
                     return;
@@ -195,12 +209,15 @@ public class CustomFieldRoutes {
                     return;
                 }
                 existing.setName(trimmedName);
+            } else if (bodyObj.has("name") && bodyObj.get("name").isJsonNull()) {
+                ctx.status(400).result("Field name is required");
+                return;
             }
-            if (incoming.getPhase() != null && ALLOWED_PHASES.contains(incoming.getPhase().trim().toLowerCase(Locale.ROOT))) {
+            if (bodyObj.has("phase") && incoming.getPhase() != null && ALLOWED_PHASES.contains(incoming.getPhase().trim().toLowerCase(Locale.ROOT))) {
                 existing.setPhase(incoming.getPhase().trim().toLowerCase(Locale.ROOT));
             }
-            if (incoming.getFieldType() != null) {
-                String type = incoming.getFieldType().trim().toLowerCase(Locale.ROOT);
+            if (bodyObj.has("fieldType") && !bodyObj.get("fieldType").isJsonNull()) {
+                String type = incoming.getFieldType() != null ? incoming.getFieldType().trim().toLowerCase(Locale.ROOT) : "";
                 if (!ALLOWED_TYPES.contains(type)) {
                     ctx.status(400).result("Invalid fieldType: " + type);
                     return;
@@ -212,23 +229,27 @@ public class CustomFieldRoutes {
                 return;
             }
 
-            existing.setRequired(incoming.isRequired());
-            existing.setDefaultVal(incoming.getDefaultVal());
-            existing.setOptionsJson(incoming.getOptionsJson());
-            existing.setMinVal(incoming.getMinVal());
-            existing.setMaxVal(incoming.getMaxVal());
-            existing.setStepVal(incoming.getStepVal());
-            existing.setUnit(incoming.getUnit());
-            existing.setDescription(incoming.getDescription());
-            existing.setConfigJson(incoming.getConfigJson());
-            existing.setFormulaExpr(incoming.getFormulaExpr());
-            existing.setAggregationMode(incoming.getAggregationMode());
-            existing.setDisplayFormat(incoming.getDisplayFormat());
+            if (bodyObj.has("required") && !bodyObj.get("required").isJsonNull()) {
+                existing.setRequired(incoming.isRequired());
+            }
+            if (bodyObj.has("defaultVal")) existing.setDefaultVal(incoming.getDefaultVal());
+            if (bodyObj.has("optionsJson")) existing.setOptionsJson(incoming.getOptionsJson());
+            if (bodyObj.has("minVal")) existing.setMinVal(incoming.getMinVal());
+            if (bodyObj.has("maxVal")) existing.setMaxVal(incoming.getMaxVal());
+            if (bodyObj.has("stepVal")) existing.setStepVal(incoming.getStepVal());
+            if (bodyObj.has("unit")) existing.setUnit(incoming.getUnit());
+            if (bodyObj.has("description")) existing.setDescription(incoming.getDescription());
+            if (bodyObj.has("configJson")) existing.setConfigJson(incoming.getConfigJson());
+            if (bodyObj.has("formulaExpr")) existing.setFormulaExpr(incoming.getFormulaExpr());
+            if (bodyObj.has("aggregationMode")) existing.setAggregationMode(incoming.getAggregationMode());
+            if (bodyObj.has("displayFormat")) existing.setDisplayFormat(incoming.getDisplayFormat());
 
-            if (incoming.getOrderSeq() > 0) {
+            if (bodyObj.has("orderSeq") && !bodyObj.get("orderSeq").isJsonNull() && incoming.getOrderSeq() > 0) {
                 existing.setOrderSeq(incoming.getOrderSeq());
             }
-            existing.setIsActive(incoming.isActive());
+            if (bodyObj.has("isActive") && !bodyObj.get("isActive").isJsonNull()) {
+                existing.setIsActive(incoming.isActive());
+            }
 
             if (!validateAndNormalizeExtendedFields(existing, eventId, ctx)) {
                 return;

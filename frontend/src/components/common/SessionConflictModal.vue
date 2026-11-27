@@ -82,7 +82,7 @@ async function handleRename() {
 }
 
 async function handleMergeAccount() {
-  const pwd = targetPassword.value ? targetPassword.value.trim() : ''
+  const pwd = targetPassword.value ?? ''
   const targetName = conflictData.value?.conflictingUsername?.trim()
   if (!targetName || !pwd || merging.value || renaming.value) return
 
@@ -215,7 +215,7 @@ onUnmounted(() => {
               />
               <button
                 class="btn btn-accent"
-                :disabled="!targetPassword.trim() || renaming || merging"
+                :disabled="!targetPassword || renaming || merging"
                 @click="handleMergeAccount"
               >
                 <span v-if="merging" class="spinner-small" style="margin-right: 4px;"></span>

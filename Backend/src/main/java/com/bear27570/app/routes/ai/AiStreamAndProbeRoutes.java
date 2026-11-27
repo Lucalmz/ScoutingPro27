@@ -73,8 +73,15 @@ public final class AiStreamAndProbeRoutes {
             return;
         }
 
-        String profileId = AiUrlGuard.getOptionalString(body, "profileId");
-        String provider = AiUrlGuard.getOptionalString(body, "provider");
+        String profileId;
+        String provider;
+        try {
+            profileId = AiUrlGuard.getOptionalString(body, "profileId");
+            provider = AiUrlGuard.getOptionalString(body, "provider");
+        } catch (IllegalArgumentException e) {
+            ctx.status(400).result(gson.toJson(Map.of("error", e.getMessage()))).contentType("application/json");
+            return;
+        }
         if ((profileId == null || profileId.isBlank()) && (provider == null || provider.isBlank())) {
             ctx.status(400).result(gson.toJson(Map.of("error", "Missing provider or profileId"))).contentType("application/json");
             return;
@@ -86,34 +93,76 @@ public final class AiStreamAndProbeRoutes {
             return;
         }
 
-        if (streaming && profile.getBaseUrl() != null && !profile.getBaseUrl().isBlank() && !AiUrlGuard.isSafeUrl(profile.getBaseUrl())) {
+        if (profile.getBaseUrl() != null && !profile.getBaseUrl().isBlank() && !AiUrlGuard.isSafeUrl(profile.getBaseUrl())) {
             ctx.status(400).result(gson.toJson(Map.of("error", "Forbidden baseUrl: SSRF protection blocked access"))).contentType("application/json");
             return;
         }
+        if (!AiUrlGuard.isSafeProxyHost(profile.getProxyHost())) {
+            ctx.status(400).result(gson.toJson(Map.of("error", "Forbidden proxyHost: SSRF protection blocked access"))).contentType("application/json");
+            return;
+        }
+        if (profile.getProxyPort() != null && (profile.getProxyPort() < 1 || profile.getProxyPort() > 65535)) {
+            ctx.status(400).result(gson.toJson(Map.of("error", "Invalid proxy port"))).contentType("application/json");
+            return;
+        }
 
-        String sysPrompt = body.has("systemPrompt") && !body.get("systemPrompt").isJsonNull()
-                ? body.get("systemPrompt").getAsString()
-                : profile.getSystemPrompt();
-        String modelOverride = AiUrlGuard.getOptionalString(body, "modelName");
-        Double tempOverride = body.has("temperature") && !body.get("temperature").isJsonNull()
-                ? body.get("temperature").getAsDouble()
-                : null;
-        List<Map<String, String>> msgList = AiUrlGuard.parseMessagesArray(body);
+        String sysPrompt;
+        String modelOverride;
+        Double tempOverride;
+        Boolean enableThinkingOverride;
+        Integer thinkingBudgetOverride;
+        String reasoningEffortOverride;
+        List<Map<String, String>> msgList;
+        try {
+            sysPrompt = body.has("systemPrompt") && !body.get("systemPrompt").isJsonNull()
+                    ? AiUrlGuard.getOptionalString(body, "systemPrompt")
+                    : profile.getSystemPrompt();
+            modelOverride = AiUrlGuard.getOptionalString(body, "modelName");
+            tempOverride = AiUrlGuard.getOptionalDouble(body, "temperature");
+            if (tempOverride != null && (tempOverride < 0.0 || tempOverride > 2.0)) {
+                throw new IllegalArgumentException("temperature must be between 0 and 2");
+            }
+            enableThinkingOverride = AiUrlGuard.getOptionalBoolean(body, "enableThinking");
+            Integer rawBudget = AiUrlGuard.getOptionalInt(body, "thinkingBudget");
+            thinkingBudgetOverride = rawBudget != null ? Math.max(0, rawBudget) : null;
+            reasoningEffortOverride = normalizeReasoningEffort(AiUrlGuard.getOptionalString(body, "reasoningEffort"));
+            msgList = AiUrlGuard.parseMessagesArray(body);
+        } catch (IllegalArgumentException e) {
+            ctx.status(400).result(gson.toJson(Map.of("error", e.getMessage()))).contentType("application/json");
+            return;
+        }
 
         if (!streaming) {
             try {
-                if (profileId == null && provider != null) {
-                    profile.setEnableThinking(false);
-                }
-                String reply = AiClient.chat(profile, sysPrompt, msgList, tempOverride, modelOverride);
+                Boolean nonStreamThinking = (profileId == null && provider != null && enableThinkingOverride == null)
+                        ? Boolean.FALSE
+                        : enableThinkingOverride;
+                AiClient.ThinkingOptions thinkingOpts = (nonStreamThinking != null || thinkingBudgetOverride != null || reasoningEffortOverride != null)
+                        ? new AiClient.ThinkingOptions(nonStreamThinking, thinkingBudgetOverride, reasoningEffortOverride)
+                        : null;
+                String reply = AiClient.chat(profile, sysPrompt, msgList, tempOverride, modelOverride, thinkingOpts);
                 ctx.result(gson.toJson(Map.of("reply", reply))).contentType("application/json");
+            } catch (IllegalArgumentException e) {
+                ctx.status(400).result(gson.toJson(Map.of("error", e.getMessage()))).contentType("application/json");
             } catch (Exception e) {
                 ctx.status(500).result(gson.toJson(Map.of("error", e.getMessage() != null ? e.getMessage() : "AI chat failed"))).contentType("application/json");
             }
             return;
         }
 
-        streamSseResponse(ctx, profile, sysPrompt, msgList, tempOverride, modelOverride);
+        AiClient.ThinkingOptions thinkingOpts = (enableThinkingOverride != null || thinkingBudgetOverride != null || reasoningEffortOverride != null)
+                ? new AiClient.ThinkingOptions(enableThinkingOverride, thinkingBudgetOverride, reasoningEffortOverride)
+                : null;
+        streamSseResponse(ctx, profile, sysPrompt, msgList, tempOverride, modelOverride, thinkingOpts);
+    }
+
+    private static String normalizeReasoningEffort(String raw) {
+        if (raw == null || raw.isBlank()) return null;
+        String lower = raw.trim().toLowerCase(Locale.ROOT);
+        return switch (lower) {
+            case "none", "minimal", "low", "medium", "high" -> lower;
+            default -> null;
+        };
     }
 
     private void streamSseResponse(
@@ -122,7 +171,8 @@ public final class AiStreamAndProbeRoutes {
             String sysPrompt,
             List<Map<String, String>> msgList,
             Double tempOverride,
-            String modelOverride
+            String modelOverride,
+            AiClient.ThinkingOptions thinkingOpts
     ) {
         ctx.status(200);
         ctx.result("");
@@ -138,9 +188,13 @@ public final class AiStreamAndProbeRoutes {
 
             try {
                 if (ctx.req().isAsyncStarted()) {
+                    ctx.req().getAsyncContext().setTimeout(300_000L);
                     ctx.req().getAsyncContext().addListener(new jakarta.servlet.AsyncListener() {
                         @Override public void onComplete(jakarta.servlet.AsyncEvent event) { isFinished.set(true); }
-                        @Override public void onTimeout(jakarta.servlet.AsyncEvent event) { isCancelled.set(true); }
+                        @Override public void onTimeout(jakarta.servlet.AsyncEvent event) {
+                            isCancelled.set(true);
+                            try { event.getAsyncContext().complete(); } catch (Exception ignored) {}
+                        }
                         @Override public void onError(jakarta.servlet.AsyncEvent event) { isCancelled.set(true); }
                         @Override public void onStartAsync(jakarta.servlet.AsyncEvent event) {}
                     });
@@ -202,7 +256,7 @@ public final class AiStreamAndProbeRoutes {
                     }
                 };
 
-                AiClient.chatStream(profile, sysPrompt, msgList, tempOverride, modelOverride, chunkConsumer, isCancelled);
+                AiClient.chatStream(profile, sysPrompt, msgList, tempOverride, modelOverride, thinkingOpts, chunkConsumer, isCancelled);
 
                 if (!isCancelled.get() && !isFinished.get()) {
                     synchronized (streamLock) {
@@ -238,7 +292,8 @@ public final class AiStreamAndProbeRoutes {
         String profileId = null;
         String protocolOrProvider = null;
         String proxyHost = null;
-        String proxyPortStr = null;
+        Object rawProxyPort = null;
+        boolean hasBodyProxyPort = false;
         String customBaseUrl = null;
         String queryApiKey = null;
         String anthropicVersion = null;
@@ -254,8 +309,9 @@ public final class AiStreamAndProbeRoutes {
                         protocolOrProvider = AiUrlGuard.asString(body.get("provider"));
                     }
                     proxyHost = AiUrlGuard.asString(body.get("proxyHost"));
-                    if (body.get("proxyPort") != null) {
-                        proxyPortStr = AiUrlGuard.asString(body.get("proxyPort"));
+                    if (body.containsKey("proxyPort") && body.get("proxyPort") != null) {
+                        rawProxyPort = body.get("proxyPort");
+                        hasBodyProxyPort = true;
                     }
                     customBaseUrl = AiUrlGuard.asString(body.get("baseUrl"));
                     queryApiKey = AiUrlGuard.asString(body.get("apiKey"));
@@ -267,7 +323,12 @@ public final class AiStreamAndProbeRoutes {
         if (protocolOrProvider == null) protocolOrProvider = ctx.queryParam("protocol");
         if (protocolOrProvider == null) protocolOrProvider = ctx.queryParam("provider");
         if (proxyHost == null) proxyHost = ctx.queryParam("proxyHost");
-        if (proxyPortStr == null) proxyPortStr = ctx.queryParam("proxyPort");
+        if (!hasBodyProxyPort) {
+            String qp = ctx.queryParam("proxyPort");
+            if (qp != null) {
+                rawProxyPort = qp;
+            }
+        }
         if (customBaseUrl == null) customBaseUrl = ctx.queryParam("baseUrl");
         if (queryApiKey == null) queryApiKey = ctx.queryParam("apiKey");
         if (anthropicVersion == null) anthropicVersion = ctx.queryParam("anthropicVersion");
@@ -312,13 +373,13 @@ public final class AiStreamAndProbeRoutes {
         if (!AiUrlGuard.isBlankOrMasked(queryApiKey)) {
             rawApiKey = queryApiKey.trim();
         } else if (savedProfile != null && savedProfile.getApiKeyEncrypted() != null && !savedProfile.getApiKeyEncrypted().isBlank()) {
-            if (AiUrlGuard.isTrustedSavedUrl(customBaseUrl, savedProfile.getBaseUrl())) {
+            if (AiUrlGuard.isTrustedSavedUrl(customBaseUrl, savedProfile.getBaseUrl(), protocol)) {
                 try {
                     rawApiKey = AESUtil.decrypt(savedProfile.getApiKeyEncrypted());
                 } catch (Exception ignored) {}
             }
         } else if (legacySaved != null && legacySaved.getApiKeyEncrypted() != null && !legacySaved.getApiKeyEncrypted().isBlank()) {
-            if (AiUrlGuard.isTrustedSavedUrl(customBaseUrl, legacySaved.getBaseUrl())) {
+            if (AiUrlGuard.isTrustedSavedUrl(customBaseUrl, legacySaved.getBaseUrl(), protocol)) {
                 try {
                     rawApiKey = AESUtil.decrypt(legacySaved.getApiKeyEncrypted());
                 } catch (Exception ignored) {}
@@ -343,18 +404,45 @@ public final class AiStreamAndProbeRoutes {
         }
 
         Integer proxyPort = null;
-        if (proxyPortStr != null && !proxyPortStr.isBlank()) {
-            try {
-                proxyPort = Integer.parseInt(proxyPortStr.trim());
-            } catch (NumberFormatException e) {
+        if (rawProxyPort != null) {
+            if (rawProxyPort instanceof Number num) {
+                double val = num.doubleValue();
+                if (!Double.isFinite(val) || val != Math.rint(val) || val < 1 || val > 65535) {
+                    ctx.status(400).result(gson.toJson(Map.of("error", "Invalid proxy port"))).contentType("application/json");
+                    return;
+                }
+                proxyPort = (int) val;
+            } else if (rawProxyPort instanceof String proxyPortStr) {
+                if (!proxyPortStr.isBlank()) {
+                    try {
+                        proxyPort = Integer.parseInt(proxyPortStr.trim());
+                    } catch (NumberFormatException e) {
+                        ctx.status(400).result(gson.toJson(Map.of("error", "Invalid proxy port"))).contentType("application/json");
+                        return;
+                    }
+                    if (proxyPort < 1 || proxyPort > 65535) {
+                        ctx.status(400).result(gson.toJson(Map.of("error", "Invalid proxy port"))).contentType("application/json");
+                        return;
+                    }
+                }
+            } else {
                 ctx.status(400).result(gson.toJson(Map.of("error", "Invalid proxy port"))).contentType("application/json");
                 return;
             }
-        } else if (savedProfile != null && savedProfile.getProxyPort() != null) {
+        }
+        if (proxyPort == null && savedProfile != null && savedProfile.getProxyPort() != null) {
             proxyPort = savedProfile.getProxyPort();
             if (proxyHost == null || proxyHost.isBlank()) {
                 proxyHost = savedProfile.getProxyHost();
             }
+        }
+        if (proxyHost != null && !proxyHost.isBlank() && !AiUrlGuard.isSafeProxyHost(proxyHost)) {
+            ctx.status(400).result(gson.toJson(Map.of("error", "Forbidden proxyHost: SSRF protection blocked access"))).contentType("application/json");
+            return;
+        }
+        if (AiUrlGuard.hasControlChars(rawApiKey) || AiUrlGuard.hasControlChars(anthropicVersion)) {
+            ctx.status(400).result(gson.toJson(Map.of("error", "Header fields contain invalid control characters"))).contentType("application/json");
+            return;
         }
 
         long start = System.currentTimeMillis();

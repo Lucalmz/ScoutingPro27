@@ -16,28 +16,34 @@ const viewportWidth = ref(typeof window !== 'undefined' ? window.innerWidth : 14
 
 const isWideDesktop = computed(() => viewportWidth.value >= AI_LAYOUT.WIDE_DESKTOP_BREAKPOINT)
 
-const showBackdrop = computed(
+const isOverlayDock = computed(
   () => aiStore.isDockOpen && (!isWideDesktop.value || aiStore.isDockExpanded)
 )
 
-const dockStyle = computed(() => {
-  if (aiStore.isDockExpanded || !isWideDesktop.value) {
-    return {}
-  }
-  return {
-    '--ai-dock-width': `${aiStore.dockWidth}px`
-  }
-})
+const showBackdrop = isOverlayDock
+
+const spacerStyle = computed(() => ({
+  '--ai-dock-width': `${aiStore.dockWidth}px`
+}))
+
+const dockStyle = computed(() => ({
+  '--ai-dock-width': `${aiStore.dockWidth}px`
+}))
 
 function syncRootRightOffset() {
   if (typeof document === 'undefined') return
   const shouldOffset = aiStore.isDockOpen && isWideDesktop.value && !aiStore.isDockExpanded
   const offset = shouldOffset ? `${aiStore.dockWidth}px` : '0px'
   document.documentElement.style.setProperty('--ai-dock-right-offset', offset)
+  if (isOverlayDock.value) {
+    document.documentElement.dataset.aiDockOverlay = 'true'
+  } else {
+    delete document.documentElement.dataset.aiDockOverlay
+  }
 }
 
 watch(
-  [() => aiStore.isDockOpen, () => aiStore.dockWidth, () => aiStore.isDockExpanded, isWideDesktop],
+  [() => aiStore.isDockOpen, () => aiStore.dockWidth, () => aiStore.isDockExpanded, isWideDesktop, isOverlayDock],
   () => {
     syncRootRightOffset()
   },
@@ -87,17 +93,38 @@ onUnmounted(() => {
   onWindowPointerUp()
   if (typeof document !== 'undefined') {
     document.documentElement.style.setProperty('--ai-dock-right-offset', '0px')
+    delete document.documentElement.dataset.aiDockOverlay
   }
 })
 </script>
 
 <template>
-  <template v-if="aiStore.isDockOpen">
-    <div v-if="showBackdrop" class="dock-overlay-backdrop" @click="aiStore.isDockExpanded ? aiStore.setDockExpanded(false) : aiStore.setDockOpen(false)"></div>
+  <!-- Wide-desktop layout spacer: smoothly reserves/releases flex width while the fixed dock animates -->
+  <div
+    v-if="isWideDesktop"
+    class="ai-dock-spacer"
+    :class="{ 'is-open': aiStore.isDockOpen, 'is-dragging': isDragging }"
+    :style="spacerStyle"
+    aria-hidden="true"
+  ></div>
 
+  <Transition name="ai-dock-backdrop">
+    <div
+      v-if="showBackdrop"
+      class="dock-overlay-backdrop"
+      @click="aiStore.isDockExpanded ? aiStore.setDockExpanded(false) : aiStore.setDockOpen(false)"
+    ></div>
+  </Transition>
+
+  <Transition name="ai-dock-slide">
     <aside
+      v-if="aiStore.isDockOpen"
       class="ai-copilot-dock"
-      :class="{ 'is-expanded': aiStore.isDockExpanded }"
+      :class="{
+        'is-expanded': aiStore.isDockExpanded,
+        'is-narrow-overlay': !isWideDesktop,
+        'is-dragging': isDragging
+      }"
       :style="dockStyle"
     >
       <div
@@ -112,7 +139,7 @@ onUnmounted(() => {
         <AiCopilotWorkspace :event-id="eventId" mode="dock" />
       </div>
     </aside>
-  </template>
+  </Transition>
 </template>
 
 <style scoped src="./AiCopilotDock.css"></style>

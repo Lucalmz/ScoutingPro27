@@ -5,10 +5,11 @@ import type { AiProtocol, AiProviderProfile, AiSettings } from '@/types'
 import {
   AI_PROFILE_DEFAULTS,
   API_KEY_ERR_LOST,
+  aiFetch,
   isMaskedOrPlaceholderApiKey
 } from '@/components/ai/constants'
 import { GEMINI_DEFAULT_MODELS, getPresetById, isLocalBaseUrl } from '@/components/ai/presets'
-import { readAiStorage, writeAiStorage } from './aiDockState'
+import { readAiStorage, removeAiStorage, writeAiStorage } from './aiDockState'
 
 const KEY_ACTIVE_PROFILE = 'sp27_ai_active_profile_id'
 
@@ -34,7 +35,15 @@ export interface ConnectionCheckResponse {
   error?: string
 }
 
-export function createAiProfilesModule(userStore: ReturnType<typeof useUserStore>) {
+export function createAiProfilesModule(
+  userStore: ReturnType<typeof useUserStore>,
+  hooks?: { onActiveProfileChanged?: (profile: AiProviderProfile | null) => void }
+) {
+  const onRefreshedToken = (newToken: string) => {
+    if (userStore.user) {
+      userStore.user = { ...userStore.user, token: newToken }
+    }
+  }
   const profiles = ref<AiProviderProfile[]>([])
   const loadingProfiles = ref(false)
   const activeProfileId = ref<string>(readAiStorage(KEY_ACTIVE_PROFILE) || '')
@@ -83,7 +92,7 @@ export function createAiProfilesModule(userStore: ReturnType<typeof useUserStore
       systemPrompt: String(raw?.systemPrompt || ''),
       temperature: typeof raw?.temperature === 'number' ? raw.temperature : AI_PROFILE_DEFAULTS.temperature,
       maxTokens: typeof raw?.maxTokens === 'number' ? raw.maxTokens : AI_PROFILE_DEFAULTS.maxTokens,
-      enableThinking: raw?.enableThinking !== false,
+      enableThinking: Boolean(raw?.enableThinking),
       thinkingBudget: typeof raw?.thinkingBudget === 'number' ? raw.thinkingBudget : AI_PROFILE_DEFAULTS.thinkingBudget,
       anthropicVersion: String(raw?.anthropicVersion || AI_PROFILE_DEFAULTS.anthropicVersion),
       maxContextMsgs: typeof raw?.maxContextMsgs === 'number' ? raw.maxContextMsgs : AI_PROFILE_DEFAULTS.maxContextMsgs,
@@ -102,17 +111,22 @@ export function createAiProfilesModule(userStore: ReturnType<typeof useUserStore
       writeAiStorage(KEY_ACTIVE_PROFILE, act.id)
       activeProvider.value = act.protocol
     }
+    hooks?.onActiveProfileChanged?.(act)
   }
 
   async function fetchProfiles(): Promise<AiProviderProfile[]> {
-    if (!userStore.userId || !userStore.token) return []
+    const reqUserId = userStore.userId
+    if (!reqUserId || !userStore.token) return []
     loadingProfiles.value = true
     try {
-      const res = await fetch(`/api/users/${userStore.userId}/ai-profiles`, {
-        headers: { Authorization: `Bearer ${userStore.token}` }
+      const res = await aiFetch(`/api/users/${reqUserId}/ai-profiles`, {
+        token: userStore.token,
+        onRefreshedToken
       })
+      if (userStore.userId !== reqUserId || !userStore.token) return profiles.value
       if (res.ok) {
         const data = await res.json()
+        if (userStore.userId !== reqUserId || !userStore.token) return profiles.value
         if (Array.isArray(data)) {
           profiles.value = data.map(normalizeProfile)
           syncLegacyBridgeFromProfiles()
@@ -133,7 +147,11 @@ export function createAiProfilesModule(userStore: ReturnType<typeof useUserStore
       return { ok: false, error: i18n.global.t('ai.err_not_logged_in') }
     }
     const payload: Record<string, any> = { ...profile }
-    if (payload.apiKeyEncrypted && isMaskedOrPlaceholderApiKey(String(payload.apiKeyEncrypted))) {
+    if (
+      payload.apiKeyEncrypted !== undefined &&
+      payload.apiKeyEncrypted !== 'ERR_KEY_LOST' &&
+      isMaskedOrPlaceholderApiKey(String(payload.apiKeyEncrypted))
+    ) {
       delete payload.apiKeyEncrypted
     }
     if (payload.proxyPort === '' || payload.proxyPort === undefined) {
@@ -141,19 +159,28 @@ export function createAiProfilesModule(userStore: ReturnType<typeof useUserStore
     }
 
     try {
-      const res = await fetch(`/api/users/${userStore.userId}/ai-profiles`, {
+      const res = await aiFetch(`/api/users/${userStore.userId}/ai-profiles`, {
         method: 'POST',
+        token: userStore.token,
+        onRefreshedToken,
         headers: {
-          'Content-Type': 'application/json',
-          Authorization: `Bearer ${userStore.token}`
+          'Content-Type': 'application/json'
         },
         body: JSON.stringify(payload)
       })
-      const data = await res.json().catch(() => ({}))
-      if (!res.ok) {
-        return { ok: false, error: data?.error || `HTTP ${res.status}` }
+      const rawText = await res.text().catch(() => '')
+      let data: any = null
+      if (rawText.trim()) {
+        try {
+          data = JSON.parse(rawText)
+        } catch {
+          data = null
+        }
       }
-      const saved = normalizeProfile(data)
+      if (!res.ok) {
+        return { ok: false, error: data?.error || data?.message || rawText.trim() || `HTTP ${res.status}` }
+      }
+      const saved = normalizeProfile(data || {})
       await fetchProfiles()
       return { ok: true, profile: saved }
     } catch (e: any) {
@@ -164,9 +191,10 @@ export function createAiProfilesModule(userStore: ReturnType<typeof useUserStore
   async function activateProfile(profileId: string): Promise<boolean> {
     if (!userStore.userId || !userStore.token || !profileId) return false
     try {
-      const res = await fetch(`/api/users/${userStore.userId}/ai-profiles/${profileId}/activate`, {
+      const res = await aiFetch(`/api/users/${userStore.userId}/ai-profiles/${profileId}/activate`, {
         method: 'POST',
-        headers: { Authorization: `Bearer ${userStore.token}` }
+        token: userStore.token,
+        onRefreshedToken
       })
       if (res.ok) {
         profiles.value = profiles.value.map(p => ({ ...p, isActive: p.id === profileId }))
@@ -197,9 +225,10 @@ export function createAiProfilesModule(userStore: ReturnType<typeof useUserStore
   async function deleteProfile(profileId: string): Promise<boolean> {
     if (!userStore.userId || !userStore.token || !profileId) return false
     try {
-      const res = await fetch(`/api/users/${userStore.userId}/ai-profiles/${profileId}`, {
+      const res = await aiFetch(`/api/users/${userStore.userId}/ai-profiles/${profileId}`, {
         method: 'DELETE',
-        headers: { Authorization: `Bearer ${userStore.token}` }
+        token: userStore.token,
+        onRefreshedToken
       })
       if (res.ok) {
         await fetchProfiles()
@@ -218,11 +247,12 @@ export function createAiProfilesModule(userStore: ReturnType<typeof useUserStore
     if (!userStore.token) return { success: false, models: [], error: i18n.global.t('ai.err_not_logged_in') }
     const cleanKey = !isMaskedOrPlaceholderApiKey(params.apiKey) ? params.apiKey!.trim() : undefined
     try {
-      const res = await fetch(endpoint, {
+      const res = await aiFetch(endpoint, {
         method: 'POST',
+        token: userStore.token,
+        onRefreshedToken,
         headers: {
-          'Content-Type': 'application/json',
-          Authorization: `Bearer ${userStore.token}`
+          'Content-Type': 'application/json'
         },
         body: JSON.stringify({
           profileId: params.profileId || undefined,
@@ -238,11 +268,19 @@ export function createAiProfilesModule(userStore: ReturnType<typeof useUserStore
       if (res.ok) {
         return await res.json()
       }
-      const errJson = await res.json().catch(() => null)
+      const rawErr = await res.text().catch(() => '')
+      let errJson: any = null
+      if (rawErr.trim()) {
+        try {
+          errJson = JSON.parse(rawErr)
+        } catch {
+          errJson = null
+        }
+      }
       return {
         success: false,
         models: [],
-        error: errJson?.error || `HTTP ${res.status}`
+        error: errJson?.error || errJson?.message || rawErr.trim() || `HTTP ${res.status}`
       }
     } catch (e: any) {
       return { success: false, models: [], error: e?.message || i18n.global.t('ai.err_network') }
@@ -268,14 +306,19 @@ export function createAiProfilesModule(userStore: ReturnType<typeof useUserStore
   }
 
   async function fetchSettings() {
-    if (!userStore.userId || !userStore.token) return
+    const reqUserId = userStore.userId
+    if (!reqUserId || !userStore.token) return
     loading.value = true
     try {
-      const res = await fetch(`/api/users/${userStore.userId}/ai-settings`, {
-        headers: { Authorization: `Bearer ${userStore.token}` }
+      const res = await aiFetch(`/api/users/${reqUserId}/ai-settings`, {
+        token: userStore.token,
+        onRefreshedToken
       })
+      if (userStore.userId !== reqUserId || !userStore.token) return
       if (res.ok) {
-        settingsList.value = await res.json()
+        const data = await res.json()
+        if (userStore.userId !== reqUserId || !userStore.token) return
+        settingsList.value = data
       }
     } catch (e) {
       console.error('Failed to fetch AI settings', e)
@@ -291,11 +334,12 @@ export function createAiProfilesModule(userStore: ReturnType<typeof useUserStore
       delete payload.apiKeyEncrypted
     }
     try {
-      const res = await fetch(`/api/users/${userStore.userId}/ai-settings`, {
+      const res = await aiFetch(`/api/users/${userStore.userId}/ai-settings`, {
         method: 'POST',
+        token: userStore.token,
+        onRefreshedToken,
         headers: {
-          'Content-Type': 'application/json',
-          Authorization: `Bearer ${userStore.token}`
+          'Content-Type': 'application/json'
         },
         body: JSON.stringify(payload)
       })
@@ -311,6 +355,16 @@ export function createAiProfilesModule(userStore: ReturnType<typeof useUserStore
 
   function getSettingsForProvider(provider: string): AiSettings | undefined {
     return settingsList.value.find(s => s.provider === provider)
+  }
+
+  function resetUserSession() {
+    profiles.value = []
+    settingsList.value = []
+    activeProfileId.value = ''
+    activeProvider.value = 'OPENAI'
+    loadingProfiles.value = false
+    loading.value = false
+    removeAiStorage(KEY_ACTIVE_PROFILE)
   }
 
   return {
@@ -331,6 +385,7 @@ export function createAiProfilesModule(userStore: ReturnType<typeof useUserStore
     activeProvider,
     fetchSettings,
     saveSettings,
-    getSettingsForProvider
+    getSettingsForProvider,
+    resetUserSession
   }
 }

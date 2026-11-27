@@ -124,7 +124,7 @@ watch(() => inboxStore.messages.length, (newLen, oldLen) => {
         :name="isViewTransitionSupported ? 'none' : 'page'" 
         :css="!isViewTransitionSupported"
         :mode="isViewTransitionSupported ? undefined : 'out-in'">
-        <component :is="Component" :key="route.name === 'event' ? 'event-view' : route.path" />
+        <component :is="Component" :key="(route.name === 'event' || route.name === 'team-detail') ? 'event-view' : route.path" />
       </transition>
     </router-view>
   </div>
@@ -295,24 +295,14 @@ watch(() => inboxStore.messages.length, (newLen, oldLen) => {
 }
 
 /* Prevent router container, Inbox FAB, and EventView sections from participating in or overlapping
-   user-profile modal or team-detail sheet transitions. */
+   user-profile modal transitions. */
 html[data-transition-type='user-profile'] .router-view-container,
 html[data-transition-type='user-profile'] .inbox-widget,
 html[data-transition-type='user-profile'] .event-view .topbar,
 html[data-transition-type='user-profile'] .event-view .event-name,
 html[data-transition-type='user-profile'] .event-view .topbar-right,
 html[data-transition-type='user-profile'] .event-view .tab-bar,
-html[data-transition-type='user-profile'] .event-view .tab-content,
-html[data-to-type='team-detail'] .event-view .topbar,
-html[data-to-type='team-detail'] .event-view .event-name,
-html[data-to-type='team-detail'] .event-view .topbar-right,
-html[data-to-type='team-detail'] .event-view .tab-bar,
-html[data-to-type='team-detail'] .event-view .tab-content,
-html[data-from-type='team-detail'] .event-view .topbar,
-html[data-from-type='team-detail'] .event-view .event-name,
-html[data-from-type='team-detail'] .event-view .topbar-right,
-html[data-from-type='team-detail'] .event-view .tab-bar,
-html[data-from-type='team-detail'] .event-view .tab-content {
+html[data-transition-type='user-profile'] .event-view .tab-content {
   view-transition-name: none !important;
 }
 
@@ -477,72 +467,6 @@ html[data-from-type='team-detail'] .event-view .tab-content {
     transform: translateY(0) scale(1);
     opacity: 1;
   }
-}
-
-/* ==============================================================
-   Team Detail: iOS Modal Sheet Transition
-   ============================================================== */
-
-/* Ensure the modal layers correctly: Detail View is ALWAYS on top */
-[data-to-type='team-detail']::view-transition-new(modal-sheet),
-[data-from-type='team-detail']::view-transition-old(modal-sheet) {
-  z-index: 2;
-  mix-blend-mode: normal;
-}
-
-[data-to-type='team-detail']::view-transition-old(page-view),
-[data-from-type='team-detail']::view-transition-new(page-view) {
-  z-index: 1;
-  mix-blend-mode: normal;
-  background: var(--g-950);
-}
-
-/* Hide the page-view of the new page when entering (we only want the modal-sheet to animate) */
-[data-to-type='team-detail']::view-transition-new(page-view) {
-  animation: none !important;
-  opacity: 0 !important;
-}
-
-/* Hide the page-view of the old page when leaving */
-[data-from-type='team-detail']::view-transition-old(page-view) {
-  animation: none !important;
-  opacity: 0 !important;
-}
-
-/* Entering TeamDetailView */
-[data-to-type='team-detail']::view-transition-new(modal-sheet) {
-  animation: modal-slide-up var(--motion-duration-page) var(--motion-ease-page) both;
-}
-[data-to-type='team-detail']::view-transition-old(page-view) {
-  animation: modal-push-back var(--motion-duration-page) var(--motion-ease-page) both;
-}
-
-/* Leaving TeamDetailView */
-[data-from-type='team-detail']::view-transition-old(modal-sheet) {
-  animation: modal-slide-down var(--motion-duration-page) var(--motion-ease-page) both;
-}
-[data-from-type='team-detail']::view-transition-new(page-view) {
-  animation: modal-pull-forward var(--motion-duration-page) var(--motion-ease-page) both;
-}
-
-@keyframes modal-slide-up {
-  from { transform: translateY(100%); }
-  to { transform: translateY(0); }
-}
-
-@keyframes modal-slide-down {
-  from { transform: translateY(0); }
-  to { transform: translateY(100%); }
-}
-
-@keyframes modal-push-back {
-  from { transform: scale(1); opacity: 1; border-radius: 0; }
-  to { transform: scale(0.94); opacity: 0.65; border-radius: 16px; }
-}
-
-@keyframes modal-pull-forward {
-  from { transform: scale(0.94); opacity: 0.65; border-radius: 16px; }
-  to { transform: scale(1); opacity: 1; border-radius: 0; }
 }
 
 /* ==============================================================

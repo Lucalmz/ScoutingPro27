@@ -769,6 +769,19 @@ export interface RankingRow {
 }
 
 export type AiProtocol = 'OPENAI' | 'GEMINI' | 'ANTHROPIC'
+export type AiThinkingMode = 'off' | 'low' | 'medium' | 'high'
+export type AiAssistantMode = 'ask' | 'turbo'
+
+export interface AiTurboActionResult {
+  id: string
+  type: string
+  status: 'pending' | 'success' | 'error'
+  summary: string
+  detail?: string
+  error?: string
+  actedAsUsername?: string
+  executedAt?: string
+}
 
 export interface AiSettings {
   userId?: string;
@@ -828,6 +841,8 @@ export interface AiChatMessage {
   viaVoice?: boolean
   stopped?: boolean
   error?: string
+  aiMode?: AiAssistantMode
+  turboActions?: AiTurboActionResult[]
 }
 
 export interface AiContextSections {

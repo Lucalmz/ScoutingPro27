@@ -130,3 +130,22 @@
   border-color: var(--status-ai);
   color: var(--status-ai);
 }
+
+/* Floating pop-in/out for scroll-to-bottom button & team hover card */
+.ai-pop-enter-active {
+  transition:
+    opacity 160ms var(--motion-ease-out),
+    transform 180ms var(--motion-ease-spring);
+}
+
+.ai-pop-leave-active {
+  transition:
+    opacity 130ms var(--motion-profile-ease-exit),
+    transform 130ms var(--motion-profile-ease-exit);
+}
+
+.ai-pop-enter-from,
+.ai-pop-leave-to {
+  opacity: 0;
+  transform: translateY(6px) scale(0.92);
+}

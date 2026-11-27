@@ -236,22 +236,32 @@ function buildConfigObject(): CustomFieldConfig {
   } else if (formType.value === 'text') {
     cfg.multiline = cfgMultiline.value
     if (cfgPlaceholder.value.trim()) cfg.placeholder = cfgPlaceholder.value.trim()
-    if (typeof cfgMaxLength.value === 'number' && cfgMaxLength.value > 0) cfg.maxLength = cfgMaxLength.value
+    const parsedMaxLen = parseOptionalNumber(cfgMaxLength.value)
+    if (parsedMaxLen !== null && parsedMaxLen > 0) cfg.maxLength = Math.trunc(parsedMaxLen)
   }
 
-  if (typeof cfgDecimalPlaces.value === 'number' && Number.isFinite(cfgDecimalPlaces.value)) {
-    cfg.decimalPlaces = Math.max(0, Math.min(4, Math.trunc(cfgDecimalPlaces.value)))
+  const parsedDecimals = parseOptionalNumber(cfgDecimalPlaces.value)
+  if (parsedDecimals !== null) {
+    cfg.decimalPlaces = Math.max(0, Math.min(4, Math.trunc(parsedDecimals)))
   }
 
-  if (formDisplayFormat.value === 'tier' && (cfgTierHigh.value !== null || cfgTierMid.value !== null)) {
+  const parsedTierHigh = parseOptionalNumber(cfgTierHigh.value)
+  const parsedTierMid = parseOptionalNumber(cfgTierMid.value)
+  if (formDisplayFormat.value === 'tier' && (parsedTierHigh !== null || parsedTierMid !== null)) {
     cfg.tierThresholds = {
-      high: cfgTierHigh.value ?? undefined,
-      mid: cfgTierMid.value ?? undefined,
+      high: parsedTierHigh ?? undefined,
+      mid: parsedTierMid ?? undefined,
       direction: cfgTierDirection.value
     }
   }
 
   return cfg
+}
+
+function parseOptionalNumber(val: unknown): number | null {
+  if (val === '' || val === null || val === undefined) return null
+  const num = Number(val)
+  return Number.isFinite(num) ? num : null
 }
 
 function submitForm() {
@@ -280,6 +290,10 @@ function submitForm() {
 
   const configObj = buildConfigObject()
   const configJson = Object.keys(configObj).length > 0 ? JSON.stringify(configObj) : null
+  const sanitizedOptions = formOptions.value.map((opt) => ({
+    ...opt,
+    numericValue: parseOptionalNumber(opt.numericValue)
+  }))
 
   const payload: Partial<CustomFieldDefinition> = {
     eventId: props.eventId,
@@ -293,10 +307,12 @@ function submitForm() {
     unit: formUnit.value.trim() || null,
     description: formDescription.value.trim() || null,
     configJson,
-    minVal: effectiveType === 'number' ? formMin.value : null,
-    maxVal: effectiveType === 'number' ? formMax.value : (effectiveType === 'level' ? formLevelCount.value : null),
-    stepVal: effectiveType === 'number' ? formStep.value : null,
-    optionsJson: (effectiveType === 'select' || effectiveType === 'multi_select') ? JSON.stringify(formOptions.value) : null,
+    minVal: effectiveType === 'number' ? parseOptionalNumber(formMin.value) : null,
+    maxVal: effectiveType === 'number'
+      ? parseOptionalNumber(formMax.value)
+      : (effectiveType === 'level' ? parseOptionalNumber(formLevelCount.value) : null),
+    stepVal: effectiveType === 'number' ? parseOptionalNumber(formStep.value) : null,
+    optionsJson: (effectiveType === 'select' || effectiveType === 'multi_select') ? JSON.stringify(sanitizedOptions) : null,
     formulaExpr: effectiveType === 'formula' ? formFormulaExpr.value.trim() : null,
     aggregationMode: formAggregationMode.value,
     displayFormat: formDisplayFormat.value,

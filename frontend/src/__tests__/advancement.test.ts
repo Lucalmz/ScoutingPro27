@@ -434,5 +434,30 @@ describe('FTC Official Advancement Points Calculator', () => {
       expect(adv.find(t => t.teamNumber === 15210)?.rolledDown).toBe(true)
       expect(adv.find(t => t.teamNumber === 24736)?.advancementStatus).toBe('BUBBLE')
     })
+
+    it('supports PascalCase official payloads, safe boolean string parsing, and non-finite/non-positive slots fallback', () => {
+      const rankings = [
+        { Rank: 1, TeamNumber: 1001, SortOrder1: 90 },
+        { Rank: 2, TeamNumber: 1002, SortOrder1: 80 },
+        { Rank: 3, TeamNumber: 1003, SortOrder1: 70 },
+        { Rank: 4, TeamNumber: 1004, SortOrder1: 60 }
+      ] as unknown as OfficialRanking[]
+      const officialAdv = {
+        AdvancesTo: 'CMP',
+        Slots: 2,
+        Advancement: [
+          { TeamNumber: '1001', Slot: 1, Declined: 'false', Status: 'FIRST' },
+          { Team: 1002, Slot: 2, Declined: 'true', Status: 'FIRST' },
+          { Team: 1003, Slot: 3, Declined: false, Status: 'FIRST' }
+        ]
+      } as unknown as OfficialAdvancementResponse
+
+      const adv = calculateAdvancement(rankings, [], [], [], Number.POSITIVE_INFINITY, officialAdv, false)
+      expect(adv.find(t => t.teamNumber === 1001)?.advancementStatus).toBe('ADVANCING')
+      expect(adv.find(t => t.teamNumber === 1002)?.advancementStatus).toBe('DECLINED')
+      expect(adv.find(t => t.teamNumber === 1003)?.advancementStatus).toBe('ADVANCING')
+      expect(adv.find(t => t.teamNumber === 1003)?.rolledDown).toBe(true)
+      expect(adv.find(t => t.teamNumber === 1004)?.advancementStatus).toBe('BUBBLE')
+    })
   })
 })

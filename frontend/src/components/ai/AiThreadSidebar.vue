@@ -49,6 +49,7 @@ function startRename(tr: AiThreadSummary) {
 }
 
 function commitRename(threadId: string) {
+  if (renamingId.value !== threadId) return
   const clean = renameDraft.value.trim()
   renamingId.value = null
   if (clean) {
@@ -165,6 +166,45 @@ async function confirmDelete(tr: AiThreadSummary) {
   bottom: 0;
   z-index: 30;
   box-shadow: var(--shadow-2);
+}
+
+.thread-sidebar:not(.docked).ai-sidebar-slide-enter-active {
+  transition:
+    transform 260ms var(--motion-profile-ease-flight),
+    opacity 200ms var(--motion-ease-out);
+}
+
+.thread-sidebar:not(.docked).ai-sidebar-slide-leave-active {
+  transition:
+    transform 200ms var(--motion-profile-ease-exit),
+    opacity 160ms var(--motion-profile-ease-exit);
+}
+
+.thread-sidebar:not(.docked).ai-sidebar-slide-enter-from,
+.thread-sidebar:not(.docked).ai-sidebar-slide-leave-to {
+  transform: translate3d(-100%, 0, 0);
+  opacity: 0;
+}
+
+.thread-sidebar.docked.ai-sidebar-slide-enter-active {
+  overflow: hidden;
+  transition:
+    width 280ms var(--motion-profile-ease-flight),
+    opacity 220ms var(--motion-ease-out);
+}
+
+.thread-sidebar.docked.ai-sidebar-slide-leave-active {
+  overflow: hidden;
+  transition:
+    width 220ms var(--motion-profile-ease-exit),
+    opacity 160ms var(--motion-profile-ease-exit);
+}
+
+.thread-sidebar.docked.ai-sidebar-slide-enter-from,
+.thread-sidebar.docked.ai-sidebar-slide-leave-to {
+  width: 0;
+  opacity: 0;
+  border-right-color: transparent;
 }
 
 .sidebar-top {

@@ -77,6 +77,23 @@
   font-size: 11px;
 }
 
+.msg-turbo-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+  font-size: 10px;
+  font-weight: 700;
+  padding: 1px 6px;
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--status-warning) 16%, transparent);
+  border: 1px solid color-mix(in srgb, var(--status-warning) 45%, transparent);
+  color: var(--status-warning);
+}
+
+.msg-turbo-pill .material-icons {
+  font-size: 11px;
+}
+
 /* Message Bubble / Card */
 .msg-bubble {
   max-width: 100%;
@@ -514,4 +531,110 @@
 .followup-chip .material-icons {
   font-size: 13px;
   color: var(--status-ai);
+}
+
+/* Turbo Execution Receipt Card */
+.turbo-pending-chip {
+  margin-top: 8px;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 5px 10px;
+  border-radius: 8px;
+  background: color-mix(in srgb, var(--status-warning) 12%, var(--surface-recessed));
+  border: 1px solid color-mix(in srgb, var(--status-warning) 40%, transparent);
+  color: var(--status-warning);
+  font-size: 12px;
+  font-weight: 600;
+}
+
+.turbo-pending-chip .material-icons {
+  font-size: 14px;
+}
+
+.turbo-receipt-card {
+  margin-top: 10px;
+  border: 1px solid color-mix(in srgb, var(--status-warning) 35%, var(--border));
+  border-radius: 10px;
+  background: color-mix(in srgb, var(--status-warning) 6%, var(--surface-recessed));
+  overflow: hidden;
+}
+
+.turbo-receipt-header {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 7px 10px;
+  background: color-mix(in srgb, var(--status-warning) 12%, var(--surface-elevated));
+  border-bottom: 1px solid var(--border-subtle);
+  font-size: 12px;
+  font-weight: 700;
+  color: var(--foreground);
+}
+
+.turbo-receipt-header .material-icons {
+  font-size: 15px;
+  color: var(--status-warning);
+}
+
+.turbo-receipt-actor {
+  margin-left: auto;
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--muted-foreground);
+}
+
+.turbo-receipt-list {
+  list-style: none;
+  margin: 0;
+  padding: 6px 10px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.turbo-receipt-item {
+  display: flex;
+  align-items: flex-start;
+  gap: 7px;
+  font-size: 12px;
+  line-height: 1.4;
+}
+
+.turbo-act-icon {
+  font-size: 15px;
+  margin-top: 1px;
+  flex-shrink: 0;
+}
+
+.turbo-receipt-item.is-success .turbo-act-icon {
+  color: var(--status-success);
+}
+
+.turbo-receipt-item.is-error .turbo-act-icon {
+  color: var(--status-error);
+}
+
+.turbo-receipt-item.is-pending .turbo-act-icon {
+  color: var(--status-warning);
+}
+
+.turbo-act-body {
+  min-width: 0;
+  flex: 1;
+}
+
+.turbo-act-summary {
+  color: var(--foreground);
+  font-weight: 600;
+}
+
+.turbo-act-detail {
+  font-size: 11px;
+  color: var(--muted-foreground);
+}
+
+.turbo-act-error {
+  font-size: 11px;
+  color: var(--status-error);
 }

@@ -123,6 +123,10 @@ public class CrdtRoutes {
                 payload.put("projectedCounts", res.projectedCounts());
             }
 
+            if (res.forbidden()) {
+                ctx.status(403).result(gson.toJson(payload)).contentType("application/json");
+                return;
+            }
             if (res.stale()) {
                 ctx.status(409).result(gson.toJson(payload)).contentType("application/json");
                 return;

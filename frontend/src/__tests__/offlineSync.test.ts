@@ -58,10 +58,9 @@ describe('offlineSync Utility', () => {
     id: 'evt_2025_cnc',
     name: '2025 FTC China Championship',
     inviteCode: 'CHAMP25',
-    season: 2025,
+    hostId: 'usr_host',
     ftcYear: 2025,
-    ftcEventCode: 'CNCMPLB',
-    createdAt: '2026-09-06T10:00:00.000Z'
+    ftcEventCode: 'CNCMPLB'
   }
 
   const dummyRecord1: ScoutingRecord = {

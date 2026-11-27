@@ -351,7 +351,7 @@ describe('WebRTC Decoupled Submodules Unit Suite', () => {
       )
     })
 
-    it('trims password and handles self-merge properly without deleting mapping in MERGE_ACCOUNT_REQUEST', async () => {
+    it('trims username while preserving password whitespace and handles self-merge properly without deleting mapping in MERGE_ACCOUNT_REQUEST', async () => {
       const api = await import('@/services/api')
       const loginSpy = vi.spyOn(api, 'login').mockResolvedValue({
         id: 'target_id_123',
@@ -402,7 +402,7 @@ describe('WebRTC Decoupled Submodules Unit Suite', () => {
 
       expect(loginSpy).toHaveBeenCalledWith({
         username: 'TargetAlice',
-        password: 'password123'
+        password: ' password123 \n '
       })
 
       expect(scoutIdToClientIds.get('target_id_123')).toBeDefined()

@@ -54,7 +54,7 @@ class FormulaParser {
   }
 
   parse(): { ast: FormulaAstNode; dependencies: string[] } {
-    const ast = this.parseTernary(1)
+    const ast = this.parseTernary(0)
     if (this.peek().type !== 'EOF') {
       const tok = this.peek()
       throw new FormulaSyntaxError('INVALID_SYNTAX', `Unexpected token '${tok.value}' at position ${tok.pos}`, tok.pos)

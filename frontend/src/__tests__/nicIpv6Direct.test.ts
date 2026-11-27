@@ -12,6 +12,7 @@ import {
   resetDoHStunCache,
   applyProxyExitDemotionToBatch,
   demoteProxyExitCandidatePriority,
+  boostDomesticOverProxyExitPriority,
   DOMESTIC_LITERAL_STUN_URLS,
   OVERSEAS_LITERAL_STUN_URLS,
   PURE_STUN_SERVERS,
@@ -36,6 +37,7 @@ import {
 } from '@/services/webrtc/connectivity'
 import { PeerConnectionManager, type PeerConnectionFactoryOptions } from '@/services/webrtc/peerManager'
 import { createClientSession } from '@/services/webrtc/clientSession'
+import { createHostSignalingHandler } from '@/services/webrtc/hostSession'
 import * as api from '@/services/api'
 
 vi.mock('@/services/api', () => ({
@@ -1201,5 +1203,324 @@ describe('Parallel Dual-Stack ICE & Non-Locking Hole Punching Architecture', () 
       expect(transport).toBe('ipv6_p2p')
     })
   })
+  })
+
+  describe('Remote ICE Candidate Priority Tier Preservation & Port Prediction Cap', () => {
+    const typePrefOf = (candStr: string): number => {
+      const clean = candStr.trim().replace(/^a=/, '').replace(/^candidate:/, '').trim()
+      const prio = parseInt(clean.split(/\s+/)[3] || '0', 10)
+      return Math.floor(prio / 16777216)
+    }
+
+    const priorityOf = (candStr: string): number => {
+      const clean = candStr.trim().replace(/^a=/, '').replace(/^candidate:/, '').trim()
+      return parseInt(clean.split(/\s+/)[3] || '0', 10)
+    }
+
+    it('preserves sender proxy-exit demotion (typePref=80) across receiver and caps predicted ports below 80', () => {
+      const rawDomestic =
+        'candidate:1 1 udp 1686052607 39.157.117.183 42000 typ srflx raddr 192.168.1.9 rport 55000 generation 0 ufrag abcd network-id 1 network-cost 10'
+      const rawProxyExit =
+        'candidate:2 1 udp 1686052607 188.253.121.98 53000 typ srflx raddr 192.168.1.9 rport 55000 generation 0 ufrag abcd network-id 1 network-cost 10'
+
+      const senderDomestic = optimizeCandidatePriority(rawDomestic)
+      const senderProxyPre = optimizeCandidatePriority(rawProxyExit)
+      const senderBatch = applyProxyExitDemotionToBatch([
+        {
+          candObj: { candidate: senderDomestic },
+          stunUrl: 'stun:111.8.3.78:3478',
+          rawRaddr: '192.168.1.9',
+          rawRport: '55000',
+          rawNetId: '1'
+        },
+        {
+          candObj: { candidate: senderProxyPre },
+          stunUrl: 'stun:74.125.250.129:19302',
+          rawRaddr: '192.168.1.9',
+          rawRport: '55000',
+          rawNetId: '1'
+        }
+      ])
+
+      const hostDomestic = senderBatch[0]!.candidate!
+      const hostDemotedProxy = senderBatch[1]!.candidate!
+      expect(typePrefOf(hostDomestic)).toBe(90)
+      expect(typePrefOf(hostDemotedProxy)).toBe(80)
+
+      // Without preserveRemoteSrflxTier, receiver would overwrite 80 back to 90 (regression proof)
+      expect(typePrefOf(optimizeCandidatePriority(hostDemotedProxy))).toBe(90)
+
+      // With preserveRemoteSrflxTier: true, receiver keeps 80 intact and keeps domestic at 90
+      const recvDomestic = optimizeCandidatePriority(hostDomestic, { preserveRemoteSrflxTier: true })
+      const recvProxy = optimizeCandidatePriority(hostDemotedProxy, { preserveRemoteSrflxTier: true })
+      expect(typePrefOf(recvDomestic)).toBe(90)
+      expect(typePrefOf(recvProxy)).toBe(80)
+
+      ;(globalThis as any).__TEST_ENABLE_PORT_PREDICTION__ = true
+      try {
+        const proxyPredicted = synthesizeSymmetricNatPortCandidates(recvProxy)
+        const domesticPredicted = synthesizeSymmetricNatPortCandidates(recvDomestic)
+        expect(proxyPredicted.length).toBe(6)
+        expect(domesticPredicted.length).toBe(6)
+
+        for (const pred of proxyPredicted) {
+          expect(typePrefOf(pred)).toBe(78)
+          expect(typePrefOf(pred)).toBeLessThan(80)
+          expect(priorityOf(recvDomestic)).toBeGreaterThan(priorityOf(pred))
+        }
+        for (const pred of domesticPredicted) {
+          expect(typePrefOf(pred)).toBe(86)
+        }
+        expect(priorityOf(recvDomestic)).toBeGreaterThan(priorityOf(recvProxy))
+      } finally {
+        delete (globalThis as any).__TEST_ENABLE_PORT_PREDICTION__
+      }
+    })
+
+    it('preserves late domestic boost (95 IPv4, 126/105 IPv6), IPv6 proxy demotion (115/95), and TUN tiers (88/122/98)', () => {
+      const baseV4 =
+        'candidate:10 1 udp 1686052607 39.157.117.183 42000 typ srflx raddr 0.0.0.0 rport 55000 generation 0 ufrag abcd network-id 1 network-cost 50'
+      const baseV6 =
+        'candidate:11 1 udp 1686055167 2409:8a00:1234::10 61000 typ srflx raddr :: rport 56000 generation 0 ufrag abcd network-id 4 network-cost 50'
+
+      const v4Boosted = boostDomesticOverProxyExitPriority(baseV4)
+      expect(typePrefOf(v4Boosted)).toBe(95)
+      const recvV4Boosted = optimizeCandidatePriority(v4Boosted, { preserveRemoteSrflxTier: true })
+      expect(typePrefOf(recvV4Boosted)).toBe(95)
+      expect(recvV4Boosted).toContain('network-cost 10')
+
+      const v6BoostedTest = boostDomesticOverProxyExitPriority(baseV6)
+      expect(typePrefOf(v6BoostedTest)).toBe(105)
+      expect(typePrefOf(optimizeCandidatePriority(v6BoostedTest, { preserveRemoteSrflxTier: true }))).toBe(105)
+
+      const v6DemotedTest = demoteProxyExitCandidatePriority(baseV6)
+      expect(typePrefOf(v6DemotedTest)).toBe(95)
+      expect(typePrefOf(optimizeCandidatePriority(v6DemotedTest, { preserveRemoteSrflxTier: true }))).toBe(95)
+
+      // Wire-format production tiers from non-test peers: IPv6 126/122/115 and IPv4 88
+      const makeWithTypePref = (template: string, tp: number) => {
+        const parts = template.split(/\s+/)
+        parts[3] = String(tp * 16777216 + 32768 * 256 + 255)
+        return parts.join(' ')
+      }
+
+      for (const v6Tp of [126, 122, 115]) {
+        const cand = makeWithTypePref(baseV6, v6Tp)
+        const out = optimizeCandidatePriority(cand, { preserveRemoteSrflxTier: true })
+        expect(typePrefOf(out)).toBe(v6Tp)
+        expect(out).toContain('network-cost 10')
+      }
+
+      const v4TunTier = makeWithTypePref(baseV4, 88)
+      const recvV4TunTier = optimizeCandidatePriority(v4TunTier, { preserveRemoteSrflxTier: true })
+      expect(typePrefOf(recvV4TunTier)).toBe(88)
+      expect(recvV4TunTier).toContain('network-cost 10')
+    })
+
+    it('still cleans and normalizes raw browser srflx (typePref=100, raddr=198.18.0.1, network-cost 50)', () => {
+      const rawTunBrowserSrflx =
+        'candidate:20 1 udp 1686052607 39.157.118.113 31081 typ srflx raddr 198.18.0.1 rport 60488 generation 0 ufrag BAjQ network-id 2 network-cost 50'
+      const rawPhysBrowserSrflx =
+        'candidate:21 1 udp 1686052607 39.157.118.113 31082 typ srflx raddr 192.168.1.5 rport 60489 generation 0 ufrag BAjQ network-id 1 network-cost 50'
+
+      expect(typePrefOf(rawTunBrowserSrflx)).toBe(100)
+      const outTun = optimizeCandidatePriority(rawTunBrowserSrflx, { preserveRemoteSrflxTier: true })
+      expect(outTun).toContain('raddr 0.0.0.0')
+      expect(outTun).toContain('network-cost 10')
+      expect(typePrefOf(outTun)).toBe(88)
+
+      expect(typePrefOf(rawPhysBrowserSrflx)).toBe(100)
+      const outPhys = optimizeCandidatePriority(rawPhysBrowserSrflx, { preserveRemoteSrflxTier: true })
+      expect(outPhys).toContain('network-cost 10')
+      expect(typePrefOf(outPhys)).toBe(90)
+    })
+
+    it('real createClientSession and createHostSignalingHandler preserve typePref=80 when adding remote candidates', async () => {
+      const demotedProxy = demoteProxyExitCandidatePriority(
+        'candidate:30 1 udp 1686052607 188.253.121.98 53000 typ srflx raddr 0.0.0.0 rport 55000 generation 0 ufrag abcd network-id 1 network-cost 10'
+      )
+      expect(typePrefOf(demotedProxy)).toBe(80)
+
+      ;(globalThis as any).__TEST_ENABLE_PORT_PREDICTION__ = true
+      try {
+        // 1. Client trickle & pending candidate intake
+        const clientAdded: string[] = []
+        const mockClientPc: any = {
+          connectionState: 'connecting',
+          iceConnectionState: 'checking',
+          signalingState: 'have-local-offer',
+          remoteDescription: null,
+          addIceCandidate: vi.fn().mockImplementation(async (c: any) => {
+            if (c?.candidate) clientAdded.push(c.candidate)
+          }),
+          setRemoteDescription: vi.fn().mockImplementation(async (desc: any) => {
+            mockClientPc.remoteDescription = desc
+            mockClientPc.signalingState = 'stable'
+          }),
+          close: vi.fn(),
+          createDataChannel: vi.fn().mockReturnValue({ readyState: 'connecting' }),
+          addEventListener: vi.fn(),
+          removeEventListener: vi.fn()
+        }
+
+        const clientPeerMgr = new PeerConnectionManager({
+          isHostMode: () => false,
+          getHostSignaling: () => null,
+          getClientSignaling: () => ({ send: vi.fn(), isConnected: () => true }) as any,
+          getClientHostSenderId: () => 'host-peer-1',
+          getClientDcState: () => undefined,
+          isExplicitlyClosed: () => false
+        })
+
+        let clientPending: any[] = []
+        const clientSession = createClientSession({
+          peerMgr: clientPeerMgr,
+          sas: {
+            clientSasState: 'VERIFIED',
+            clientSharedAesKey: null,
+            clientHostEcdhPubHex: '',
+            clientHostDeviceId: 'host-dev',
+            clientSecurityFingerprint: ''
+          } as any,
+          getSignaling: () => ({ send: vi.fn(), isConnected: () => true }) as any,
+          getLocalEcdhKeyPair: () => null,
+          getLocalEcdhPubHex: () => '',
+          getLocalDeviceId: () => 'dev-client',
+          getCurrentInviteCode: () => 'INV1',
+          getCurrentHostSessionId: () => 'host-sess-1',
+          setCurrentHostSessionId: () => {},
+          getClientSessionId: () => 'csess-1',
+          setClientSessionId: () => {},
+          getClientHostSenderId: () => 'host-peer-1',
+          setClientHostSenderId: () => {},
+          getClientPc: () => mockClientPc,
+          setClientPc: () => {},
+          getClientDc: () => null,
+          setClientDc: () => {},
+          setClientSender: () => {},
+          getClientPendingCandidates: () => clientPending,
+          setClientPendingCandidates: (list) => {
+            clientPending = list
+          },
+          getClientForceRelay: () => false,
+          setClientForceRelay: () => {},
+          isExplicitlyClosed: () => false,
+          isHostMode: () => false,
+          getStatus: () => 'connecting',
+          setStatus: () => {},
+          handleChannelMessage: async () => {},
+          rejectSas: () => {},
+          callbacks: {}
+        })
+
+        // Pending path (before Answer arrives)
+        clientPending.push({ candidate: demotedProxy, sdpMid: '0', sdpMLineIndex: 0 })
+        await clientSession.handleClientSignalingMessage({
+          sender: 'host-peer-1',
+          clientSessionId: 'csess-1',
+          hostSessionId: 'host-sess-1',
+          answer: { type: 'answer', sdp: 'v=0\r\n' }
+        })
+
+        // Trickle path (after Answer applied)
+        const demotedProxyTrickle = demoteProxyExitCandidatePriority(
+          'candidate:31 1 udp 1686052607 188.253.121.98 53100 typ srflx raddr 0.0.0.0 rport 55001 generation 0 ufrag abcd network-id 1 network-cost 10'
+        )
+        await clientSession.handleClientSignalingMessage({
+          sender: 'host-peer-1',
+          clientSessionId: 'csess-1',
+          candidate: { candidate: demotedProxyTrickle, sdpMid: '0', sdpMLineIndex: 0 }
+        })
+
+        const clientOrig53000 = clientAdded.find((c) => c.includes('188.253.121.98 53000 '))
+        const clientOrig53100 = clientAdded.find((c) => c.includes('188.253.121.98 53100 '))
+        const clientPred53001 = clientAdded.find((c) => c.includes('188.253.121.98 53001 '))
+        expect(clientOrig53000).toBeDefined()
+        expect(clientOrig53100).toBeDefined()
+        expect(clientPred53001).toBeDefined()
+        expect(typePrefOf(clientOrig53000!)).toBe(80)
+        expect(typePrefOf(clientOrig53100!)).toBe(80)
+        expect(typePrefOf(clientPred53001!)).toBe(78)
+
+        // 2. Host trickle candidate intake
+        const hostAdded: string[] = []
+        const mockHostPc: any = {
+          connectionState: 'connecting',
+          iceConnectionState: 'checking',
+          signalingState: 'stable',
+          addIceCandidate: vi.fn().mockImplementation(async (c: any) => {
+            if (c?.candidate) hostAdded.push(c.candidate)
+          })
+        }
+
+        const hostPeerMgr = new PeerConnectionManager({
+          isHostMode: () => true,
+          getHostSignaling: () => ({ send: vi.fn(), isConnected: () => true }) as any,
+          getClientSignaling: () => null,
+          getClientHostSenderId: () => '',
+          getClientDcState: () => undefined,
+          isExplicitlyClosed: () => false
+        })
+
+        const clients = new Map<string, any>([
+          [
+            'client-1',
+            {
+              pc: mockHostPc,
+              dc: null,
+              sender: null,
+              pendingCandidates: [],
+              sessionId: 'csess-host-1'
+            }
+          ]
+        ])
+
+        const taskPromises: Promise<void>[] = []
+        const hostHandler = createHostSignalingHandler({
+          clients,
+          stagedClients: new Map(),
+          preOfferCandidates: new Map(),
+          enqueueHostTask: (_sender, task) => {
+            const p = task()
+            taskPromises.push(p)
+            return p
+          },
+          updateHostStatus: vi.fn(),
+          peerMgr: hostPeerMgr,
+          sas: {
+            clientSharedKeys: new Map(),
+            clientSasStates: new Map(),
+            clientFingerprints: new Map()
+          } as any,
+          getSignaling: () => ({ send: vi.fn(), isConnected: () => true }) as any,
+          getLocalEcdhKeyPair: () => null,
+          getLocalEcdhPubHex: () => '',
+          getLocalDeviceId: () => 'host-dev',
+          getHostSessionId: () => 'host-sess-1',
+          getCurrentInviteCode: () => 'INV1',
+          getCurrentEventMetadata: () => null,
+          sendMessage: vi.fn(),
+          handleChannelMessage: vi.fn(),
+          rejectSas: vi.fn(),
+          callbacks: {}
+        })
+
+        hostHandler({
+          sender: 'client-1',
+          clientSessionId: 'csess-host-1',
+          candidate: { candidate: demotedProxyTrickle, sdpMid: '0', sdpMLineIndex: 0 }
+        })
+        await Promise.all(taskPromises)
+
+        const hostOrig53100 = hostAdded.find((c) => c.includes('188.253.121.98 53100 '))
+        const hostPred53101 = hostAdded.find((c) => c.includes('188.253.121.98 53101 '))
+        expect(hostOrig53100).toBeDefined()
+        expect(hostPred53101).toBeDefined()
+        expect(typePrefOf(hostOrig53100!)).toBe(80)
+        expect(typePrefOf(hostPred53101!)).toBe(78)
+      } finally {
+        delete (globalThis as any).__TEST_ENABLE_PORT_PREDICTION__
+      }
+    })
   })
 })

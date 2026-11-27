@@ -115,9 +115,24 @@ public class Main {
             System.setProperty("java.awt.headless", "true");
             initAndRun(args, null);
         } else {
-            // 1. 先在 EDT 上把启动动画显示出来
-            SplashScreen splash = new SplashScreen();
-            SwingUtilities.invokeLater(() -> splash.setVisible(true));
+            // 1. 先在 EDT 上创建并显示启动动画窗口，避免重型初始化抢占首帧渲染导致动画跳过开头
+            final java.util.concurrent.atomic.AtomicReference<SplashScreen> splashRef =
+                    new java.util.concurrent.atomic.AtomicReference<>();
+            Runnable showSplash = () -> {
+                SplashScreen created = new SplashScreen();
+                created.setVisible(true);
+                splashRef.set(created);
+            };
+            if (SwingUtilities.isEventDispatchThread()) {
+                showSplash.run();
+            } else {
+                try {
+                    SwingUtilities.invokeAndWait(showSplash);
+                } catch (Exception e) {
+                    logger.warn("SplashScreen EDT initialization interrupted", e);
+                }
+            }
+            SplashScreen splash = splashRef.get();
 
             // 2. 真正耗时的初始化放到后台线程，避免卡住 EDT 导致动画卡帧/掉帧
             new Thread(() -> initAndRun(args, splash), "app-init").start();
@@ -219,15 +234,43 @@ public class Main {
             File installDir = new File("jcef-bundle");
             CefAppBuilder builder = new CefAppBuilder();
             builder.setInstallDir(installDir);
-            CefApp cefApp = builder.build();
-            cefApp.dispose();
+            builder.install();
             System.out.println("JCEF 原生库预热完成: " + installDir.getAbsolutePath());
             System.exit(0);
-        } catch (Exception e) {
+        } catch (Throwable e) {
             e.printStackTrace();
             System.exit(1);
         }
     }
+
+    static boolean isEmbeddedJcefBundlePresent() {
+        return Main.class.getResource(JCEF_BUNDLE_TAR_RESOURCE) != null
+                || Main.class.getResource(JCEF_BUNDLE_RESOURCE) != null;
+    }
+
+    static boolean isInstalledJcefBundleCompatible(File targetDir) {
+        if (targetDir == null || !targetDir.isDirectory()) {
+            return false;
+        }
+        try {
+            return me.friwi.jcefmaven.impl.step.check.CefInstallationChecker.checkInstallation(targetDir);
+        } catch (Throwable e) {
+            return false;
+        }
+    }
+
+    private static void clearMacQuarantine(File targetDir) {
+        if (targetDir == null || !targetDir.exists()) {
+            return;
+        }
+        try {
+            new ProcessBuilder("xattr", "-r", "-d", "com.apple.quarantine", targetDir.getAbsolutePath())
+                    .redirectErrorStream(true)
+                    .start()
+                    .waitFor();
+        } catch (Exception ignored) {}
+    }
+
     /** 运行时优先使用内嵌的离线原生库，没有就退回 jcefmaven 默认联网下载 */
     private static File ensureJcefBundle() throws IOException {
         return ensureJcefBundle(new File(System.getProperty("user.home"), ".scoutingpro27/jcef-bundle"));
@@ -244,7 +287,8 @@ public class Main {
                 (isMac && (new File(targetDir, "jcef Helper.app").exists() || new File(targetDir, "libjcef.dylib").exists())) ||
                 (!isWindows && !isMac && new File(targetDir, "libjcef.so").exists());
 
-        if (hasBinaries) {
+        boolean embeddedPresent = isEmbeddedJcefBundlePresent();
+        if (hasBinaries && (!embeddedPresent || isInstalledJcefBundleCompatible(targetDir))) {
             if (!markerV3.exists()) {
                 try {
                     markerV3.createNewFile();
@@ -254,6 +298,9 @@ public class Main {
                 try {
                     new ProcessBuilder("chmod", "-R", "755", targetDir.getAbsolutePath()).start().waitFor();
                 } catch (Exception ignored) {}
+            }
+            if (isMac) {
+                clearMacQuarantine(targetDir);
             }
             return targetDir;
         }
@@ -277,6 +324,9 @@ public class Main {
                     if (code == 0) {
                         if (!isWindows) {
                             new ProcessBuilder("chmod", "-R", "755", targetDir.getAbsolutePath()).start().waitFor();
+                        }
+                        if (isMac) {
+                            clearMacQuarantine(targetDir);
                         }
                         new FileOutputStream(markerV3).close();
                         return targetDir;
@@ -311,7 +361,10 @@ public class Main {
                     if (entry.isDirectory()) {
                         outFile.mkdirs();
                     } else {
-                        outFile.getParentFile().mkdirs();
+                        File parent = outFile.getParentFile();
+                        if (parent != null) {
+                            parent.mkdirs();
+                        }
                         try (FileOutputStream fos = new FileOutputStream(outFile)) {
                             int len;
                             while ((len = zis.read(buf)) > 0) fos.write(buf, 0, len);
@@ -326,6 +379,9 @@ public class Main {
                 try {
                     new ProcessBuilder("chmod", "-R", "755", targetDir.getAbsolutePath()).start().waitFor();
                 } catch (Exception ignored) {}
+            }
+            if (isMac) {
+                clearMacQuarantine(targetDir);
             }
             try {
                 markerV3.createNewFile();
@@ -390,14 +446,7 @@ public class Main {
             ApiRoutes apiRoutes = new ApiRoutes(jdbi);
 
             final Javalin app = startServerWithFallback(apiRoutes, targetPort);
-
-            // 异步确认并配置 Windows 防火墙（同时放行 TCP 服务端口与 WebRTC UDP 49152-65535 入站端口）
             final int activePort = app.port();
-            if (NetworkUtil.shouldSkipFirewallCheck(args)) {
-                logger.info("已跳过 Windows 防火墙检测与 UAC 提权配置 (ENABLE_TEST_CLEANUP / SKIP_FIREWALL_CHECK)");
-            } else {
-                new Thread(() -> NetworkUtil.ensureWindowsFirewallPort(activePort), "firewall-check").start();
-            }
 
             // 异步探测物理网卡上的路由器 UPnP IGD / NAT-PMP / PCP（含 IPv6 Pinholes），仅开放 50000-50009/UDP 且带短租约与退出自动清理
             final com.bear27570.app.util.PortForwardingService portForwardingService =
@@ -442,6 +491,7 @@ public class Main {
             boolean headless = NetworkUtil.hasHeadlessArg(args);
             
             if (headless) {
+                startWindowsFirewallCheckAsync(args, activePort);
                 logger.info("运行在 Headless 模式，已跳过 JCEF UI 的启动。");
                 return;
             }
@@ -450,8 +500,11 @@ public class Main {
             // 配置 JCEF 浏览器
             // ==========================================
             if (splash != null) splash.updateProgress(70, "Initializing browser engine...");
+            File jcefBundleDir = ensureJcefBundle();
+            // 先完成 JCEF 解压再触发 Windows 防火墙配置，确保 jcef_helper.exe 已就位并能被准确加白
+            startWindowsFirewallCheckAsync(args, activePort);
             CefAppBuilder builder = new CefAppBuilder();
-            builder.setInstallDir(ensureJcefBundle());
+            builder.setInstallDir(jcefBundleDir);
             builder.getCefSettings().windowless_rendering_enabled = false;
             builder.addJcefArgs("--use-fake-ui-for-media-stream");
             builder.addJcefArgs("--disable-features=WebRtcHideLocalIpsWithMdns,WebUsb,MediaRouter,CalculateNativeWinOcclusion");
@@ -617,7 +670,7 @@ public class Main {
                 }
             });
 
-        } catch (Exception e) {
+        } catch (Exception | LinkageError e) {
             e.printStackTrace();
             if (splash != null) {
                 final String errMsg = e.getMessage() != null ? e.getMessage() : e.getClass().getSimpleName();
@@ -628,6 +681,14 @@ public class Main {
             } else {
                 System.exit(1);
             }
+        }
+    }
+
+    private static void startWindowsFirewallCheckAsync(String[] args, int activePort) {
+        if (NetworkUtil.shouldSkipFirewallCheck(args)) {
+            logger.info("已跳过 Windows 防火墙检测与 UAC 提权配置 (ENABLE_TEST_CLEANUP / SKIP_FIREWALL_CHECK)");
+        } else {
+            new Thread(() -> NetworkUtil.ensureWindowsFirewallPort(activePort), "firewall-check").start();
         }
     }
 

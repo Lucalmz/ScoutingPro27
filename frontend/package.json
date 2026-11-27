@@ -1,6 +1,6 @@
 {
   "name": "frontend",
-  "version": "1.1.1",
+  "version": "1.1.2",
   "private": true,
   "type": "module",
   "scripts": {
@@ -11,13 +11,15 @@
     "build:pwa": "vite build --outDir dist-pwa",
     "type-check": "vue-tsc --build",
     "test": "vitest run",
+    "test:coverage": "vitest run --coverage",
     "purge:diagnostics": "node scripts/purge-diagnostics.mjs",
-    "test:e2e": "node e2e/multi-client.e2e.js && node e2e/qr-mobile-join.e2e.js && node e2e/inbox-lifecycle.e2e.js && node e2e/comprehensive-interactive.e2e.js",
+    "test:e2e": "node e2e/multi-client.e2e.js && cross-env SKIP_BUILD=1 node e2e/qr-mobile-join.e2e.js && cross-env SKIP_BUILD=1 node e2e/inbox-lifecycle.e2e.js && cross-env SKIP_BUILD=1 node e2e/comprehensive-interactive.e2e.js && cross-env SKIP_BUILD=1 node e2e/webrtc-resilience.e2e.js",
     "test:e2e:multi": "node e2e/multi-client.e2e.js",
     "test:e2e:ui": "cross-env SHOW_UI=1 node e2e/multi-client.e2e.js",
     "test:e2e:inbox": "node e2e/inbox-lifecycle.e2e.js",
     "test:e2e:qr": "node e2e/qr-mobile-join.e2e.js",
     "test:e2e:interactive": "node e2e/comprehensive-interactive.e2e.js",
+    "test:e2e:resilience": "node e2e/webrtc-resilience.e2e.js",
     "capture:userguide": "node generators/capture-userguide-screens.js",
     "export:userguide-pdf": "node generators/export-userguide-pdf.js"
   },
@@ -42,6 +44,7 @@
     "@types/node": "^24.13.3",
     "@types/qrcode": "^1.5.6",
     "@vitejs/plugin-vue": "^6.0.8",
+    "@vitest/coverage-v8": "^2.1.9",
     "@vue/test-utils": "^2.4.11",
     "@vue/tsconfig": "^0.9.1",
     "cross-env": "^10.1.0",

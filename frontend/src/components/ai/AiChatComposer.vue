@@ -1,6 +1,8 @@
 <script setup lang="ts">
 import { computed, ref, watch, nextTick } from 'vue'
 import { useI18n } from 'vue-i18n'
+import type { AiAssistantMode, AiThinkingMode } from '@/types'
+import { THINKING_MODE_ORDER } from '@/components/ai/constants'
 import { SLASH_COMMANDS, type SlashCommandItem } from '@/components/ai/personas'
 
 export interface KnownTeamOption {
@@ -8,19 +10,29 @@ export interface KnownTeamOption {
   name?: string
 }
 
-const props = defineProps<{
-  modelValue: string
-  isStreaming: boolean
-  disabled?: boolean
-  knownTeams: KnownTeamOption[]
-  activeProfileLabel?: string
-  voiceSupported?: boolean
-  voiceActive?: boolean
-  voiceTooltip?: string
-}>()
+const props = withDefaults(
+  defineProps<{
+    modelValue: string
+    isStreaming: boolean
+    disabled?: boolean
+    knownTeams: KnownTeamOption[]
+    activeProfileLabel?: string
+    aiMode?: AiAssistantMode
+    thinkingMode?: AiThinkingMode
+    voiceSupported?: boolean
+    voiceActive?: boolean
+    voiceTooltip?: string
+  }>(),
+  {
+    aiMode: 'ask',
+    thinkingMode: 'off'
+  }
+)
 
 const emit = defineEmits<{
   'update:modelValue': [val: string]
+  'update:aiMode': [mode: AiAssistantMode]
+  'update:thinkingMode': [mode: AiThinkingMode]
   send: [text: string]
   stop: []
   addFocusTeam: [teamNumber: number]
@@ -199,13 +211,13 @@ function handleSendClick() {
       </button>
     </div>
 
-    <div class="composer-box">
+    <div class="composer-box" :class="{ 'turbo-active': aiMode === 'turbo' }">
       <textarea
         ref="textareaRef"
         :value="modelValue"
         rows="1"
         :disabled="disabled"
-        :placeholder="t('ai.input_placeholder_v2')"
+        :placeholder="aiMode === 'turbo' ? t('ai.input_placeholder_turbo') : t('ai.input_placeholder_v2')"
         @input="emit('update:modelValue', ($event.target as HTMLTextAreaElement).value); resizeTextarea()"
         @compositionstart="isComposing = true"
         @compositionend="isComposing = false"
@@ -213,10 +225,52 @@ function handleSendClick() {
       ></textarea>
 
       <div class="composer-bottom">
-        <span class="composer-hints">
-          <template v-if="activeProfileLabel">{{ activeProfileLabel }} · </template>
-          {{ t('ai.composer_shortcut_hint') }}
-        </span>
+        <div class="composer-controls-left">
+          <div class="mode-segmented" role="group" :aria-label="t('ai.mode_switch_label')">
+            <button
+              type="button"
+              class="mode-seg-btn"
+              :class="{ active: aiMode === 'ask' }"
+              :title="t('ai.mode_ask_hint')"
+              @click="emit('update:aiMode', 'ask')"
+            >
+              <span>{{ t('ai.mode_ask') }}</span>
+            </button>
+            <button
+              type="button"
+              class="mode-seg-btn turbo"
+              :class="{ active: aiMode === 'turbo' }"
+              :title="t('ai.mode_turbo_hint')"
+              @click="emit('update:aiMode', 'turbo')"
+            >
+              <span class="material-icons" aria-hidden="true">bolt</span>
+              <span>{{ t('ai.mode_turbo') }}</span>
+            </button>
+          </div>
+
+          <label
+            class="thinking-pill"
+            :class="{ active: thinkingMode !== 'off' }"
+            :title="t('ai.thinking_mode_hint')"
+          >
+            <span class="material-icons" aria-hidden="true">psychology</span>
+            <select
+              class="thinking-select"
+              :value="thinkingMode"
+              :aria-label="t('ai.thinking_mode_hint')"
+              @change="emit('update:thinkingMode', ($event.target as HTMLSelectElement).value as AiThinkingMode)"
+            >
+              <option v-for="m in THINKING_MODE_ORDER" :key="m" :value="m">
+                {{ t(`ai.thinking_${m}`) }}
+              </option>
+            </select>
+          </label>
+
+          <span class="composer-hints">
+            <template v-if="activeProfileLabel">{{ activeProfileLabel }} · </template>
+            {{ t('ai.composer_shortcut_hint') }}
+          </span>
+        </div>
 
         <div class="composer-actions">
           <button
@@ -349,6 +403,15 @@ function handleSendClick() {
   border-color: var(--status-ai);
 }
 
+.composer-box.turbo-active {
+  border-color: color-mix(in srgb, var(--status-warning) 58%, var(--border));
+  box-shadow: 0 0 0 1px color-mix(in srgb, var(--status-warning) 18%, transparent);
+}
+
+.composer-box.turbo-active:focus-within {
+  border-color: var(--status-warning);
+}
+
 .composer-box textarea {
   width: 100%;
   box-sizing: border-box;
@@ -371,12 +434,107 @@ function handleSendClick() {
   gap: 8px;
 }
 
+.composer-controls-left {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+  flex: 1;
+}
+
+.mode-segmented {
+  display: inline-flex;
+  align-items: center;
+  padding: 2px;
+  border-radius: 8px;
+  background: var(--surface-recessed);
+  border: 1px solid var(--border);
+  flex-shrink: 0;
+}
+
+.mode-seg-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+  padding: 2px 7px;
+  border-radius: 6px;
+  border: none;
+  background: transparent;
+  color: var(--muted-foreground);
+  font-size: 11px;
+  font-weight: 700;
+  cursor: pointer;
+  transition: background-color 0.14s ease, color 0.14s ease;
+}
+
+.mode-seg-btn .material-icons {
+  font-size: 13px;
+}
+
+.mode-seg-btn.active {
+  background: var(--surface-elevated);
+  color: var(--foreground);
+  box-shadow: var(--shadow-1);
+}
+
+.mode-seg-btn.turbo.active {
+  background: color-mix(in srgb, var(--status-warning) 18%, var(--surface-elevated));
+  color: var(--status-warning);
+}
+
+.thinking-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  padding: 2px 6px;
+  border-radius: 7px;
+  background: var(--surface-recessed);
+  border: 1px solid var(--border);
+  color: var(--muted-foreground);
+  font-size: 11px;
+  flex-shrink: 0;
+  cursor: pointer;
+}
+
+.thinking-pill.active {
+  background: var(--status-ai-bg);
+  border-color: var(--status-ai-border);
+  color: var(--status-ai);
+}
+
+.thinking-pill .material-icons {
+  font-size: 13px;
+}
+
+.thinking-select {
+  background: transparent;
+  border: none;
+  color: inherit;
+  font-size: 11px;
+  font-weight: 600;
+  font-family: inherit;
+  outline: none;
+  cursor: pointer;
+  padding-right: 2px;
+}
+
+.thinking-select option {
+  background: var(--popover);
+  color: var(--foreground);
+}
+
 .composer-hints {
   font-size: 11px;
   color: var(--muted-foreground);
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
+}
+
+@container ai-dock (max-width: 500px) {
+  .composer-hints {
+    display: none;
+  }
 }
 
 .composer-actions {

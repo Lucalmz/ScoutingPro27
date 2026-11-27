@@ -220,14 +220,18 @@ public class EventRoutes {
                     }
                 }
 
-                // Only temporary distributed stubs ('ext_...', 'evt-...', or 'external_host') may unbind & reparent
+                // Only temporary distributed stubs ('ext_...' owned by placeholder or same host, or 'external_host') may unbind & reparent
                 // their inviteCode into the authoritative event UUID; an authoritative event's inviteCode is immutable for everyone.
                 ScoutingEvent existingByCode = eventDao.findByInviteCode(normalizedCode);
                 if (existingByCode != null && !existingByCode.getId().equals(incoming.getId())) {
                     String codeId = existingByCode.getId();
-                    boolean isDistributedStub = codeId.startsWith("ext_")
-                            || codeId.toLowerCase(Locale.ROOT).startsWith("evt-")
-                            || "external_host".equals(existingByCode.getHostId());
+                    String codeHostId = existingByCode.getHostId();
+                    User codeHostUser = codeHostId != null ? userDao.findById(codeHostId) : null;
+                    boolean codeHostIsRegistered = codeHostUser != null
+                            && codeHostUser.getPassword() != null
+                            && !codeHostUser.getPassword().isBlank();
+                    boolean isDistributedStub = (!codeHostIsRegistered || java.util.Objects.equals(userId, codeHostId))
+                            && (codeId.startsWith("ext_") || "external_host".equals(codeHostId));
                     if (!isDistributedStub) {
                         throw new io.javalin.http.ForbiddenResponse("Event inviteCode is immutable; cannot overwrite invite code of an existing event");
                     }

@@ -23,6 +23,17 @@ const md = new MarkdownIt({
   }
 })
 
+const DANGEROUS_PROTOCOL_RE = /^(?:javascript|vbscript|file|data:(?!image\/(?:png|jpe?g|gif|webp)\b))/i
+
+function isSafeLinkUrl(url: string): boolean {
+  const normalized = url.replace(/[\u0000-\u0020\u007f]+/g, '')
+  return !DANGEROUS_PROTOCOL_RE.test(normalized)
+}
+
+md.validateLink = function (url: string): boolean {
+  return isSafeLinkUrl(url)
+}
+
 // Ensure external links open safely in a new tab with noopener
 const defaultLinkRender =
   md.renderer.rules.link_open ||
@@ -33,6 +44,13 @@ const defaultLinkRender =
 md.renderer.rules.link_open = function (tokens, idx, options, env, self) {
   const token = tokens[idx]
   if (token) {
+    const hrefIndex = token.attrIndex('href')
+    if (hrefIndex >= 0 && token.attrs && token.attrs[hrefIndex]) {
+      const hrefAttr = token.attrs[hrefIndex]
+      if (hrefAttr && !isSafeLinkUrl(String(hrefAttr[1]))) {
+        hrefAttr[1] = '#'
+      }
+    }
     const targetIndex = token.attrIndex('target')
     if (targetIndex < 0) {
       token.attrPush(['target', '_blank'])

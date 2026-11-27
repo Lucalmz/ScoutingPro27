@@ -276,4 +276,34 @@ class EventRoutesTest {
             });
         });
     }
+
+    @Test
+    void testBanAndUnbanTeamPermissionsAndValidation() {
+        JavalinTest.test(support.app, (server, client) -> {
+            RoomFixture f = RouteTestSupport.setupRoomFixture(client);
+
+            // Non-host cannot ban or unban; invalid formats return 400; missing event returns 404
+            assertThat(client.post("/api/events/" + f.eventId + "/banned-teams", "{\"teamNumber\":27570}",
+                    b -> b.header("Authorization", "Bearer " + f.scoutAToken)).code()).isEqualTo(403);
+            assertThat(client.post("/api/events/" + f.eventId + "/banned-teams", "{\"teamNumber\":\"not-a-num\"}",
+                    b -> b.header("Authorization", "Bearer " + f.hostToken)).code()).isEqualTo(400);
+
+            assertThat(client.post("/api/events/" + f.eventId + "/banned-teams", "{\"teamNumber\":27570}",
+                    b -> b.header("Authorization", "Bearer " + f.hostToken)).code()).isEqualTo(200);
+            assertThat(client.get("/api/events/" + f.eventId + "/banned-teams",
+                    b -> b.header("Authorization", "Bearer " + f.scoutAToken)).body().string()).contains("27570");
+
+            assertThat(client.delete("/api/events/" + f.eventId + "/banned-teams/27570", null,
+                    b -> b.header("Authorization", "Bearer " + f.scoutAToken)).code()).isEqualTo(403);
+            assertThat(client.delete("/api/events/" + f.eventId + "/banned-teams/abc", null,
+                    b -> b.header("Authorization", "Bearer " + f.hostToken)).code()).isEqualTo(400);
+            assertThat(client.delete("/api/events/missing-evt/banned-teams/27570", null,
+                    b -> b.header("Authorization", "Bearer " + f.hostToken)).code()).isEqualTo(404);
+
+            assertThat(client.delete("/api/events/" + f.eventId + "/banned-teams/27570", null,
+                    b -> b.header("Authorization", "Bearer " + f.hostToken)).code()).isEqualTo(200);
+            assertThat(client.get("/api/events/" + f.eventId + "/banned-teams",
+                    b -> b.header("Authorization", "Bearer " + f.scoutAToken)).body().string()).doesNotContain("27570");
+        });
+    }
 }

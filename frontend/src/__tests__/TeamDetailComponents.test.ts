@@ -101,7 +101,7 @@ describe('TeamDetail & Rankings Decoupled Sub-components and Composables', () =>
       fieldType: 'number',
       required: false,
       unit: '次',
-      sortOrder: 0,
+      orderSeq: 0,
       isActive: true
     },
     {
@@ -113,7 +113,7 @@ describe('TeamDetail & Rankings Decoupled Sub-components and Composables', () =>
       fieldKey: 'auto_avoid',
       fieldType: 'boolean',
       required: false,
-      sortOrder: 1,
+      orderSeq: 1,
       isActive: true
     },
     {
@@ -129,7 +129,7 @@ describe('TeamDetail & Rankings Decoupled Sub-components and Composables', () =>
         { label: '中心区', value: 'center', color: 'green' },
         { label: '边缘区', value: 'edge', color: 'blue' }
       ],
-      sortOrder: 2,
+      orderSeq: 2,
       isActive: true
     },
     {
@@ -141,7 +141,7 @@ describe('TeamDetail & Rankings Decoupled Sub-components and Composables', () =>
       fieldKey: 'obs_note',
       fieldType: 'text',
       required: false,
-      sortOrder: 3,
+      orderSeq: 3,
       isActive: true
     }
   ]
@@ -170,7 +170,8 @@ describe('TeamDetail & Rankings Decoupled Sub-components and Composables', () =>
       syncStatus: 'SYNCED',
       createdAt: '2026-01-01T00:00:00Z',
       updatedAt: '2026-01-01T00:00:00Z',
-      isBroken: false
+      isBroken: false,
+      version: 1
     },
     {
       id: 'r2',
@@ -195,7 +196,8 @@ describe('TeamDetail & Rankings Decoupled Sub-components and Composables', () =>
       syncStatus: 'SYNCED',
       createdAt: '2026-01-01T00:10:00Z',
       updatedAt: '2026-01-01T00:10:00Z',
-      isBroken: false
+      isBroken: false,
+      version: 1
     }
   ]
 
@@ -244,7 +246,7 @@ describe('TeamDetail & Rankings Decoupled Sub-components and Composables', () =>
         fieldType: 'number',
         required: false,
         unit: '个',
-        sortOrder: 0,
+        orderSeq: 0,
         isActive: true
       }
     ]
@@ -368,7 +370,7 @@ describe('TeamDetail & Rankings Decoupled Sub-components and Composables', () =>
     expect(teamStats.auto_avoid.display).toBe('50%')
 
     const eventStore = useEventStore()
-    eventStore.currentEvent = { id: 'evt-1', name: 'Test Event', code: 'EVT1', date: '2026-01-01', createdAt: '' }
+    eventStore.currentEvent = { id: 'evt-1', name: 'Test Event', inviteCode: 'EVT1', hostId: 'u-host' }
     const cfStore = useCustomFieldsStore()
     cfStore.fieldsByEvent['evt-1'] = matchFields
 

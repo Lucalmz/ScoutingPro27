@@ -27,6 +27,8 @@ public class AiClient {
 
     public record StreamChunk(String kind, String text, JsonObject usage) {}
 
+    public record ThinkingOptions(Boolean enableThinking, Integer thinkingBudget, String reasoningEffort) {}
+
     // ==================== Proxy Resolution & Bypass ====================
 
     public static boolean isLoopbackUrl(String targetUrl) {
@@ -74,8 +76,19 @@ public class AiClient {
     }
 
     public static String chat(AiProviderProfile profile, String systemPrompt, List<Map<String, String>> messages, Double temperatureOverride, String modelOverride) throws Exception {
+        return chat(profile, systemPrompt, messages, temperatureOverride, modelOverride, null);
+    }
+
+    public static String chat(
+            AiProviderProfile profile,
+            String systemPrompt,
+            List<Map<String, String>> messages,
+            Double temperatureOverride,
+            String modelOverride,
+            ThinkingOptions thinkingOverride
+    ) throws Exception {
         StringBuilder answer = new StringBuilder();
-        chatStream(profile, systemPrompt, messages, temperatureOverride, modelOverride, chunk -> {
+        chatStream(profile, systemPrompt, messages, temperatureOverride, modelOverride, thinkingOverride, chunk -> {
             if ("text".equals(chunk.kind()) && chunk.text() != null) {
                 answer.append(chunk.text());
             }
@@ -92,6 +105,19 @@ public class AiClient {
             Consumer<StreamChunk> chunkConsumer,
             AtomicBoolean isCancelled
     ) throws Exception {
+        chatStream(profile, systemPrompt, messages, temperatureOverride, modelOverride, null, chunkConsumer, isCancelled);
+    }
+
+    public static void chatStream(
+            AiProviderProfile profile,
+            String systemPrompt,
+            List<Map<String, String>> messages,
+            Double temperatureOverride,
+            String modelOverride,
+            ThinkingOptions thinkingOverride,
+            Consumer<StreamChunk> chunkConsumer,
+            AtomicBoolean isCancelled
+    ) throws Exception {
         if (profile == null) {
             throw new IllegalArgumentException("AI profile cannot be null");
         }
@@ -102,10 +128,48 @@ public class AiClient {
         Double effectiveTemp = temperatureOverride != null ? temperatureOverride : profile.getTemperature();
         List<Map<String, String>> trimmedMessages = AiStreamSupport.trimContextMessages(messages, profile.getMaxContextMsgs());
 
+        boolean effectiveEnableThinking = thinkingOverride != null && thinkingOverride.enableThinking() != null
+                ? thinkingOverride.enableThinking()
+                : profile.getEnableThinking();
+        Integer effectiveThinkingBudget;
+        if (thinkingOverride != null && thinkingOverride.thinkingBudget() != null) {
+            effectiveThinkingBudget = Math.max(0, thinkingOverride.thinkingBudget());
+        } else if (!effectiveEnableThinking) {
+            effectiveThinkingBudget = 0;
+        } else {
+            effectiveThinkingBudget = profile.getThinkingBudget();
+        }
+        Boolean openAiThinkingOverride = thinkingOverride != null ? thinkingOverride.enableThinking() : null;
+        String effectiveReasoningEffort = thinkingOverride != null ? thinkingOverride.reasoningEffort() : null;
+
         switch (protocol) {
-            case "OPENAI" -> OpenAiProtocolAdapter.streamChat(profile, rawKey, effectiveModel, effectiveTemp, systemPrompt, trimmedMessages, chunkConsumer, isCancelled);
-            case "GEMINI" -> GeminiProtocolAdapter.streamChat(profile, rawKey, effectiveModel, effectiveTemp, systemPrompt, trimmedMessages, chunkConsumer, isCancelled);
-            case "ANTHROPIC" -> AnthropicProtocolAdapter.streamChat(profile, rawKey, effectiveModel, effectiveTemp, systemPrompt, trimmedMessages, chunkConsumer, isCancelled);
+            case "OPENAI" -> {
+                String ep = OpenAiProtocolAdapter.resolveChatEndpoint(profile.getBaseUrl());
+                if (!com.bear27570.app.routes.ai.AiUrlGuard.isSafeUrl(ep)) {
+                    throw new IllegalArgumentException("Forbidden baseUrl: SSRF protection blocked access");
+                }
+                OpenAiProtocolAdapter.streamChat(
+                        profile, rawKey, effectiveModel, effectiveTemp, systemPrompt, trimmedMessages,
+                        openAiThinkingOverride, effectiveReasoningEffort, chunkConsumer, isCancelled);
+            }
+            case "GEMINI" -> {
+                String ep = GeminiProtocolAdapter.resolveGenerateEndpoint(profile.getBaseUrl(), effectiveModel, true);
+                if (!com.bear27570.app.routes.ai.AiUrlGuard.isSafeUrl(ep)) {
+                    throw new IllegalArgumentException("Forbidden baseUrl: SSRF protection blocked access");
+                }
+                GeminiProtocolAdapter.streamChat(
+                        profile, rawKey, effectiveModel, effectiveTemp, systemPrompt, trimmedMessages,
+                        effectiveEnableThinking, effectiveThinkingBudget, chunkConsumer, isCancelled);
+            }
+            case "ANTHROPIC" -> {
+                String ep = AnthropicProtocolAdapter.resolveMessagesEndpoint(profile.getBaseUrl());
+                if (!com.bear27570.app.routes.ai.AiUrlGuard.isSafeUrl(ep)) {
+                    throw new IllegalArgumentException("Forbidden baseUrl: SSRF protection blocked access");
+                }
+                AnthropicProtocolAdapter.streamChat(
+                        profile, rawKey, effectiveModel, effectiveTemp, systemPrompt, trimmedMessages,
+                        effectiveEnableThinking, effectiveThinkingBudget, chunkConsumer, isCancelled);
+            }
             default -> throw new IllegalArgumentException("Unsupported AI protocol: " + protocol);
         }
     }

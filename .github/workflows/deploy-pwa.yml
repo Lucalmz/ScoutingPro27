@@ -4,13 +4,15 @@ on:
   push:
     branches:
       - master
+      - main
     paths:
       - 'frontend/**'
+      - 'shared/**'
       - '.github/workflows/deploy-pwa.yml'
   workflow_dispatch:
 
 permissions:
-  contents: write
+  contents: read
   pages: write
   id-token: write
 
@@ -53,13 +55,6 @@ jobs:
         uses: actions/upload-pages-artifact@v3
         with:
           path: 'frontend/dist-pwa'
-
-      - name: Deploy to gh-pages branch
-        uses: peaceiris/actions-gh-pages@v4
-        with:
-          github_token: ${{ secrets.GITHUB_TOKEN }}
-          publish_dir: frontend/dist-pwa
-          publish_branch: gh-pages
 
   deploy:
     needs: build

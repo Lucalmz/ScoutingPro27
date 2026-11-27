@@ -21,12 +21,22 @@ export class SenderAbortedError extends Error {
   }
 }
 
+export type SendPriority = 'high' | 'normal'
+
+export interface EnqueueSendOptions {
+  priority?: SendPriority
+}
+
+interface QueueTask {
+  payload: string
+  priority: SendPriority
+  resolve: () => void
+  reject: (err: any) => void
+}
+
 export class DataChannelSender {
-  private queue: Array<{
-    payload: string
-    resolve: () => void
-    reject: (err: any) => void
-  }> = []
+  private highQueue: QueueTask[] = []
+  private queue: QueueTask[] = []
   private isProcessing = false
   private aborted = false
   /** 当前正在背压等待中的任务的取消句柄（abort 时需要一并拒绝，否则会遗留一个无人观察的 pending 任务） */
@@ -42,15 +52,19 @@ export class DataChannelSender {
     private onCongestion?: (isCongested: boolean) => void
   ) {}
 
+  public getChannel(): RTCDataChannel {
+    return this.dc
+  }
+
   public getQueueLength(): number {
-    return this.queue.length
+    return this.highQueue.length + this.queue.length
   }
 
   public isAborted(): boolean {
     return this.aborted
   }
 
-  public enqueueSend(payload: string): Promise<void> {
+  public enqueueSend(payload: string, options?: EnqueueSendOptions): Promise<void> {
     if (this.aborted) {
       return Promise.reject(new SenderAbortedError('DataChannel sender aborted'))
     }
@@ -64,8 +78,14 @@ export class DataChannelSender {
         )
       )
     }
+    const priority: SendPriority = options?.priority === 'high' ? 'high' : 'normal'
     return new Promise<void>((resolve, reject) => {
-      this.queue.push({ payload, resolve, reject })
+      const task: QueueTask = { payload, priority, resolve, reject }
+      if (priority === 'high') {
+        this.highQueue.push(task)
+      } else {
+        this.queue.push(task)
+      }
       this.processQueue()
     })
   }
@@ -74,8 +94,8 @@ export class DataChannelSender {
    * 发后即忘（fire-and-forget）专用：永不 reject。对端中途断开 / 队列被中止 / 背压超时都只记录日志并返回 false，
    * 杜绝 “Uncaught (in promise) DataChannel closed while waiting for backpressure relief”。
    */
-  public enqueueSendQuiet(payload: string, label = 'message'): Promise<boolean> {
-    return this.enqueueSend(payload).then(
+  public enqueueSendQuiet(payload: string, label = 'message', options?: EnqueueSendOptions): Promise<boolean> {
+    return this.enqueueSend(payload, options).then(
       () => true,
       (err) => {
         log.warn(`Dropped ${label}: ${err instanceof Error ? err.message : String(err)}`)
@@ -101,15 +121,20 @@ export class DataChannelSender {
     if (this.isProcessing) return
     this.isProcessing = true
 
-    while (this.queue.length > 0) {
-      const task = this.queue.shift()
+    while (this.highQueue.length > 0 || this.queue.length > 0) {
+      const task = this.highQueue.length > 0 ? this.highQueue.shift() : this.queue.shift()
       if (!task) break
 
       try {
-        await this.safeSendInternal(task.payload)
+        await this.safeSendInternal(task.payload, task.priority)
         task.resolve()
         this.onCongestion?.(false)
-        if (this.queue.length > 0 && task.payload.length > 1120 && !(this.dc as any)?.isVirtual) {
+        if (
+          this.highQueue.length === 0 &&
+          this.queue.length > 0 &&
+          task.payload.length > 1120 &&
+          !(this.dc as any)?.isVirtual
+        ) {
           await new Promise((r) => setTimeout(r, 3))
         }
       } catch (err) {
@@ -144,13 +169,21 @@ export class DataChannelSender {
   }
 
   private failFastRemaining(error: Error) {
+    while (this.highQueue.length > 0) {
+      const remaining = this.highQueue.shift()
+      remaining?.reject(error)
+    }
     while (this.queue.length > 0) {
       const remaining = this.queue.shift()
       remaining?.reject(error)
     }
   }
 
-  private async safeSendInternal(payload: string): Promise<void> {
+  private async safeSendInternal(payload: string, priority: SendPriority = 'normal'): Promise<void> {
+    if (this.aborted) {
+      throw new SenderAbortedError('DataChannel sender aborted')
+    }
+
     if (this.dc.readyState !== 'open') {
       throw new Error(`DataChannel is not open (state: ${this.dc.readyState})`)
     }
@@ -161,16 +194,45 @@ export class DataChannelSender {
       )
     }
 
-    const needsWait =
-      this.dc.bufferedAmount > this.BUFFER_HIGH_WATERMARK ||
-      (this.dc.bufferedAmount > this.BUFFER_LOW_WATERMARK &&
-        this.dc.bufferedAmount + payload.length > this.BUFFER_HIGH_WATERMARK)
+    const isSmallHighPriority = priority === 'high' && payload.length <= 4096
+    const controlCeiling = this.BUFFER_HIGH_WATERMARK * 2 // 64 KiB
 
-    if (needsWait) {
-      log.warn(
-        `DataChannel buffer pressure detected (${this.dc.bufferedAmount} bytes + payload ${payload.length} > ${this.BUFFER_HIGH_WATERMARK}). Pausing sender for backpressure relief.`
+    const needsWait = (): boolean => {
+      const buffered = this.dc.bufferedAmount
+      if (isSmallHighPriority) {
+        return buffered + payload.length > controlCeiling
+      }
+      return (
+        buffered > this.BUFFER_HIGH_WATERMARK ||
+        (buffered > this.BUFFER_LOW_WATERMARK &&
+          buffered + payload.length > this.BUFFER_HIGH_WATERMARK)
       )
+    }
+
+    const deadline = Date.now() + this.MAX_BACKPRESSURE_TIMEOUT
+    let loggedWait = false
+
+    while (needsWait()) {
+      if (this.aborted) {
+        throw new SenderAbortedError('DataChannel sender aborted')
+      }
+      if (this.dc.readyState !== 'open') {
+        throw new Error(`DataChannel closed before send (current state: ${this.dc.readyState})`)
+      }
+      const remaining = deadline - Date.now()
+      if (remaining <= 0) {
+        throw new BackpressureTimeoutError(`Backpressure wait timeout (${this.MAX_BACKPRESSURE_TIMEOUT}ms)`)
+      }
+
+      if (!loggedWait) {
+        loggedWait = true
+        const limit = isSmallHighPriority ? controlCeiling : this.BUFFER_HIGH_WATERMARK
+        log.warn(
+          `DataChannel buffer pressure detected (${this.dc.bufferedAmount} bytes + payload ${payload.length} > ${limit}). Pausing sender for backpressure relief.`
+        )
+      }
       this.onCongestion?.(true)
+
       await new Promise<void>((resolve, reject) => {
         let finished = false
         let intervalId: ReturnType<typeof setInterval> | null = null
@@ -216,15 +278,21 @@ export class DataChannelSender {
         this.dc.addEventListener('close', onClose)
         this.dc.addEventListener('error', onClose)
 
-        if (this.dc.bufferedAmount <= this.BUFFER_LOW_WATERMARK) {
+        if (!needsWait()) {
           done()
           return
         }
 
         intervalId = setInterval(() => {
-          if (this.dc.readyState !== 'open') {
+          if (this.aborted) {
+            if (!finished) {
+              finished = true
+              cleanup()
+              reject(new SenderAbortedError('DataChannel sender aborted'))
+            }
+          } else if (this.dc.readyState !== 'open') {
             onClose()
-          } else if (this.dc.bufferedAmount <= this.BUFFER_LOW_WATERMARK) {
+          } else if (!needsWait()) {
             done()
           }
         }, 50)
@@ -235,8 +303,12 @@ export class DataChannelSender {
             cleanup()
             reject(new BackpressureTimeoutError(`Backpressure wait timeout (${this.MAX_BACKPRESSURE_TIMEOUT}ms)`))
           }
-        }, this.MAX_BACKPRESSURE_TIMEOUT)
+        }, remaining)
       })
+    }
+
+    if (this.aborted) {
+      throw new SenderAbortedError('DataChannel sender aborted')
     }
 
     if (this.dc.readyState !== 'open') {

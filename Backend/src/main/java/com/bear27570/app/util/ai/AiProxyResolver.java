@@ -1,5 +1,6 @@
 package com.bear27570.app.util.ai;
 
+import com.bear27570.app.routes.ai.AiUrlGuard;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -12,6 +13,7 @@ import java.net.http.HttpClient;
 import java.time.Duration;
 import java.util.List;
 import java.util.Locale;
+import java.util.concurrent.ConcurrentHashMap;
 
 /**
  * Resolves effective HTTP proxies with loopback bypass and 30s local VPN proxy auto-detection caching.
@@ -22,6 +24,7 @@ public final class AiProxyResolver {
     // Common local proxy ports used by desktop VPN/tunnel clients
     private static final int[] COMMON_LOCAL_PROXY_PORTS = {7890, 7897, 10809, 10808, 7891, 1080};
     private static final long PROXY_SCAN_CACHE_TTL_MS = 30_000L;
+    private static final ConcurrentHashMap<String, HttpClient> CLIENT_CACHE = new ConcurrentHashMap<>();
     private static volatile long cachedProxyScanAtMs = 0L;
     private static volatile int cachedAutoProxyPort = -1;
 
@@ -54,8 +57,14 @@ public final class AiProxyResolver {
 
     public static Proxy resolveEffectiveProxy(String customHost, Integer customPort, String targetUrl) {
         // 1. Explicit proxy host/port takes highest precedence
-        if (customPort != null && customPort > 0 && customPort <= 65535) {
+        if (customPort != null) {
+            if (customPort < 1 || customPort > 65535) {
+                throw new IllegalArgumentException("Invalid proxy port: must be between 1 and 65535");
+            }
             String host = (customHost != null && !customHost.isBlank()) ? customHost.trim() : "127.0.0.1";
+            if (!AiUrlGuard.isSafeProxyHost(host)) {
+                throw new IllegalArgumentException("Forbidden proxyHost: SSRF protection blocked access");
+            }
             return new Proxy(Proxy.Type.HTTP, new InetSocketAddress(host, customPort));
         }
 
@@ -144,9 +153,21 @@ public final class AiProxyResolver {
     }
 
     public static HttpClient buildHttpClient(String proxyHost, Integer proxyPort, String targetUrl) {
-        return HttpClient.newBuilder()
+        ProxySelector selector = resolveEffectiveProxySelector(proxyHost, proxyPort, targetUrl);
+        String cacheKey;
+        if (selector == HttpClient.Builder.NO_PROXY) {
+            cacheKey = "NO_PROXY";
+        } else {
+            List<Proxy> selected = selector.select(URI.create("https://api.openai.com"));
+            if (selected != null && !selected.isEmpty() && selected.get(0).address() instanceof InetSocketAddress addr) {
+                cacheKey = "PROXY:" + addr.getHostString() + ":" + addr.getPort();
+            } else {
+                cacheKey = "SYS_DEFAULT";
+            }
+        }
+        return CLIENT_CACHE.computeIfAbsent(cacheKey, k -> HttpClient.newBuilder()
                 .connectTimeout(Duration.ofSeconds(15))
-                .proxy(resolveEffectiveProxySelector(proxyHost, proxyPort, targetUrl))
-                .build();
+                .proxy(selector)
+                .build());
     }
 }

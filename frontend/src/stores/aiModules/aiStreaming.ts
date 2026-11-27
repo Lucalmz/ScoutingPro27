@@ -1,29 +1,38 @@
-import { computed, ref, type ComputedRef } from 'vue'
+import { computed, ref, type ComputedRef, type Ref } from 'vue'
 import type { useUserStore } from '@/stores/user'
+import { useEventStore } from '@/stores/events'
+import { useConnectionStore } from '@/stores/connection'
 import { useToastStore } from '@/stores/toast'
+import { isDesktopHost } from '@/services/photoStorage'
+import { isMobileDevice } from '@/composables/useIsMobile'
 import { i18n } from '@/i18n'
 import type {
+  AiAssistantMode,
   AiChatMessage,
   AiChatThread,
   AiContextFocusMatch,
   AiProviderProfile,
+  AiThinkingMode,
   MatchScheduleItem
 } from '@/types'
-import { DEFAULT_THREAD_TITLES } from '@/components/ai/constants'
+import { DEFAULT_THREAD_TITLES, THINKING_MODE_CONFIG } from '@/components/ai/constants'
 import { DEFAULT_PRESET } from '@/components/ai/presets'
 import { buildMatchBriefPrompt, buildTeamAnalysisPrompt } from '@/components/ai/personas'
 import { streamAiChat } from '@/components/ai/useAiChatStream'
+import { executeTurboActions, extractTurboActionsFromContent, stripTurboActionBlocks } from '@/components/ai/turboAgent'
 import { normalizeContextConfig, type createAiThreadsModule } from './aiThreads'
 
 export function createAiStreamingModule(deps: {
   userStore: ReturnType<typeof useUserStore>
   activeProfile: ComputedRef<AiProviderProfile | null>
   canSendWithActiveProfile: ComputedRef<boolean>
+  aiMode?: Ref<AiAssistantMode>
+  thinkingMode?: Ref<AiThinkingMode>
   setDockOpen: (open: boolean) => void
   openSettingsModal: (profileId?: string) => void
   threads: ReturnType<typeof createAiThreadsModule>
 }) {
-  const { userStore, activeProfile, canSendWithActiveProfile, setDockOpen, openSettingsModal, threads } = deps
+  const { userStore, activeProfile, canSendWithActiveProfile, aiMode, thinkingMode, setDockOpen, openSettingsModal, threads } = deps
 
   const streamingByThread = ref<Record<string, { messageId: string; startedAt: number }>>({})
   const abortControllersByThread = new Map<string, AbortController>()
@@ -69,15 +78,42 @@ export function createAiStreamingModule(deps: {
     }
   }
 
+  function isHostForEvent(eventId: string): boolean {
+    if (isMobileDevice() || !isDesktopHost()) {
+      return false
+    }
+    const eventStore = useEventStore()
+    const targetEvent =
+      eventStore.events.find(e => e.id === eventId) ||
+      (eventStore.currentEvent?.id === eventId ? eventStore.currentEvent : null)
+    if (!targetEvent) return false
+    if (targetEvent.hostId && targetEvent.hostId === userStore.userId) {
+      return true
+    }
+    if (eventStore.currentEvent?.id === eventId) {
+      const conn = useConnectionStore()
+      if (conn.rtcService && typeof conn.rtcService.isHostMode === 'function' && conn.rtcService.isHostMode()) {
+        return true
+      }
+    }
+    return false
+  }
+
   async function runAssistantTurn(params: {
     eventId: string
     thread: AiChatThread
     effectiveSystemPrompt: string
     contextSummary?: string
+    aiMode?: AiAssistantMode
+    thinkingMode?: AiThinkingMode
     rollbackUserMessageOnPreflight?: { messageId: string; originalContent: string }
+    rollbackMessagesSnapshot?: { messages: AiChatMessage[]; updatedAt?: string }
     errorPrefix?: string
   }): Promise<boolean> {
     const { thread, effectiveSystemPrompt, contextSummary, errorPrefix = '' } = params
+    const effectiveAiMode: AiAssistantMode = params.aiMode ?? aiMode?.value ?? 'ask'
+    const effectiveThinkingMode: AiThinkingMode = params.thinkingMode ?? thinkingMode?.value ?? 'off'
+    const thinkingCfg = THINKING_MODE_CONFIG[effectiveThinkingMode] || THINKING_MODE_CONFIG.off
     const token = userStore.token
     if (!token) return false
 
@@ -100,14 +136,28 @@ export function createAiStreamingModule(deps: {
       createdAt: new Date().toISOString(),
       modelName: profile.modelName || DEFAULT_PRESET.defaultModel,
       profileName: profile.name,
-      contextSummary
+      contextSummary,
+      aiMode: effectiveAiMode
     }
     thread.messages.push(assistantMsg)
 
     const maxMsgs = profile.maxContextMsgs > 0 ? profile.maxContextMsgs : 16
     const payloadMessages = thread.messages
       .filter(m => m.id !== asstMsgId && !m.error)
-      .map(m => ({ role: m.role, content: m.content }))
+      .map(m => {
+        if (m.role !== 'assistant') {
+          return { role: m.role, content: m.content }
+        }
+        const clean = stripTurboActionBlocks(m.content || '').displayContent
+        if (clean) {
+          return { role: m.role, content: clean }
+        }
+        if (m.turboActions && m.turboActions.length > 0) {
+          const actionLine = m.turboActions.map(a => `${a.type}: ${a.summary}`).join('; ')
+          return { role: m.role, content: `[Executed actions: ${actionLine}]` }
+        }
+        return { role: m.role, content: '' }
+      })
       .slice(-maxMsgs)
 
     const abortController = new AbortController()
@@ -120,6 +170,16 @@ export function createAiStreamingModule(deps: {
 
     const findAsst = () => thread.messages.find(m => m.id === asstMsgId)
 
+    const profileBudget = profile.thinkingBudget >= 1024 ? profile.thinkingBudget : 4096
+    const effectiveThinkingBudget =
+      effectiveThinkingMode === 'off'
+        ? 0
+        : effectiveThinkingMode === 'low'
+          ? thinkingCfg.thinkingBudget
+          : effectiveThinkingMode === 'medium'
+            ? profileBudget
+            : Math.max(thinkingCfg.thinkingBudget, profileBudget)
+
     const res = await streamAiChat(
       {
         token,
@@ -127,9 +187,17 @@ export function createAiStreamingModule(deps: {
         provider: profile.protocol,
         modelName: profile.modelName,
         temperature: profile.temperature,
+        enableThinking: thinkingCfg.enableThinking,
+        thinkingBudget: effectiveThinkingBudget,
+        reasoningEffort: thinkingCfg.reasoningEffort,
         systemPrompt: effectiveSystemPrompt,
         messages: payloadMessages,
-        signal: abortController.signal
+        signal: abortController.signal,
+        onRefreshedToken: newToken => {
+          if (userStore.user) {
+            userStore.user = { ...userStore.user, token: newToken }
+          }
+        }
       },
       {
         onDelta(delta) {
@@ -145,7 +213,11 @@ export function createAiStreamingModule(deps: {
         onPreflightError(msg) {
           const aIdx = thread.messages.findIndex(m => m.id === asstMsgId)
           if (aIdx !== -1) thread.messages.splice(aIdx, 1)
-          if (params.rollbackUserMessageOnPreflight) {
+          if (params.rollbackMessagesSnapshot) {
+            thread.messages = [...params.rollbackMessagesSnapshot.messages]
+            thread.updatedAt = params.rollbackMessagesSnapshot.updatedAt
+            threads.syncSummaryFromThread(thread)
+          } else if (params.rollbackUserMessageOnPreflight) {
             const uIdx = thread.messages.findIndex(m => m.id === params.rollbackUserMessageOnPreflight!.messageId)
             if (uIdx !== -1) thread.messages.splice(uIdx, 1)
             threads.draftPromptByEvent.value = {
@@ -185,11 +257,62 @@ export function createAiStreamingModule(deps: {
         }
         if (res.cancelled) {
           finalTarget.stopped = true
-        } else if (!finalTarget.content.trim() && !finalTarget.error && !finalTarget.reasoning?.trim()) {
-          finalTarget.content = i18n.global.t('ai.no_content_returned')
+          finalTarget.content = stripTurboActionBlocks(finalTarget.content).displayContent
+        } else {
+          if (effectiveAiMode === 'turbo' && !res.error && finalTarget.content.trim()) {
+            const parsedActions = extractTurboActionsFromContent(finalTarget.content)
+            if (parsedActions.length > 0) {
+              const actingUser = userStore.username || 'User'
+              finalTarget.turboActions = parsedActions.map((act, idx) => ({
+                id: `pending_${idx}`,
+                type: act.type,
+                status: 'pending' as const,
+                summary: act.type,
+                actedAsUsername: actingUser
+              }))
+              const executed = await executeTurboActions({
+                eventId: params.eventId,
+                actions: parsedActions,
+                userId: userStore.userId,
+                username: actingUser,
+                isHost: isHostForEvent(params.eventId),
+                locale: i18n.global.locale.value
+              })
+              finalTarget.turboActions = executed
+              const okCount = executed.filter(item => item.status === 'success').length
+              const errCount = executed.filter(item => item.status === 'error').length
+              const toastStore = useToastStore()
+              if (errCount === 0 && okCount > 0) {
+                toastStore.showToast(
+                  i18n.global.t('ai.turbo_toast_success', { count: okCount }),
+                  'success'
+                )
+              } else if (okCount > 0 && errCount > 0) {
+                toastStore.showToast(
+                  i18n.global.t('ai.turbo_toast_partial', { ok: okCount, fail: errCount }),
+                  'warning'
+                )
+              } else if (errCount > 0) {
+                toastStore.showToast(
+                  i18n.global.t('ai.turbo_toast_failed', { fail: errCount }),
+                  'error'
+                )
+              }
+            }
+          }
+
+          const strippedProse = stripTurboActionBlocks(finalTarget.content).displayContent
+          const hasExecutedActions = Boolean(finalTarget.turboActions && finalTarget.turboActions.length > 0)
+          if (!strippedProse && !hasExecutedActions && !finalTarget.error && !finalTarget.reasoning?.trim()) {
+            finalTarget.content = i18n.global.t('ai.no_content_returned')
+          } else {
+            finalTarget.content = strippedProse
+          }
         }
       }
-      await threads.persistThreadNow(thread)
+      if (threads.threadDetailsById.value[thread.id]) {
+        await threads.persistThreadNow(thread)
+      }
       return !res.error
     }
 
@@ -201,6 +324,8 @@ export function createAiStreamingModule(deps: {
     prompt: string
     effectiveSystemPrompt: string
     contextSummary?: string
+    aiMode?: AiAssistantMode
+    thinkingMode?: AiThinkingMode
     errorPrefix?: string
   }): Promise<boolean> {
     const clean = params.prompt.trim()
@@ -228,6 +353,8 @@ export function createAiStreamingModule(deps: {
       thread,
       effectiveSystemPrompt: params.effectiveSystemPrompt,
       contextSummary: params.contextSummary,
+      aiMode: params.aiMode,
+      thinkingMode: params.thinkingMode,
       rollbackUserMessageOnPreflight: { messageId: userMsg.id, originalContent: clean },
       errorPrefix: params.errorPrefix
     })
@@ -238,6 +365,8 @@ export function createAiStreamingModule(deps: {
     messageId: string
     effectiveSystemPrompt: string
     contextSummary?: string
+    aiMode?: AiAssistantMode
+    thinkingMode?: AiThinkingMode
     errorPrefix?: string
   }): Promise<boolean> {
     const thread = threads.getActiveThread(params.eventId)
@@ -245,6 +374,8 @@ export function createAiStreamingModule(deps: {
     const idx = thread.messages.findIndex(m => m.id === params.messageId)
     if (idx === -1) return false
 
+    const prevMessages = [...thread.messages]
+    const prevUpdatedAt = thread.updatedAt
     thread.messages = thread.messages.slice(0, idx)
     threads.scheduleSaveThread(thread)
 
@@ -253,6 +384,9 @@ export function createAiStreamingModule(deps: {
       thread,
       effectiveSystemPrompt: params.effectiveSystemPrompt,
       contextSummary: params.contextSummary,
+      aiMode: params.aiMode,
+      thinkingMode: params.thinkingMode,
+      rollbackMessagesSnapshot: { messages: prevMessages, updatedAt: prevUpdatedAt },
       errorPrefix: params.errorPrefix
     })
   }
@@ -263,6 +397,8 @@ export function createAiStreamingModule(deps: {
     newContent: string
     effectiveSystemPrompt: string
     contextSummary?: string
+    aiMode?: AiAssistantMode
+    thinkingMode?: AiThinkingMode
     errorPrefix?: string
   }): Promise<boolean> {
     const clean = params.newContent.trim()
@@ -272,6 +408,8 @@ export function createAiStreamingModule(deps: {
     const idx = thread.messages.findIndex(m => m.id === params.messageId)
     if (idx === -1) return false
 
+    const prevMessages = [...thread.messages]
+    const prevUpdatedAt = thread.updatedAt
     thread.messages = thread.messages.slice(0, idx)
     const editedMsg: AiChatMessage = {
       id: `user_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`,
@@ -287,7 +425,9 @@ export function createAiStreamingModule(deps: {
       thread,
       effectiveSystemPrompt: params.effectiveSystemPrompt,
       contextSummary: params.contextSummary,
-      rollbackUserMessageOnPreflight: { messageId: editedMsg.id, originalContent: clean },
+      aiMode: params.aiMode,
+      thinkingMode: params.thinkingMode,
+      rollbackMessagesSnapshot: { messages: prevMessages, updatedAt: prevUpdatedAt },
       errorPrefix: params.errorPrefix
     })
   }

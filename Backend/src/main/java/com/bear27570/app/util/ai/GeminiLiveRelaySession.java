@@ -53,10 +53,7 @@ public final class GeminiLiveRelaySession extends AbstractVoiceWsRelay {
         if (baseUrl == null || baseUrl.isBlank()) {
             return DEFAULT_WS_ENDPOINT;
         }
-        String bUrl = baseUrl.trim();
-        while (bUrl.endsWith("/")) {
-            bUrl = bUrl.substring(0, bUrl.length() - 1);
-        }
+        String bUrl = com.bear27570.app.routes.ai.AiUrlGuard.stripQueryAndFragment(baseUrl);
         if (bUrl.regionMatches(true, 0, "https://", 0, 8)) {
             bUrl = "wss://" + bUrl.substring(8);
         } else if (bUrl.regionMatches(true, 0, "http://", 0, 7)) {

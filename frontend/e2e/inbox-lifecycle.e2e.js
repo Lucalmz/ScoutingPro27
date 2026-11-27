@@ -1,7 +1,7 @@
 import assert from 'assert';
 import fs from 'fs';
 import path from 'path';
-import { E2EClusterManager, REPO_ROOT, allocateFreePort } from './helpers/e2eBackendManager.js';
+import { E2EClusterManager, REPO_ROOT, allocateFreePort, ensureE2eBuildArtifacts } from './helpers/e2eBackendManager.js';
 import {
   confirmAnySasModals,
   createEventViaUi,
@@ -26,6 +26,7 @@ function snapshotFileStat(filePath) {
 }
 
 async function runE2E() {
+  ensureE2eBuildArtifacts();
   const rootDbPaths = [
     path.join(REPO_ROOT, 'app_data.mv.db'),
     path.join(REPO_ROOT, 'Backend', 'app_data.mv.db')

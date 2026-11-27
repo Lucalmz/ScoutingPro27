@@ -6,6 +6,13 @@ import { probePublicConnectivity } from '@/services/webrtc'
 import { isDesktopHost } from '@/services/photoStorage'
 import { isMobileDevice } from '@/composables/useIsMobile'
 
+export interface PendingSasItem {
+  peerId: string
+  username: string
+  ecdhPublicKey?: string
+  fingerprint: string
+}
+
 export const useConnectionStore = defineStore('connection', () => {
   const status = ref<ConnectionStatus>('offline')
   const transportInfo = ref<ConnectionTransportInfo | null>(null)
@@ -23,13 +30,6 @@ export const useConnectionStore = defineStore('connection', () => {
   const takeoverPrompt = ref<{ requesterUsername: string; timeoutSeconds: number } | null>(null)
   const isKicked = ref<{ reason: string } | null>(null)
   const isIceStalled = ref(false)
-  interface PendingSasItem {
-    peerId: string
-    username: string
-    ecdhPublicKey?: string
-    fingerprint: string
-  }
-
   const pendingSasQueue = ref<PendingSasItem[]>([])
   const isSasModalOpen = ref(false)
 

@@ -24,18 +24,20 @@ const router = createRouter({
       name: 'event',
       component: () => import('@/views/EventView.vue'),
       props: true,
-      meta: { depth: 2 }
+      meta: { depth: 2 },
+      children: [
+        {
+          path: 'team/:teamNumber',
+          name: 'team-detail',
+          component: () => import('@/views/TeamDetailView.vue'),
+          props: true,
+          meta: { depth: 3 }
+        }
+      ]
     },
     {
       path: '/join',
       redirect: (to) => ({ path: '/', query: to.query })
-    },
-    {
-      path: '/event/:eventId/team/:teamNumber',
-      name: 'team-detail',
-      component: () => import('@/views/TeamDetailView.vue'),
-      props: true,
-      meta: { depth: 3 }
     },
   ],
 })
@@ -69,6 +71,19 @@ router.beforeEach((to, from) => {
 
 router.beforeResolve((to, from, next) => {
   if (to.path === from.path || !document.startViewTransition) {
+    if (transitionState.activeToken) {
+      transitionState.clear(transitionState.activeToken)
+    }
+    return next()
+  }
+
+  const isSameEventDetailTransition =
+    (from.name === 'event' || from.name === 'team-detail') &&
+    (to.name === 'event' || to.name === 'team-detail') &&
+    Boolean(from.params.eventId) &&
+    String(from.params.eventId) === String(to.params.eventId)
+
+  if (isSameEventDetailTransition) {
     if (transitionState.activeToken) {
       transitionState.clear(transitionState.activeToken)
     }

@@ -111,7 +111,7 @@ function getMatchBiobuzzMeta(match: ScoutingRecord) {
 function goFullDetail() {
   if (props.teamNumber === null) return
   const tabContent = document.querySelector('.tab-content') as HTMLElement | null
-  const chatMessages = document.querySelector('.chat-messages') as HTMLElement | null
+  const chatMessages = document.querySelector('.messages-scroll, .chat-messages') as HTMLElement | null
   navStore.saveEventPosition({
     eventId: props.eventId,
     fromTab: 'ai',

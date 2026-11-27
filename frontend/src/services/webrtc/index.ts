@@ -373,6 +373,7 @@ export function createWebRtcService(callbacks: WebRtcCallbacks): WebRtcService {
     takeoverCooldowns,
     offlineMessages,
     sendMessage,
+    getPeerSasState: (peerId: string) => sas.clientSasStates.get(peerId),
     promoteTakeover,
     enqueueHostTask,
     cleanupPeerResources: (peerId: string) => {

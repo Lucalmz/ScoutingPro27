@@ -2,7 +2,7 @@ import assert from 'node:assert/strict'
 import fs from 'node:fs'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
-import { E2EClusterManager, allocateFreePort } from './helpers/e2eBackendManager.js'
+import { E2EClusterManager, allocateFreePort, ensureE2eBuildArtifacts } from './helpers/e2eBackendManager.js'
 import {
   assertNoStuckTransition,
   createEventViaUi,
@@ -44,6 +44,7 @@ async function setNumericInputValue(page, selector, valueStr) {
 }
 
 async function run() {
+  ensureE2eBuildArtifacts()
   const rootDbPaths = [
     path.join(REPO_ROOT, 'app_data.mv.db'),
     path.join(REPO_ROOT, 'Backend', 'app_data.mv.db'),

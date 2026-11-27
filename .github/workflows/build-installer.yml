@@ -59,6 +59,20 @@ jobs:
         working-directory: Backend
         run: |
           if [ "${{ runner.os }}" = "macOS" ]; then
+            xattr -cr jcef-bundle || true
+            # Ensure all Mach-O binaries, dylibs, frameworks, and helper apps have at least a valid ad-hoc signature for Apple Silicon (arm64)
+            find jcef-bundle -type f \( -name "*.dylib" -o -name "*.so" -o -perm -111 \) -print0 | while IFS= read -r -d '' bin; do
+              if file -b "$bin" | grep -q "Mach-O"; then
+                if ! codesign --verify --strict "$bin" >/dev/null 2>&1; then
+                  codesign --force --sign - "$bin"
+                fi
+              fi
+            done
+            find jcef-bundle -depth -type d \( -name "*.framework" -o -name "*.app" \) -print0 | while IFS= read -r -d '' bundle; do
+              if ! codesign --verify --deep --strict "$bundle" >/dev/null 2>&1; then
+                codesign --force --sign - "$bundle"
+              fi
+            done
             tar -czf src/main/resources/jcef-bundle.tar.gz -C jcef-bundle .
           else
             jar --create --file=src/main/resources/jcef-bundle.zip -C jcef-bundle .
@@ -69,26 +83,29 @@ jobs:
         working-directory: Backend
         run: mvn -B clean package -DskipTests
 
-      # ---------- 提取应用版本号 (如 v0.1.0 -> 0.1.0) ----------
+      # ---------- 提取应用版本号 (如 v1.1.2 -> 1.1.2；非 tag 手动构建回退到 Backend/pom.xml 版本) ----------
       - name: Determine App Version
         shell: bash
         run: |
           if [[ "${{ github.ref }}" == refs/tags/v* ]]; then
             RAW_VER="${GITHUB_REF_NAME#v}"
-            # 保证 jpackage 接收符合规范的数字版本号
-            CLEAN_VER=$(echo "$RAW_VER" | grep -oE '^[0-9]+(\.[0-9]+)*' || echo "0.1.0")
-            echo "APP_VERSION=$CLEAN_VER" >> $GITHUB_ENV
           else
-            echo "APP_VERSION=0.1.0" >> $GITHUB_ENV
-            CLEAN_VER="0.1.0"
-          fi
-          # macOS jpackage DMG 规范要求主版本号必须为正整数 (>=1)，否则报 configuration problem 错误
-          if [[ "${{ matrix.os-name }}" == mac* ]]; then
-            MAC_VER="$CLEAN_VER"
-            if [[ "$MAC_VER" =~ ^0\. ]]; then
-              MAC_VER="1.${MAC_VER#0.}"
+            RAW_VER=$(sed -n 's:.*<version>\([0-9][0-9.]*\)</version>.*:\1:p' Backend/pom.xml | head -n 1 || true)
+            if [[ -z "$RAW_VER" ]]; then
+              RAW_VER="1.0.0"
             fi
-            echo "JPACKAGE_VERSION=$MAC_VER" >> $GITHUB_ENV
+          fi
+          # 保证 jpackage 接收严格符合 Windows MSI 与 macOS DMG 规范的三段式数字版本号 (MAJOR.MINOR.PATCH)
+          CLEAN_VER=$(echo "$RAW_VER" | grep -oE '^[0-9]+(\.[0-9]+)*' || echo "1.0.0")
+          IFS='.' read -r V_MAJ V_MIN V_PAT _ <<< "$CLEAN_VER"
+          V_MAJ=${V_MAJ:-1}
+          V_MIN=${V_MIN:-0}
+          V_PAT=${V_PAT:-0}
+          CLEAN_VER="${V_MAJ}.${V_MIN}.${V_PAT}"
+          echo "APP_VERSION=$CLEAN_VER" >> $GITHUB_ENV
+          # macOS jpackage DMG / CFBundleShortVersionString 要求主版本号必须为正整数 (>=1)，否则报 configuration problem 错误
+          if [[ "${{ matrix.os-name }}" == mac* ]] && [[ "$V_MAJ" -eq 0 ]]; then
+            echo "JPACKAGE_VERSION=1.${V_MIN}.${V_PAT}" >> $GITHUB_ENV
           else
             echo "JPACKAGE_VERSION=$CLEAN_VER" >> $GITHUB_ENV
           fi
@@ -98,11 +115,11 @@ jobs:
         shell: bash
         working-directory: Backend
         run: |
-          rm -rf dist-input
-          mkdir -p dist-input
+          rm -rf dist-input dist
+          mkdir -p dist-input dist
           cp target/ScoutingPro27.jar dist-input/
 
-      # ---------- jpackage (Windows: 添加快捷方式、开始菜单和安装目录选择向导) ----------
+      # ---------- jpackage (Windows: 添加固定 UpgradeCode、发布商、快捷方式、开始菜单和安装目录选择向导) ----------
       - name: Run jpackage (Windows)
         if: runner.os == 'Windows'
         working-directory: Backend
@@ -111,6 +128,8 @@ jobs:
           --type ${{ matrix.jpackage-type }}
           --name ScoutingPro27
           --app-version ${{ env.JPACKAGE_VERSION }}
+          --vendor "FTC Team 27570 B.E.A.R."
+          --win-upgrade-uuid 1640af3f-2837-35d3-b98a-d8d8fe87e5e7
           --input dist-input
           --main-jar ScoutingPro27.jar
           --main-class com.bear27570.app.Main
@@ -122,40 +141,87 @@ jobs:
           --win-menu
           --win-menu-group ScoutingPro27
 
-      # ---------- jpackage (macOS: 添加包标识与图标) ----------
+      # ---------- jpackage (macOS: 生成 app-image -> 注入麦克风/摄像头权限 -> 由内向外 ad-hoc 签名 -> 封装 DMG) ----------
       - name: Run jpackage (macOS)
         if: runner.os == 'macOS'
         working-directory: Backend
         run: |
-          mkdir -p icon.iconset
-          sips -z 16 16     src/main/resources/icon.png --out icon.iconset/icon_16x16.png || true
-          sips -z 32 32     src/main/resources/icon.png --out icon.iconset/icon_16x16@2x.png || true
-          sips -z 32 32     src/main/resources/icon.png --out icon.iconset/icon_32x32.png || true
-          sips -z 64 64     src/main/resources/icon.png --out icon.iconset/icon_32x32@2x.png || true
-          sips -z 128 128   src/main/resources/icon.png --out icon.iconset/icon_128x128.png || true
-          sips -z 256 256   src/main/resources/icon.png --out icon.iconset/icon_128x128@2x.png || true
-          sips -z 256 256   src/main/resources/icon.png --out icon.iconset/icon_256x256.png || true
-          sips -z 512 512   src/main/resources/icon.png --out icon.iconset/icon_256x256@2x.png || true
-          sips -z 512 512   src/main/resources/icon.png --out icon.iconset/icon_512x512.png || true
-          iconutil -c icns icon.iconset -o src/main/resources/icon.icns || true
-          ICON_ARG=""
-          if [ -f src/main/resources/icon.icns ]; then
-            ICON_ARG="--icon src/main/resources/icon.icns"
-          fi
+          rm -rf icon.iconset dist-app
+          mkdir -p icon.iconset dist-app
+          sips -z 16 16     src/main/resources/icon.png --out icon.iconset/icon_16x16.png
+          sips -z 32 32     src/main/resources/icon.png --out icon.iconset/icon_16x16@2x.png
+          sips -z 32 32     src/main/resources/icon.png --out icon.iconset/icon_32x32.png
+          sips -z 64 64     src/main/resources/icon.png --out icon.iconset/icon_32x32@2x.png
+          sips -z 128 128   src/main/resources/icon.png --out icon.iconset/icon_128x128.png
+          sips -z 256 256   src/main/resources/icon.png --out icon.iconset/icon_128x128@2x.png
+          sips -z 256 256   src/main/resources/icon.png --out icon.iconset/icon_256x256.png
+          sips -z 512 512   src/main/resources/icon.png --out icon.iconset/icon_256x256@2x.png
+          sips -z 512 512   src/main/resources/icon.png --out icon.iconset/icon_512x512.png
+          iconutil -c icns icon.iconset -o src/main/resources/icon.icns
+
           jpackage \
-            --type ${{ matrix.jpackage-type }} \
+            --type app-image \
             --name ScoutingPro27 \
             --app-version ${{ env.JPACKAGE_VERSION }} \
+            --vendor "FTC Team 27570 B.E.A.R." \
             --input dist-input \
             --main-jar ScoutingPro27.jar \
             --main-class com.bear27570.app.Main \
-            --dest dist \
-            $ICON_ARG \
+            --dest dist-app \
+            --icon src/main/resources/icon.icns \
+            --java-options "--add-opens=java.desktop/java.awt.peer=ALL-UNNAMED" \
             --java-options "--add-opens=java.desktop/sun.awt=ALL-UNNAMED" \
             --java-options "--add-opens=java.desktop/sun.lwawt=ALL-UNNAMED" \
             --java-options "--add-opens=java.desktop/sun.lwawt.macosx=ALL-UNNAMED" \
             --mac-package-identifier com.bear27570.app \
             --mac-package-name ScoutingPro27
+
+          APP_BUNDLE="dist-app/ScoutingPro27.app"
+          PLIST="$APP_BUNDLE/Contents/Info.plist"
+
+          # 注入 macOS TCC 隐私用途声明，避免 AI 实时语音与 QR 扫码因缺少 Info.plist 键触发崩溃或静默拒权
+          /usr/libexec/PlistBuddy -c "Delete :NSMicrophoneUsageDescription" "$PLIST" >/dev/null 2>&1 || true
+          /usr/libexec/PlistBuddy -c "Add :NSMicrophoneUsageDescription string 'ScoutingPro27 needs microphone access for AI Copilot live voice and speech input.'" "$PLIST"
+          /usr/libexec/PlistBuddy -c "Delete :NSCameraUsageDescription" "$PLIST" >/dev/null 2>&1 || true
+          /usr/libexec/PlistBuddy -c "Add :NSCameraUsageDescription string 'ScoutingPro27 needs camera access to scan event QR codes.'" "$PLIST"
+          /usr/libexec/PlistBuddy -c "Delete :LSMinimumSystemVersion" "$PLIST" >/dev/null 2>&1 || true
+          /usr/libexec/PlistBuddy -c "Add :LSMinimumSystemVersion string '11.0'" "$PLIST"
+
+          # Apple Silicon (arm64) 强制要求所有 Mach-O 二进制与 .app 包至少具备有效 ad-hoc 签名
+          xattr -cr "$APP_BUNDLE" || true
+          find "$APP_BUNDLE/Contents" -type f \( -name "*.dylib" -o -name "*.jnilib" -o -name "*.so" -o -name "jspawnhelper" -o -perm -111 \) -print0 | while IFS= read -r -d '' f; do
+            if file -b "$f" | grep -q "Mach-O"; then
+              codesign --force --sign - "$f"
+            fi
+          done
+          if [ -d "$APP_BUNDLE/Contents/runtime" ]; then
+            codesign --force --sign - "$APP_BUNDLE/Contents/runtime"
+          fi
+          codesign --force --sign - "$APP_BUNDLE/Contents/MacOS/ScoutingPro27"
+          codesign --force --sign - "$APP_BUNDLE"
+          codesign --verify --deep --strict --verbose=2 "$APP_BUNDLE"
+
+          # 使用 ditto + hdiutil 打包标准拖拽式 .dmg，避免 jpackage --type dmg 在无头 CI 触发 osascript/Finder 超时或破坏已有签名
+          sync
+          rm -rf dmg-stage
+          mkdir -p dmg-stage
+          ditto "$APP_BUNDLE" "dmg-stage/ScoutingPro27.app"
+          ln -s /Applications dmg-stage/Applications
+          DMG_FILE="dist/ScoutingPro27.dmg"
+          hdiutil create -volname "ScoutingPro27" -srcfolder dmg-stage -ov -format UDZO "$DMG_FILE"
+          codesign --force --sign - "$DMG_FILE"
+
+          # 挂载最终 .dmg 严格复验内部 .app 签名与隐私声明完整无损
+          MOUNT_DIR=$(mktemp -d)
+          trap 'hdiutil detach "$MOUNT_DIR" -force >/dev/null 2>&1 || true; rmdir "$MOUNT_DIR" >/dev/null 2>&1 || true' EXIT
+          hdiutil attach "$DMG_FILE" -mountpoint "$MOUNT_DIR" -nobrowse -readonly
+          codesign --verify --deep --strict --verbose=2 "$MOUNT_DIR/ScoutingPro27.app"
+          /usr/libexec/PlistBuddy -c "Print :NSMicrophoneUsageDescription" "$MOUNT_DIR/ScoutingPro27.app/Contents/Info.plist"
+          /usr/libexec/PlistBuddy -c "Print :NSCameraUsageDescription" "$MOUNT_DIR/ScoutingPro27.app/Contents/Info.plist"
+          hdiutil detach "$MOUNT_DIR" -force
+          rmdir "$MOUNT_DIR"
+          trap - EXIT
+          rm -rf dmg-stage dist-app icon.iconset
 
       # ---------- 重命名安装包为 ScoutingPro27-[OS]-[version] 形式 ----------
       - name: Rename installer to ScoutingPro27-[OS]-[version]
@@ -176,10 +242,25 @@ jobs:
           name: installer-${{ matrix.os-name }}
           path: Backend/dist/*
 
+      # ---------- 生成中英双语 User Guide PDF（Windows 端自带中文字体与 Chrome）并随 Release 发布 ----------
+      - name: Generate bilingual User Guide PDFs
+        if: runner.os == 'Windows'
+        working-directory: frontend
+        run: |
+          npm run capture:userguide
+          npm run export:userguide-pdf
+
+      - name: Upload User Guide PDFs
+        if: runner.os == 'Windows'
+        uses: actions/upload-artifact@v4
+        with:
+          name: userguide-pdfs
+          path: docs/ScoutingPro27_UserGuide_*.pdf
+
   # ---------- 自动发布并挂载产物到 GitHub Release (Official Release) ----------
   release:
     needs: build
-    if: always() && startsWith(github.ref, 'refs/tags/v') && !cancelled()
+    if: needs.build.result == 'success' && startsWith(github.ref, 'refs/tags/v')
     runs-on: ubuntu-latest
     permissions:
       contents: write

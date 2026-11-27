@@ -32,6 +32,9 @@ public interface PitScoutDao {
     @SqlQuery("SELECT * FROM pit_scouting_records WHERE event_id = :eventId AND team_number = :teamNumber")
     PitScoutingRecord findPitRecordByTeam(@Bind("eventId") String eventId, @Bind("teamNumber") int teamNumber);
 
+    @SqlQuery("SELECT event_id FROM pit_scouting_records WHERE id = :id")
+    String findEventIdByRecordId(@Bind("id") String id);
+
     @SqlUpdate("""
         MERGE INTO pit_scouting_records AS target
         USING (VALUES (

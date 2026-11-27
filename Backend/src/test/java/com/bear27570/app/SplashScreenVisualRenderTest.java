@@ -24,10 +24,28 @@ public class SplashScreenVisualRenderTest {
                 assertThat(splash.getHeight()).isEqualTo(380);
                 assertThat(splash.getBackground()).isEqualTo(SplashScreen.BG_GRAPHITE_900);
 
+                // Clock must stay at 0ms while SplashScreen is not yet shown on screen
+                Thread.sleep(60L);
+                assertThat(splash.currentElapsedMs()).isEqualTo(0L);
+
                 splash.doLayout();
                 splash.validate();
 
-                // 1. Mid-progress loading state
+                // 0. Clock must stay anchored at 0ms before actual display, and typewriter starts delayed
+                assertThat(splash.currentElapsedMs()).isEqualTo(0L);
+                assertThat(SplashScreen.computeTitleTypedLength(0L)).isEqualTo(0);
+                assertThat(SplashScreen.computeTitleTypedLength(SplashScreen.TITLE_START_MS - 1L)).isEqualTo(0);
+                assertThat(SplashScreen.computeTitleTypedLength(SplashScreen.TITLE_START_MS)).isEqualTo(1);
+                assertThat(SplashScreen.computeTitleTypedLength(SplashScreen.TITLE_PREFIX_DONE_MS)).isEqualTo(11);
+                assertThat(SplashScreen.computeTitleTypedLength(SplashScreen.TITLE_SUFFIX_START_MS - 1L)).isEqualTo(11);
+                assertThat(SplashScreen.computeTitleTypedLength(SplashScreen.TITLE_SUFFIX_START_MS)).isEqualTo(12);
+                assertThat(SplashScreen.computeTitleTypedLength(SplashScreen.TITLE_COMPLETE_MS)).isEqualTo(13);
+
+                splash.setRenderStateForTest(0L, 0f, "Initializing...", false);
+                BufferedImage initialImg = renderSplashToImage(splash);
+                assertHasPaintedContent(initialImg);
+
+                // 1. Mid-progress & mid-typing loading state
                 splash.updateProgress(62, "Starting local server...");
                 assertThat(splash.isFailed()).isFalse();
                 assertThat(splash.getTargetProgress()).isEqualTo(62);
@@ -36,15 +54,17 @@ public class SplashScreenVisualRenderTest {
                 splash.setRenderStateForTest(1600L, 62f, "Starting local server...", false);
                 BufferedImage midImg = renderSplashToImage(splash);
                 assertHasPaintedContent(midImg);
+                assertImagesDiffer(initialImg, midImg);
 
-                // 2. Ready 100% state (clamped to [0, 100])
+                // 2. Ready 100% state (clamped to [0, 100]) after full entrance + typewriter + subtitle
                 splash.updateProgress(130, "Ready");
                 assertThat(splash.getTargetProgress()).isEqualTo(100);
                 assertThat(splash.getStatusText()).isEqualTo("Ready");
 
-                splash.setRenderStateForTest(3000L, 100f, "Ready", false);
+                splash.setRenderStateForTest(3500L, 100f, "Ready", false);
                 BufferedImage readyImg = renderSplashToImage(splash);
                 assertHasPaintedContent(readyImg);
+                assertImagesDiffer(midImg, readyImg);
 
                 // 3. Failure state truncation, prefixing, and sticky latch against subsequent updateProgress
                 splash.showFailure("   A very long initialization error message exceeding forty-four characters   ");
@@ -70,6 +90,39 @@ public class SplashScreenVisualRenderTest {
         }
     }
 
+    @Test
+    public void testVisibleLifecycleHonorsMinDurationAndProgressRamp() throws Exception {
+        Assumptions.assumeFalse(GraphicsEnvironment.isHeadless(), "Swing SplashScreen test requires non-headless display");
+        java.util.concurrent.CountDownLatch closedLatch = new java.util.concurrent.CountDownLatch(1);
+        java.util.concurrent.atomic.AtomicLong shownAtMs = new java.util.concurrent.atomic.AtomicLong();
+        java.util.concurrent.atomic.AtomicLong closedAtMs = new java.util.concurrent.atomic.AtomicLong();
+        AtomicReference<SplashScreen> ref = new AtomicReference<>();
+
+        SwingUtilities.invokeAndWait(() -> {
+            SplashScreen splash = new SplashScreen();
+            ref.set(splash);
+            shownAtMs.set(System.currentTimeMillis());
+            splash.setVisible(true);
+            splash.updateProgress(100, "Ready");
+            splash.closeSmoothly(() -> {
+                closedAtMs.set(System.currentTimeMillis());
+                closedLatch.countDown();
+            });
+        });
+
+        try {
+            boolean completed = closedLatch.await(10, java.util.concurrent.TimeUnit.SECONDS);
+            assertThat(completed).as("SplashScreen should complete fade-out and invoke callback").isTrue();
+            long visibleDurationMs = closedAtMs.get() - shownAtMs.get();
+            assertThat(visibleDurationMs).isGreaterThanOrEqualTo(SplashScreen.MIN_VISIBLE_MS);
+        } finally {
+            SplashScreen splash = ref.get();
+            if (splash != null) {
+                SwingUtilities.invokeAndWait(splash::dispose);
+            }
+        }
+    }
+
     private static void assertHasPaintedContent(BufferedImage img) {
         int bgRgb = SplashScreen.BG_GRAPHITE_900.getRGB() & 0xFFFFFF;
         int nonBgPixels = 0;
@@ -81,6 +134,18 @@ public class SplashScreenVisualRenderTest {
             }
         }
         assertThat(nonBgPixels).isGreaterThan(0);
+    }
+
+    private static void assertImagesDiffer(BufferedImage a, BufferedImage b) {
+        int diffPixels = 0;
+        for (int y = 0; y < a.getHeight(); y += 2) {
+            for (int x = 0; x < a.getWidth(); x += 2) {
+                if (a.getRGB(x, y) != b.getRGB(x, y)) {
+                    diffPixels++;
+                }
+            }
+        }
+        assertThat(diffPixels).isGreaterThan(0);
     }
 
     private static BufferedImage renderSplashToImage(SplashScreen splash) {

@@ -53,14 +53,39 @@ public final class OpenAiProtocolAdapter {
         return lower.matches("^o[134](-.*|$)");
     }
 
+    private static boolean isOpenAiGpt5Series(String model) {
+        if (model == null) return false;
+        String lower = model.trim().toLowerCase(Locale.ROOT);
+        return lower.matches("^gpt-5(-.*|$)");
+    }
+
+    private static boolean isDashScopeEndpoint(String baseUrl) {
+        return baseUrl != null && baseUrl.toLowerCase(Locale.ROOT).contains("dashscope.aliyuncs.com");
+    }
+
+    private static boolean isSiliconFlowEndpoint(String baseUrl) {
+        return baseUrl != null && baseUrl.toLowerCase(Locale.ROOT).contains("siliconflow");
+    }
+
+    private static boolean isZhipuEndpoint(String baseUrl) {
+        if (baseUrl == null) return false;
+        String lower = baseUrl.toLowerCase(Locale.ROOT);
+        return lower.contains("bigmodel.cn") || lower.contains("api.z.ai");
+    }
+
+    private static boolean isOpenRouterEndpoint(String baseUrl) {
+        return baseUrl != null && baseUrl.toLowerCase(Locale.ROOT).contains("openrouter.ai");
+    }
+
+    private static boolean isDeepSeekEndpoint(String baseUrl) {
+        return baseUrl != null && baseUrl.toLowerCase(Locale.ROOT).contains("deepseek.com");
+    }
+
     public static String resolveChatEndpoint(String baseUrl) {
         if (baseUrl == null || baseUrl.isBlank()) {
             return "https://api.openai.com/v1/chat/completions";
         }
-        String bUrl = baseUrl.trim();
-        while (bUrl.endsWith("/")) {
-            bUrl = bUrl.substring(0, bUrl.length() - 1);
-        }
+        String bUrl = com.bear27570.app.routes.ai.AiUrlGuard.stripQueryAndFragment(baseUrl);
         if (bUrl.endsWith("/chat/completions")) {
             return bUrl;
         }
@@ -74,10 +99,7 @@ public final class OpenAiProtocolAdapter {
         if (baseUrl == null || baseUrl.isBlank()) {
             return "https://api.openai.com/v1/models";
         }
-        String bUrl = baseUrl.trim();
-        while (bUrl.endsWith("/")) {
-            bUrl = bUrl.substring(0, bUrl.length() - 1);
-        }
+        String bUrl = com.bear27570.app.routes.ai.AiUrlGuard.stripQueryAndFragment(baseUrl);
         if (bUrl.endsWith("/models")) {
             return bUrl;
         }
@@ -97,6 +119,21 @@ public final class OpenAiProtocolAdapter {
             Double temperature,
             String systemPrompt,
             List<Map<String, String>> messages,
+            Consumer<StreamChunk> chunkConsumer,
+            AtomicBoolean isCancelled
+    ) throws Exception {
+        streamChat(profile, apiKey, modelName, temperature, systemPrompt, messages, null, null, chunkConsumer, isCancelled);
+    }
+
+    public static void streamChat(
+            AiProviderProfile profile,
+            String apiKey,
+            String modelName,
+            Double temperature,
+            String systemPrompt,
+            List<Map<String, String>> messages,
+            Boolean enableThinkingOverride,
+            String reasoningEffortOverride,
             Consumer<StreamChunk> chunkConsumer,
             AtomicBoolean isCancelled
     ) throws Exception {
@@ -123,19 +160,27 @@ public final class OpenAiProtocolAdapter {
 
         boolean includeStreamOptions = true;
         boolean includeMaxTokens = profile.getMaxTokens() != null && profile.getMaxTokens() > 0 && !isOpenAiOSeries(model);
+        boolean includeThinkingParams = true;
 
         HttpResponse<InputStream> response = null;
         CompletableFuture<HttpResponse<InputStream>> activeFuture = null;
 
-        for (int attempt = 0; attempt < 2; attempt++) {
-            JsonObject payload = buildStreamPayload(model, msgsArray, temperature, profile.getMaxTokens(), includeMaxTokens, includeStreamOptions);
+        for (int attempt = 0; attempt < 3; attempt++) {
+            JsonObject payload = buildStreamPayload(
+                    model, msgsArray, temperature, profile.getMaxTokens(),
+                    includeMaxTokens, includeStreamOptions,
+                    profile.getBaseUrl(),
+                    includeThinkingParams ? enableThinkingOverride : null,
+                    includeThinkingParams ? reasoningEffortOverride : null
+            );
             HttpRequest.Builder reqBuilder = HttpRequest.newBuilder()
                     .uri(URI.create(endpoint))
                     .header("Content-Type", "application/json")
                     .POST(HttpRequest.BodyPublishers.ofString(AiStreamSupport.GSON.toJson(payload)))
                     .timeout(Duration.ofSeconds(120));
-            if (!apiKey.isEmpty()) {
-                reqBuilder.header("Authorization", "Bearer " + apiKey);
+            String cleanApiKey = com.bear27570.app.routes.ai.AiUrlGuard.stripControlChars(apiKey);
+            if (!cleanApiKey.isEmpty()) {
+                reqBuilder.header("Authorization", "Bearer " + cleanApiKey);
             }
 
             activeFuture = client.sendAsync(reqBuilder.build(), HttpResponse.BodyHandlers.ofInputStream());
@@ -155,16 +200,22 @@ public final class OpenAiProtocolAdapter {
             }
 
             String lower = errorBody.toLowerCase(Locale.ROOT);
-            boolean canRetryStreamOptions = attempt == 0 && (statusCode == 400 || statusCode == 422)
+            boolean canRetryStreamOptions = attempt < 2 && (statusCode == 400 || statusCode == 422)
                     && includeStreamOptions
                     && (lower.contains("stream_options") || lower.contains("unrecognized") || lower.contains("extra inputs") || lower.contains("unknown field"));
-            boolean canRetryMaxTokens = attempt == 0 && (statusCode == 400 || statusCode == 422)
+            boolean canRetryMaxTokens = attempt < 2 && (statusCode == 400 || statusCode == 422)
                     && includeMaxTokens
                     && lower.contains("max_tokens");
+            boolean canRetryThinking = attempt < 2 && (statusCode == 400 || statusCode == 422)
+                    && includeThinkingParams
+                    && (enableThinkingOverride != null || reasoningEffortOverride != null)
+                    && (lower.contains("reasoning_effort") || lower.contains("enable_thinking") || lower.contains("thinking")
+                    || lower.contains("reasoning") || lower.contains("unrecognized") || lower.contains("unknown field") || lower.contains("extra inputs"));
 
-            if (canRetryStreamOptions || canRetryMaxTokens) {
+            if (canRetryStreamOptions || canRetryMaxTokens || canRetryThinking) {
                 if (canRetryStreamOptions) includeStreamOptions = false;
                 if (canRetryMaxTokens) includeMaxTokens = false;
+                if (canRetryThinking) includeThinkingParams = false;
                 logger.info("[AiClient] OpenAI-compatible gateway rejected optional parameter (HTTP {}), retrying without it.", statusCode);
                 continue;
             }
@@ -195,13 +246,16 @@ public final class OpenAiProtocolAdapter {
         }
     }
 
-    private static JsonObject buildStreamPayload(
+    public static JsonObject buildStreamPayload(
             String model,
             JsonArray msgsArray,
             Double temperature,
             Integer maxTokens,
             boolean includeMaxTokens,
-            boolean includeStreamOptions
+            boolean includeStreamOptions,
+            String baseUrl,
+            Boolean enableThinking,
+            String reasoningEffort
     ) {
         JsonObject payload = new JsonObject();
         payload.addProperty("model", model);
@@ -216,6 +270,39 @@ public final class OpenAiProtocolAdapter {
         }
         if (includeMaxTokens && maxTokens != null && maxTokens > 0) {
             payload.addProperty("max_tokens", maxTokens);
+        }
+        if (isOpenAiOSeries(model) || isOpenAiGpt5Series(model)) {
+            String effort = reasoningEffort != null ? reasoningEffort.trim().toLowerCase(Locale.ROOT) : "";
+            if (effort.isEmpty() && enableThinking != null) {
+                effort = enableThinking ? "medium" : "none";
+            }
+            if (!effort.isEmpty()) {
+                if ("off".equals(effort) || "none".equals(effort) || "minimal".equals(effort)) {
+                    payload.addProperty("reasoning_effort", isOpenAiGpt5Series(model) ? "minimal" : "low");
+                } else if ("low".equals(effort) || "medium".equals(effort) || "high".equals(effort)) {
+                    payload.addProperty("reasoning_effort", effort);
+                }
+            }
+        } else if ((isDashScopeEndpoint(baseUrl) || isSiliconFlowEndpoint(baseUrl)) && enableThinking != null) {
+            payload.addProperty("enable_thinking", enableThinking);
+        } else if ((isZhipuEndpoint(baseUrl) || isDeepSeekEndpoint(baseUrl)) && enableThinking != null) {
+            JsonObject thinking = new JsonObject();
+            thinking.addProperty("type", enableThinking ? "enabled" : "disabled");
+            payload.add("thinking", thinking);
+        } else if (isOpenRouterEndpoint(baseUrl) && (enableThinking != null || (reasoningEffort != null && !reasoningEffort.isBlank()))) {
+            String effort = reasoningEffort != null ? reasoningEffort.trim().toLowerCase(Locale.ROOT) : "";
+            if (effort.isEmpty() && enableThinking != null) {
+                effort = enableThinking ? "medium" : "none";
+            }
+            JsonObject reasoning = new JsonObject();
+            if ("off".equals(effort) || "none".equals(effort)) {
+                reasoning.addProperty("exclude", true);
+            } else if ("minimal".equals(effort) || "low".equals(effort) || "medium".equals(effort) || "high".equals(effort)) {
+                reasoning.addProperty("effort", "minimal".equals(effort) ? "low" : effort);
+            }
+            if (!reasoning.isEmpty()) {
+                payload.add("reasoning", reasoning);
+            }
         }
         payload.add("messages", msgsArray);
         return payload;

@@ -111,6 +111,14 @@
       "expectedDeps": [],
       "context": {},
       "expectedValue": 42
+    },
+    {
+      "name": "allow_ast_depth_exactly_20",
+      "target": "TEAM",
+      "expr": "((((((((((((((((((((1))))))))))))))))))))",
+      "expectedDeps": [],
+      "context": {},
+      "expectedValue": 1
     }
   ],
   "invalidCases": [
@@ -119,6 +127,18 @@
       "target": "TEAM",
       "expr": "   ",
       "expectedErrorCode": "EMPTY_FORMULA"
+    },
+    {
+      "name": "reject_method_call_on_namespace",
+      "target": "MATCH",
+      "expr": "system.env()",
+      "expectedErrorCode": "INVALID_SYNTAX"
+    },
+    {
+      "name": "reject_method_call_on_known_cross_layer_namespace",
+      "target": "MATCH",
+      "expr": "opr.np()",
+      "expectedErrorCode": "INVALID_SYNTAX"
     },
     {
       "name": "reject_proto_pollution",
@@ -275,6 +295,12 @@
       "target": "TEAM",
       "exprRepeat": { "open": "(", "core": "1", "close": ")", "count": 25 },
       "expectedErrorCode": "AST_DEPTH_EXCEEDED"
+    },
+    {
+      "name": "reject_ast_depth_21",
+      "target": "TEAM",
+      "exprRepeat": { "open": "(", "core": "1", "close": ")", "count": 21 },
+      "expectedErrorCode": "AST_DEPTH_EXCEEDED"
     }
   ],
   "graphCases": [
@@ -330,6 +356,32 @@
         { "id": "cf-same-1", "target": "TEAM", "fieldKey": "metric_a", "fieldType": "formula", "formulaExpr": "opr.np + 1" }
       ],
       "candidate": { "id": "cf-same-1", "target": "TEAM", "fieldKey": "METRIC_A", "fieldType": "formula", "formulaExpr": "opr.np * 2" },
+      "expectedValid": true
+    },
+    {
+      "name": "re_edit_existing_formula_same_id_breaks_old_cycle",
+      "existingFields": [
+        { "id": "cf-break-cycle", "target": "TEAM", "fieldKey": "cyc_a", "fieldType": "formula", "formulaExpr": "formula.cyc_b + 1" },
+        { "id": "cf-cyc-b", "target": "TEAM", "fieldKey": "cyc_b", "fieldType": "formula", "formulaExpr": "formula.cyc_a + 1" }
+      ],
+      "candidate": { "id": "cf-break-cycle", "target": "TEAM", "fieldKey": "cyc_a_renamed", "fieldType": "formula", "formulaExpr": "opr.np * 2" },
+      "expectedValid": true
+    },
+    {
+      "name": "cross_target_same_field_key_allowed",
+      "existingFields": [
+        { "id": "cf-match-eff", "target": "MATCH", "fieldKey": "eff", "fieldType": "formula", "formulaExpr": "match.autoScore + match.teleopScore" }
+      ],
+      "candidate": { "id": "cf-team-eff", "target": "TEAM", "fieldKey": "eff", "fieldType": "formula", "formulaExpr": "formula.eff + opr.np" },
+      "expectedValid": true
+    },
+    {
+      "name": "cross_target_multi_node_same_keys_no_phantom_cycle",
+      "existingFields": [
+        { "id": "cf-m-b", "target": "MATCH", "fieldKey": "b", "fieldType": "formula", "formulaExpr": "match.autoScore" },
+        { "id": "cf-m-a", "target": "MATCH", "fieldKey": "a", "fieldType": "formula", "formulaExpr": "formula.b + 1" }
+      ],
+      "candidate": { "id": "cf-t-b", "target": "TEAM", "fieldKey": "b", "fieldType": "formula", "formulaExpr": "formula.a + opr.np" },
       "expectedValid": true
     }
   ]

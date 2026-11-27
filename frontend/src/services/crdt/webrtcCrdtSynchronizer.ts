@@ -48,7 +48,7 @@ export interface WebRtcCrdtSynchronizerHub {
  *
  * Keeps a dedicated Synchronizer per remote peer against the shared MergeableStore so
  * Client1 -> Host automatically fans out delta ContentDiffs to Client2 with zero echo loops,
- * performs chunked (48 KiB) framing, and runs pre-merge HLC skew scanning (`decodeHlc`).
+ * performs chunked (16 KiB) framing, and runs pre-merge HLC skew scanning (`decodeHlc`).
  */
 export function createWebRtcCrdtSynchronizerHub(opts: WebRtcCrdtHubOptions): WebRtcCrdtSynchronizerHub {
   const {
@@ -63,7 +63,7 @@ export function createWebRtcCrdtSynchronizerHub(opts: WebRtcCrdtHubOptions): Web
     onPeerSyncSettled,
     onIgnoredError
   } = opts
-  const requestTimeoutSeconds = opts.requestTimeoutSeconds ?? 4
+  const requestTimeoutSeconds = opts.requestTimeoutSeconds ?? 12
   const maxClockSkewMs = opts.maxClockSkewMs ?? MAX_CLOCK_SKEW_MS
 
   const peers = new Map<string, AttachedPeerSync>()

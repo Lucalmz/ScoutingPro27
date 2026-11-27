@@ -29,23 +29,27 @@ public class ApiRoutes {
     private static final Logger logger = LoggerFactory.getLogger(ApiRoutes.class);
     private final Jdbi jdbi;
     private final FtcApiClient ftcApiClient;
-    private final Gson gson = new com.google.gson.GsonBuilder()
-            .setDateFormat("yyyy-MM-dd'T'HH:mm:ss.SSSZ")
-            .registerTypeAdapter(int.class, (com.google.gson.JsonDeserializer<Integer>) (json, typeOfT, context) -> {
-                try {
-                    return (int) Math.round(json.getAsDouble());
-                } catch (Exception e) {
-                    return 0;
-                }
-            })
-            .registerTypeAdapter(Integer.class, (com.google.gson.JsonDeserializer<Integer>) (json, typeOfT, context) -> {
-                try {
-                    return (int) Math.round(json.getAsDouble());
-                } catch (Exception e) {
-                    return null;
-                }
-            })
-            .create();
+    private final Gson gson = createGson();
+
+    public static Gson createGson() {
+        return new com.google.gson.GsonBuilder()
+                .setDateFormat("yyyy-MM-dd'T'HH:mm:ss.SSSZ")
+                .registerTypeAdapter(int.class, (com.google.gson.JsonDeserializer<Integer>) (json, typeOfT, context) -> {
+                    try {
+                        return (int) Math.round(json.getAsDouble());
+                    } catch (Exception e) {
+                        return 0;
+                    }
+                })
+                .registerTypeAdapter(Integer.class, (com.google.gson.JsonDeserializer<Integer>) (json, typeOfT, context) -> {
+                    try {
+                        return (int) Math.round(json.getAsDouble());
+                    } catch (Exception e) {
+                        return null;
+                    }
+                })
+                .create();
+    }
     private final ScheduledExecutorService gcScheduler = Executors.newSingleThreadScheduledExecutor(r -> {
         Thread t = new Thread(r, "tombstone-gc-thread");
         t.setDaemon(true);

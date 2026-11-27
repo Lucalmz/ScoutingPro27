@@ -534,4 +534,51 @@ describe('DynamicFieldsRenderer.vue', () => {
     expect(wrapper.find('.formula-result-value').text()).toBe('14')
     expect(wrapper.find('.formula-error-badge.is-cycle').exists()).toBe(true)
   })
+
+  it('rejects trailing non-numeric characters in onNumberInput and isolates cross-target formula previews', async () => {
+    const numField = createField({
+      id: 'n1',
+      target: 'MATCH',
+      fieldType: 'number',
+      fieldKey: 'balls',
+      minVal: 0,
+      maxVal: 10,
+      defaultVal: '3',
+      configJson: JSON.stringify({ inputMode: 'direct' })
+    })
+    const matchFormula = createField({
+      id: 'mf1',
+      target: 'MATCH',
+      fieldType: 'formula',
+      fieldKey: 'shared_score',
+      formulaExpr: 'cf.balls * 2'
+    })
+    const teamFormula = createField({
+      id: 'tf1',
+      target: 'TEAM',
+      fieldType: 'formula',
+      fieldKey: 'shared_score',
+      formulaExpr: 'opr.np + 100'
+    })
+
+    const wrapper = track(mount(DynamicFieldsRenderer, {
+      props: {
+        definitions: [numField, matchFormula],
+        allDefinitions: [numField, matchFormula, teamFormula],
+        modelValue: { balls: 4 },
+        formulaContext: { opr: { np: 50 } }
+      }
+    }))
+
+    // Cross-target TEAM formula with same fieldKey must NOT overwrite MATCH formula result (4 * 2 = 8)
+    expect(wrapper.find('.formula-result-value').text()).toBe('8')
+
+    // Trailing garbage like "12abc" must fall back to clamped default (3) instead of parseFloat -> 10
+    const input = wrapper.find('.direct-number-input')
+    await input.setValue('12abc')
+    await input.trigger('change')
+    const emitted = wrapper.emitted('update:modelValue')
+    expect(emitted).toBeTruthy()
+    expect(emitted![emitted!.length - 1]![0]).toMatchObject({ balls: 3 })
+  })
 })

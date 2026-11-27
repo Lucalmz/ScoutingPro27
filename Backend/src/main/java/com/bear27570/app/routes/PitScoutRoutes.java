@@ -76,6 +76,10 @@ public class PitScoutRoutes {
                 ctx.status(400).result("Invalid PitScoutingRecord payload");
                 return;
             }
+            if (record.getTeamNumber() <= 0) {
+                ctx.status(400).result("Invalid teamNumber");
+                return;
+            }
 
             if (record.getId() == null || record.getId().isBlank()) {
                 record.setId(UUID.randomUUID().toString());
@@ -92,9 +96,17 @@ public class PitScoutRoutes {
             try {
                 synchronized (DbUtil.RECORD_WRITE_LOCK) {
                     DbUtil.withDeadlockRetry(() -> {
-                        jdbi.useExtension(PitScoutDao.class, dao -> dao.upsertPitRecord(record));
+                        jdbi.useExtension(PitScoutDao.class, dao -> {
+                            String existingEventId = dao.findEventIdByRecordId(record.getId());
+                            if (existingEventId != null && !existingEventId.equals(eventId)) {
+                                throw new ForbiddenResponse("Pit record ID belongs to another event");
+                            }
+                            dao.upsertPitRecord(record);
+                        });
                     });
                 }
+            } catch (io.javalin.http.HttpResponseException e) {
+                throw e;
             } catch (Exception e) {
                 ctx.status(500).result("Save pit record failed: " + e.getMessage());
                 return;
@@ -118,6 +130,12 @@ public class PitScoutRoutes {
                 ctx.result(gson.toJson(Map.of("success", true, "count", 0))).contentType("application/json");
                 return;
             }
+            for (PitScoutingRecord r : records) {
+                if (r == null || r.getTeamNumber() <= 0) {
+                    ctx.status(400).result("Invalid teamNumber");
+                    return;
+                }
+            }
 
             records.sort(Comparator.comparing(r -> r.getId() != null ? r.getId() : ""));
             try {
@@ -135,6 +153,10 @@ public class PitScoutRoutes {
                                 if (r.getScoutName() == null || r.getScoutName().isBlank()) {
                                     r.setScoutName(r.getScoutId() != null ? r.getScoutId() : userId);
                                 }
+                                String existingEventId = dao.findEventIdByRecordId(r.getId());
+                                if (existingEventId != null && !existingEventId.equals(eventId)) {
+                                    throw new ForbiddenResponse("Pit record ID belongs to another event");
+                                }
                                 r.setEventId(eventId);
                                 normalizePitRecord(r);
                                 dao.upsertPitRecord(r);
@@ -142,6 +164,8 @@ public class PitScoutRoutes {
                         });
                     });
                 }
+            } catch (io.javalin.http.HttpResponseException e) {
+                throw e;
             } catch (Exception e) {
                 ctx.status(500).result("Batch pit sync failed: " + e.getMessage());
                 return;

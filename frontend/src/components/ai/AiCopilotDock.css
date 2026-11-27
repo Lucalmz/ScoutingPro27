@@ -1,26 +1,102 @@
-.ai-copilot-dock {
-  position: relative;
-  display: flex;
+.ai-dock-spacer {
   flex-shrink: 0;
-  width: var(--ai-dock-width, 420px);
+  width: 0;
   height: 100%;
-  min-height: 0;
-  background: var(--g-900);
-  border-left: 1px solid var(--border);
-  container-type: inline-size;
-  container-name: ai-dock;
-  z-index: 40;
+  pointer-events: none;
+  transition: width 260ms var(--motion-profile-ease-exit);
 }
 
-.ai-copilot-dock.is-expanded {
+.ai-dock-spacer.is-open {
+  width: var(--ai-dock-width, 420px);
+  transition: width 340ms var(--motion-profile-ease-flight);
+}
+
+.ai-dock-spacer.is-dragging {
+  transition: none !important;
+}
+
+.ai-copilot-dock {
   position: fixed;
   top: var(--ai-dock-top-offset, 64px);
   right: 0;
   bottom: 0;
-  height: auto;
-  width: min(940px, 82vw);
+  display: flex;
+  width: var(--ai-dock-width, 420px);
+  min-height: 0;
+  background: var(--g-900);
+  border: 1px solid transparent;
+  border-left-color: var(--border);
+  border-radius: 0;
+  container-type: inline-size;
+  container-name: ai-dock;
+  z-index: 40;
+  overflow: hidden;
+  transform-origin: right center;
+  box-shadow: none;
+  transition:
+    width 300ms var(--motion-profile-ease-exit),
+    top 300ms var(--motion-profile-ease-exit),
+    right 300ms var(--motion-profile-ease-exit),
+    bottom 300ms var(--motion-profile-ease-exit),
+    border-radius 300ms var(--motion-profile-ease-exit),
+    border-color 240ms var(--motion-ease-out),
+    box-shadow 300ms var(--motion-ease-out),
+    z-index 300ms step-end;
+}
+
+.ai-copilot-dock.is-narrow-overlay {
+  width: min(440px, 88vw);
   z-index: 950;
   box-shadow: var(--shadow-3);
+}
+
+.ai-copilot-dock.is-expanded {
+  top: 12px;
+  right: 12px;
+  bottom: 12px;
+  width: min(940px, calc(100vw - 24px));
+  border-radius: 14px;
+  border-color: color-mix(in srgb, var(--status-ai) 38%, var(--border-strong));
+  z-index: 950;
+  box-shadow: var(--shadow-3);
+  transition:
+    width 360ms var(--motion-profile-ease-flight),
+    top 360ms var(--motion-profile-ease-flight),
+    right 360ms var(--motion-profile-ease-flight),
+    bottom 360ms var(--motion-profile-ease-flight),
+    border-radius 360ms var(--motion-profile-ease-flight),
+    border-color 280ms var(--motion-ease-out),
+    box-shadow 360ms var(--motion-ease-out),
+    z-index 0ms step-start;
+}
+
+.ai-copilot-dock.is-dragging {
+  transition: none !important;
+}
+
+/* Slide-in / Slide-out ("拉入拉出") transitions */
+.ai-dock-slide-enter-active {
+  transition:
+    transform 340ms var(--motion-profile-ease-flight),
+    opacity 240ms var(--motion-ease-out) !important;
+}
+
+.ai-dock-slide-leave-active {
+  transition:
+    transform 260ms var(--motion-profile-ease-exit),
+    opacity 200ms var(--motion-profile-ease-exit) !important;
+}
+
+.ai-dock-slide-enter-from,
+.ai-dock-slide-leave-to {
+  transform: translate3d(100%, 0, 0) scale(0.985);
+  opacity: 0;
+}
+
+.ai-copilot-dock.is-expanded.ai-dock-slide-enter-from,
+.ai-copilot-dock.is-expanded.ai-dock-slide-leave-to {
+  transform: translate3d(48px, 0, 0) scale(0.94);
+  opacity: 0;
 }
 
 .dock-splitter {
@@ -68,23 +144,27 @@
 .dock-overlay-backdrop {
   position: fixed;
   inset: 0;
-  background: rgba(7, 9, 10, 0.56);
+  background-color: rgba(7, 9, 10, 0.56);
+  backdrop-filter: blur(5px);
+  -webkit-backdrop-filter: blur(5px);
   z-index: 940;
+}
+
+.ai-dock-backdrop-enter-active {
+  transition: opacity 300ms var(--motion-ease-out);
+}
+
+.ai-dock-backdrop-leave-active {
+  transition: opacity 240ms var(--motion-profile-ease-exit);
+}
+
+.ai-dock-backdrop-enter-from,
+.ai-dock-backdrop-leave-to {
+  opacity: 0;
 }
 
 /* Narrow Desktop (769px - 1119px): slide-over drawer so left main stage does not squish */
 @media (max-width: 1119px) {
-  .ai-copilot-dock {
-    position: fixed;
-    top: var(--ai-dock-top-offset, 64px);
-    right: 0;
-    bottom: 0;
-    height: auto;
-    width: min(440px, 88vw);
-    z-index: 950;
-    box-shadow: var(--shadow-3);
-  }
-
   .dock-splitter {
     display: none;
   }

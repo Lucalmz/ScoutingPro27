@@ -6,7 +6,7 @@ import os from 'os';
 import path from 'path';
 import { fileURLToPath } from 'url';
 import mqtt from 'mqtt';
-import { E2EClusterManager, REPO_ROOT, allocateFreePorts, delay } from './helpers/e2eBackendManager.js';
+import { E2EClusterManager, REPO_ROOT, allocateFreePorts, delay, ensureE2eBuildArtifacts } from './helpers/e2eBackendManager.js';
 import {
   confirmAnySasModals,
   createEventViaUi,
@@ -123,12 +123,7 @@ async function publishMqttStrict(mqttClient, topic, payload) {
 }
 
 async function runTest() {
-  if (process.env.SKIP_BUILD !== '1') {
-    console.log('Building frontend and packaging Backend fat JAR before E2E (set SKIP_BUILD=1 to skip)...');
-    execSync('npm run build', { cwd: path.resolve(__dirname, '..'), stdio: 'inherit' });
-    const mavenCmd = os.platform() === 'win32' ? 'mvn.cmd' : 'mvn';
-    execSync(`${mavenCmd} package -DskipTests`, { cwd: path.join(REPO_ROOT, 'Backend'), stdio: 'inherit' });
-  }
+  ensureE2eBuildArtifacts();
 
   const rootDbPaths = [
     path.join(REPO_ROOT, 'app_data.mv.db'),
@@ -1634,6 +1629,17 @@ async function runTest() {
           await robustLogin(pageHostB, hostUser);
         } else {
           await pageHostB.waitForSelector('.dashboard', { timeout: 10000 });
+          const activeUsername = await pageHostB.evaluate(() => {
+            try {
+              return JSON.parse(localStorage.getItem('scoutingpro-user') || 'null')?.username || null;
+            } catch {
+              return null;
+            }
+          });
+          if (activeUsername !== hostUser) {
+            await logoutViaUi(pageHostB);
+            await robustLogin(pageHostB, hostUser);
+          }
         }
         await enterExistingEventCardViaUi(pageHostB, eventCode);
       }),

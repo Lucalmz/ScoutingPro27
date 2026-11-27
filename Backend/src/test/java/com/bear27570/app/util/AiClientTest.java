@@ -1,5 +1,11 @@
 package com.bear27570.app.util;
 
+import com.bear27570.app.model.AiProviderProfile;
+import com.bear27570.app.util.ai.AnthropicProtocolAdapter;
+import com.bear27570.app.util.ai.GeminiProtocolAdapter;
+import com.bear27570.app.util.ai.OpenAiProtocolAdapter;
+import com.google.gson.JsonArray;
+import com.google.gson.JsonObject;
 import org.junit.jupiter.api.Test;
 
 import java.util.ArrayList;
@@ -315,5 +321,244 @@ class AiClientTest {
         String anthropicModelsJson = "{\"data\":[{\"id\":\"claude-sonnet-4-20250514\"},{\"id\":\"claude-3-5-haiku-latest\"}]}";
         List<String> parsedAnthropic = AiClient.parseModelsResponse("ANTHROPIC", anthropicModelsJson);
         assertEquals(List.of("claude-3-5-haiku-latest", "claude-sonnet-4-20250514"), parsedAnthropic);
+    }
+
+    @Test
+    void testVariableThinkingPayloadsAndDefaults() {
+        AiProviderProfile defaultProfile = new AiProviderProfile();
+        assertFalse(defaultProfile.getEnableThinking(), "New AI profiles should default enableThinking to false");
+
+        List<Map<String, String>> msgs = List.of(Map.of("role", "user", "content", "Analyze #27570"));
+
+        // Gemini off -> explicit thinkingBudget=0 & includeThoughts=false
+        JsonObject gemOff = GeminiProtocolAdapter.buildPayload("sys", msgs, 0.4, 4096, false, 0, true);
+        JsonObject gemOffCfg = gemOff.getAsJsonObject("generationConfig").getAsJsonObject("thinkingConfig");
+        assertFalse(gemOffCfg.get("includeThoughts").getAsBoolean());
+        assertEquals(0, gemOffCfg.get("thinkingBudget").getAsInt());
+
+        // Gemini low -> thinkingBudget=1024 & includeThoughts=true
+        JsonObject gemLow = GeminiProtocolAdapter.buildPayload("sys", msgs, 0.4, 4096, true, 1024, true);
+        JsonObject gemLowCfg = gemLow.getAsJsonObject("generationConfig").getAsJsonObject("thinkingConfig");
+        assertTrue(gemLowCfg.get("includeThoughts").getAsBoolean());
+        assertEquals(1024, gemLowCfg.get("thinkingBudget").getAsInt());
+
+        // Gemini without thinkingConfig
+        JsonObject gemOmit = GeminiProtocolAdapter.buildPayload("sys", msgs, 0.4, 4096, false, 0, false);
+        assertFalse(gemOmit.getAsJsonObject("generationConfig").has("thinkingConfig"));
+
+        // Anthropic off vs high
+        JsonObject antOff = AnthropicProtocolAdapter.buildPayload("claude-sonnet-4-20250514", "sys", msgs, 0.4, 4096, false, 0);
+        assertFalse(antOff.has("thinking"));
+        assertEquals(0.4, antOff.get("temperature").getAsDouble());
+
+        JsonObject antHigh = AnthropicProtocolAdapter.buildPayload("claude-sonnet-4-20250514", "sys", msgs, 0.4, 4096, true, 8192);
+        assertTrue(antHigh.has("thinking"));
+        assertEquals("enabled", antHigh.getAsJsonObject("thinking").get("type").getAsString());
+        assertEquals(8192, antHigh.getAsJsonObject("thinking").get("budget_tokens").getAsInt());
+        assertTrue(antHigh.get("max_tokens").getAsInt() > 8192);
+        assertFalse(antHigh.has("temperature"));
+
+        // OpenAI reasoning_effort & DashScope enable_thinking
+        JsonArray oaMsgs = new JsonArray();
+        JsonObject m = new JsonObject();
+        m.addProperty("role", "user");
+        m.addProperty("content", "hi");
+        oaMsgs.add(m);
+
+        JsonObject gpt5Off = OpenAiProtocolAdapter.buildStreamPayload("gpt-5-mini", oaMsgs, 0.4, 4096, true, true, "https://api.openai.com/v1", false, "none");
+        assertEquals("minimal", gpt5Off.get("reasoning_effort").getAsString());
+
+        JsonObject o3High = OpenAiProtocolAdapter.buildStreamPayload("o3-mini", oaMsgs, 0.4, 4096, false, true, "https://api.openai.com/v1", true, "high");
+        assertEquals("high", o3High.get("reasoning_effort").getAsString());
+
+        JsonObject dashOff = OpenAiProtocolAdapter.buildStreamPayload("qwen-plus", oaMsgs, 0.4, 4096, true, true, "https://dashscope.aliyuncs.com/compatible-mode/v1", false, "none");
+        assertFalse(dashOff.get("enable_thinking").getAsBoolean());
+
+        JsonObject genericOpenAi = OpenAiProtocolAdapter.buildStreamPayload("deepseek-chat", oaMsgs, 0.4, 4096, true, true, "https://api.deepseek.com/v1", false, "none");
+        assertFalse(genericOpenAi.has("reasoning_effort"));
+        assertFalse(genericOpenAi.has("enable_thinking"));
+    }
+
+    @Test
+    void testAiStreamSupportAndProtocolAdapterEdgeCasesWithMockServer() throws Exception {
+        // AiStreamSupport unit tests
+        assertTrue(com.bear27570.app.util.ai.AiStreamSupport.trimContextMessages(null, 5).isEmpty());
+        List<Map<String, String>> fiveMsgs = List.of(
+                Map.of("role", "user", "content", "1"),
+                Map.of("role", "assistant", "content", "2"),
+                Map.of("role", "user", "content", "3")
+        );
+        assertEquals(3, com.bear27570.app.util.ai.AiStreamSupport.trimContextMessages(fiveMsgs, 0).size());
+        assertEquals(2, com.bear27570.app.util.ai.AiStreamSupport.trimContextMessages(fiveMsgs, 2).size());
+        assertEquals("2", com.bear27570.app.util.ai.AiStreamSupport.trimContextMessages(fiveMsgs, 2).get(0).get("content"));
+
+        JsonObject sampleObj = new JsonObject();
+        sampleObj.addProperty("str", "abc");
+        sampleObj.addProperty("empty", "");
+        sampleObj.addProperty("badInt", "not-int");
+        sampleObj.addProperty("okInt", 42);
+        assertEquals("abc", com.bear27570.app.util.ai.AiStreamSupport.getNonEmptyString(sampleObj, "str"));
+        assertNull(com.bear27570.app.util.ai.AiStreamSupport.getNonEmptyString(sampleObj, "empty"));
+        assertNull(com.bear27570.app.util.ai.AiStreamSupport.getNonEmptyString(sampleObj, "missing"));
+        assertEquals(42, com.bear27570.app.util.ai.AiStreamSupport.getIntOrDefault(sampleObj, "okInt", 7));
+        assertEquals(7, com.bear27570.app.util.ai.AiStreamSupport.getIntOrDefault(sampleObj, "badInt", 7));
+        assertEquals(7, com.bear27570.app.util.ai.AiStreamSupport.getIntOrDefault(null, "okInt", 7));
+
+        // awaitResponseWithCancellation: cancelled before completion & non-cancelled exception propagation
+        java.util.concurrent.CompletableFuture<java.net.http.HttpResponse<java.io.InputStream>> pending = new java.util.concurrent.CompletableFuture<>();
+        var cancelledFlag = new java.util.concurrent.atomic.AtomicBoolean(true);
+        assertNull(com.bear27570.app.util.ai.AiStreamSupport.awaitResponseWithCancellation(pending, cancelledFlag));
+        assertTrue(pending.isCancelled());
+
+        java.util.concurrent.CompletableFuture<java.net.http.HttpResponse<java.io.InputStream>> failedFuture = new java.util.concurrent.CompletableFuture<>();
+        failedFuture.completeExceptionally(new IllegalStateException("boom"));
+        assertThrows(Exception.class, () -> com.bear27570.app.util.ai.AiStreamSupport.awaitResponseWithCancellation(
+                failedFuture, new java.util.concurrent.atomic.AtomicBoolean(false)));
+
+        // OpenAI reasoning_effort / DeepSeek / OpenRouter / error chunk edge cases
+        JsonArray msgs = new JsonArray();
+        JsonObject u = new JsonObject();
+        u.addProperty("role", "user");
+        u.addProperty("content", "q");
+        msgs.add(u);
+        assertFalse(OpenAiProtocolAdapter.buildStreamPayload("o1", msgs, 0.7, 2048, false, true, "https://api.openai.com/v1", false, "none").has("max_tokens"));
+        assertEquals("low", OpenAiProtocolAdapter.buildStreamPayload("o1", msgs, 0.7, 2048, false, true, "https://api.openai.com/v1", false, "none").get("reasoning_effort").getAsString());
+        assertEquals("disabled", OpenAiProtocolAdapter.buildStreamPayload("deepseek-chat", msgs, 0.4, 2048, true, true, "https://api.deepseek.com/v1", false, null).getAsJsonObject("thinking").get("type").getAsString());
+        assertTrue(OpenAiProtocolAdapter.buildStreamPayload("anthropic/claude", msgs, 0.4, 2048, true, true, "https://openrouter.ai/api/v1", false, "off").getAsJsonObject("reasoning").get("exclude").getAsBoolean());
+
+        assertThrows(RuntimeException.class, () -> AiClient.parseOpenAiSseChunk("data: {\"error\":{\"message\":\"Rate limit\"}}"));
+        assertThrows(RuntimeException.class, () -> AiClient.parseOpenAiSseChunk("data: {\"error\":\"bad\"}"));
+        assertEquals("reasoning", AiClient.parseOpenAiSseChunk("data: {\"choices\":[{\"delta\":{\"reasoning\":\"step1\"}}]}").get(0).kind());
+        // Regression #18.3b: non-primitive content/reasoning in SSE delta must not crash stream
+        assertTrue(AiClient.parseOpenAiSseChunk("data: {\"choices\":[{\"delta\":{\"content\":{\"nested\":1},\"reasoning\":[]}}]}").isEmpty());
+
+        // Gemini safety block (PROHIBITED_CONTENT & suppressed after text emitted), error chunk, baseUrl variants
+        assertEquals("https://proxy.example.com/v1alpha", AiClient.resolveGeminiBaseUrl("https://proxy.example.com/v1alpha"));
+        assertEquals("https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent",
+                AiClient.resolveGeminiGenerateEndpoint(null, "gemini-2.5-flash", false));
+
+        var emittedFalse = new java.util.concurrent.atomic.AtomicBoolean(false);
+        var blocked = AiClient.parseGeminiSseChunk("data: {\"candidates\":[{\"finishReason\":\"PROHIBITED_CONTENT\"}]}", emittedFalse);
+        assertEquals(1, blocked.size());
+        assertTrue(blocked.get(0).text().contains("PROHIBITED_CONTENT"));
+
+        var emittedTrue = new java.util.concurrent.atomic.AtomicBoolean(true);
+        assertTrue(AiClient.parseGeminiSseChunk("data: {\"candidates\":[{\"finishReason\":\"SAFETY\"}]}", emittedTrue).isEmpty());
+        assertThrows(RuntimeException.class, () -> AiClient.parseGeminiSseChunk("data: {\"error\":{\"message\":\"Bad key\"}}", emittedFalse));
+        assertTrue(AiClient.parseModelsResponse("GEMINI", "[]").isEmpty());
+        assertTrue(AiClient.parseModelsResponse("OPENAI", "not-json").isEmpty());
+
+        // Anthropic endpoints, empty normalizeMessages, maxTokens bump
+        assertEquals("https://api.anthropic.com/v1/messages", AnthropicProtocolAdapter.resolveMessagesEndpoint("https://api.anthropic.com/v1/messages"));
+        assertEquals("https://api.anthropic.com/v1/models", AnthropicProtocolAdapter.resolveModelsEndpoint("https://api.anthropic.com"));
+        assertEquals("Hello", AnthropicProtocolAdapter.normalizeMessages(List.of()).get(0).get("content"));
+        JsonObject antBumped = AnthropicProtocolAdapter.buildPayload("claude-sonnet-4-20250514", "sys", List.of(), 0.4, 1024, true, 512);
+        assertEquals(4096, antBumped.getAsJsonObject("thinking").get("budget_tokens").getAsInt());
+        assertEquals(8192, antBumped.get("max_tokens").getAsInt());
+        assertEquals("text", AnthropicProtocolAdapter.parseSseEvent("content_block_delta", "{\"delta\":{\"text\":\"fallback\"}}", null).get(0).kind());
+
+        // AiClient null / unsupported protocol errors
+        assertThrows(IllegalArgumentException.class, () -> AiClient.chat((AiProviderProfile) null, "sys", List.of()));
+        AiProviderProfile badProto = new AiProviderProfile();
+        badProto.setProtocol("UNKNOWN");
+        assertThrows(IllegalArgumentException.class, () -> AiClient.chat(badProto, "sys", List.of()));
+
+        // HTTP retry & error paths against local HttpServer
+        com.sun.net.httpserver.HttpServer mock = com.sun.net.httpserver.HttpServer.create(new java.net.InetSocketAddress(0), 0);
+        var oaTries = new java.util.concurrent.atomic.AtomicInteger(0);
+        var antTries = new java.util.concurrent.atomic.AtomicInteger(0);
+        mock.createContext("/oa/v1/chat/completions", ex -> {
+            int n = oaTries.incrementAndGet();
+            if (n == 1) {
+                byte[] b = "{\"error\":\"Unsupported parameter: max_tokens and reasoning_effort\"}".getBytes(java.nio.charset.StandardCharsets.UTF_8);
+                ex.sendResponseHeaders(400, b.length);
+                try (var os = ex.getResponseBody()) { os.write(b); }
+                return;
+            }
+            ex.getResponseHeaders().set("Content-Type", "text/event-stream");
+            ex.sendResponseHeaders(200, 0);
+            try (var os = ex.getResponseBody()) {
+                os.write("data: {\"choices\":[{\"delta\":{\"content\":\"ok\"}}]}\n\ndata: [DONE]\n\n".getBytes(java.nio.charset.StandardCharsets.UTF_8));
+            }
+        });
+        mock.createContext("/gem429/v1beta/models", ex -> {
+            byte[] b = "{\"error\":{\"message\":\"quota\"}}".getBytes(java.nio.charset.StandardCharsets.UTF_8);
+            ex.sendResponseHeaders(429, b.length);
+            try (var os = ex.getResponseBody()) { os.write(b); }
+        });
+        var gemDefaultOffBody = new java.util.concurrent.atomic.AtomicReference<String>();
+        mock.createContext("/gemok/v1beta/models", ex -> {
+            gemDefaultOffBody.set(new String(ex.getRequestBody().readAllBytes(), java.nio.charset.StandardCharsets.UTF_8));
+            ex.getResponseHeaders().set("Content-Type", "text/event-stream");
+            ex.sendResponseHeaders(200, 0);
+            try (var os = ex.getResponseBody()) {
+                os.write("data: {\"candidates\":[{\"content\":{\"parts\":[{\"text\":\"gem-ok\"}]}}]}\n\n".getBytes(java.nio.charset.StandardCharsets.UTF_8));
+            }
+        });
+        mock.createContext("/ant/v1/messages", ex -> {
+            int n = antTries.incrementAndGet();
+            if (n == 1) {
+                byte[] b = "{\"error\":{\"message\":\"thinking is not supported\"}}".getBytes(java.nio.charset.StandardCharsets.UTF_8);
+                ex.sendResponseHeaders(400, b.length);
+                try (var os = ex.getResponseBody()) { os.write(b); }
+                return;
+            }
+            ex.getResponseHeaders().set("Content-Type", "text/event-stream");
+            ex.sendResponseHeaders(200, 0);
+            try (var os = ex.getResponseBody()) {
+                os.write("event: content_block_delta\ndata: {\"type\":\"content_block_delta\",\"delta\":{\"type\":\"text_delta\",\"text\":\"ant-ok\"}}\n\nevent: message_stop\ndata: {}\n\n".getBytes(java.nio.charset.StandardCharsets.UTF_8));
+            }
+        });
+        mock.start();
+        try {
+            int p = mock.getAddress().getPort();
+            AiProviderProfile oaProf = new AiProviderProfile();
+            oaProf.setProtocol("OPENAI");
+            oaProf.setBaseUrl("http://127.0.0.1:" + p + "/oa/v1");
+            oaProf.setModelName("gpt-5-mini");
+            oaProf.setMaxTokens(1000);
+            String oaReply = AiClient.chat(oaProf, "sys", List.of(Map.of("role", "user", "content", "hi")),
+                    null, null, new AiClient.ThinkingOptions(true, null, "low"));
+            assertEquals("ok", oaReply);
+            assertEquals(2, oaTries.get());
+
+            AiProviderProfile gemProf = new AiProviderProfile();
+            gemProf.setProtocol("GEMINI");
+            gemProf.setBaseUrl("http://127.0.0.1:" + p + "/gem429/v1beta");
+            assertThrows(RuntimeException.class, () -> AiClient.chat(gemProf, "sys", List.of(Map.of("role", "user", "content", "hi"))));
+
+            // Regression #18.4: Gemini profile with default enableThinking=false & thinkingBudget=4096 must send thinkingBudget=0
+            AiProviderProfile gemOffProf = new AiProviderProfile();
+            gemOffProf.setProtocol("GEMINI");
+            gemOffProf.setBaseUrl("http://127.0.0.1:" + p + "/gemok/v1beta");
+            assertFalse(gemOffProf.getEnableThinking());
+            assertEquals(4096, gemOffProf.getThinkingBudget());
+            assertEquals("gem-ok", AiClient.chat(gemOffProf, "sys", List.of(Map.of("role", "user", "content", "hi"))));
+            JsonObject sentGemCfg = com.google.gson.JsonParser.parseString(gemDefaultOffBody.get()).getAsJsonObject()
+                    .getAsJsonObject("generationConfig").getAsJsonObject("thinkingConfig");
+            assertFalse(sentGemCfg.get("includeThoughts").getAsBoolean());
+            assertEquals(0, sentGemCfg.get("thinkingBudget").getAsInt());
+
+            AiProviderProfile antProf = new AiProviderProfile();
+            antProf.setProtocol("ANTHROPIC");
+            antProf.setBaseUrl("http://127.0.0.1:" + p + "/ant");
+            antProf.setEnableThinking(true);
+            String antReply = AiClient.chat(antProf, "sys", List.of(Map.of("role", "user", "content", "hi")));
+            assertEquals("ant-ok", antReply);
+            assertEquals(2, antTries.get());
+
+            // Legacy AiSettings chat & chatStream entry points
+            com.bear27570.app.model.AiSettings legacy = new com.bear27570.app.model.AiSettings();
+            legacy.setProvider("OPENAI");
+            legacy.setBaseUrl("http://127.0.0.1:" + p + "/oa/v1");
+            legacy.setModelName("gpt-4o");
+            assertEquals("ok", AiClient.chat(legacy, "sys", List.of(Map.of("role", "user", "content", "hi"))));
+            StringBuilder legacyStreamed = new StringBuilder();
+            AiClient.chatStream(legacy, "sys", List.of(Map.of("role", "user", "content", "hi")),
+                    legacyStreamed::append, new java.util.concurrent.atomic.AtomicBoolean(false));
+            assertEquals("ok", legacyStreamed.toString());
+        } finally {
+            mock.stop(0);
+        }
     }
 }

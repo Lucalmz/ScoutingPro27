@@ -20,9 +20,9 @@ import java.util.Map;
  *   - Canvas background : #0B0E10 (--g-900)
  *   - 1px inner border  : #1B2126 (--g-750) + top 1px #39FF14 center fade highlight
  *   - Dot grid texture  : #151A1E (--g-800), 20px pitch, 300px radial fade
- *   - Header            : pulsing 6px #39FF14 dot (#FF5577 static on failure) + "SYSTEM BOOT" (#6E7A84) | "v1.1.1" (#4B5660)
+ *   - Header            : pulsing 6px #39FF14 dot (#FF5577 static on failure) + "SYSTEM BOOT" (#6E7A84) | "v1.1.2" (#4B5660)
  *   - Center brand      : 72px V6 SP27 logo (/assets/logo_transparent.png), Orbitron wordmark "ScoutingPro27"
- *                         ("ScoutingPro" #E6EBEE + "27" #39FF14, 45ms/char typewriter + #39FF14 cursor),
+ *                         ("ScoutingPro" #E6EBEE + "27" #39FF14, visibility-anchored deliberate typewriter + #39FF14 cursor),
  *                         subtitle "FTC MATCH & PIT SCOUTING" (#6E7A84)
  *   - Status & progress : "▸ " (#39FF14 / #FF5577) + English statusText (#C3CBD1 / #39FF14 / #FF5577) | percent% (#97A2AB)
  *                         or "See log/ directory" (#97A2AB) on failure; 5-segment progress bar matching Main.java stages
@@ -30,25 +30,35 @@ import java.util.Map;
  */
 public class SplashScreen extends JWindow {
 
-    private static final long MIN_VISIBLE_MS = 2200;
+    static final long MIN_VISIBLE_MS = 3850;
+    private static final long READY_HOLD_MS = 280;
+    private static final long FADE_OUT_MS = 320;
 
-    // ------- typewriter & entrance timeline -------
+    // ------- typewriter & entrance timeline (relative to first visible paint) -------
     private static final String TITLE_FULL = "ScoutingPro27";
     private static final String TITLE_PREFIX = "ScoutingPro";
     private static final String SUBTITLE = "FTC MATCH & PIT SCOUTING";
     private static final String HEADER_LEFT = "SYSTEM BOOT";
-    private static final String HEADER_VERSION = "v1.1.1";
+    private static final String HEADER_VERSION = "v1.1.2";
     private static final String CREDIT_TEXT = "Led by 27570";
     private static final String FOOTER_RIGHT = "B.E.A.R ROBOTICS";
     private static final String FAILURE_HINT = "See log/ directory";
 
-    private static final long LOGO_FADE_START_MS = 80;
-    private static final long LOGO_FADE_MS = 360;
-    private static final long TITLE_START_MS = 220;
-    private static final long TITLE_CHAR_MS = 45;
-    private static final long SUBTITLE_START_MS = TITLE_START_MS + TITLE_FULL.length() * TITLE_CHAR_MS + 60;
-    private static final long SUBTITLE_FADE_MS = 240;
-    private static final long CURSOR_BLINK_MS = 530;
+    static final long STAGE_WAKE_MS = 480;
+    static final long LOGO_FADE_START_MS = 160;
+    static final long LOGO_FADE_MS = 600;
+    static final long CURSOR_START_MS = 520;
+    static final long TITLE_START_MS = 800;
+    static final long TITLE_CHAR_MS = 115;
+    static final long TITLE_SUFFIX_PAUSE_MS = 160;
+    static final long TITLE_SUFFIX_CHAR_MS = 140;
+    static final long TITLE_PREFIX_DONE_MS = TITLE_START_MS + (long) TITLE_PREFIX.length() * TITLE_CHAR_MS;
+    static final long TITLE_SUFFIX_START_MS = TITLE_PREFIX_DONE_MS + TITLE_SUFFIX_PAUSE_MS;
+    static final long TITLE_COMPLETE_MS =
+            TITLE_SUFFIX_START_MS + (long) (TITLE_FULL.length() - TITLE_PREFIX.length() - 1) * TITLE_SUFFIX_CHAR_MS;
+    static final long SUBTITLE_START_MS = 2520;
+    static final long SUBTITLE_FADE_MS = 520;
+    private static final long CURSOR_BLINK_MS = 480;
 
     // ------- Pit Wall color palette -------
     public static final Color BG_GRAPHITE_900 = new Color(0x0B, 0x0E, 0x10);
@@ -87,15 +97,21 @@ public class SplashScreen extends JWindow {
     private final Font footerRightFont;
 
     private final ContentPanel contentPanel = new ContentPanel();
-    private final long startTime = System.currentTimeMillis();
+    private final long createdAtMs = System.currentTimeMillis();
+    private volatile long animationStartTimeMs = 0L;
     private Long testElapsedOverrideMs = null;
-    private long readyReachedAtMs = 0L;
+    private volatile long readyReachedAtMs = 0L;
 
     private volatile int targetProgress = 0;
     private volatile String statusText = "Initializing...";
     private volatile boolean failed = false;
     private float displayedProgress = 0f;
+    private long lastTickMs = 0L;
+    private boolean closePending = false;
+    private boolean closingStarted = false;
+    private Runnable onClosedCallback = null;
 
+    private final Map<String, Font> baseFontCache = new HashMap<>();
     private final BufferedImage sp27Logo;
     private final BufferedImage bearLogo;
     private final Timer animTimer;
@@ -130,25 +146,61 @@ public class SplashScreen extends JWindow {
         add(contentPanel, BorderLayout.CENTER);
 
         animTimer = new Timer(16, e -> {
-            if (!failed) {
-                displayedProgress += (targetProgress - displayedProgress) * 0.12f;
+            long nowMs = System.currentTimeMillis();
+            long dtMs = lastTickMs > 0L ? Math.max(1L, Math.min(50L, nowMs - lastTickMs)) : 16L;
+            lastTickMs = nowMs;
+
+            if (!failed && animationStartTimeMs > 0L) {
+                float diff = targetProgress - displayedProgress;
+                if (diff > 0f) {
+                    float dtScale = dtMs / 16.0f;
+                    float step = Math.min(diff * 0.08f * dtScale, 1.35f * dtScale);
+                    float minStep = Math.min(diff, 0.28f * dtScale);
+                    displayedProgress = Math.min(targetProgress, displayedProgress + Math.max(step, minStep));
+                } else if (diff < 0f) {
+                    displayedProgress = targetProgress;
+                }
                 if (Math.abs(targetProgress - displayedProgress) < 0.15f) {
                     displayedProgress = targetProgress;
                 }
-                if (displayedProgress >= 99.5f && readyReachedAtMs == 0L) {
+                if (displayedProgress >= 99.5f && readyReachedAtMs == 0L && animationStartTimeMs > 0L) {
                     readyReachedAtMs = currentElapsedMs();
                 }
             }
             contentPanel.repaint();
+
+            if (!failed && closePending && !closingStarted && canStartFadeOut()) {
+                closingStarted = true;
+                closePending = false;
+                Runnable cb = onClosedCallback;
+                onClosedCallback = null;
+                fadeOutAndClose(cb);
+            }
         });
-        animTimer.start();
     }
 
-    private long currentElapsedMs() {
+    @Override
+    public void setVisible(boolean visible) {
+        super.setVisible(visible);
+        if (visible) {
+            lastTickMs = System.currentTimeMillis();
+            if (!animTimer.isRunning()) {
+                animTimer.start();
+            }
+        } else if (animTimer.isRunning()) {
+            animTimer.stop();
+        }
+    }
+
+    long currentElapsedMs() {
         if (testElapsedOverrideMs != null) {
             return testElapsedOverrideMs;
         }
-        return System.currentTimeMillis() - startTime;
+        long animStart = animationStartTimeMs;
+        if (animStart <= 0L) {
+            return 0L;
+        }
+        return Math.max(0L, System.currentTimeMillis() - animStart);
     }
 
     private static Font withTracking(Font base, float tracking) {
@@ -158,14 +210,20 @@ public class SplashScreen extends JWindow {
     }
 
     private Font loadFont(String classpathResource, int style, float size) {
-        try (InputStream in = SplashScreen.class.getResourceAsStream(classpathResource)) {
-            if (in != null) {
-                Font base = Font.createFont(Font.TRUETYPE_FONT, in);
-                GraphicsEnvironment.getLocalGraphicsEnvironment().registerFont(base);
-                return base.deriveFont(style, size);
+        Font cachedBase = baseFontCache.get(classpathResource);
+        if (cachedBase == null) {
+            try (InputStream in = SplashScreen.class.getResourceAsStream(classpathResource)) {
+                if (in != null) {
+                    cachedBase = Font.createFont(Font.TRUETYPE_FONT, in);
+                    GraphicsEnvironment.getLocalGraphicsEnvironment().registerFont(cachedBase);
+                    baseFontCache.put(classpathResource, cachedBase);
+                }
+            } catch (Exception e) {
+                System.err.println("Could not load font " + classpathResource + ": " + e.getMessage());
             }
-        } catch (Exception e) {
-            System.err.println("Could not load font " + classpathResource + ": " + e.getMessage());
+        }
+        if (cachedBase != null) {
+            return cachedBase.deriveFont(style, size);
         }
         return new Font(FONT_FALLBACK, style, Math.round(size));
     }
@@ -218,9 +276,6 @@ public class SplashScreen extends JWindow {
         if (text != null && !text.isEmpty()) {
             this.statusText = text;
         }
-        if (this.targetProgress >= 100 && readyReachedAtMs == 0L) {
-            readyReachedAtMs = currentElapsedMs();
-        }
         contentPanel.repaint();
     }
 
@@ -230,6 +285,8 @@ public class SplashScreen extends JWindow {
      */
     public void showFailure(String errorMessage) {
         this.failed = true;
+        this.closePending = false;
+        this.onClosedCallback = null;
         String detail = (errorMessage != null && !errorMessage.trim().isEmpty())
                 ? errorMessage.trim()
                 : "Unexpected initialization error";
@@ -274,31 +331,78 @@ public class SplashScreen extends JWindow {
         contentPanel.repaint();
     }
 
-    public void closeSmoothly(Runnable onClosed) {
-        if (failed) return;
-        long elapsed = System.currentTimeMillis() - startTime;
-        long remaining = Math.max(0, MIN_VISIBLE_MS - elapsed);
+    private boolean canStartFadeOut() {
+        if (animationStartTimeMs <= 0L) {
+            return false;
+        }
+        long elapsed = currentElapsedMs();
+        if (elapsed < MIN_VISIBLE_MS) {
+            return false;
+        }
+        if (displayedProgress < 99.5f) {
+            return false;
+        }
+        long readyAt = readyReachedAtMs;
+        return readyAt > 0L && (elapsed - readyAt) >= READY_HOLD_MS;
+    }
 
-        Timer delay = new Timer((int) remaining, e -> fadeOutAndClose(onClosed));
-        delay.setRepeats(false);
-        delay.start();
+    public void closeSmoothly(Runnable onClosed) {
+        Runnable task = () -> {
+            if (failed || closingStarted) return;
+            if (!isVisible()) {
+                long elapsedSinceCreate = System.currentTimeMillis() - createdAtMs;
+                long remaining = Math.max(0L, MIN_VISIBLE_MS - elapsedSinceCreate);
+                Timer delay = new Timer((int) remaining, e -> {
+                    if (!failed && !closingStarted) {
+                        closingStarted = true;
+                        fadeOutAndClose(onClosed);
+                    }
+                });
+                delay.setRepeats(false);
+                delay.start();
+                return;
+            }
+            this.onClosedCallback = onClosed;
+            this.closePending = true;
+            if (!animTimer.isRunning()) {
+                lastTickMs = System.currentTimeMillis();
+                animTimer.start();
+            }
+            if (canStartFadeOut()) {
+                closingStarted = true;
+                closePending = false;
+                this.onClosedCallback = null;
+                fadeOutAndClose(onClosed);
+            }
+        };
+        if (SwingUtilities.isEventDispatchThread()) {
+            task.run();
+        } else {
+            SwingUtilities.invokeLater(task);
+        }
     }
 
     private void fadeOutAndClose(Runnable onClosed) {
-        final float[] opacity = {1f};
-        Timer fade = new Timer(15, null);
+        final long fadeStartMs = System.currentTimeMillis();
+        Timer fade = new Timer(16, null);
         fade.addActionListener(e -> {
-            opacity[0] -= 0.08f;
-            if (opacity[0] <= 0f) {
+            if (failed) {
                 fade.stop();
-                if (animTimer != null && animTimer.isRunning()) {
-                    animTimer.stop();
-                }
+                closingStarted = false;
+                try {
+                    setOpacity(1f);
+                } catch (UnsupportedOperationException ignored) {}
+                return;
+            }
+            float progress = Math.min(1f, (System.currentTimeMillis() - fadeStartMs) / (float) FADE_OUT_MS);
+            float opacity = 1f - easeOutCubic(progress);
+            if (progress >= 1f) {
+                fade.stop();
                 dispose();
                 if (onClosed != null) onClosed.run();
             } else {
                 try {
-                    setOpacity(Math.max(0f, opacity[0]));
+                    setOpacity(Math.max(0f, opacity));
                 } catch (UnsupportedOperationException ignored) {}
             }
         });
@@ -307,15 +411,30 @@ public class SplashScreen extends JWindow {
 
     @Override
     public void dispose() {
+        closePending = false;
+        onClosedCallback = null;
         if (animTimer != null && animTimer.isRunning()) {
             animTimer.stop();
         }
         super.dispose();
     }
 
-    private static int typedChars(String text, long elapsedMs, long startMs, long charMs) {
-        if (elapsedMs < startMs) return 0;
-        return (int) Math.min(text.length(), (elapsedMs - startMs) / charMs + 1);
+    static int computeTitleTypedLength(long elapsedMs) {
+        if (elapsedMs < TITLE_START_MS) {
+            return 0;
+        }
+        if (elapsedMs < TITLE_SUFFIX_START_MS) {
+            int prefixTyped = (int) ((elapsedMs - TITLE_START_MS) / TITLE_CHAR_MS + 1);
+            return Math.min(TITLE_PREFIX.length(), prefixTyped);
+        }
+        int suffixTyped = (int) ((elapsedMs - TITLE_SUFFIX_START_MS) / TITLE_SUFFIX_CHAR_MS + 1);
+        return Math.min(TITLE_FULL.length(), TITLE_PREFIX.length() + suffixTyped);
+    }
+
+    private static float easeOutCubic(float t) {
+        float clamped = Math.max(0f, Math.min(1f, t));
+        float inv = 1f - clamped;
+        return 1f - inv * inv * inv;
     }
 
     private class ContentPanel extends JPanel {
@@ -340,8 +459,12 @@ public class SplashScreen extends JWindow {
 
             int w = getWidth();
             int h = getHeight();
+            if (testElapsedOverrideMs == null && animationStartTimeMs == 0L && isShowing()) {
+                animationStartTimeMs = System.currentTimeMillis();
+            }
             long elapsed = currentElapsedMs();
             Composite oldComposite = g2.getComposite();
+            float wakeFactor = failed ? 1f : easeOutCubic(elapsed / (float) STAGE_WAKE_MS);
 
             // 1. Cold Graphite #0B0E10 background
             g2.setColor(BG_GRAPHITE_900);
@@ -351,11 +474,12 @@ public class SplashScreen extends JWindow {
             float cx = w * 0.5f;
             float cy = h * 0.40f;
             float maxR = 300f;
+            float gridWake = 0.25f + 0.75f * wakeFactor;
             for (int gy = 16; gy < h - 16; gy += 20) {
                 for (int gx = 16; gx < w - 16; gx += 20) {
                     float dist = (float) Math.hypot(gx - cx, gy - cy);
                     if (dist < maxR) {
-                        float alpha = (1f - dist / maxR) * 0.85f;
+                        float alpha = (1f - dist / maxR) * 0.85f * gridWake;
                         g2.setColor(new Color(0x15, 0x1A, 0x1E, Math.min(255, Math.round(alpha * 255f))));
                         g2.fill(new Rectangle2D.Float(gx - 0.75f, gy - 0.75f, 1.5f, 1.5f));
                     }
@@ -370,18 +494,24 @@ public class SplashScreen extends JWindow {
             g2.fillRect(w - 1, 0, 1, h);
 
             Paint oldPaint = g2.getPaint();
-            Color topHighlight = failed ? new Color(0xFF, 0x55, 0x77, 155) : new Color(0x39, 0xFF, 0x14, 165);
-            Color topClear = new Color(topHighlight.getRed(), topHighlight.getGreen(), topHighlight.getBlue(), 0);
-            g2.setPaint(new LinearGradientPaint(
-                    new Point2D.Float(36f, 0f),
-                    new Point2D.Float(w - 36f, 0f),
-                    new float[]{0f, 0.5f, 1f},
-                    new Color[]{topClear, topHighlight, topClear}
-            ));
-            g2.fill(new Rectangle2D.Float(36f, 0f, w - 72f, 1.25f));
-            g2.setPaint(oldPaint);
+            float maxHalfSpan = Math.max(12f, (w - 72f) * 0.5f);
+            float activeHalfSpan = failed ? maxHalfSpan : Math.max(12f, maxHalfSpan * (0.12f + 0.88f * wakeFactor));
+            float highlightLeft = w * 0.5f - activeHalfSpan;
+            float highlightRight = w * 0.5f + activeHalfSpan;
+            if (highlightRight > highlightLeft + 2f) {
+                Color topHighlight = failed ? new Color(0xFF, 0x55, 0x77, 155) : new Color(0x39, 0xFF, 0x14, 165);
+                Color topClear = new Color(topHighlight.getRed(), topHighlight.getGreen(), topHighlight.getBlue(), 0);
+                g2.setPaint(new LinearGradientPaint(
+                        new Point2D.Float(highlightLeft, 0f),
+                        new Point2D.Float(highlightRight, 0f),
+                        new float[]{0f, 0.5f, 1f},
+                        new Color[]{topClear, topHighlight, topClear}
+                ));
+                g2.fill(new Rectangle2D.Float(highlightLeft, 0f, highlightRight - highlightLeft, 1.25f));
+                g2.setPaint(oldPaint);
+            }
 
-            // 4. Header row: pulsing status dot + "SYSTEM BOOT" | "v1.1.1"
+            // 4. Header row: pulsing status dot + "SYSTEM BOOT" | "v1.1.2"
             int headerY = 28;
             float dotX = 24f;
             float dotY = headerY - 7.5f;
@@ -405,19 +535,41 @@ public class SplashScreen extends JWindow {
             g2.setColor(TEXT_G500);
             g2.drawString(HEADER_VERSION, w - 24 - vfm.stringWidth(HEADER_VERSION), headerY);
 
-            // 5. Center SP27 Logo (72 x 72)
+            // 5. Center SP27 Logo (72 x 72) with cubic ease-out entrance & subtle settle
             int logoSize = 72;
             int logoX = (w - logoSize) / 2;
             int logoY = 58;
-            if (sp27Logo != null && elapsed >= LOGO_FADE_START_MS) {
-                float logoAlpha = Math.min(1f, (elapsed - LOGO_FADE_START_MS) / (float) LOGO_FADE_MS);
-                g2.setComposite(AlphaComposite.getInstance(AlphaComposite.SRC_OVER, logoAlpha));
-                g2.drawImage(sp27Logo, logoX, logoY, logoSize, logoSize, null);
+            float logoProgress = failed
+                    ? 1f
+                    : (elapsed < LOGO_FADE_START_MS
+                        ? 0f
+                        : easeOutCubic((elapsed - LOGO_FADE_START_MS) / (float) LOGO_FADE_MS));
+            if (sp27Logo != null && logoProgress > 0f) {
+                if (!failed) {
+                    float auraStrength = (float) Math.sin(Math.min(1f, logoProgress) * Math.PI) * 20f + 8f * logoProgress;
+                    int auraAlpha = Math.max(0, Math.min(34, Math.round(auraStrength)));
+                    if (auraAlpha > 0) {
+                        Paint prevLogoPaint = g2.getPaint();
+                        float logoCenterX = logoX + logoSize * 0.5f;
+                        float logoCenterY = logoY + logoSize * 0.5f;
+                        g2.setPaint(new RadialGradientPaint(
+                                new Point2D.Float(logoCenterX, logoCenterY),
+                                56f,
+                                new float[]{0f, 1f},
+                                new Color[]{new Color(0x39, 0xFF, 0x14, auraAlpha), new Color(0x39, 0xFF, 0x14, 0)}
+                        ));
+                        g2.fill(new Rectangle2D.Float(logoCenterX - 56f, logoCenterY - 56f, 112f, 112f));
+                        g2.setPaint(prevLogoPaint);
+                    }
+                }
+                int logoOffsetY = failed ? 0 : Math.round(8f * (1f - logoProgress));
+                g2.setComposite(AlphaComposite.getInstance(AlphaComposite.SRC_OVER, logoProgress));
+                g2.drawImage(sp27Logo, logoX, logoY + logoOffsetY, logoSize, logoSize, null);
                 g2.setComposite(oldComposite);
             }
 
-            // 6. Wordmark: "ScoutingPro" (#E6EBEE) + "27" (#39FF14) with 45ms/char typewriter
-            int titleTyped = typedChars(TITLE_FULL, elapsed, TITLE_START_MS, TITLE_CHAR_MS);
+            // 6. Wordmark: "ScoutingPro" (#E6EBEE) + "27" (#39FF14) with deliberate typewriter
+            int titleTyped = failed ? TITLE_FULL.length() : computeTitleTypedLength(elapsed);
             g2.setFont(titleFont);
             FontMetrics tfm = g2.getFontMetrics();
             int fullTitleW = tfm.stringWidth(TITLE_FULL);
@@ -441,23 +593,43 @@ public class SplashScreen extends JWindow {
                 currentEndX = titleX + fullPrefixW + tfm.stringWidth(typedSuffix);
             }
 
-            // Typewriter block cursor (#39FF14)
-            boolean typingTitle = titleTyped > 0 && titleTyped < TITLE_FULL.length();
-            boolean blinkOn = (elapsed / CURSOR_BLINK_MS) % 2 == 0;
-            if (!failed && (typingTitle || (titleTyped >= TITLE_FULL.length() && blinkOn))) {
-                g2.setColor(PRIMARY_GREEN);
+            // Typewriter cursor (#39FF14): pre-type lock-on beat, active typing, and post-type blink
+            if (!failed && elapsed >= CURSOR_START_MS) {
                 int cursorH = 22;
-                g2.fill(new Rectangle2D.Float(currentEndX + 4f, titleBaselineY - cursorH + 2f, 2.2f, cursorH));
+                float cursorTopY = titleBaselineY - cursorH + 2f;
+                if (titleTyped == 0) {
+                    float preCursorAlpha = Math.min(1f, (elapsed - CURSOR_START_MS) / 140f);
+                    float cursorX = titleX - 1f;
+                    g2.setColor(new Color(0x39, 0xFF, 0x14, Math.round(52 * preCursorAlpha)));
+                    g2.fill(new Rectangle2D.Float(cursorX - 1.5f, cursorTopY - 1f, 5.2f, cursorH + 2f));
+                    g2.setColor(new Color(0x39, 0xFF, 0x14, Math.round(255 * preCursorAlpha)));
+                    g2.fill(new Rectangle2D.Float(cursorX, cursorTopY, 2.2f, cursorH));
+                } else {
+                    boolean typingTitle = titleTyped < TITLE_FULL.length();
+                    boolean blinkOn = ((Math.max(0L, elapsed - TITLE_COMPLETE_MS)) / CURSOR_BLINK_MS) % 2 == 0;
+                    if (typingTitle || blinkOn) {
+                        float cursorX = currentEndX + 4f;
+                        g2.setColor(new Color(0x39, 0xFF, 0x14, 52));
+                        g2.fill(new Rectangle2D.Float(cursorX - 1.5f, cursorTopY - 1f, 5.2f, cursorH + 2f));
+                        g2.setColor(PRIMARY_GREEN);
+                        g2.fill(new Rectangle2D.Float(cursorX, cursorTopY, 2.2f, cursorH));
+                    }
+                }
             }
 
             // 7. Subtitle: "FTC MATCH & PIT SCOUTING"
-            if (elapsed >= SUBTITLE_START_MS) {
-                float subAlpha = Math.min(1f, (elapsed - SUBTITLE_START_MS) / (float) SUBTITLE_FADE_MS);
-                g2.setComposite(AlphaComposite.getInstance(AlphaComposite.SRC_OVER, subAlpha));
+            float subProgress = failed
+                    ? 1f
+                    : (elapsed < SUBTITLE_START_MS
+                        ? 0f
+                        : easeOutCubic((elapsed - SUBTITLE_START_MS) / (float) SUBTITLE_FADE_MS));
+            if (subProgress > 0f) {
+                int subOffsetY = failed ? 0 : Math.round(5f * (1f - subProgress));
+                g2.setComposite(AlphaComposite.getInstance(AlphaComposite.SRC_OVER, subProgress));
                 g2.setFont(subtitleFont);
                 FontMetrics sfm = g2.getFontMetrics();
                 g2.setColor(TEXT_G400);
-                g2.drawString(SUBTITLE, (w - sfm.stringWidth(SUBTITLE)) / 2, 202);
+                g2.drawString(SUBTITLE, (w - sfm.stringWidth(SUBTITLE)) / 2, 202 + subOffsetY);
                 g2.setComposite(oldComposite);
             }
 

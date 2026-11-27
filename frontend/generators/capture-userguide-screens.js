@@ -1899,11 +1899,17 @@ async function main() {
 
   let backendProcess = null;
   let browser = null;
+  const tmpDataDir = fs.mkdtempSync(path.join(os.tmpdir(), 'sp27-userguide-'));
 
   const cleanup = () => {
     if (backendProcess?.pid) {
       killProcessTree(backendProcess.pid);
       backendProcess = null;
+    }
+    try {
+      fs.rmSync(tmpDataDir, { recursive: true, force: true });
+    } catch {
+      // Ignore cleanup race while JVM releases H2 lock
     }
   };
   process.on('SIGINT', () => {
@@ -1930,13 +1936,16 @@ async function main() {
       stdio: 'inherit'
     });
 
-    console.log(`⚡ Spawning headless Backend on isolated port ${PORT}...`);
+    console.log(`⚡ Spawning headless Backend on isolated port ${PORT} (dataDir=${tmpDataDir})...`);
+    const execArgsVal = `--headless --data-dir=${tmpDataDir} --no-auto-server`;
+    const h2Url = `jdbc:h2:file:${path.join(tmpDataDir, 'app_data')};DB_CLOSE_DELAY=-1`;
     backendProcess = spawn(
       mavenCmd,
       [
         'exec:java',
         os.platform() === 'win32' ? '"-Dexec.mainClass=com.bear27570.app.Main"' : '-Dexec.mainClass=com.bear27570.app.Main',
-        os.platform() === 'win32' ? '"-Dexec.args=--headless"' : '-Dexec.args=--headless',
+        os.platform() === 'win32' ? `"-Dexec.args=${execArgsVal}"` : `-Dexec.args=${execArgsVal}`,
+        `-Dscouting.data.dir=${tmpDataDir}`,
         '-DENABLE_TEST_CLEANUP=true',
         '-DSKIP_FIREWALL_CHECK=true'
       ],
@@ -1944,7 +1953,14 @@ async function main() {
         cwd: BACKEND_DIR,
         detached: os.platform() !== 'win32',
         shell: os.platform() === 'win32',
-        env: { ...process.env, DEV_PORT: String(PORT), ENABLE_TEST_CLEANUP: 'true', SKIP_FIREWALL_CHECK: 'true' }
+        env: {
+          ...process.env,
+          DEV_PORT: String(PORT),
+          SCOUTING_DATA_DIR: tmpDataDir,
+          DB_URL: h2Url,
+          ENABLE_TEST_CLEANUP: 'true',
+          SKIP_FIREWALL_CHECK: 'true'
+        }
       }
     );
 

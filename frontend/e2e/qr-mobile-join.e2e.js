@@ -2,7 +2,7 @@ import assert from 'assert';
 import fs from 'fs';
 import path from 'path';
 import jsQR from 'jsqr';
-import { E2EClusterManager, REPO_ROOT, allocateFreePort } from './helpers/e2eBackendManager.js';
+import { E2EClusterManager, REPO_ROOT, allocateFreePort, ensureE2eBuildArtifacts } from './helpers/e2eBackendManager.js';
 import {
   completeMobileWizardMatchViaUi,
   confirmAnySasModals,
@@ -43,6 +43,7 @@ async function decodeQrCanvasOnPage(page) {
 }
 
 async function runQrMobileE2ETest() {
+  ensureE2eBuildArtifacts();
   const rootDbPaths = [
     path.join(REPO_ROOT, 'app_data.mv.db'),
     path.join(REPO_ROOT, 'Backend', 'app_data.mv.db')

@@ -52,7 +52,7 @@
 
 ## 📖 文档导航
 
-- **队员与领队快速上手**：请直接阅读独立图文手册 👉 **[双语总入口](docs/USER_GUIDE.md)** · **[中文保姆级教程](docs/USER_GUIDE.zh.md)** · **[English Step-by-Step Guide](docs/USER_GUIDE.en.md)**（含 Windows `.msi` / macOS `.dmg` 安装指引；可在 `frontend/` 执行 `npm run export:userguide-pdf` 导出离线 PDF）。
+- **队员与领队快速上手**：请直接阅读独立图文手册 👉 **[双语总入口](docs/USER_GUIDE.md)** · **[中文保姆级教程](docs/USER_GUIDE.zh.md)** · **[English Step-by-Step Guide](docs/USER_GUIDE.en.md)**（含 Windows `.msi` / macOS `.dmg` 安装指引与苹果 Gatekeeper 绕过方案见[第 0 章](docs/USER_GUIDE.zh.md#第-0-章下载与安装macos-用户必读)；可在 `frontend/` 执行 `npm run export:userguide-pdf` 导出离线 PDF）。
 - **开发者与架构契约**：完整 HTTP REST 路由、WebSocket 信令、TinyBase 8 表 Schema、ECDSA 验签与 JCEF 桌面桥接规范见 **[CONTRACT.md](CONTRACT.md)**；测试与发版记录见 **[docs/README.md](docs/README.md)**。
 
 ---
@@ -238,9 +238,34 @@ sequenceDiagram
 
 ---
 
-## 五、 快速启动与自动化验证
+## 五、 安装包下载、苹果签名绕过与源码启动
 
-### 5.1 环境要求与本地运行
+### 5.1 桌面端安装包下载（含 macOS Gatekeeper 拦截绕过指南）
+
+前往 **[GitHub Releases](https://github.com/Lucalmz/ScoutingPro27/releases)** 下载对应系统的原生安装包（看台手机/平板扫码即可直接运行零安装离线 PWA，无需下载）：
+
+- **Windows（`ScoutingPro27-windows-<version>.msi`）**：
+  1. 双击 `.msi` 安装包按向导完成安装。
+  2. 若 **Windows Defender SmartScreen** 弹出「Windows 已保护你的电脑」提示，点击 **「更多信息」→「仍要运行」** 即可（开源项目未购买商用代码签名证书时的正常提示）。
+  3. 首次启动请允许 Windows UAC 防火墙放行，以便本机局域网扫码与 WebRTC P2P 正常连通。
+
+- **macOS Apple Silicon（`ScoutingPro27-mac-arm64-<version>.dmg`）— 苹果系统签名拦截解决方案**：
+  1. 双击挂载 `.dmg`，将 **ScoutingPro27** 拖入 **「应用程序 (Applications)」** 文件夹。
+  2. 由于本开源版本在 Apple Silicon 上采用本地 ad-hoc 签名、未购买付费 Apple 开发者公证，macOS 首次启动会拦截并提示 **“Apple 无法验证 ScoutingPro27 是否包含恶意软件”**（macOS 15 Sequoia / 26 Tahoe+）或 **“无法打开，因为无法验证开发者”**（旧版系统）。**仅需首次**按以下任一方式放行即可永久正常打开：
+     - **方案 A：系统设置「仍要打开」（推荐 · 适用于 macOS 15 Sequoia / 26 Tahoe 及所有新版本）**：
+       1. 在 **访达 → 应用程序** 中双击尝试打开一次 ScoutingPro27，弹出拦截窗口后点击 **「完成」**（或「好」）。
+       2. 打开 **系统设置 → 隐私与安全性**，滑到底部 **「安全性」** 区域。
+       3. 点击 ScoutingPro27 拦截提示旁的 **「仍要打开」**，通过触控 ID 或密码确认，再点 **「打开」**。
+     - **方案 B：终端一行命令解除隔离（最快）**：
+       ```bash
+       xattr -cr /Applications/ScoutingPro27.app
+       ```
+       *（或 `xattr -dr com.apple.quarantine /Applications/ScoutingPro27.app`。）* 执行后直接双击应用即可运行。
+     - *（注：仅 **macOS 14 Sonoma 及更早旧系统**支持“Control+单击 / 右键 → 打开”；苹果已自 macOS 15 Sequoia 起移除该右键绕过入口，新系统请务必使用方案 A 或方案 B。）*
+
+  详细图文步骤见 [新手手册第 0 章](docs/USER_GUIDE.zh.md#第-0-章下载与安装macos-用户必读)。
+
+### 5.2 环境要求与源码本地运行
 - **环境要求**：JDK 21+、Maven 3.8+、Node.js `>=22.18.0` 或 `>=24.12.0`
 - **构建与启动**：
   ```powershell
@@ -257,7 +282,7 @@ sequenceDiagram
   mvn package -DskipTests
   ```
 
-### 5.2 全量测试套件执行
+### 5.3 全量测试套件执行
 ```powershell
 # 1. 前端 TypeScript 6 严格类型检查
 cd frontend

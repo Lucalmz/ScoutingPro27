@@ -54,7 +54,7 @@ describe('Formula Engine - Shared Conformance Suite', () => {
     for (const tc of conformanceCases.graphCases) {
       it(tc.name, () => {
         const existingFields: CustomFieldDefinition[] = (tc.existingFields ?? []).map((f: any, idx: number) => ({
-          id: `existing-${idx}`,
+          id: f.id ?? `existing-${idx}`,
           eventId: 'evt-1',
           target: f.target as CustomFieldTarget,
           phase: 'overall',

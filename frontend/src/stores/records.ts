@@ -61,12 +61,18 @@ export const useRecordStore = defineStore('records', () => {
   const currentEventId = ref<string | null>(null)
   const loading = ref(false)
   const error = ref<string | null>(null)
+  let fetchSeq = 0
 
   const advancementMap = computed(() => buildAdvancementMap(officialAdvancement.value))
 
   const currentRecords = computed(() => {
     if (!currentEventId.value) return records.value
     return records.value.filter(r => r.eventId === currentEventId.value)
+  })
+
+  const currentTeamTags = computed(() => {
+    if (!currentEventId.value) return teamTags.value
+    return teamTags.value.filter(t => t.eventId === currentEventId.value)
   })
 
   function saveToStorage(key: string, val: any) {
@@ -155,11 +161,11 @@ export const useRecordStore = defineStore('records', () => {
           bulkSync(parsed)
         }
       } catch {}
-    } else if (e.key === 'scoutingpro_officialMatches' && e.newValue) {
+    } else if (currentEventId.value && e.key === officialMatchesStorageKey(currentEventId.value) && e.newValue) {
       try { officialMatches.value = JSON.parse(e.newValue) } catch {}
-    } else if (e.key === 'scoutingpro_advancement' && e.newValue) {
+    } else if (currentEventId.value && e.key === advancementStorageKey(currentEventId.value) && e.newValue) {
       try { officialAdvancement.value = JSON.parse(e.newValue) } catch {}
-    } else if (e.key === 'scoutingpro_bannedTeams' && e.newValue) {
+    } else if (currentEventId.value && e.key === bannedTeamsStorageKey(currentEventId.value) && e.newValue) {
       try { bannedTeams.value = JSON.parse(e.newValue) } catch {}
     } else if (e.key === 'scoutingpro_tags' && e.newValue) {
       try { teamTags.value = JSON.parse(e.newValue) } catch {}
@@ -212,11 +218,23 @@ export const useRecordStore = defineStore('records', () => {
   async function fetchRecords(eventId: string, ftcYear?: number, ftcEventCode?: string) {
     const prevEventId = currentEventId.value
     const isSwitchingEvent = prevEventId !== eventId
+    const reqSeq = ++fetchSeq
+    if (isSwitchingEvent && saveTimeout) {
+      clearTimeout(saveTimeout)
+      saveTimeout = null
+      if (prevEventId) {
+        flushStorage()
+      }
+    }
     loading.value = true
     error.value = null
     currentEventId.value = eventId
     if (isSwitchingEvent) {
       hydrateEventScopedCaches(eventId, prevEventId === null)
+    }
+    if (!ftcYear || !ftcEventCode) {
+      officialMatches.value = []
+      officialAdvancement.value = []
     }
     try {
       const fetched = await listRecords(eventId)
@@ -270,15 +288,24 @@ export const useRecordStore = defineStore('records', () => {
           console.warn('[fetchRecords] Failed to auto-persist cached stamped records:', err)
         })
       }
+
+      if (reqSeq !== fetchSeq || currentEventId.value !== eventId) return
+
       if (ftcYear && ftcEventCode) {
         try {
-          officialMatches.value = await fetchEventMatches(ftcYear, ftcEventCode)
+          const matches = await fetchEventMatches(ftcYear, ftcEventCode)
+          if (reqSeq !== fetchSeq || currentEventId.value !== eventId) return
+          officialMatches.value = matches
         } catch (err) {
+          if (reqSeq !== fetchSeq || currentEventId.value !== eventId) return
           console.warn('[fetchRecords] Failed to fetch official matches (using cached matches):', err)
         }
         try {
-          officialAdvancement.value = await fetchEventAdvancement(ftcYear, ftcEventCode)
+          const adv = await fetchEventAdvancement(ftcYear, ftcEventCode)
+          if (reqSeq !== fetchSeq || currentEventId.value !== eventId) return
+          officialAdvancement.value = adv
         } catch (err) {
+          if (reqSeq !== fetchSeq || currentEventId.value !== eventId) return
           console.warn('[fetchRecords] Failed to fetch advancement (using cached advancement):', err)
         }
         flushStorage()
@@ -288,15 +315,22 @@ export const useRecordStore = defineStore('records', () => {
         flushStorage()
       }
       try {
-        bannedTeams.value = await apiFetchBannedTeams(eventId)
+        const banned = await apiFetchBannedTeams(eventId)
+        if (reqSeq !== fetchSeq || currentEventId.value !== eventId) return
+        bannedTeams.value = banned
         flushStorage()
       } catch (err) {
+        if (reqSeq !== fetchSeq || currentEventId.value !== eventId) return
         console.warn('[fetchRecords] Failed to fetch banned teams (using cached banned teams):', err)
       }
     } catch (e: any) {
-      error.value = e.message ?? 'Failed to load records'
+      if (reqSeq === fetchSeq) {
+        error.value = e.message ?? 'Failed to load records'
+      }
     } finally {
-      loading.value = false
+      if (reqSeq === fetchSeq) {
+        loading.value = false
+      }
     }
   }
 
@@ -657,7 +691,9 @@ export const useRecordStore = defineStore('records', () => {
     try {
       const tags = await apiFetchEventTags(eventId)
       if (Array.isArray(tags)) {
-        const normalizedTags = tags.map((t) => ({ ...t, eventId: t.eventId || eventId }))
+        const normalizedTags = tags
+          .filter((t) => !t.eventId || t.eventId === eventId)
+          .map((t) => ({ ...t, eventId }))
         const otherEventsTags = teamTags.value.filter((t) => t.eventId !== eventId)
         teamTags.value = [...otherEventsTags, ...normalizedTags]
         flushStorage()
@@ -752,27 +788,29 @@ export const useRecordStore = defineStore('records', () => {
   }
 
   function applyTagUpdate(tag: TeamTagItem, action: 'ADD' | 'REMOVE') {
-    const targetTag = normalizeTag(tag.tag)
+    const resolvedEid = tag.eventId || currentEventId.value || ''
+    const normalizedTagItem: TeamTagItem = { ...tag, eventId: resolvedEid }
+    const targetTag = normalizeTag(normalizedTagItem.tag)
     if (action === 'ADD') {
       const idx = teamTags.value.findIndex(
-        t => t.eventId === tag.eventId && t.teamNumber === tag.teamNumber && normalizeTag(t.tag) === targetTag
+        t => t.eventId === normalizedTagItem.eventId && t.teamNumber === normalizedTagItem.teamNumber && normalizeTag(t.tag) === targetTag
       )
       if (idx >= 0) {
-        teamTags.value[idx] = tag
+        teamTags.value[idx] = normalizedTagItem
       } else {
-        teamTags.value.push(tag)
+        teamTags.value.push(normalizedTagItem)
       }
     } else if (action === 'REMOVE') {
       teamTags.value = teamTags.value.filter(
-        t => !(t.eventId === tag.eventId && t.teamNumber === tag.teamNumber && normalizeTag(t.tag) === targetTag)
+        t => !(t.eventId === normalizedTagItem.eventId && t.teamNumber === normalizedTagItem.teamNumber && normalizeTag(t.tag) === targetTag)
       )
     }
 
-    const eid = tag.eventId || currentEventId.value
+    const eid = normalizedTagItem.eventId || currentEventId.value
     const crdtHandle = eid ? getExistingEventCrdt(eid) : undefined
     if (crdtHandle) {
       withLocalCrdtWrite(eid, () => {
-        writeTeamTagToCrdt(crdtHandle.store, { ...tag, eventId: tag.eventId || eid || '' }, action === 'ADD')
+        writeTeamTagToCrdt(crdtHandle.store, { ...normalizedTagItem, eventId: normalizedTagItem.eventId || eid || '' }, action === 'ADD')
       })
     }
   }
@@ -782,11 +820,14 @@ export const useRecordStore = defineStore('records', () => {
     const firstTag = tags[0]
     const targetEventId = eventId || (firstTag?.eventId ? firstTag.eventId : currentEventId.value)
     if (targetEventId) {
+      const scopedTags = tags
+        .filter((t) => !t.eventId || t.eventId === targetEventId)
+        .map((t) => ({ ...t, eventId: targetEventId }))
       const otherEventsTags = teamTags.value.filter(t => t.eventId !== targetEventId)
-      teamTags.value = [...otherEventsTags, ...tags]
+      teamTags.value = [...otherEventsTags, ...scopedTags]
       const crdtHandle = getExistingEventCrdt(targetEventId)
       if (crdtHandle) {
-        const keepRowIds = new Set(tags.map((t) => teamTagRowId(t.teamNumber, t.tag)))
+        const keepRowIds = new Set(scopedTags.map((t) => teamTagRowId(t.teamNumber, t.tag)))
         withLocalCrdtWrite(targetEventId, () => {
           crdtHandle.store.transaction(() => {
             const existing = readTeamTagsFromCrdt(crdtHandle.store, targetEventId)
@@ -795,8 +836,8 @@ export const useRecordStore = defineStore('records', () => {
                 setTeamTagActive(crdtHandle.store, targetEventId, oldTag, false)
               }
             }
-            for (const inc of tags) {
-              writeTeamTagToCrdt(crdtHandle.store, { ...inc, eventId: inc.eventId || targetEventId }, true)
+            for (const inc of scopedTags) {
+              writeTeamTagToCrdt(crdtHandle.store, inc, true)
             }
           })
         })
@@ -975,6 +1016,12 @@ export const useRecordStore = defineStore('records', () => {
     } catch {}
   }
 
+  const getTagsForEvent = (eventId?: string): TeamTagItem[] => {
+    const eid = eventId || currentEventId.value
+    if (!eid) return teamTags.value
+    return teamTags.value.filter(t => t.eventId === eid)
+  }
+
   const getTagsForTeam = (teamNumber: number, eventId?: string): TeamTagItem[] => {
     const eid = eventId || currentEventId.value
     return teamTags.value.filter(t => t.teamNumber === teamNumber && (!eid || t.eventId === eid))
@@ -982,8 +1029,11 @@ export const useRecordStore = defineStore('records', () => {
 
   async function refreshAdvancement(season: number, eventCode: string) {
     if (!season || !eventCode) return
+    const targetEid = currentEventId.value
+    const reqSeq = fetchSeq
     try {
       const adv = await fetchEventAdvancement(season, eventCode)
+      if (currentEventId.value !== targetEid || reqSeq !== fetchSeq) return
       officialAdvancement.value = adv
       flushStorage()
     } catch (e) {
@@ -994,6 +1044,7 @@ export const useRecordStore = defineStore('records', () => {
   return {
     records,
     currentRecords,
+    currentTeamTags,
     activeRecords,
     officialMatches,
     officialAdvancement,
@@ -1030,6 +1081,7 @@ export const useRecordStore = defineStore('records', () => {
     applyTagUpdate,
     applyTagsFullSync,
     syncTagsFromCrdt,
+    getTagsForEvent,
     getTagsForTeam,
     purgeExpiredTombstones,
     clearMemoryOnly,

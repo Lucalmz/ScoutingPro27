@@ -24,7 +24,7 @@ public class AiProviderProfile {
     private String systemPrompt = "";
     private Double temperature = 0.4;
     private Integer maxTokens = 4096;
-    private boolean enableThinking = true;
+    private boolean enableThinking = false;
     private Integer thinkingBudget = 4096;
     private String anthropicVersion = "2023-06-01";
     private Integer maxContextMsgs = 16;

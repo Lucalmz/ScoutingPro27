@@ -1,6 +1,7 @@
 package com.bear27570.app.util.ai;
 
 import com.google.gson.JsonArray;
+import com.google.gson.JsonNull;
 import com.google.gson.JsonObject;
 
 import java.net.URLEncoder;
@@ -23,6 +24,7 @@ public final class OpenAiRealtimeRelaySession extends AbstractVoiceWsRelay {
     private final String systemPrompt;
     private final List<Map<String, String>> history;
     private final boolean isBetaPreview;
+    private volatile String inputMode;
     private final AtomicBoolean initialized = new AtomicBoolean(false);
 
     public OpenAiRealtimeRelaySession(
@@ -36,12 +38,47 @@ public final class OpenAiRealtimeRelaySession extends AbstractVoiceWsRelay {
             Integer proxyPort,
             RelayEventListener listener
     ) {
+        this(baseUrl, rawApiKey, modelName, voiceName, systemPrompt, history, "vad", proxyHost, proxyPort, listener);
+    }
+
+    public OpenAiRealtimeRelaySession(
+            String baseUrl,
+            String rawApiKey,
+            String modelName,
+            String voiceName,
+            String systemPrompt,
+            List<Map<String, String>> history,
+            String inputMode,
+            String proxyHost,
+            Integer proxyPort,
+            RelayEventListener listener
+    ) {
         super(resolveWebSocketUrl(baseUrl, modelName), rawApiKey, proxyHost, proxyPort, listener);
         this.model = (modelName != null && !modelName.isBlank()) ? modelName.trim() : DEFAULT_REALTIME_MODEL;
         this.voice = (voiceName != null && !voiceName.isBlank()) ? voiceName.trim() : DEFAULT_VOICE;
         this.systemPrompt = systemPrompt != null ? systemPrompt.trim() : "";
         this.history = trimRecentHistory(history);
         this.isBetaPreview = this.model.toLowerCase(Locale.ROOT).contains("preview");
+        this.inputMode = normalizeInputMode(inputMode);
+    }
+
+    private static String normalizeInputMode(String raw) {
+        return "ptt".equalsIgnoreCase(raw != null ? raw.trim() : "") ? "ptt" : "vad";
+    }
+
+    public void setInputMode(String mode) {
+        String normalized = normalizeInputMode(mode);
+        if (normalized.equals(this.inputMode)) {
+            return;
+        }
+        this.inputMode = normalized;
+        if (initialized.get() && !isClosed()) {
+            sendSessionUpdate();
+        }
+    }
+
+    public String getInputMode() {
+        return inputMode;
     }
 
     public static String resolveWebSocketUrl(String baseUrl, String modelName) {
@@ -51,6 +88,10 @@ public final class OpenAiRealtimeRelaySession extends AbstractVoiceWsRelay {
             return "wss://api.openai.com/v1/realtime?model=" + encodedModel;
         }
         String bUrl = baseUrl.trim();
+        int hashIdx = bUrl.indexOf('#');
+        if (hashIdx >= 0) {
+            bUrl = bUrl.substring(0, hashIdx);
+        }
         while (bUrl.endsWith("/")) {
             bUrl = bUrl.substring(0, bUrl.length() - 1);
         }
@@ -59,14 +100,15 @@ public final class OpenAiRealtimeRelaySession extends AbstractVoiceWsRelay {
         } else if (bUrl.regionMatches(true, 0, "http://", 0, 7)) {
             bUrl = "ws://" + bUrl.substring(7);
         }
-        if (bUrl.endsWith("/chat/completions")) {
-            bUrl = bUrl.substring(0, bUrl.length() - "/chat/completions".length());
-        }
         if (bUrl.contains("/realtime")) {
             if (bUrl.contains("model=")) {
                 return bUrl;
             }
             return bUrl + (bUrl.contains("?") ? "&" : "?") + "model=" + encodedModel;
+        }
+        bUrl = com.bear27570.app.routes.ai.AiUrlGuard.stripQueryAndFragment(bUrl);
+        if (bUrl.endsWith("/chat/completions")) {
+            bUrl = bUrl.substring(0, bUrl.length() - "/chat/completions".length());
         }
         if (bUrl.matches(".*/v[0-9]+([a-zA-Z0-9_-]*)?$")) {
             return bUrl + "/realtime?model=" + encodedModel;
@@ -224,11 +266,15 @@ public final class OpenAiRealtimeRelaySession extends AbstractVoiceWsRelay {
             transcription.addProperty("model", "whisper-1");
             session.add("input_audio_transcription", transcription);
 
-            JsonObject turnDetection = new JsonObject();
-            turnDetection.addProperty("type", "server_vad");
-            turnDetection.addProperty("create_response", true);
-            turnDetection.addProperty("interrupt_response", true);
-            session.add("turn_detection", turnDetection);
+            if ("ptt".equals(inputMode)) {
+                session.add("turn_detection", JsonNull.INSTANCE);
+            } else {
+                JsonObject turnDetection = new JsonObject();
+                turnDetection.addProperty("type", "server_vad");
+                turnDetection.addProperty("create_response", true);
+                turnDetection.addProperty("interrupt_response", true);
+                session.add("turn_detection", turnDetection);
+            }
         } else {
             session.addProperty("type", "realtime");
             JsonArray outputModalities = new JsonArray();
@@ -247,11 +293,15 @@ public final class OpenAiRealtimeRelaySession extends AbstractVoiceWsRelay {
             JsonObject transcription = new JsonObject();
             transcription.addProperty("model", "gpt-4o-mini-transcribe");
             inputAudio.add("transcription", transcription);
-            JsonObject turnDetection = new JsonObject();
-            turnDetection.addProperty("type", "server_vad");
-            turnDetection.addProperty("create_response", true);
-            turnDetection.addProperty("interrupt_response", true);
-            inputAudio.add("turn_detection", turnDetection);
+            if ("ptt".equals(inputMode)) {
+                inputAudio.add("turn_detection", JsonNull.INSTANCE);
+            } else {
+                JsonObject turnDetection = new JsonObject();
+                turnDetection.addProperty("type", "server_vad");
+                turnDetection.addProperty("create_response", true);
+                turnDetection.addProperty("interrupt_response", true);
+                inputAudio.add("turn_detection", turnDetection);
+            }
 
             JsonObject outputAudio = new JsonObject();
             outputAudio.add("format", pcmFormat);
@@ -301,7 +351,7 @@ public final class OpenAiRealtimeRelaySession extends AbstractVoiceWsRelay {
 
     @Override
     public void sendAudioEnd(boolean commit) {
-        if (isClosed() || !commit) return;
+        if (isClosed() || !commit || !"ptt".equals(this.inputMode)) return;
         JsonObject commitEvt = new JsonObject();
         commitEvt.addProperty("type", "input_audio_buffer.commit");
         sendJson(commitEvt);

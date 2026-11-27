@@ -1,5 +1,7 @@
+import { watch } from 'vue'
 import { defineStore } from 'pinia'
-import { useUserStore } from './user'
+import { registerBeforeLogoutHook, useUserStore } from './user'
+import { useEventStore } from './events'
 import { DEFAULT_DOCK_WIDTH, MAX_DOCK_WIDTH, MIN_DOCK_WIDTH } from '@/components/ai/constants'
 import { clampDockWidth, createAiDockState } from './aiModules/aiDockState'
 import {
@@ -19,9 +21,12 @@ export type { ConnectionCheckParams, ConnectionCheckResponse, PendingAutoSendReq
 
 export const useAiStore = defineStore('ai', () => {
   const userStore = useUserStore()
+  const eventStore = useEventStore()
 
   const dock = createAiDockState()
-  const profilesMod = createAiProfilesModule(userStore)
+  const profilesMod = createAiProfilesModule(userStore, {
+    onActiveProfileChanged: profile => dock.syncThinkingModeFromProfile(profile)
+  })
 
   let stopStreamingFn: (threadId?: string | null) => void = () => {}
   const threadsMod = createAiThreadsModule(userStore, {
@@ -32,11 +37,57 @@ export const useAiStore = defineStore('ai', () => {
     userStore,
     activeProfile: profilesMod.activeProfile,
     canSendWithActiveProfile: profilesMod.canSendWithActiveProfile,
+    aiMode: dock.aiMode,
+    thinkingMode: dock.thinkingMode,
     setDockOpen: dock.setDockOpen,
     openSettingsModal: dock.openSettingsModal,
     threads: threadsMod
   })
   stopStreamingFn = streamingMod.stopStreaming
+
+  function resetUserSession() {
+    streamingMod.stopStreaming()
+    threadsMod.resetUserSession()
+    profilesMod.resetUserSession()
+    dock.resetUserSession()
+  }
+
+  registerBeforeLogoutHook(async () => {
+    await threadsMod.flushPendingSaves(undefined, false)
+  })
+
+  watch(
+    () => userStore.userId,
+    (newId, oldId) => {
+      if (newId !== oldId) {
+        resetUserSession()
+      }
+    },
+    { flush: 'sync' }
+  )
+
+  watch(
+    () => eventStore.currentEvent,
+    (newEvt, oldEvt) => {
+      if (
+        oldEvt &&
+        newEvt &&
+        oldEvt.id !== newEvt.id &&
+        oldEvt.inviteCode &&
+        newEvt.inviteCode &&
+        oldEvt.inviteCode === newEvt.inviteCode &&
+        (oldEvt.id.startsWith('evt-') || oldEvt.id.startsWith('ext_')) &&
+        !(newEvt.id.startsWith('evt-') || newEvt.id.startsWith('ext_'))
+      ) {
+        const oldMyTeam = dock.getMyTeamNumber(oldEvt.id)
+        if (oldMyTeam && !dock.getMyTeamNumber(newEvt.id)) {
+          dock.setMyTeamNumber(newEvt.id, oldMyTeam)
+        }
+        void threadsMod.migratePlaceholderEvent(oldEvt.id, newEvt.id)
+      }
+    },
+    { flush: 'sync' }
+  )
 
   return {
     // Dock & workspace UI state
@@ -71,6 +122,8 @@ export const useAiStore = defineStore('ai', () => {
     saveChatHistory: threadsMod.saveChatHistory,
 
     // Streaming & workflow shortcuts
-    ...streamingMod
+    ...streamingMod,
+
+    resetUserSession
   }
 })

@@ -19,11 +19,21 @@ import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.UUID;
+import java.util.regex.Pattern;
 
 /**
  * HTTP routes for multi-thread event Copilot sessions and legacy `/ai-chat` history migration/compatibility.
  */
 public final class AiThreadRoutes {
+    private static final Pattern TURBO_CLOSED_BLOCK = Pattern.compile("```sp27-action[ \\t]*(?:\\r?\\n)?[\\s\\S]*?```", Pattern.CASE_INSENSITIVE);
+    private static final Pattern TURBO_OPEN_BLOCK = Pattern.compile("```sp27-action[\\s\\S]*$", Pattern.CASE_INSENSITIVE);
+
+    private static String stripTurboActionBlocks(String content) {
+        if (content == null || content.isEmpty()) return "";
+        String cleaned = TURBO_CLOSED_BLOCK.matcher(content).replaceAll("");
+        cleaned = TURBO_OPEN_BLOCK.matcher(cleaned).replaceAll("");
+        return cleaned.trim();
+    }
     private final Jdbi jdbi;
     private final Gson gson;
 
@@ -100,54 +110,95 @@ public final class AiThreadRoutes {
                 return;
             }
 
-            AiChatThread thread = new AiChatThread();
-            String reqId = body != null ? AiUrlGuard.getOptionalString(body, "id") : null;
-            thread.setId((reqId != null && !reqId.isBlank()) ? reqId.trim() : ("thr-" + UUID.randomUUID()));
-            thread.setUserId(userId);
-            thread.setEventId(eventId);
-            String title = body != null ? AiUrlGuard.getOptionalString(body, "title") : null;
-            thread.setTitle((title != null && !title.isBlank()) ? trimTitle(title) : "New Tactical Chat");
-            String personaId = body != null ? AiUrlGuard.getOptionalString(body, "personaId") : null;
-            thread.setPersonaId((personaId != null && !personaId.isBlank()) ? personaId.trim() : "strategist");
-            thread.setPinned(body != null && body.has("pinned") && !body.get("pinned").isJsonNull() && body.get("pinned").getAsBoolean());
+            try {
+                AiChatThread thread = new AiChatThread();
+                String reqId = body != null ? AiUrlGuard.getOptionalString(body, "id") : null;
+                String normalizedId = (reqId != null && !reqId.isBlank()) ? reqId.trim() : ("thr-" + UUID.randomUUID());
+                if (normalizedId.length() > 128) {
+                    ctx.status(400).result(gson.toJson(Map.of("error", "Thread id exceeds 128 characters"))).contentType("application/json");
+                    return;
+                }
+                thread.setId(normalizedId);
+                thread.setUserId(userId);
+                thread.setEventId(eventId);
+                String title = body != null ? AiUrlGuard.getOptionalString(body, "title") : null;
+                thread.setTitle((title != null && !title.isBlank()) ? trimTitle(title) : "New Tactical Chat");
+                String personaId = body != null ? AiUrlGuard.getOptionalString(body, "personaId") : null;
+                thread.setPersonaId((personaId != null && !personaId.isBlank()) ? AiUrlGuard.truncate(personaId.trim(), 48) : "strategist");
+                Boolean pinnedVal = body != null ? AiUrlGuard.getOptionalBoolean(body, "pinned") : null;
+                thread.setPinned(Boolean.TRUE.equals(pinnedVal));
 
-            if (body != null && body.has("messages") && body.get("messages").isJsonArray()) {
-                thread.setMessagesJson(gson.toJson(body.getAsJsonArray("messages")));
-            } else {
-                thread.setMessagesJson("[]");
+                if (body != null && body.has("messages") && !body.get("messages").isJsonNull()) {
+                    if (!body.get("messages").isJsonArray()) {
+                        ctx.status(400).result(gson.toJson(Map.of("error", "messages must be a JSON array"))).contentType("application/json");
+                        return;
+                    }
+                    thread.setMessagesJson(gson.toJson(body.getAsJsonArray("messages")));
+                } else {
+                    thread.setMessagesJson("[]");
+                }
+                if (body != null && body.has("contextConfig") && !body.get("contextConfig").isJsonNull()) {
+                    if (!body.get("contextConfig").isJsonObject()) {
+                        ctx.status(400).result(gson.toJson(Map.of("error", "contextConfig must be a JSON object"))).contentType("application/json");
+                        return;
+                    }
+                    thread.setContextConfigJson(gson.toJson(body.getAsJsonObject("contextConfig")));
+                } else {
+                    thread.setContextConfigJson("{\"enabled\":true}");
+                }
+
+                AiChatThread saved = jdbi.inTransaction(handle -> {
+                    AiChatThreadDao dao = handle.attach(AiChatThreadDao.class);
+                    AiChatThread globalExisting = dao.findById(thread.getId());
+                    if (globalExisting != null) {
+                        if (!userId.equals(globalExisting.getUserId())) {
+                            throw new io.javalin.http.ForbiddenResponse("Cannot overwrite AI thread of another user");
+                        }
+                        if (!eventId.equals(globalExisting.getEventId())) {
+                            throw new io.javalin.http.ConflictResponse("Thread id belongs to another event");
+                        }
+                        dao.updateScoped(thread);
+                    } else {
+                        dao.insert(thread);
+                    }
+                    return dao.findByIdUserAndEvent(thread.getId(), userId, eventId);
+                });
+
+                ctx.status(200).result(gson.toJson(toThreadPayload(saved))).contentType("application/json");
+            } catch (IllegalArgumentException e) {
+                ctx.status(400).result(gson.toJson(Map.of("error", e.getMessage()))).contentType("application/json");
             }
-            if (body != null && body.has("contextConfig") && body.get("contextConfig").isJsonObject()) {
-                thread.setContextConfigJson(gson.toJson(body.getAsJsonObject("contextConfig")));
-            } else {
-                thread.setContextConfigJson("{\"enabled\":true}");
-            }
-
-            AiChatThread saved = jdbi.inTransaction(handle -> {
-                AiChatThreadDao dao = handle.attach(AiChatThreadDao.class);
-                dao.upsert(thread);
-                return dao.findByIdUserAndEvent(thread.getId(), userId, eventId);
-            });
-
-            ctx.status(200).result(gson.toJson(toThreadPayload(saved))).contentType("application/json");
         });
 
         routes.get("/api/events/{id}/ai-threads/{threadId}", ctx -> {
             String eventId = ctx.pathParam("id");
-            String threadId = ctx.pathParam("threadId");
+            String threadId = ctx.pathParam("threadId").trim();
             String userId = requireEventMember(ctx, eventId);
 
-            AiChatThread thread = jdbi.withExtension(AiChatThreadDao.class, dao -> dao.findByIdUserAndEvent(threadId, userId, eventId));
-            if (thread == null) {
+            AiChatThread globalExisting = jdbi.withExtension(AiChatThreadDao.class, dao -> dao.findById(threadId));
+            if (globalExisting == null) {
                 ctx.status(404).result(gson.toJson(Map.of("error", "Thread not found"))).contentType("application/json");
                 return;
             }
-            ctx.result(gson.toJson(toThreadPayload(thread))).contentType("application/json");
+            if (!userId.equals(globalExisting.getUserId())) {
+                ctx.status(403).result(gson.toJson(Map.of("error", "Cannot access AI thread of another user"))).contentType("application/json");
+                return;
+            }
+            if (!eventId.equals(globalExisting.getEventId())) {
+                ctx.status(404).result(gson.toJson(Map.of("error", "Thread not found"))).contentType("application/json");
+                return;
+            }
+            ctx.result(gson.toJson(toThreadPayload(globalExisting))).contentType("application/json");
         });
 
         routes.put("/api/events/{id}/ai-threads/{threadId}", ctx -> {
             String eventId = ctx.pathParam("id");
-            String threadId = ctx.pathParam("threadId");
+            String threadId = ctx.pathParam("threadId").trim();
             String userId = requireEventMember(ctx, eventId);
+            if (threadId.isEmpty() || threadId.length() > 128) {
+                ctx.status(400).result(gson.toJson(Map.of("error", "Invalid threadId length"))).contentType("application/json");
+                return;
+            }
 
             JsonObject body;
             try {
@@ -165,32 +216,46 @@ public final class AiThreadRoutes {
             try {
                 AiChatThread updated = jdbi.inTransaction(handle -> {
                     AiChatThreadDao dao = handle.attach(AiChatThreadDao.class);
-                    AiChatThread existing = dao.findByIdUserAndEvent(threadId, userId, eventId);
-                    AiChatThread target = existing != null ? existing : new AiChatThread();
+                    AiChatThread globalExisting = dao.findById(threadId);
+                    if (globalExisting != null) {
+                        if (!userId.equals(globalExisting.getUserId())) {
+                            throw new io.javalin.http.ForbiddenResponse("Cannot modify AI thread of another user");
+                        }
+                        if (!eventId.equals(globalExisting.getEventId())) {
+                            throw new io.javalin.http.ConflictResponse("Thread id belongs to another event");
+                        }
+                    }
+
+                    AiChatThread target = globalExisting != null ? globalExisting : new AiChatThread();
                     target.setId(threadId);
                     target.setUserId(userId);
                     target.setEventId(eventId);
 
-                    if (body.has("title") && !body.get("title").isJsonNull()) {
-                        String t = body.get("title").getAsString().trim();
-                        if (!t.isEmpty()) target.setTitle(trimTitle(t));
-                    } else if (existing == null) {
+                    String title = AiUrlGuard.getOptionalString(body, "title");
+                    if (title != null && !title.trim().isEmpty()) {
+                        target.setTitle(trimTitle(title));
+                    } else if (globalExisting == null) {
                         target.setTitle("New Tactical Chat");
                     }
 
-                    if (body.has("personaId") && !body.get("personaId").isJsonNull()) {
-                        String p = body.get("personaId").getAsString().trim();
-                        if (!p.isEmpty()) target.setPersonaId(p);
-                    } else if (existing == null) {
+                    String personaId = AiUrlGuard.getOptionalString(body, "personaId");
+                    if (personaId != null && !personaId.trim().isEmpty()) {
+                        target.setPersonaId(AiUrlGuard.truncate(personaId.trim(), 48));
+                    } else if (globalExisting == null) {
                         target.setPersonaId("strategist");
                     }
 
-                    if (body.has("pinned") && !body.get("pinned").isJsonNull()) {
-                        target.setPinned(body.get("pinned").getAsBoolean());
+                    Boolean pinnedVal = AiUrlGuard.getOptionalBoolean(body, "pinned");
+                    if (pinnedVal != null) {
+                        target.setPinned(pinnedVal);
                     }
 
-                    applyMessagesAndContextUpdates(target, body, existing == null);
-                    dao.upsert(target);
+                    applyMessagesAndContextUpdates(target, body, globalExisting == null);
+                    if (globalExisting != null) {
+                        dao.updateScoped(target);
+                    } else {
+                        dao.insert(target);
+                    }
                     return dao.findByIdUserAndEvent(threadId, userId, eventId);
                 });
 
@@ -202,14 +267,20 @@ public final class AiThreadRoutes {
 
         routes.delete("/api/events/{id}/ai-threads/{threadId}", ctx -> {
             String eventId = ctx.pathParam("id");
-            String threadId = ctx.pathParam("threadId");
+            String threadId = ctx.pathParam("threadId").trim();
             String userId = requireEventMember(ctx, eventId);
 
             int deleted = jdbi.inTransaction(handle -> {
                 AiChatThreadDao dao = handle.attach(AiChatThreadDao.class);
-                AiChatThread existing = dao.findByIdUserAndEvent(threadId, userId, eventId);
-                if (existing == null) return 0;
-                return dao.deleteByIdAndUser(threadId, userId);
+                AiChatThread globalExisting = dao.findById(threadId);
+                if (globalExisting == null) return 0;
+                if (!userId.equals(globalExisting.getUserId())) {
+                    throw new io.javalin.http.ForbiddenResponse("Cannot delete AI thread of another user");
+                }
+                if (!eventId.equals(globalExisting.getEventId())) {
+                    return 0;
+                }
+                return dao.deleteByIdUserAndEvent(threadId, userId, eventId);
             });
             if (deleted == 0) {
                 ctx.status(404).result(gson.toJson(Map.of("error", "Thread not found"))).contentType("application/json");
@@ -278,7 +349,7 @@ public final class AiThreadRoutes {
                         migrated.setPinned(false);
                         migrated.setMessagesJson(gson.toJson(arr));
                         migrated.setContextConfigJson("{\"enabled\":true}");
-                        threadDao.upsert(migrated);
+                        threadDao.insert(migrated);
                         return threadDao.findByUserAndEvent(userId, eventId);
                     }
                 } catch (Exception ignored) {}
@@ -316,8 +387,22 @@ public final class AiThreadRoutes {
                 if (count > 0 && arr.get(count - 1).isJsonObject()) {
                     JsonObject last = arr.get(count - 1).getAsJsonObject();
                     if (last.has("content") && !last.get("content").isJsonNull()) {
-                        String raw = last.get("content").getAsString().replaceAll("\\s+", " ").trim();
-                        preview = raw.length() > 80 ? raw.substring(0, 80) + "..." : raw;
+                        String stripped = stripTurboActionBlocks(last.get("content").getAsString())
+                                .replaceAll("\\s+", " ")
+                                .trim();
+                        preview = stripped.length() > 80 ? stripped.substring(0, 80) + "..." : stripped;
+                    }
+                    if (preview.isEmpty() && last.has("turboActions") && last.get("turboActions").isJsonArray()) {
+                        JsonArray actions = last.getAsJsonArray("turboActions");
+                        if (!actions.isEmpty() && actions.get(0).isJsonObject()) {
+                            JsonObject firstAct = actions.get(0).getAsJsonObject();
+                            if (firstAct.has("summary") && !firstAct.get("summary").isJsonNull()) {
+                                String rawAction = ("[Turbo] " + firstAct.get("summary").getAsString())
+                                        .replaceAll("\\s+", " ")
+                                        .trim();
+                                preview = rawAction.length() > 80 ? rawAction.substring(0, 80) + "..." : rawAction;
+                            }
+                        }
                     }
                 }
             }

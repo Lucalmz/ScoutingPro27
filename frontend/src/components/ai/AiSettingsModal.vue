@@ -2,6 +2,7 @@
 import { computed, ref, watch, nextTick } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { useAiStore, type ConnectionCheckResponse } from '@/stores/ai'
+import { useUserStore } from '@/stores/user'
 import { useToastStore } from '@/stores/toast'
 import type { AiProtocol, AiProviderProfile } from '@/types'
 import {
@@ -27,6 +28,7 @@ import AiModelChipInput from './settings/AiModelChipInput.vue'
 
 const { t, te, locale } = useI18n()
 const aiStore = useAiStore()
+const userStore = useUserStore()
 const toastStore = useToastStore()
 
 const isZh = computed(() => isZhLocale(locale.value))
@@ -43,6 +45,8 @@ const baseUrl = ref('')
 const apiKey = ref('')
 const showApiKey = ref(false)
 const keyLostError = ref(false)
+const hasSavedValidKey = ref(false)
+const savedKeyMask = ref('')
 const modelName = ref('')
 const customModels = ref<string[]>([])
 const proxyHost = ref('')
@@ -120,7 +124,9 @@ function hydrateFormFromProfile(profile: AiProviderProfile) {
   presetId.value = profile.presetId || findPresetByBaseUrl(profile.baseUrl, profile.protocol).id
   baseUrl.value = profile.baseUrl || ''
   keyLostError.value = profile.apiKeyEncrypted === API_KEY_ERR_LOST
-  apiKey.value = keyLostError.value ? '' : profile.apiKeyEncrypted || ''
+  hasSavedValidKey.value = Boolean(profile.hasApiKey) && !keyLostError.value
+  savedKeyMask.value = hasSavedValidKey.value ? (profile.apiKeyEncrypted || '') : ''
+  apiKey.value = ''
   modelName.value = profile.modelName || ''
   customModels.value =
     profile.customModels && profile.customModels.length > 0
@@ -133,7 +139,7 @@ function hydrateFormFromProfile(profile: AiProviderProfile) {
   systemPrompt.value = profile.systemPrompt || ''
   temperature.value = profile.temperature ?? AI_PROFILE_DEFAULTS.temperature
   maxTokens.value = profile.maxTokens ?? AI_PROFILE_DEFAULTS.maxTokens
-  enableThinking.value = profile.enableThinking !== false
+  enableThinking.value = Boolean(profile.enableThinking)
   thinkingBudget.value = profile.thinkingBudget ?? AI_PROFILE_DEFAULTS.thinkingBudget
   anthropicVersion.value = profile.anthropicVersion || DEFAULT_ANTHROPIC_VERSION
   maxContextMsgs.value = profile.maxContextMsgs ?? AI_PROFILE_DEFAULTS.maxContextMsgs
@@ -162,6 +168,8 @@ function startNewProfile(targetProtocol: AiProtocol = 'OPENAI') {
   customModels.value = targetProtocol === 'GEMINI' ? [...GEMINI_DEFAULT_MODELS] : [...def.models]
   apiKey.value = ''
   keyLostError.value = false
+  hasSavedValidKey.value = false
+  savedKeyMask.value = ''
   proxyHost.value = ''
   proxyPort.value = null
   systemPrompt.value = ''
@@ -317,7 +325,12 @@ watch(
   () => aiStore.settingsModalOpen,
   async (isOpen) => {
     if (isOpen) {
-      if (aiStore.profiles.length === 0) await aiStore.fetchProfiles()
+      if (
+        aiStore.profiles.length === 0 ||
+        (userStore.userId && aiStore.profiles.some(p => p.userId && p.userId !== userStore.userId))
+      ) {
+        await aiStore.fetchProfiles()
+      }
       const targetId = aiStore.settingsModalTargetProfileId
       const targetProfile =
         (targetId && aiStore.profiles.find(p => p.id === targetId)) ||
@@ -410,12 +423,13 @@ async function handleSave() {
   }
 
   isSaving.value = true
+  const trimmedKey = apiKey.value.trim()
   const res = await aiStore.saveProfile({
     id: editingProfileId.value || undefined,
     name: name.value.trim() || undefined,
     presetId: presetId.value,
     protocol: protocol.value,
-    apiKeyEncrypted: apiKey.value,
+    apiKeyEncrypted: trimmedKey || (keyLostError.value ? API_KEY_ERR_LOST : undefined),
     baseUrl: baseUrl.value.trim(),
     modelName: trimmedModel,
     customModels: finalCustomModels,
@@ -607,7 +621,7 @@ function selectFetchedModel(m: string, alsoPin: boolean) {
                 id="ai-api-key"
                 v-model="apiKey"
                 :type="showApiKey ? 'text' : 'password'"
-                :placeholder="protocolMeta.keyPlaceholder"
+                :placeholder="hasSavedValidKey ? savedKeyMask : protocolMeta.keyPlaceholder"
                 autocomplete="off"
               />
               <button
@@ -682,8 +696,9 @@ function selectFetchedModel(m: string, alsoPin: boolean) {
                   <input type="checkbox" v-model="enableThinking" />
                   <span>{{ t('ai.enable_thinking') }}</span>
                 </label>
+                <span class="field-hint">{{ t('ai.thinking_composer_hint') }}</span>
               </div>
-              <div v-if="protocol === 'ANTHROPIC' && enableThinking" class="form-field">
+              <div v-if="(protocol === 'ANTHROPIC' || protocol === 'GEMINI') && enableThinking" class="form-field">
                 <label>{{ t('ai.thinking_budget') }}</label>
                 <input v-model.number="thinkingBudget" type="number" min="1024" max="32768" step="512" />
               </div>

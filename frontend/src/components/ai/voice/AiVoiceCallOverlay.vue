@@ -200,10 +200,10 @@ const miniSnippet = computed(() => {
 </script>
 
 <template>
-  <template v-if="isActive">
-    <!-- Expanded Full Voice Stage inside Copilot Workspace -->
+  <!-- Expanded Full Voice Stage inside Copilot Workspace -->
+  <Transition name="voice-stage-zoom">
     <section
-      v-if="!isMinimized"
+      v-if="isActive && !isMinimized"
       class="voice-stage-overlay"
       role="dialog"
       aria-modal="false"
@@ -511,10 +511,12 @@ const miniSnippet = computed(() => {
         </div>
       </footer>
     </section>
+  </Transition>
 
-    <!-- Minimized Floating Bar docked above Composer -->
+  <!-- Minimized Floating Bar docked above Composer -->
+  <Transition name="voice-mini-slide">
     <div
-      v-else
+      v-if="isActive && isMinimized"
       class="voice-mini-bar"
       role="region"
       :aria-label="t('ai.voice.mini_bar_label')"
@@ -584,7 +586,7 @@ const miniSnippet = computed(() => {
         </button>
       </div>
     </div>
-  </template>
+  </Transition>
 </template>
 
 <style scoped src="./AiVoiceCallOverlay.css"></style>

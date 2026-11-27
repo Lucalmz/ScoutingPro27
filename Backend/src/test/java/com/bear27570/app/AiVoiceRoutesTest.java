@@ -480,6 +480,133 @@ public class AiVoiceRoutesTest {
         assertThat(antRes.body()).contains("Anthropic protocol does not support audio transcription");
     }
 
+    @Test
+    void testWsVoiceValidationErrorsAndTranscribeEdgeCases() throws Exception {
+        AtomicReference<String> lastOpenAiMultipart = new AtomicReference<>();
+        AtomicReference<Boolean> returnUpstreamError = new AtomicReference<>(false);
+        mockUpstream = Javalin.create(cfg -> {
+            cfg.routes.post("/v1/audio/transcriptions", ctx -> {
+                if (Boolean.TRUE.equals(returnUpstreamError.get())) {
+                    ctx.status(500).result("{\"error\":\"upstream down\"}");
+                    return;
+                }
+                lastOpenAiMultipart.set(new String(ctx.bodyAsBytes(), StandardCharsets.UTF_8));
+                ctx.status(200).result("{\"text\":\"Transcribed ok\"}").contentType("application/json");
+            });
+            cfg.routes.post("/v1beta/models/gemini-flash-latest:generateContent", ctx ->
+                    ctx.status(200).result("{\"candidates\":[{\"content\":{\"parts\":[{\"text\":\"internal\",\"thought\":true},{\"text\":\"Clean text\"}]}}]}").contentType("application/json"));
+        }).start(0);
+
+        String[] auth = registerUser("voice_edge_user", "secret123");
+        String userId = auth[0];
+        String token = auth[1];
+
+        String openaiProfId = createProfile(userId, token, "OA Edge", "OPENAI",
+                "sk-edge-123", "http://localhost:" + mockUpstream.port() + "/v1", "gpt-4o");
+        String groqProfId = createProfile(userId, token, "Groq Edge", "OPENAI",
+                "sk-groq-123", "http://localhost:" + mockUpstream.port() + "/v1", "llama");
+        jdbi.useHandle(h -> h.createUpdate("UPDATE ai_provider_profiles SET preset_id = 'groq' WHERE id = :id").bind("id", groqProfId).execute());
+
+        String gemProfId = createProfile(userId, token, "Gem Edge", "GEMINI",
+                "AIzaEdge123", "http://localhost:" + mockUpstream.port() + "/v1beta", "gemini-flash-latest");
+        String antProfId = createProfile(userId, token, "Ant Edge", "ANTHROPIC",
+                "sk-ant-edge", "https://api.anthropic.com", "claude-sonnet-4-20250514");
+
+        // WS protocol validation frames: INVALID_JSON, MISSING_TYPE, UNKNOWN_TYPE, NOT_STARTED, MISSING_PROFILE, UNSUPPORTED_PROTOCOL, KEY_DECRYPT_FAILED, API_KEY_REQUIRED
+        HttpClient http = HttpClient.newHttpClient();
+        String wsUrl = "ws://localhost:" + app.port() + "/ws/ai/voice";
+        BlockingQueue<String> frames = new LinkedBlockingQueue<>();
+        WebSocket ws = http.newWebSocketBuilder()
+                .buildAsync(URI.create(wsUrl), new QueueListener(frames))
+                .get(5, TimeUnit.SECONDS);
+
+        ws.sendText("not-json", true).join();
+        assertThat(JsonParser.parseString(frames.poll(5, TimeUnit.SECONDS)).getAsJsonObject().get("code").getAsString()).isEqualTo("BAD_MESSAGE");
+
+        ws.sendText("{not-json", true).join();
+        assertThat(JsonParser.parseString(frames.poll(5, TimeUnit.SECONDS)).getAsJsonObject().get("code").getAsString()).isEqualTo("INVALID_JSON");
+
+        // Regression #18.6a: non-string token in start must return BAD_MESSAGE and allow subsequent valid start retry
+        ws.sendText("{\"type\":\"start\",\"token\":[]}", true).join();
+        assertThat(JsonParser.parseString(frames.poll(5, TimeUnit.SECONDS)).getAsJsonObject().get("code").getAsString()).isEqualTo("BAD_MESSAGE");
+
+        ws.sendText("{}", true).join();
+        assertThat(JsonParser.parseString(frames.poll(5, TimeUnit.SECONDS)).getAsJsonObject().get("code").getAsString()).isEqualTo("MISSING_TYPE");
+
+        ws.sendText("{\"type\":\"audio\",\"data\":\"AAAA\"}", true).join();
+        assertThat(JsonParser.parseString(frames.poll(5, TimeUnit.SECONDS)).getAsJsonObject().get("code").getAsString()).isEqualTo("NOT_STARTED");
+
+        ws.sendText("{\"type\":\"bogus\"}", true).join();
+        assertThat(JsonParser.parseString(frames.poll(5, TimeUnit.SECONDS)).getAsJsonObject().get("code").getAsString()).isEqualTo("UNKNOWN_TYPE");
+
+        ws.sendText("{\"type\":\"start\",\"token\":\"" + token + "\"}", true).join();
+        assertThat(JsonParser.parseString(frames.poll(5, TimeUnit.SECONDS)).getAsJsonObject().get("code").getAsString()).isEqualTo("MISSING_PROFILE");
+        ws.abort();
+
+        // Anthropic profile rejected on WS voice
+        BlockingQueue<String> antFrames = new LinkedBlockingQueue<>();
+        WebSocket antWs = http.newWebSocketBuilder()
+                .buildAsync(URI.create(wsUrl), new QueueListener(antFrames))
+                .get(5, TimeUnit.SECONDS);
+        antWs.sendText("{\"type\":\"start\",\"token\":\"" + token + "\",\"profileId\":\"" + antProfId + "\"}", true).join();
+        assertThat(JsonParser.parseString(antFrames.poll(5, TimeUnit.SECONDS)).getAsJsonObject().get("code").getAsString()).isEqualTo("UNSUPPORTED_PROTOCOL");
+        antWs.abort();
+
+        // Corrupted key on WS voice -> KEY_DECRYPT_FAILED
+        jdbi.useHandle(h -> h.execute(
+                "INSERT INTO ai_provider_profiles (id, user_id, name, preset_id, protocol, api_key_encrypted, base_url, model_name, is_active) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                "prof-corrupt-ws", userId, "Corrupt", "custom", "OPENAI", "corrupted-ciphertext", "https://api.openai.com/v1", "gpt-realtime", false));
+        BlockingQueue<String> corruptFrames = new LinkedBlockingQueue<>();
+        WebSocket corruptWs = http.newWebSocketBuilder()
+                .buildAsync(URI.create(wsUrl), new QueueListener(corruptFrames))
+                .get(5, TimeUnit.SECONDS);
+        corruptWs.sendText("{\"type\":\"start\",\"token\":\"" + token + "\",\"profileId\":\"prof-corrupt-ws\"}", true).join();
+        assertThat(JsonParser.parseString(corruptFrames.poll(5, TimeUnit.SECONDS)).getAsJsonObject().get("code").getAsString()).isEqualTo("KEY_DECRYPT_FAILED");
+        corruptWs.abort();
+
+        // Remote OpenAI with empty key -> API_KEY_REQUIRED
+        jdbi.useHandle(h -> h.execute(
+                "INSERT INTO ai_provider_profiles (id, user_id, name, preset_id, protocol, api_key_encrypted, base_url, model_name, is_active) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                "prof-nokey-ws", userId, "NoKey", "custom", "OPENAI", "", "https://api.openai.com/v1", "gpt-realtime", false));
+        BlockingQueue<String> noKeyFrames = new LinkedBlockingQueue<>();
+        WebSocket noKeyWs = http.newWebSocketBuilder()
+                .buildAsync(URI.create(wsUrl), new QueueListener(noKeyFrames))
+                .get(5, TimeUnit.SECONDS);
+        noKeyWs.sendText("{\"type\":\"start\",\"token\":\"" + token + "\",\"profileId\":\"prof-nokey-ws\"}", true).join();
+        assertThat(JsonParser.parseString(noKeyFrames.poll(5, TimeUnit.SECONDS)).getAsJsonObject().get("code").getAsString()).isEqualTo("API_KEY_REQUIRED");
+        noKeyWs.abort();
+
+        // Transcribe validation & format edge cases
+        String baseUrl = "http://localhost:" + app.port();
+        String dummyAudio = Base64.getEncoder().encodeToString("audio-bytes".getBytes(StandardCharsets.UTF_8));
+        assertThat(postJson(http, baseUrl + "/api/ai/audio/transcribe", token, "[]").statusCode()).isEqualTo(400);
+        assertThat(postJson(http, baseUrl + "/api/ai/audio/transcribe", token, "{bad").statusCode()).isEqualTo(400);
+        assertThat(postJson(http, baseUrl + "/api/ai/audio/transcribe", token, "{\"audioBase64\":\"abc\"}").statusCode()).isEqualTo(400);
+        assertThat(postJson(http, baseUrl + "/api/ai/audio/transcribe", token, "{\"profileId\":\"" + openaiProfId + "\"}").statusCode()).isEqualTo(400);
+        assertThat(postJson(http, baseUrl + "/api/ai/audio/transcribe", token, "{\"profileId\":\"" + openaiProfId + "\",\"audioBase64\":\"a\"}").statusCode()).isEqualTo(400);
+        assertThat(postJson(http, baseUrl + "/api/ai/audio/transcribe", token, "{\"profileId\":\"" + openaiProfId + "\",\"audioBase64\":\"data:audio/wav;base64,\"}").statusCode()).isEqualTo(400);
+        assertThat(postJson(http, baseUrl + "/api/ai/audio/transcribe", token, "{\"profileId\":\"prof-corrupt-ws\",\"audioBase64\":\"" + dummyAudio + "\"}").statusCode()).isEqualTo(400);
+        assertThat(postJson(http, baseUrl + "/api/ai/audio/transcribe", token, "{\"profileId\":\"prof-nokey-ws\",\"audioBase64\":\"" + dummyAudio + "\"}").statusCode()).isEqualTo(400);
+
+        // Data URL prefix + webm mimeType + Groq preset model selection + Regression #18.6b CR/LF strip on modelOverride
+        HttpResponse<String> groqRes = postJson(http, baseUrl + "/api/ai/audio/transcribe", token,
+                "{\"profileId\":\"" + groqProfId + "\",\"audioBase64\":\"data:audio/webm;base64," + dummyAudio + "\",\"mimeType\":\"audio/webm\",\"model\":\"whisper-large-v3\\r\\nInjected: 1\"}");
+        assertThat(groqRes.statusCode()).isEqualTo(200);
+        assertThat(lastOpenAiMultipart.get()).contains("filename=\"recording.webm\"").contains("whisper-large-v3Injected: 1").doesNotContain("whisper-large-v3\r\nInjected");
+
+        // Gemini ignores thought=true parts in STT response
+        HttpResponse<String> gemRes = postJson(http, baseUrl + "/api/ai/audio/transcribe", token,
+                "{\"profileId\":\"" + gemProfId + "\",\"audioBase64\":\"" + dummyAudio + "\"}");
+        assertThat(gemRes.statusCode()).isEqualTo(200);
+        assertThat(JsonParser.parseString(gemRes.body()).getAsJsonObject().get("text").getAsString()).isEqualTo("Clean text");
+
+        // Upstream 500 maps to 502
+        returnUpstreamError.set(true);
+        HttpResponse<String> errRes = postJson(http, baseUrl + "/api/ai/audio/transcribe", token,
+                "{\"profileId\":\"" + openaiProfId + "\",\"audioBase64\":\"" + dummyAudio + "\"}");
+        assertThat(errRes.statusCode()).isEqualTo(502);
+    }
+
     private String[] registerUser(String username, String password) throws Exception {
         HttpClient http = HttpClient.newHttpClient();
         HttpResponse<String> res = http.send(

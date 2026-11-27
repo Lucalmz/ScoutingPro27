@@ -130,6 +130,82 @@ class SignalingRoutesTest {
             awaitCondition(() -> signalingRoutes.getActiveRoomCount() == 0, 3000);
             assertThat(signalingRoutes.getPeerCount("roomA")).isEqualTo(0);
             assertThat(signalingRoutes.getPeerCount("roomB")).isEqualTo(0);
+            assertThat(signalingRoutes.getPeerCount("never-existed")).isEqualTo(0);
+            assertThat(signalingRoutes.getActiveRoomCount()).isEqualTo(0);
+        } finally {
+            for (WebSocket ws : new WebSocket[]{ws1, ws2, ws3}) {
+                if (ws != null) {
+                    try {
+                        ws.abort();
+                    } catch (Exception ignored) {}
+                }
+            }
+            app.stop();
+        }
+    }
+
+    @Test
+    void testThreePeerBroadcastSinglePeerNoEchoAndAbruptDisconnectCleanup() throws Exception {
+        SignalingRoutes signalingRoutes = new SignalingRoutes();
+        Javalin app = Javalin.create(config -> signalingRoutes.register(config.routes));
+        app.start(0);
+        int port = app.port();
+
+        HttpClient httpClient = HttpClient.newHttpClient();
+        WebSocket ws1 = null;
+        WebSocket ws2 = null;
+        WebSocket ws3 = null;
+
+        try {
+            RecordingListener l1 = new RecordingListener();
+            RecordingListener l2 = new RecordingListener();
+            RecordingListener l3 = new RecordingListener();
+
+            ws1 = httpClient.newWebSocketBuilder()
+                    .buildAsync(URI.create("ws://127.0.0.1:" + port + "/ws/signal/ROOM-3"), l1)
+                    .get(5, TimeUnit.SECONDS);
+            assertThat(l1.openLatch.await(5, TimeUnit.SECONDS)).isTrue();
+            awaitCondition(() -> signalingRoutes.getPeerCount("ROOM-3") == 1, 2000);
+
+            // Single peer sending in room does not echo to itself or crash
+            ws1.sendText("{\"type\":\"host_probe\"}", true).get(5, TimeUnit.SECONDS);
+            Thread.sleep(60);
+            assertThat(l1.receivedMessages).isEmpty();
+
+            ws2 = httpClient.newWebSocketBuilder()
+                    .buildAsync(URI.create("ws://127.0.0.1:" + port + "/ws/signal/ROOM-3"), l2)
+                    .get(5, TimeUnit.SECONDS);
+            ws3 = httpClient.newWebSocketBuilder()
+                    .buildAsync(URI.create("ws://127.0.0.1:" + port + "/ws/signal/ROOM-3"), l3)
+                    .get(5, TimeUnit.SECONDS);
+            assertThat(l2.openLatch.await(5, TimeUnit.SECONDS)).isTrue();
+            assertThat(l3.openLatch.await(5, TimeUnit.SECONDS)).isTrue();
+            awaitCondition(() -> signalingRoutes.getPeerCount("ROOM-3") == 3, 2000);
+
+            // Broadcast from ws1 reaches BOTH ws2 and ws3, not ws1
+            l2.expectMessages(1);
+            l3.expectMessages(1);
+            String msg = "{\"type\":\"host_hello\",\"epoch\":2}";
+            ws1.sendText(msg, true).get(5, TimeUnit.SECONDS);
+            assertThat(l2.nextMessageLatch.await(5, TimeUnit.SECONDS)).isTrue();
+            assertThat(l3.nextMessageLatch.await(5, TimeUnit.SECONDS)).isTrue();
+            assertThat(l2.receivedMessages).containsExactly(msg);
+            assertThat(l3.receivedMessages).containsExactly(msg);
+            assertThat(l1.receivedMessages).isEmpty();
+
+            // Abruptly abort ws2 and verify room shrinks and ws1 <-> ws3 still works
+            ws2.abort();
+            awaitCondition(() -> signalingRoutes.getPeerCount("ROOM-3") == 2, 3000);
+            assertThat(signalingRoutes.getPeerCount("ROOM-3")).isEqualTo(2);
+
+            l1.expectMessages(1);
+            ws3.sendText("{\"type\":\"client_hello\"}", true).get(5, TimeUnit.SECONDS);
+            assertThat(l1.nextMessageLatch.await(5, TimeUnit.SECONDS)).isTrue();
+            assertThat(l1.receivedMessages).containsExactly("{\"type\":\"client_hello\"}");
+
+            ws1.sendClose(WebSocket.NORMAL_CLOSURE, "bye").get(5, TimeUnit.SECONDS);
+            ws3.sendClose(WebSocket.NORMAL_CLOSURE, "bye").get(5, TimeUnit.SECONDS);
+            awaitCondition(() -> signalingRoutes.getActiveRoomCount() == 0, 3000);
             assertThat(signalingRoutes.getActiveRoomCount()).isEqualTo(0);
         } finally {
             for (WebSocket ws : new WebSocket[]{ws1, ws2, ws3}) {

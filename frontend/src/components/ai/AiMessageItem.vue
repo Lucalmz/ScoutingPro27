@@ -5,6 +5,7 @@ import { useToastStore } from '@/stores/toast'
 import type { AiChatMessage } from '@/types'
 import { renderMarkdown } from '@/utils/markdown'
 import { applyTeamChipsToHtml } from '@/components/ai/teamMatcher'
+import { stripTurboActionBlocks } from '@/components/ai/turboAgent'
 import { StreamingSpeechSynthesizer } from '@/components/ai/voice/audioEngine'
 
 const props = defineProps<{
@@ -37,24 +38,37 @@ const localTts = new StreamingSpeechSynthesizer({
   }
 })
 
+const parsedAssistantDisplay = computed(() =>
+  stripTurboActionBlocks(props.message.content || '')
+)
+
+const displayText = computed(() =>
+  props.message.role === 'assistant'
+    ? parsedAssistantDisplay.value.displayContent
+    : (props.message.content || '')
+)
+
+const hasDisplayContent = computed(() => Boolean(displayText.value.trim()))
+
 function toggleReadAloud() {
   if (isSpeakingAloud.value) {
     localTts.stop()
     return
   }
+  if (!hasDisplayContent.value) return
   localTts.setLocale(locale.value)
-  localTts.speakText(props.message.content || '')
+  localTts.speakText(displayText.value)
 }
 
 // Thinking panel toggle + live elapsed timer while reasoning streams
 const hasAutoCollapsed = ref(false)
-const thinkingExpanded = ref(props.isStreaming && !props.message.content)
+const thinkingExpanded = ref(props.isStreaming && !hasDisplayContent.value)
 const thinkingElapsedMs = ref(0)
 let thinkingTimer: ReturnType<typeof setInterval> | null = null
 let thinkingStartMs: number | null = null
 
 watch(
-  () => [props.isStreaming, props.message.reasoning, props.message.content] as const,
+  () => [props.isStreaming, props.message.reasoning, displayText.value] as const,
   ([streaming, reasoning, content]) => {
     if (streaming && reasoning && !content) {
       if (!thinkingStartMs) thinkingStartMs = Date.now()
@@ -97,35 +111,48 @@ const displayThinkingSec = computed(() => {
 })
 
 const isReasoningPhase = computed(
-  () => props.isStreaming && Boolean(props.message.reasoning) && !props.message.content
+  () => props.isStreaming && Boolean(props.message.reasoning) && !hasDisplayContent.value
 )
 
-// Render HTML safely: skip heavy team-chip regex overlay while streaming (V4), apply as soon as idle
-const renderedAssistantHtml = computed(() => {
-  const content = props.message.content || ''
-  if (!content) return ''
-  try {
-    const html = renderMarkdown(content, { copyLabel: t('ai.btn_copy_code') })
-    return props.isStreaming ? html : applyTeamChipsToHtml(html, props.knownTeamRegex)
-  } catch {
-    return content
-  }
-})
-
-const renderedUserHtml = computed(() => {
-  const content = props.message.content || ''
-  const escaped = content
+function escapeHtml(text: string): string {
+  return text
     .replace(/&/g, '&amp;')
     .replace(/</g, '&lt;')
     .replace(/>/g, '&gt;')
-  return applyTeamChipsToHtml(escaped, props.knownTeamRegex)
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#39;')
+}
+
+// Render HTML safely: apply team chips immediately during and after streaming
+const renderedAssistantHtml = computed(() => {
+  const content = parsedAssistantDisplay.value.displayContent
+  if (!content) return ''
+  try {
+    const html = renderMarkdown(content, { copyLabel: t('ai.btn_copy_code') })
+    return applyTeamChipsToHtml(html, props.knownTeamRegex)
+  } catch {
+    return escapeHtml(content)
+  }
+})
+
+const turboSuccessCount = computed(
+  () => (props.message.turboActions || []).filter(a => a.status === 'success').length
+)
+const turboActingUser = computed(
+  () => (props.message.turboActions || []).find(a => a.actedAsUsername)?.actedAsUsername || ''
+)
+
+const renderedUserHtml = computed(() => {
+  const content = props.message.content || ''
+  return applyTeamChipsToHtml(escapeHtml(content), props.knownTeamRegex)
 })
 
 // Copy message state
 const copied = ref(false)
 async function copyWholeMessage() {
+  if (!hasDisplayContent.value) return
   try {
-    await navigator.clipboard.writeText(props.message.content || '')
+    await navigator.clipboard.writeText(displayText.value)
     copied.value = true
     toastStore.showToast(t('ai.msg_copied'), 'success')
     setTimeout(() => {
@@ -233,6 +260,10 @@ const durationText = computed(() => {
       <span v-if="message.role === 'assistant' && message.modelName" class="msg-model-pill">
         {{ message.modelName }}
       </span>
+      <span v-if="message.role === 'assistant' && message.aiMode === 'turbo'" class="msg-turbo-pill">
+        <span class="material-icons" aria-hidden="true">bolt</span>
+        <span>{{ t('ai.mode_turbo') }}</span>
+      </span>
       <span v-if="message.viaVoice" class="msg-voice-pill">
         <span class="material-icons" aria-hidden="true">mic</span>
         <span>{{ t('ai.voice.badge_voice') }}</span>
@@ -297,14 +328,49 @@ const durationText = computed(() => {
         </div>
 
         <!-- Waiting indicator before first token -->
-        <div v-if="isStreaming && !message.content && !message.reasoning" class="thinking-toggle" style="padding: 2px 0;">
+        <div v-if="isStreaming && !hasDisplayContent && !parsedAssistantDisplay.hasPendingBlock && !message.reasoning" class="thinking-toggle" style="padding: 2px 0;">
           <span class="thinking-pulse"></span>
           <span>{{ t('ai.generating') }}</span>
         </div>
 
         <!-- Rendered Markdown Answer -->
-        <div v-if="message.content" class="markdown-body" v-html="renderedAssistantHtml"></div>
-        <span v-if="isStreaming && message.content" class="streaming-caret" aria-hidden="true"></span>
+        <div v-if="parsedAssistantDisplay.displayContent" class="markdown-body" v-html="renderedAssistantHtml"></div>
+        <span v-if="isStreaming && parsedAssistantDisplay.displayContent && !parsedAssistantDisplay.hasPendingBlock" class="streaming-caret" aria-hidden="true"></span>
+
+        <div v-if="isStreaming && parsedAssistantDisplay.hasPendingBlock" class="turbo-pending-chip">
+          <span class="thinking-pulse"></span>
+          <span class="material-icons" aria-hidden="true">bolt</span>
+          <span>{{ t('ai.turbo_preparing_actions') }}</span>
+        </div>
+
+        <div v-if="message.turboActions && message.turboActions.length > 0" class="turbo-receipt-card">
+          <div class="turbo-receipt-header">
+            <span class="material-icons" aria-hidden="true">bolt</span>
+            <span class="turbo-receipt-title">
+              {{ t('ai.turbo_receipt_title', { ok: turboSuccessCount, total: message.turboActions.length }) }}
+            </span>
+            <span v-if="turboActingUser" class="turbo-receipt-actor">
+              {{ t('ai.turbo_acted_as', { user: turboActingUser }) }}
+            </span>
+          </div>
+          <ul class="turbo-receipt-list">
+            <li
+              v-for="act in message.turboActions"
+              :key="act.id"
+              class="turbo-receipt-item"
+              :class="`is-${act.status}`"
+            >
+              <span class="material-icons turbo-act-icon" aria-hidden="true">
+                {{ act.status === 'success' ? 'check_circle' : act.status === 'error' ? 'error' : 'hourglass_top' }}
+              </span>
+              <div class="turbo-act-body">
+                <div class="turbo-act-summary">{{ act.summary }}</div>
+                <div v-if="act.detail" class="turbo-act-detail">{{ act.detail }}</div>
+                <div v-if="act.error" class="turbo-act-error">{{ act.error }}</div>
+              </div>
+            </li>
+          </ul>
+        </div>
 
         <div v-if="message.stopped" class="msg-stopped-note">{{ t('ai.stopped_by_user') }}</div>
 
@@ -338,7 +404,7 @@ const durationText = computed(() => {
           <span class="material-icons">edit</span>
         </button>
         <button
-          v-if="message.content"
+          v-if="hasDisplayContent"
           type="button"
           class="btn-msg-act"
           :class="{ copied }"
@@ -348,7 +414,7 @@ const durationText = computed(() => {
           <span class="material-icons">{{ copied ? 'check' : 'content_copy' }}</span>
         </button>
         <button
-          v-if="canSpeakAloud && message.role === 'assistant' && message.content"
+          v-if="canSpeakAloud && message.role === 'assistant' && hasDisplayContent"
           type="button"
           class="btn-msg-act"
           :class="{ speaking: isSpeakingAloud }"

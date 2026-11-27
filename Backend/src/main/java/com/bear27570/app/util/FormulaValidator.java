@@ -164,27 +164,33 @@ public final class FormulaValidator {
         }
 
         List<CustomFieldDefinition> fields = existingFields != null ? existingFields : List.of();
-        Map<String, Set<String>> targetsByKey = new HashMap<>();
+        String candidateKey = candidate.getFieldKey() != null
+                ? candidate.getFieldKey().trim().toLowerCase(Locale.ROOT)
+                : "";
+        Map<String, Set<String>> formulaTargetsByKey = new HashMap<>();
         for (CustomFieldDefinition field : fields) {
             if (field == null || field.getFieldKey() == null) continue;
+            if (!"formula".equalsIgnoreCase(field.getFieldType())) continue;
             if (candidate.getId() != null && candidate.getId().equals(field.getId())) continue;
             String key = field.getFieldKey().trim().toLowerCase(Locale.ROOT);
             String fieldTarget = field.getTarget() != null ? field.getTarget().trim().toUpperCase(Locale.ROOT) : "MATCH";
-            targetsByKey.computeIfAbsent(key, k -> new HashSet<>()).add(fieldTarget);
+            if (!candidateKey.isEmpty() && key.equals(candidateKey) && fieldTarget.equals(target)) continue;
+            formulaTargetsByKey.computeIfAbsent(key, k -> new HashSet<>()).add(fieldTarget);
+        }
+        if (!candidateKey.isEmpty()) {
+            formulaTargetsByKey.computeIfAbsent(candidateKey, k -> new HashSet<>()).add(target);
         }
 
         // Cross-layer check for formula.* references
         for (String dep : syntaxResult.getDependencies()) {
             if (dep.startsWith("formula.")) {
                 String refKey = dep.substring("formula.".length()).toLowerCase(Locale.ROOT);
-                Set<String> refTargets = targetsByKey.getOrDefault(refKey, Set.of());
-                if ("MATCH".equals(target) && refTargets.contains("TEAM") && !refTargets.contains("MATCH")) {
+                Set<String> refTargets = formulaTargetsByKey.getOrDefault(refKey, Set.of());
+                if ("MATCH".equals(target) && (refTargets.contains("TEAM") || refTargets.contains("PIT"))
+                        && !refTargets.contains("MATCH")) {
                     return ValidationResult.error("CROSS_LAYER_REFERENCE",
-                            "MATCH formula cannot reference TEAM formula 'formula." + refKey + "'");
-                }
-                if ("MATCH".equals(target) && refTargets.contains("PIT") && !refTargets.contains("MATCH")) {
-                    return ValidationResult.error("CROSS_LAYER_REFERENCE",
-                            "MATCH formula cannot reference PIT formula 'formula." + refKey + "'");
+                            "MATCH formula cannot reference " + (refTargets.contains("TEAM") ? "TEAM" : "PIT")
+                                    + " formula 'formula." + refKey + "'");
                 }
                 if ("PIT".equals(target) && (refTargets.contains("MATCH") || refTargets.contains("TEAM"))
                         && !refTargets.contains("PIT")) {
@@ -194,40 +200,83 @@ public final class FormulaValidator {
             }
         }
 
-        // Build formula dependency graph for 3-color DFS cycle detection
-        String candidateKey = candidate.getFieldKey() != null
-                ? candidate.getFieldKey().trim().toLowerCase(Locale.ROOT)
-                : "";
+        // Build target-scoped formula dependency graph for 3-color DFS cycle detection
         if (candidateKey.isEmpty()) {
             return syntaxResult;
         }
 
-        Map<String, List<String>> graph = new LinkedHashMap<>();
+        Map<String, List<String>> rawFormulaDepsByNode = new LinkedHashMap<>();
         for (CustomFieldDefinition field : fields) {
             if (field == null || !"formula".equalsIgnoreCase(field.getFieldType())) continue;
             if (candidate.getId() != null && candidate.getId().equals(field.getId())) continue;
             String key = field.getFieldKey() != null ? field.getFieldKey().trim().toLowerCase(Locale.ROOT) : "";
-            if (key.isEmpty() || key.equals(candidateKey)) continue;
+            String fieldTarget = field.getTarget() != null ? field.getTarget().trim().toUpperCase(Locale.ROOT) : "MATCH";
+            if (key.isEmpty() || (key.equals(candidateKey) && fieldTarget.equals(target))) continue;
 
-            List<String> formulaDeps = extractFormulaDeps(field);
-            graph.put(key, formulaDeps);
+            rawFormulaDepsByNode.put(formulaNodeId(fieldTarget, key), extractFormulaDeps(field));
         }
 
+        String candidateNode = formulaNodeId(target, candidateKey);
         List<String> candidateFormulaDeps = extractFormulaKeyRefs(syntaxResult.getDependencies());
-        graph.put(candidateKey, candidateFormulaDeps);
+        rawFormulaDepsByNode.put(candidateNode, candidateFormulaDeps);
+
+        Map<String, List<String>> graph = new LinkedHashMap<>();
+        for (Map.Entry<String, List<String>> entry : rawFormulaDepsByNode.entrySet()) {
+            String node = entry.getKey();
+            int sep = node.indexOf(':');
+            String nodeTarget = sep >= 0 ? node.substring(0, sep) : "MATCH";
+            String nodeKey = sep >= 0 ? node.substring(sep + 1) : node;
+            List<String> resolvedTargets = new ArrayList<>();
+            for (String depKey : entry.getValue()) {
+                if (!"TEAM".equals(nodeTarget)) {
+                    resolvedTargets.add(formulaNodeId(nodeTarget, depKey));
+                } else if (depKey.equals(nodeKey)) {
+                    boolean addedLower = false;
+                    for (String lower : List.of("MATCH", "PIT")) {
+                        String lowerNode = formulaNodeId(lower, depKey);
+                        if (rawFormulaDepsByNode.containsKey(lowerNode)) {
+                            resolvedTargets.add(lowerNode);
+                            addedLower = true;
+                        }
+                    }
+                    if (!addedLower) {
+                        resolvedTargets.add(formulaNodeId("TEAM", depKey));
+                    }
+                } else {
+                    for (String t : List.of("TEAM", "MATCH", "PIT")) {
+                        String depNode = formulaNodeId(t, depKey);
+                        if (rawFormulaDepsByNode.containsKey(depNode)) {
+                            resolvedTargets.add(depNode);
+                        }
+                    }
+                }
+            }
+            graph.put(node, resolvedTargets);
+        }
 
         // 3-color DFS: 0 = WHITE, 1 = GRAY, 2 = BLACK
         Map<String, Integer> color = new HashMap<>();
         List<String> stack = new ArrayList<>();
-        List<String> cycle = dfsFindCycle(candidateKey, graph, color, stack);
+        List<String> cycle = dfsFindCycle(candidateNode, graph, color, stack);
         if (cycle != null) {
+            List<String> bareCycle = new ArrayList<>(cycle.size());
+            for (String node : cycle) {
+                int sep = node.indexOf(':');
+                bareCycle.add(sep >= 0 ? node.substring(sep + 1) : node);
+            }
             return ValidationResult.cycleError(
-                    "Circular dependency detected: " + String.join(" -> ", cycle),
-                    cycle
+                    "Circular dependency detected: " + String.join(" -> ", bareCycle),
+                    bareCycle
             );
         }
 
         return syntaxResult;
+    }
+
+    private static String formulaNodeId(String target, String fieldKey) {
+        String t = target != null ? target.trim().toUpperCase(Locale.ROOT) : "MATCH";
+        String k = fieldKey != null ? fieldKey.trim().toLowerCase(Locale.ROOT) : "";
+        return t + ":" + k;
     }
 
     private static List<String> extractFormulaDeps(CustomFieldDefinition field) {
@@ -639,10 +688,10 @@ public final class FormulaValidator {
                     }
                     advance();
 
-                    // Reject deep property chains like a.b.c
-                    if (peek().type() == TokenType.DOT) {
+                    // Reject deep property chains like a.b.c or method calls like a.b()
+                    if (peek().type() == TokenType.DOT || peek().type() == TokenType.LPAREN) {
                         throw new FormulaParseException("INVALID_SYNTAX",
-                                "Deep property chains are not allowed at position " + peek().pos());
+                                "Deep property chains or method calls are not allowed at position " + peek().pos());
                     }
 
                     String ns = ident;

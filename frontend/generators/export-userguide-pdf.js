@@ -3,6 +3,7 @@ import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 import MarkdownIt from 'markdown-it'
 import puppeteer from 'puppeteer'
+import { getChromeExecutablePath } from '../e2e/helpers/e2eBackendManager.js'
 
 const __filename = fileURLToPath(import.meta.url)
 const __dirname = path.dirname(__filename)
@@ -220,7 +221,9 @@ const TARGETS = [
 
 async function main() {
   console.log('🚀 [UserGuide PDF] Launching headless Chromium...')
+  const executablePath = getChromeExecutablePath()
   const browser = await puppeteer.launch({
+    executablePath,
     headless: true,
     args: ['--no-sandbox', '--disable-setuid-sandbox']
   })

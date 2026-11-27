@@ -24,6 +24,10 @@ export function createClientHeartbeatManager(deps: ClientHeartbeatDeps) {
   const pendingPings = new Map<number, (ok: boolean) => void>()
   let dataChannelHeartbeatTimer: ReturnType<typeof setInterval> | null = null
   let consecutiveFailedPings = 0
+  let lastPongReceivedAt = 0
+  let lastObservedBufferedAmount = -1
+  let lastObservedQueueLength = -1
+  let consecutiveStalledDrainTicks = 0
 
   function abortPendingPings() {
     for (const [, resolve] of pendingPings.entries()) {
@@ -33,10 +37,20 @@ export function createClientHeartbeatManager(deps: ClientHeartbeatDeps) {
   }
 
   function handlePong(timestamp: number) {
+    lastPongReceivedAt = Date.now()
+    consecutiveFailedPings = 0
+    consecutiveStalledDrainTicks = 0
+    lastObservedBufferedAmount = -1
+    lastObservedQueueLength = -1
+
     if (pendingPings.has(timestamp)) {
       const resolve = pendingPings.get(timestamp)
       pendingPings.delete(timestamp)
-      const rtt = Math.max(1, Date.now() - timestamp)
+      const rtt = Math.max(1, lastPongReceivedAt - timestamp)
+      if (ctx.getStatus() === 'degraded') {
+        log.info('DataChannel heartbeat restored, updating status to connected.')
+        ctx.setStatus('connected')
+      }
       const activeVirtualDc = getActiveVirtualDc()
       if (activeVirtualDc && ctx.getClientDc() === (activeVirtualDc as any) && ctx.peerMgr.currentTransportInfo) {
         ctx.peerMgr.currentTransportInfo = {
@@ -66,6 +80,15 @@ export function createClientHeartbeatManager(deps: ClientHeartbeatDeps) {
         }
       }
       resolve?.(true)
+      return
+    }
+
+    // Late PONG (arriving after pingHost timed out while queued behind bulk chunks) still proves channel liveness.
+    if (ctx.getStatus() === 'degraded') {
+      log.info('DataChannel late PONG received while degraded, restoring status to connected.')
+      ctx.setStatus('connected')
+      const pc = ctx.getClientPc()
+      if (pc) void ctx.peerMgr.updateTransportInfo(pc)
     }
   }
 
@@ -106,6 +129,10 @@ export function createClientHeartbeatManager(deps: ClientHeartbeatDeps) {
   function startDataChannelHeartbeat() {
     stopDataChannelHeartbeat()
     consecutiveFailedPings = 0
+    lastPongReceivedAt = 0
+    lastObservedBufferedAmount = -1
+    lastObservedQueueLength = -1
+    consecutiveStalledDrainTicks = 0
     const epoch = getAttemptEpoch()
     const intervalMs = (globalThis as any).__TEST_HEARTBEAT_INTERVAL_MS__ ?? 2000
     const defaultPingTimeoutMs = (globalThis as any).__TEST_PING_TIMEOUT_MS__
@@ -121,34 +148,94 @@ export function createClientHeartbeatManager(deps: ClientHeartbeatDeps) {
       if (!dc || dc.readyState !== 'open' || (!isVirtualOpen && (!pc || pc.connectionState !== 'connected'))) {
         return
       }
+      const observedRtt = ctx.peerMgr.currentTransportInfo?.rttMs
+      const nativeTimeoutMs =
+        typeof observedRtt === 'number' && Number.isFinite(observedRtt) && observedRtt > 0
+          ? Math.max(1800, Math.min(4500, Math.round(observedRtt * 4 + 1200)))
+          : 1800
       // VirtualDataChannel 走公共 MQTT Broker + 手机 VPN 时偶发 2~3s 抖动，放宽单次 Ping 超时至 3500ms
-      const effectiveTimeoutMs = defaultPingTimeoutMs ?? (isVirtualOpen ? 3500 : 1200)
+      const effectiveTimeoutMs = defaultPingTimeoutMs ?? (isVirtualOpen ? 3500 : nativeTimeoutMs)
+      const pingStartedAt = Date.now()
+      const preBuf = typeof dc.bufferedAmount === 'number' ? dc.bufferedAmount : 0
+      const preQueue = ctx.getClientSender?.()?.getQueueLength?.() ?? 0
       const isAlive = await pingHost(effectiveTimeoutMs)
       if (epoch !== getAttemptEpoch()) return
       if (!isAlive) {
-        consecutiveFailedPings++
-        log.warn(`DataChannel heartbeat ping timeout (${consecutiveFailedPings} consecutive misses)`)
-        if (consecutiveFailedPings === HEARTBEAT_DEGRADE_MISSES) {
-          // 关键修复：仅标记 degraded 并触发 onHostDisconnected，绝不调用 onActiveHostLeft()！
-          // 因为 onActiveHostLeft 会直接把 connStore.status 强行设为 'offline' 并弹出“主机离开房间”的错误提示，
-          // 导致后续 PONG 到达时因状态分裂无法恢复（日志 18:10:59 假离线断联的元凶）。
-          log.warn('Active host unresponsive via DataChannel heartbeat. Marking degraded and continuing to probe.')
-          ctx.peerMgr.resetTransportInfo()
-          ctx.setStatus('degraded')
-          ctx.callbacks.onHostDisconnected?.()
-        } else if (consecutiveFailedPings >= HEARTBEAT_REBUILD_MISSES) {
-          log.warn('DataChannel heartbeat dead for an extended period (SCTP wedged). Forcing connection rebuild.')
-          stopDataChannelHeartbeat()
-          failAttempt(epoch, 'heartbeat_timeout')
+        if (lastPongReceivedAt >= pingStartedAt) {
+          consecutiveFailedPings = 0
+          consecutiveStalledDrainTicks = 0
+          lastObservedBufferedAmount = -1
+          lastObservedQueueLength = -1
+          if (ctx.getStatus() === 'degraded') {
+            log.info('DataChannel heartbeat activity observed via recent PONG, restoring status to connected.')
+            ctx.setStatus('connected')
+            const pc2 = ctx.getClientPc()
+            if (pc2) void ctx.peerMgr.updateTransportInfo(pc2)
+          }
+          return
+        }
+
+        const postBuf = typeof dc.bufferedAmount === 'number' ? dc.bufferedAmount : 0
+        const postQueue = ctx.getClientSender?.()?.getQueueLength?.() ?? 0
+        const hasBulkTraffic = preBuf > 0 || postBuf > 0 || preQueue > 0 || postQueue > 0
+        const madeDrainProgress =
+          hasBulkTraffic &&
+          (postBuf < preBuf ||
+            postQueue < preQueue ||
+            (lastObservedBufferedAmount >= 0 && postBuf < lastObservedBufferedAmount) ||
+            (lastObservedQueueLength >= 0 && postQueue < lastObservedQueueLength))
+        lastObservedBufferedAmount = postBuf
+        lastObservedQueueLength = postQueue
+
+        if (madeDrainProgress) {
+          consecutiveStalledDrainTicks = 0
+          if (consecutiveFailedPings < HEARTBEAT_DEGRADE_MISSES) {
+            consecutiveFailedPings++
+            log.warn(
+              `DataChannel heartbeat ping timeout during active bulk drain (${consecutiveFailedPings}/${HEARTBEAT_DEGRADE_MISSES}; bufferedAmount=${postBuf}, queue=${postQueue})`
+            )
+            if (consecutiveFailedPings === HEARTBEAT_DEGRADE_MISSES) {
+              log.warn(
+                'Active host unresponsive via DataChannel heartbeat during bulk drain. Marking degraded and holding rebuild while drain progresses.'
+              )
+              ctx.peerMgr.resetTransportInfo()
+              ctx.setStatus('degraded')
+              ctx.callbacks.onHostDisconnected?.()
+            }
+          } else {
+            consecutiveFailedPings = HEARTBEAT_DEGRADE_MISSES
+          }
+        } else {
+          consecutiveStalledDrainTicks++
+          consecutiveFailedPings++
+          log.warn(
+            `DataChannel heartbeat ping timeout (${consecutiveFailedPings} consecutive misses, stalledDrainTicks=${consecutiveStalledDrainTicks})`
+          )
+          if (consecutiveFailedPings === HEARTBEAT_DEGRADE_MISSES) {
+            // 关键修复：仅标记 degraded 并触发 onHostDisconnected，绝不调用 onActiveHostLeft()！
+            // 因为 onActiveHostLeft 会直接把 connStore.status 强行设为 'offline' 并弹出“主机离开房间”的错误提示，
+            // 导致后续 PONG 到达时因状态分裂无法恢复（日志 18:10:59 假离线断联的元凶）。
+            log.warn('Active host unresponsive via DataChannel heartbeat. Marking degraded and continuing to probe.')
+            ctx.peerMgr.resetTransportInfo()
+            ctx.setStatus('degraded')
+            ctx.callbacks.onHostDisconnected?.()
+          } else if (consecutiveFailedPings >= HEARTBEAT_REBUILD_MISSES) {
+            log.warn('DataChannel heartbeat dead for an extended period (SCTP wedged). Forcing connection rebuild.')
+            stopDataChannelHeartbeat()
+            failAttempt(epoch, 'heartbeat_timeout')
+          }
         }
       } else {
-        if (consecutiveFailedPings > 0 && ctx.getStatus() === 'degraded') {
+        if (ctx.getStatus() === 'degraded') {
           log.info('DataChannel heartbeat restored, updating status to connected.')
           ctx.setStatus('connected')
           const pc2 = ctx.getClientPc()
           if (pc2) void ctx.peerMgr.updateTransportInfo(pc2)
         }
         consecutiveFailedPings = 0
+        consecutiveStalledDrainTicks = 0
+        lastObservedBufferedAmount = -1
+        lastObservedQueueLength = -1
       }
     }, intervalMs)
   }
@@ -159,6 +246,10 @@ export function createClientHeartbeatManager(deps: ClientHeartbeatDeps) {
       dataChannelHeartbeatTimer = null
     }
     consecutiveFailedPings = 0
+    lastPongReceivedAt = 0
+    lastObservedBufferedAmount = -1
+    lastObservedQueueLength = -1
+    consecutiveStalledDrainTicks = 0
   }
 
   return {

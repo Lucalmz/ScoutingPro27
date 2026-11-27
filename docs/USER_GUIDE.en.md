@@ -13,7 +13,7 @@ Check what role you are helping with today and jump straight to your chapters:
 
 | Your Arena Role | Top Tab You Use | What You Actually Do at the Venue | Go To Chapters |
 | :--- | :--- | :--- | :--- |
-| 🚩 **Event Host / Lead (1 laptop)** | Create Event → **Mobile QR** / **Schedule** / **Scouts & Settings** | Create the competition lobby, show the QR code, bind your **FTC Event Code** to pull official rosters & schedules, drag-select & auto-assign schedules, and add **Custom Fields** or **Custom TURN** if needed | [Ch 1](#chapter-1-open-the-app--create-your-callsign) · [Ch 2](#chapter-2-scan-qr-to-join-the-same-event-even-without-venue-internet) · [Ch 9](#chapter-9-match-schedule--assignments-how-batch-scheduling-works) · [Ch 14](#chapter-14-how-to-add--manage-custom-fields) · [Ch 15](#chapter-15-official-ftc-data-sync-roll-down-advancement-and-custom-turn) |
+| 🚩 **Event Host / Lead (1 laptop)** | Create Event → **Mobile QR** / **Schedule** / **Scouts & Settings** | Create the competition lobby, show the QR code, bind your **FTC Event Code** to pull official rosters & schedules, drag-select & auto-assign schedules, and add **Custom Fields** or **Custom TURN** if needed | [Ch 1](#chapter-1-open-the-app--create-your-callsign) · [Ch 2](#chapter-2-scan-qr-to-join-the-same-event-even-without-venue-internet) · [Ch 9](#chapter-9-match-schedule--assignments-how-batch-scheduling-works) · [Ch 14](#chapter-14-how-to-add--manage-custom-fields--formulas) · [Ch 15](#chapter-15-official-ftc-data-sync-roll-down-advancement-and-custom-turn) |
 | 📱 **Stand / Bleacher Scout (phone or laptop)** | **Scout** · **History** | Tap your 1-tap Schedule Banner to pre-load your match, log points & cycles, and use **`History` → `Edit`** anytime if you need to fix a submitted match | [Ch 3](#chapter-3-10-second-pre-match-setup-mode-alliance--pit-cross-check) – [Ch 7](#chapter-7-mobile-single-handed-wizard-scout-standing-up-with-one-thumb) · [Ch 12](#chapter-12-how-to-edit--fix-saved-match-records) |
 | 🔧 **Pit Scout (roaming the team pits)** | **Pit Scout** | Walk pit-to-pit and open the **Pit Form Drawer**: record **weight**, **Compact Small / Wide Large** chassis, flower mechanism, and claimed scores | [Ch 8](#chapter-8-pit-scouting-robot-size-weight--actual-pit-form-drawer) |
 | 🎯 **Drive Coach / Alliance Selection Lead** | **Rankings** · **Whiteboard** · **AI Copilot** | Check sticky **Advancement Points (w/ Roll-Down)**, **Predict Cycle Time**, **Swarm RP**, and **Brag Index**; bind an **API Key** so the **AI Copilot** analyzes live event data right beside the rankings, and animate Whiteboard routes | [Ch 10](#chapter-10-rankings--brag-index-picking-honest-alliance-partners) · [Ch 11](#chapter-11-tactical-whiteboard-plan--play-animated-routes-before-queuing) · [Ch 13](#chapter-13-how-to-bind-an-api-key--use-ai-copilot) · [Ch 15](#chapter-15-official-ftc-data-sync-roll-down-advancement-and-custom-turn) |
@@ -36,7 +36,7 @@ Check what role you are helping with today and jump straight to your chapters:
 11. [Tactical Whiteboard: Plan & Play Animated Routes Before Queuing](#chapter-11-tactical-whiteboard-plan--play-animated-routes-before-queuing)
 12. [How to Edit & Fix Saved Match Records](#chapter-12-how-to-edit--fix-saved-match-records)
 13. [How to Bind an API Key & Use AI Copilot](#chapter-13-how-to-bind-an-api-key--use-ai-copilot)
-14. [How to Add & Manage Custom Fields](#chapter-14-how-to-add--manage-custom-fields)
+14. [How to Add & Manage Custom Fields & Formulas](#chapter-14-how-to-add--manage-custom-fields--formulas)
 15. [Official FTC Data Sync, Roll-Down Advancement, and Custom TURN](#chapter-15-official-ftc-data-sync-roll-down-advancement-and-custom-turn)
 16. [Emergency Troubleshooting FAQ](#chapter-16-emergency-troubleshooting-faq)
 
@@ -46,37 +46,35 @@ Check what role you are helping with today and jump straight to your chapters:
 
 ### Windows Users
 1. Go to [GitHub Releases](https://github.com/Lucalmz/ScoutingPro27/releases) and download the latest **`ScoutingPro27-windows-x.x.x.msi`**.
-2. Double-click the MSI installer and follow the prompts—done!
+2. If Windows Defender SmartScreen shows **"Windows protected your PC"**, click **"More info"** → **"Run anyway"** (expected for unsigned open-source `.msi` packages).
+3. Double-click and follow the MSI installer wizard; on first app launch, click **Yes** on the Windows UAC prompt so ScoutingPro27 can register scoped firewall rules for LAN QR onboarding and WebRTC P2P.
 
 ### macOS Users (Apple Silicon)
 1. Go to [GitHub Releases](https://github.com/Lucalmz/ScoutingPro27/releases) and download the latest **`ScoutingPro27-mac-arm64-x.x.x.dmg`**.
-2. Double-click the `.dmg` to mount it and drag ScoutingPro27 into your **Applications** folder.
+2. Double-click the `.dmg` to mount it and drag **ScoutingPro27** into your **Applications** folder.
 
 > ⚠️ **Bypassing macOS Gatekeeper (Required on First Launch)**
 >
-> Because the app is not yet Apple-notarized, macOS will block it with **"cannot be opened because the developer cannot be verified"**. Follow one of these methods to open it:
+> Because this open-source release uses an ad-hoc Apple Silicon signature rather than a paid Apple Developer notarization certificate, macOS Gatekeeper will block the first launch with **"Apple could not verify 'ScoutingPro27' is free of malware"** (macOS 15 Sequoia / 26 Tahoe+) or **"cannot be opened because the developer cannot be verified"** (earlier macOS). Follow one of these methods:
 >
-> **Method 1: Right-Click → Open (Recommended, Fastest)**
-> 1. Open **Finder** → **Applications**, locate **ScoutingPro27**.
-> 2. Hold the **Control** key and **click** the app icon (or simply **right-click** it).
-> 3. Select **"Open"** from the context menu.
-> 4. A security dialog appears—click **"Open"** to confirm.
-> 5. ✅ You only need to do this once. After that, double-clicking works normally.
->
-> **Method 2: Allow in System Settings (If Method 1 Doesn't Work)**
-> 1. Double-click ScoutingPro27 (it will be blocked—this step registers it with the system).
+> **Method 1: Allow in System Settings (Recommended — Works on macOS 15 Sequoia, 26 Tahoe & macOS 13–14)**
+> 1. Double-click **ScoutingPro27** in **Finder → Applications** once so Gatekeeper blocks it, then click **Done** (this registers the app in System Settings).
 > 2. Open **System Settings** → **Privacy & Security**.
-> 3. Scroll to the bottom. Under **Security**, you'll see: **"ScoutingPro27 was blocked from use because it is not from an identified developer."**
-> 4. Click the **"Open Anyway"** button.
-> 5. Enter your Mac login password or use Touch ID to confirm.
-> 6. ✅ The app will launch normally from now on.
+> 3. Scroll down to the **Security** section—you will see: **"ScoutingPro27 was blocked to protect your Mac"** (or *"not from an identified developer"*).
+> 4. Click **"Open Anyway"**.
+> 5. Enter your Mac password or use Touch ID, then click **"Open"** on the confirmation prompt.
+> 6. ✅ You only need to do this once. Double-clicking works normally afterward.
 >
-> **Method 3: Terminal Command (Advanced Users)**
+> **Method 2: One-Line Terminal Command (Fastest)**
 > ```bash
-> # Remove the quarantine attribute (one-time only)
-> xattr -dr com.apple.quarantine /Applications/ScoutingPro27.app
+> # Clear the macOS quarantine attribute (one-time only)
+> xattr -cr /Applications/ScoutingPro27.app
 > ```
-> After running this, double-clicking the app opens it without any further prompts.
+> *(Or `xattr -dr com.apple.quarantine /Applications/ScoutingPro27.app`.)* After running this, double-clicking the app launches it immediately with no further prompts.
+>
+> **Method 3: Right-Click → Open (Legacy macOS 14 Sonoma & earlier only)**
+> 1. In **Finder → Applications**, hold **Control** and click **ScoutingPro27** (or right-click) → choose **"Open"** → click **"Open"**.
+> 2. *(Note: Apple removed this Control-click shortcut starting in **macOS 15 Sequoia**; on macOS 15+ use Method 1 or Method 2 above.)*
 
 ### Web / PWA (No Installation Needed)
 If you're a bleacher scout or simply don't want to install the desktop app, just scan the QR code or click the invite link from your phone or laptop browser—no download required.
@@ -294,7 +292,9 @@ Once qualification matches accumulate, open **`Rankings`** (scroll the table hor
    - Look for **`≤ 1.25x Realistic`** (green) with **`Flower Verified · Park Verified`** (`#27570` = `1.02x Realistic`).
    - Multiplier key: `≤ 1.25x` = **Realistic**; `> 1.25x` = **Optimistic**; `> 1.65x` = **Overclaimed**; `> 2.20x` = **Mythical** (`#28410` at `2.39x Mythical` + `Park Unstable`). Always trust proven field data!
 
-> 💡 **Scroll left in the table to also inspect `Mobility RP Pts` (`Swarm RP`) & `Avg Nectars` (`BIOBUZZ Flower & Garden`)**:
+> 💡 **Scroll left in the table to also inspect `NP OPR` (`SP-NP OPR`), `Auto Cycle Time`, `Mobility RP Pts` (`Swarm RP`), & `Avg Nectars` (`BIOBUZZ Flower & Garden`)**:
+> - **`NP OPR` (SP-NP OPR)**: Computes **Scout-Prior Non-Penalty OPR** with broken-match downweighting, displaying **Raw NP OPR**, **Auto / TeleOp / Endgame** split, **Delta `Δ`**, and a confidence badge (**`High Conf.`**, **`Med Conf.`**, **`Low Conf.`**, or **`Scout Only`**). Click any team row to open the **Team Detail Drawer** and inspect the full **SP-NP OPR Evaluation** card.
+> - **`Auto Cycle Time`**: Displays mean Autonomous cycle interval when ≥ 2 Auto cycles are logged (filtering `0.3s < dt ≤ 30s`).
 > - **`Mobility RP Pts`**: Combines **Leave (+3) + Auto Park (+5) + Endgame Park (+5)** = max **13.0 pts** per robot; two robots combining for **≥ 16 pts** earn your alliance the **Swarm RP**!
 > - **`Avg Nectars`**: Displays `N:2.5 B:2 / P:3.5 G:2.5` (avg **Nectars**, **Bottom Bonus Flowers**, **Pollens**, **Garden Balls**), cleanly separating Flower specialists from Garden-only pushers.
 
@@ -354,9 +354,13 @@ Before Alliance Selection, instead of manually scanning dozens of rows, bind an 
 2. **`(1)` Choose AI Coach Persona**: Switch instantly between the 5 built-in personas (**`Alliance Strategist`**, **`Pre-Match Coach`**, **`Brag & Risk Auditor`**, **`15-Sec Pit Brief`**, and **`Custom Prompt`**).
 3. **`(2)` `Live Data On` Toggle + `(3)` Live Telemetry Meter**:
    - **Zero copy-pasting spreadsheets!** Keep `(2)` enabled and `(3)` displays how many live rankings, schedules, and pit records are bundled with every question (expand the tune icon beside it to toggle individual data sections).
-4. **Type in `(4)` & Send (`@team` & `/slash` supported)**:
+4. **Type in `(4)` & Send (`@team`, `/slash`, `Ask / Turbo`, & `DeepThink`)**:
+   - **Switch `Ask` vs. `Turbo` mode** in the composer bar:
+     - **`Ask` Mode (default)**: Read-only tactical analysis without modifying any event data.
+     - **`Turbo` Mode**: AI executes data actions directly as your logged-in user—editing/creating/deleting match or pit records (within your permission scope), adding/removing team tags, updating schedules/assignments, or managing custom fields & formulas—and renders a transparent **`Turbo Execution (ok/total)` · `Acted as: <user>`** receipt!
+   - **Switch `DeepThink` effort per message** (`Think: Off / Low / Med / Deep`) right in the composer bar.
    - Type **`@`** to tag and focus specific teams, **`/`** for 5 quick analysis commands (`/pick`, `/match`, `/compare`, `/audit`, `/brief`), or ask naturally—e.g., `"Compare #27570 and #11115 using our live data: whose Predict Cycle Time and Swarm RP look stronger for alliance selection?"`
-   - Reasoning models' thinking tokens automatically collapse into a dedicated thinking drawer separate from the final answer; any **`#team`** badge supports hover preview and click-to-open Team Detail Drawer, plus multi-thread history and 1-click Markdown export.
+   - Reasoning models' thinking tokens automatically collapse into a dedicated thinking drawer separate from the final answer; any **`#team`** badge supports hover preview (with click-to-open Team Detail Drawer), plus multi-thread history and 1-click Markdown export.
 
 ### Step 3: Start a Direct Voice Call with AI Copilot
 
@@ -373,22 +377,32 @@ Before Alliance Selection, instead of manually scanning dozens of rows, bind an 
 
 ---
 
-## Chapter 14: How to Add & Manage Custom Fields
+## Chapter 14: How to Add & Manage Custom Fields & Formulas
 
-Want to track extra team-specific observations beyond built-in BIOBUZZ scoring (e.g., `"Defense Resilience 1–5"`, `"Intake Jam Risk"`, or `"Driver Comms"`)? Hosts can add custom fields in 30 seconds without touching code:
+Want to track extra team-specific observations beyond built-in BIOBUZZ scoring (e.g., `"Defense Resilience 1–5"`, `"Cycle Stopwatch"`, or a live `"Weighted Alliance Score"` formula)? Hosts can add custom fields and team formulas in 30 seconds without touching code:
 
 ![Custom Fields Builder modal showing Match/Pit tabs, New Field button, and active field card](images/userguide/en/15_custom_fields_manager.png)
 
 ### Where to Tap
 1. **Open `Scouts & Settings` → click `Custom Fields Config`** (the `tune` icon button) to open the modal above.
-2. **Choose `(1)` Target Form**: Pick **`Match Scouting Fields (Match)`** for stand scouts or **`Pit Scouting Fields (Pit)`** for pit scouts.
+2. **Choose `(1)` Target Tab (or click `Import Templates`)**:
+   - Pick **`Match Scouting Fields (Match)`** for stand scouts, **`Pit Scouting Fields (Pit)`** for pit scouts, or **`Team Formulas`** to build cross-match team ranking formulas.
+   - Want a head start? Click **`Import Templates`** to add preset formulas & fields in one click.
 3. **Click `(2)` Green `+ New Field`**:
    - Enter a **Field Name** (e.g., `Defense Resilience`);
    - Pick which **Phase** it appears in (`Autonomous`, `TeleOp`, `Endgame`, or `Post-Match Overall`);
-   - Choose a control type (**Number**, **Yes/No Toggle**, **1–5 Rating**, **Single/Multi-Select**, or **Text**) and save.
+   - Choose a control type:
+     - **Number** (choose **Stepper `+/-`**, **Slider** with quick steps & ticks, **Big Counter `+1`** with Undo, or **Direct Input**);
+     - **Yes/No Toggle** (supports **Tri-state `Yes / Unset / No`** and custom labels);
+     - **1–5 Rating** (**Number Blocks** or **Stars**);
+     - **Single/Multi-Select** (**Chips** or **Dropdown**, with optional numeric weights);
+     - **Text** (single-line or **Multiline Textarea**);
+     - **Stopwatch Timer**: Sleep-safe wall-clock stopwatch (`Start` / `Pause` / `Lap` / `Reset`);
+     - **Formula**: Read-only live expression with syntax & circular-dependency validation, clickable variables (`opr.np`, `match.*`, event custom fields), safe functions (`ROUND`, etc.), and live preview against sample or real team data.
+   - Configure **Ranking Aggregation** (`Average`, `Median`, `Max`, `Min`, `Sum`, `Last 3`, `Trimmed Avg`, `Std Dev`, `Rate`) and **Display Format** (`Decimal`, `Integer`, `Percent`, `Boolean`, or **`Tier Badge`** with High/Mid thresholds), then save.
 4. **Manage `(3)` Field Cards & `(4)` Close to Sync Live**:
-   - Reorder with up/down arrows, toggle active on/off, edit, or delete anytime;
-   - Closing the modal pushes the new field live to every connected scout form—and lets you display it as a column in **`Rankings`**!
+   - Reorder with up/down arrows, toggle active on/off, edit, or delete anytime (the app automatically warns you if deleting/deactivating a field impacts dependent formulas);
+   - Closing the modal pushes the new field live to every connected scout form—and lets you display it via **`Custom Columns`** in **`Rankings`**!
 
 ---
 
@@ -443,4 +457,4 @@ Once you bind your official FTC Event Code, ScoutingPro 27 connects through its 
 | **Q5: How do I remember BIOBUZZ Endgame rules quickly?** | **No climbing!** Only: **last-60s Nectars (+2)**, **Bottom Nectar Flowers (+5 each)**, **Pollens (+2)**, **Garden Balls (+1)**, **Loading Park (+5)**, **G418 Descore**, and check **G410** if a Nectar goes in before the 1:00 mark! |
 | **Q6: Binding fails with `"FTC official event not found"` or `"service unreachable"`!** | Double-check `ftc-events.firstinspires.org/<year>/<code>`—make sure you entered the season **start year** (`2025` for 2025–26, not `2026`). If the Host laptop is completely offline at the venue, use **`Import Schedule` → `CSV`** temporarily and click **`Update & Re-sync Official Data`** once internet returns. |
 | **Q7: A scout phone shows `ECDH Tunnel (TLS)` while running a VPN—is that normal?** | **Yes—and it uses zero TURN quota!** When mobile VPNs (such as Clash/TUN) or strict venue Wi-Fi block UDP, ScoutingPro 27 seamlessly uses the end-to-end encrypted WSS tunnel while probing for Direct P2P in the background. Disabling the phone VPN upgrades back to `IPv6 Direct` / `IPv4 Hole-punch`, or Hosts can add a **Custom TURN** server in `Scouts & Settings` (see [VPN P2P Test Guide](./testing/VPN_P2P_TEST_GUIDE.md)). |
-| **Q8: macOS says "cannot be opened because the developer cannot be verified"!** | In Finder → Applications, **right-click** (or Control-click) ScoutingPro27 → choose **"Open"** → click **"Open"** in the dialog. This is a one-time step. If that doesn't work, go to **System Settings → Privacy & Security** and click **"Open Anyway"** at the bottom. See [Chapter 0](#chapter-0-download--install-macos-users-read-this-first) for full details. |
+| **Q8: macOS blocks ScoutingPro27 ("cannot be verified" / "free of malware")!** | Double-click ScoutingPro27 once and click **Done**, then open **System Settings → Privacy & Security** → scroll to **Security** → click **"Open Anyway"** (required on macOS 15 Sequoia / 26 Tahoe+, since Apple removed Control-click → Open). Or run `xattr -cr /Applications/ScoutingPro27.app` once in Terminal. See [Chapter 0](#chapter-0-download--install-macos-users-read-this-first) for details. |

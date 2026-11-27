@@ -41,9 +41,11 @@ import java.util.Map;
 import java.util.UUID;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ExecutorService;
-import java.util.concurrent.Executors;
+import java.util.concurrent.LinkedBlockingQueue;
+import java.util.concurrent.RejectedExecutionException;
 import java.util.concurrent.ScheduledFuture;
 import java.util.concurrent.ScheduledThreadPoolExecutor;
+import java.util.concurrent.ThreadPoolExecutor;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicBoolean;
 
@@ -53,17 +55,22 @@ import java.util.concurrent.atomic.AtomicBoolean;
 public final class AiVoiceRoutes {
     private static final Logger logger = LoggerFactory.getLogger(AiVoiceRoutes.class);
     private static final int MAX_AUDIO_BYTES = 10 * 1024 * 1024;
+    private static final int MAX_TRANSCRIBE_BODY_CHARS = 15 * 1024 * 1024;
     private static final long AUTH_TIMEOUT_SECONDS = 10L;
 
     private final Jdbi jdbi;
     private final Gson gson;
     private final ScheduledThreadPoolExecutor scheduler;
     private final ConcurrentHashMap<String, VoiceWsState> activeSessions = new ConcurrentHashMap<>();
-    private final ExecutorService connectExecutor = Executors.newCachedThreadPool(r -> {
-        Thread t = new Thread(r, "ai-voice-connect");
-        t.setDaemon(true);
-        return t;
-    });
+    private final ExecutorService connectExecutor = new ThreadPoolExecutor(
+            2, 16, 60L, TimeUnit.SECONDS,
+            new LinkedBlockingQueue<>(64),
+            r -> {
+                Thread t = new Thread(r, "ai-voice-connect");
+                t.setDaemon(true);
+                return t;
+            }
+    );
 
     public AiVoiceRoutes(Jdbi jdbi, Gson gson, ScheduledThreadPoolExecutor scheduler) {
         this.jdbi = jdbi;
@@ -113,39 +120,51 @@ public final class AiVoiceRoutes {
                     return;
                 }
 
-                String type = AiUrlGuard.getOptionalString(msg, "type");
-                if (type == null || type.isBlank()) {
-                    state.sendError("MISSING_TYPE", "Missing message type");
-                    return;
-                }
+                try {
+                    String type = AiUrlGuard.getOptionalString(msg, "type");
+                    if (type == null || type.isBlank()) {
+                        state.sendError("MISSING_TYPE", "Missing message type");
+                        return;
+                    }
 
-                switch (type) {
-                    case "start" -> handleWsStart(state, msg);
-                    case "audio" -> {
-                        if (!requireStarted(state)) return;
-                        String data = AiUrlGuard.getOptionalString(msg, "data");
-                        if (data != null && !data.isBlank()) {
-                            state.relay.sendAudio(data);
+                    switch (type) {
+                        case "start" -> handleWsStart(state, msg);
+                        case "audio" -> {
+                            if (!requireStarted(state)) return;
+                            String data = AiUrlGuard.getOptionalString(msg, "data");
+                            if (data != null && !data.isBlank()) {
+                                state.relay.sendAudio(data);
+                            }
                         }
-                    }
-                    case "audio_end" -> {
-                        if (!requireStarted(state)) return;
-                        boolean commit = !msg.has("commit") || msg.get("commit").isJsonNull() || msg.get("commit").getAsBoolean();
-                        state.relay.sendAudioEnd(commit);
-                    }
-                    case "text" -> {
-                        if (!requireStarted(state)) return;
-                        String text = AiUrlGuard.getOptionalString(msg, "text");
-                        if (text != null && !text.isBlank()) {
-                            state.relay.sendText(text);
+                        case "audio_end" -> {
+                            if (!requireStarted(state)) return;
+                            Boolean commitVal = AiUrlGuard.getOptionalBoolean(msg, "commit");
+                            boolean commit = commitVal == null || commitVal;
+                            state.relay.sendAudioEnd(commit);
                         }
+                        case "mode" -> {
+                            if (!requireStarted(state)) return;
+                            String mode = AiUrlGuard.getOptionalString(msg, "inputMode");
+                            if (state.relay instanceof OpenAiRealtimeRelaySession openAiRelay && mode != null && !mode.isBlank()) {
+                                openAiRelay.setInputMode(mode);
+                            }
+                        }
+                        case "text" -> {
+                            if (!requireStarted(state)) return;
+                            String text = AiUrlGuard.getOptionalString(msg, "text");
+                            if (text != null && !text.isBlank()) {
+                                state.relay.sendText(text);
+                            }
+                        }
+                        case "interrupt" -> {
+                            if (!requireStarted(state)) return;
+                            state.relay.interrupt();
+                        }
+                        case "stop" -> state.closeAll(WsCloseStatus.NORMAL_CLOSURE, "Stopped by client");
+                        default -> state.sendError("UNKNOWN_TYPE", "Unsupported message type: " + type);
                     }
-                    case "interrupt" -> {
-                        if (!requireStarted(state)) return;
-                        state.relay.interrupt();
-                    }
-                    case "stop" -> state.closeAll(WsCloseStatus.NORMAL_CLOSURE, "Stopped by client");
-                    default -> state.sendError("UNKNOWN_TYPE", "Unsupported message type: " + type);
+                } catch (IllegalArgumentException e) {
+                    state.sendError("BAD_MESSAGE", e.getMessage());
                 }
             });
 
@@ -174,7 +193,15 @@ public final class AiVoiceRoutes {
     }
 
     private void handleWsStart(VoiceWsState state, JsonObject msg) {
+        if (state.started.get()) {
+            state.sendError("ALREADY_STARTED", "Voice session already started");
+            return;
+        }
         String token = AiUrlGuard.getOptionalString(msg, "token");
+        if (!state.started.compareAndSet(false, true)) {
+            state.sendError("ALREADY_STARTED", "Voice session already started");
+            return;
+        }
         String userId = authenticateJwtUser(token);
         if (userId == null) {
             state.sendErrorAndClose("UNAUTHORIZED", "Invalid or expired JWT token", WsCloseStatus.POLICY_VIOLATION);
@@ -201,6 +228,10 @@ public final class AiVoiceRoutes {
             state.sendErrorAndClose("FORBIDDEN_URL", "Forbidden baseUrl: SSRF protection blocked access", WsCloseStatus.POLICY_VIOLATION);
             return;
         }
+        if (!AiUrlGuard.isSafeProxyHost(profile.getProxyHost())) {
+            state.sendErrorAndClose("FORBIDDEN_URL", "Forbidden proxyHost: SSRF protection blocked access", WsCloseStatus.POLICY_VIOLATION);
+            return;
+        }
 
         String rawKey;
         try {
@@ -217,13 +248,25 @@ public final class AiVoiceRoutes {
             return;
         }
 
-        String requestedModel = AiUrlGuard.getOptionalString(msg, "model");
-        String requestedVoice = AiUrlGuard.getOptionalString(msg, "voice");
-        String systemPrompt = msg.has("systemPrompt") && !msg.get("systemPrompt").isJsonNull()
-                ? msg.get("systemPrompt").getAsString()
-                : profile.getSystemPrompt();
-        List<Map<String, String>> history = parseHistoryArray(msg);
+        String requestedModel;
+        String requestedVoice;
+        String inputMode;
+        String systemPrompt;
+        List<Map<String, String>> history;
+        try {
+            requestedModel = AiUrlGuard.getOptionalString(msg, "model");
+            requestedVoice = AiUrlGuard.getOptionalString(msg, "voice");
+            inputMode = AiUrlGuard.getOptionalString(msg, "inputMode");
+            systemPrompt = msg.has("systemPrompt") && !msg.get("systemPrompt").isJsonNull()
+                    ? AiUrlGuard.getOptionalString(msg, "systemPrompt")
+                    : profile.getSystemPrompt();
+            history = parseHistoryArray(msg);
+        } catch (IllegalArgumentException e) {
+            state.sendErrorAndClose("BAD_MESSAGE", e.getMessage(), WsCloseStatus.POLICY_VIOLATION);
+            return;
+        }
 
+        final AiVoiceRelaySession[] relayHolder = new AiVoiceRelaySession[1];
         AiVoiceRelaySession.RelayEventListener listener = new AiVoiceRelaySession.RelayEventListener() {
             @Override
             public void onEvent(JsonObject event) {
@@ -237,7 +280,9 @@ public final class AiVoiceRoutes {
 
             @Override
             public void onClosed(int statusCode, String reason) {
-                state.closeAll(WsCloseStatus.NORMAL_CLOSURE, reason != null && !reason.isBlank() ? reason : "Upstream closed");
+                if (state.relay == relayHolder[0]) {
+                    state.closeAll(WsCloseStatus.NORMAL_CLOSURE, reason != null && !reason.isBlank() ? reason : "Upstream closed");
+                }
             }
         };
 
@@ -263,7 +308,7 @@ public final class AiVoiceRoutes {
             }
             String effectiveVoice = (requestedVoice != null && !requestedVoice.isBlank()) ? requestedVoice.trim() : OpenAiRealtimeRelaySession.DEFAULT_VOICE;
             relay = new OpenAiRealtimeRelaySession(
-                    baseUrl, rawKey, effectiveModel, effectiveVoice, systemPrompt, history,
+                    baseUrl, rawKey, effectiveModel, effectiveVoice, systemPrompt, history, inputMode,
                     profile.getProxyHost(), profile.getProxyPort(), listener
             );
         } else {
@@ -275,17 +320,18 @@ public final class AiVoiceRoutes {
             return;
         }
 
-        AiVoiceRelaySession prev = state.relay;
-        if (prev != null) {
-            prev.close();
-        }
+        relayHolder[0] = relay;
         state.relay = relay;
 
-        connectExecutor.submit(() -> {
-            if (!state.closed.get()) {
-                relay.connect();
-            }
-        });
+        try {
+            connectExecutor.submit(() -> {
+                if (!state.closed.get()) {
+                    relay.connect();
+                }
+            });
+        } catch (RejectedExecutionException e) {
+            state.sendErrorAndClose("UPSTREAM_CONNECT_FAILED", "Voice relay server is busy; please retry", WsCloseStatus.TRY_AGAIN_LATER);
+        }
     }
 
     private String authenticateJwtUser(String token) {
@@ -352,9 +398,15 @@ public final class AiVoiceRoutes {
             throw new io.javalin.http.UnauthorizedResponse("Not logged in");
         }
 
+        String rawBody = ctx.body();
+        if (rawBody != null && rawBody.length() > MAX_TRANSCRIBE_BODY_CHARS) {
+            ctx.status(400).result(gson.toJson(Map.of("error", "Request body exceeds maximum allowed size"))).contentType("application/json");
+            return;
+        }
+
         JsonObject body;
         try {
-            JsonElement parsed = JsonParser.parseString(ctx.body());
+            JsonElement parsed = JsonParser.parseString(rawBody);
             if (!parsed.isJsonObject()) {
                 ctx.status(400).result(gson.toJson(Map.of("error", "Request body must be a JSON object"))).contentType("application/json");
                 return;
@@ -365,14 +417,28 @@ public final class AiVoiceRoutes {
             return;
         }
 
-        String profileId = AiUrlGuard.getOptionalString(body, "profileId");
-        String provider = AiUrlGuard.getOptionalString(body, "provider");
+        String profileId;
+        String provider;
+        String audioBase64;
+        String mimeType;
+        String language;
+        String modelOverride;
+        try {
+            profileId = AiUrlGuard.getOptionalString(body, "profileId");
+            provider = AiUrlGuard.getOptionalString(body, "provider");
+            audioBase64 = AiUrlGuard.getOptionalString(body, "audioBase64");
+            mimeType = AiUrlGuard.getOptionalString(body, "mimeType");
+            language = AiUrlGuard.getOptionalString(body, "language");
+            modelOverride = AiUrlGuard.getOptionalString(body, "model");
+        } catch (IllegalArgumentException e) {
+            ctx.status(400).result(gson.toJson(Map.of("error", e.getMessage()))).contentType("application/json");
+            return;
+        }
         if ((profileId == null || profileId.isBlank()) && (provider == null || provider.isBlank())) {
             ctx.status(400).result(gson.toJson(Map.of("error", "Missing provider or profileId"))).contentType("application/json");
             return;
         }
 
-        String audioBase64 = AiUrlGuard.getOptionalString(body, "audioBase64");
         if (audioBase64 == null || audioBase64.isBlank()) {
             ctx.status(400).result(gson.toJson(Map.of("error", "audioBase64 is required"))).contentType("application/json");
             return;
@@ -380,7 +446,7 @@ public final class AiVoiceRoutes {
         String cleanBase64 = stripDataUrlPrefix(audioBase64.trim());
         byte[] audioBytes;
         try {
-            audioBytes = Base64.getDecoder().decode(cleanBase64);
+            audioBytes = Base64.getMimeDecoder().decode(cleanBase64);
         } catch (IllegalArgumentException e) {
             ctx.status(400).result(gson.toJson(Map.of("error", "Invalid audioBase64 encoding"))).contentType("application/json");
             return;
@@ -405,6 +471,10 @@ public final class AiVoiceRoutes {
             ctx.status(400).result(gson.toJson(Map.of("error", "Forbidden baseUrl: SSRF protection blocked access"))).contentType("application/json");
             return;
         }
+        if (!AiUrlGuard.isSafeProxyHost(profile.getProxyHost())) {
+            ctx.status(400).result(gson.toJson(Map.of("error", "Forbidden proxyHost: SSRF protection blocked access"))).contentType("application/json");
+            return;
+        }
 
         String protocol = profile.getProtocol() != null ? profile.getProtocol().trim().toUpperCase(Locale.ROOT) : "";
         if ("ANTHROPIC".equals(protocol)) {
@@ -426,12 +496,16 @@ public final class AiVoiceRoutes {
             return;
         }
 
-        String mimeType = AiUrlGuard.getOptionalString(body, "mimeType");
         if (mimeType == null || mimeType.isBlank()) {
             mimeType = "audio/wav";
         }
-        String language = AiUrlGuard.getOptionalString(body, "language");
-        String modelOverride = AiUrlGuard.getOptionalString(body, "model");
+        mimeType = AiUrlGuard.stripControlChars(mimeType.trim());
+        if (language != null) {
+            language = AiUrlGuard.stripControlChars(language.trim());
+        }
+        if (modelOverride != null) {
+            modelOverride = AiUrlGuard.stripControlChars(modelOverride.trim());
+        }
 
         try {
             String text;
@@ -563,10 +637,7 @@ public final class AiVoiceRoutes {
         if (baseUrl == null || baseUrl.isBlank()) {
             return "https://api.openai.com/v1/audio/transcriptions";
         }
-        String bUrl = baseUrl.trim();
-        while (bUrl.endsWith("/")) {
-            bUrl = bUrl.substring(0, bUrl.length() - 1);
-        }
+        String bUrl = AiUrlGuard.stripQueryAndFragment(baseUrl);
         if (bUrl.endsWith("/audio/transcriptions")) {
             return bUrl;
         }
@@ -684,6 +755,7 @@ public final class AiVoiceRoutes {
     private final class VoiceWsState {
         final WsContext ctx;
         final Object sendLock = new Object();
+        final AtomicBoolean started = new AtomicBoolean(false);
         final AtomicBoolean authenticated = new AtomicBoolean(false);
         final AtomicBoolean closed = new AtomicBoolean(false);
         volatile ScheduledFuture<?> authTimeoutFuture;

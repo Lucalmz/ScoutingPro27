@@ -51,7 +51,8 @@ onUnmounted(() => {
       <span class="material-icons" style="font-size: 15px;">expand_more</span>
     </button>
 
-    <div v-if="open" class="model-quick-popover">
+    <Transition name="ai-popover">
+      <div v-if="open" class="model-quick-popover">
       <div class="quick-sec-title">{{ t('ai.saved_profiles') }}</div>
       <div v-if="profiles.length > 0" class="quick-profile-list">
         <button
@@ -92,7 +93,8 @@ onUnmounted(() => {
         <span class="material-icons" style="font-size: 15px;">tune</span>
         <span>{{ t('ai.manage_profiles') }}</span>
       </button>
-    </div>
+      </div>
+    </Transition>
   </div>
 </template>
 
@@ -245,5 +247,27 @@ onUnmounted(() => {
   font-size: 11.5px;
   font-weight: 600;
   cursor: pointer;
+}
+
+.model-quick-popover {
+  transform-origin: top left;
+}
+
+.ai-popover-enter-active {
+  transition:
+    opacity 180ms var(--motion-ease-out),
+    transform 180ms var(--motion-profile-ease-flight);
+}
+
+.ai-popover-leave-active {
+  transition:
+    opacity 140ms var(--motion-profile-ease-exit),
+    transform 140ms var(--motion-profile-ease-exit);
+}
+
+.ai-popover-enter-from,
+.ai-popover-leave-to {
+  opacity: 0;
+  transform: translateY(-6px) scale(0.96);
 }
 </style>

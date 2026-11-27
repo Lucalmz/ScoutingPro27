@@ -400,13 +400,16 @@ describe('Per-Event Epoch Store, Retained Epoch Beacon & Fencing Control Plane',
     expect(serviceWinner.getHostEpoch()).toBe(3)
     expect(getHighestSeenEpoch('ROOM-TIE')).toBe(3)
 
-    const supersededSent = mqttWin.published.find((f) => f.parsed?.type === 'epoch_superseded')
-    expect(supersededSent?.parsed?.currentEpoch).toBe(3)
-
-    const beaconSent = mqttWin.published.find(
-      (f) => f.topic.endsWith('/epoch-beacon') && f.parsed?.type === 'epoch_beacon' && f.parsed?.hostEpoch === 3
-    )
-    expect(beaconSent).toBeDefined()
+    let supersededSent: any
+    let beaconSent: any
+    await vi.waitFor(() => {
+      supersededSent = mqttWin.published.find((f) => f.parsed?.type === 'epoch_superseded')
+      beaconSent = mqttWin.published.find(
+        (f) => f.topic.endsWith('/epoch-beacon') && f.parsed?.type === 'epoch_beacon' && f.parsed?.hostEpoch === 3
+      )
+      expect(supersededSent?.parsed?.currentEpoch).toBe(3)
+      expect(beaconSent).toBeDefined()
+    })
     expect(beaconSent?.options).toMatchObject({ retain: true, qos: 1 })
 
     serviceWinner.disconnect()
@@ -477,8 +480,10 @@ describe('Per-Event Epoch Store, Retained Epoch Beacon & Fencing Control Plane',
     expect(service.getHostEpoch()).toBe(3)
     expect(service.getCalibratedClock().now()).toBeGreaterThanOrEqual(witnessTime1 + 1)
 
-    const beaconSent = mqttCli.published.find((f) => f.topic.endsWith('/epoch-beacon') && f.parsed?.hostEpoch === 3)
-    expect(beaconSent).toBeDefined()
+    await vi.waitFor(() => {
+      const beaconSent = mqttCli.published.find((f) => f.topic.endsWith('/epoch-beacon') && f.parsed?.hostEpoch === 3)
+      expect(beaconSent).toBeDefined()
+    })
 
     service.disconnect()
   })

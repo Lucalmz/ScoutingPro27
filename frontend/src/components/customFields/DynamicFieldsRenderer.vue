@@ -172,11 +172,32 @@ function setTristateBoolean(field: CustomFieldDefinition, val: boolean | null) {
   setValue(field.fieldKey, val)
 }
 
+function getClampedFallbackNumber(field: CustomFieldDefinition): number {
+  const hasDefault =
+    field.defaultVal !== undefined &&
+    field.defaultVal !== null &&
+    field.defaultVal.trim() !== '' &&
+    Number.isFinite(Number(field.defaultVal))
+  let val = hasDefault ? Number(field.defaultVal) : (field.minVal ?? 0)
+  if (field.minVal !== null && field.minVal !== undefined && val < field.minVal) val = field.minVal
+  if (field.maxVal !== null && field.maxVal !== undefined && val > field.maxVal) val = field.maxVal
+  return val
+}
+
+function getNumericDisplayValue(field: CustomFieldDefinition): number {
+  const raw = getValue(field.fieldKey)
+  if (typeof raw === 'number' && Number.isFinite(raw)) return raw
+  if (typeof raw === 'string' && raw.trim() !== '' && Number.isFinite(Number(raw))) {
+    return Number(raw)
+  }
+  return getClampedFallbackNumber(field)
+}
+
 // NUMBER 数值步进交互
 function stepNumber(field: CustomFieldDefinition, delta: number) {
   const min = field.minVal !== null && field.minVal !== undefined ? field.minVal : -Infinity
   const max = field.maxVal !== null && field.maxVal !== undefined ? field.maxVal : Infinity
-  const cur = Number(getValue(field.fieldKey, field.defaultVal ? Number(field.defaultVal) : (min !== -Infinity ? min : 0)))
+  const cur = getNumericDisplayValue(field)
 
   let next = cur + delta
   if (next < min) next = min
@@ -200,14 +221,24 @@ function stepNumberDir(field: CustomFieldDefinition, dir: 1 | -1) {
 
 function onNumberInput(field: CustomFieldDefinition, event: Event) {
   const target = event.target as HTMLInputElement
-  const raw = parseFloat(target.value)
-  if (isNaN(raw)) {
-    setValue(field.fieldKey, field.minVal ?? 0)
+  const trimmed = target.value.trim()
+  if (trimmed === '') {
+    const fallback = getClampedFallbackNumber(field)
+    target.value = String(fallback)
+    setValue(field.fieldKey, fallback)
+    return
+  }
+  const raw = Number(trimmed)
+  if (isNaN(raw) || !Number.isFinite(raw)) {
+    const fallback = getClampedFallbackNumber(field)
+    target.value = String(fallback)
+    setValue(field.fieldKey, fallback)
     return
   }
   let clamped = raw
   if (field.minVal !== null && field.minVal !== undefined && clamped < field.minVal) clamped = field.minVal
   if (field.maxVal !== null && field.maxVal !== undefined && clamped > field.maxVal) clamped = field.maxVal
+  target.value = String(clamped)
   setValue(field.fieldKey, clamped)
 }
 
@@ -442,70 +473,83 @@ interface FormulaDisplayResult {
 
 const evaluatedFormulas = computed<Record<string, FormulaDisplayResult>>(() => {
   if (!props.definitions.some((d) => d.fieldType === 'formula')) return {}
-  const allDefs = props.allDefinitions && props.allDefinitions.length > 0
+  const renderedTarget = props.definitions[0]?.target
+  const rawAllDefs = props.allDefinitions && props.allDefinitions.length > 0
     ? props.allDefinitions
     : props.definitions
-  const formulaFields = allDefs.filter((d) => d.fieldType === 'formula' && d.fieldKey)
+  const scopedDefs = renderedTarget && renderedTarget !== 'TEAM'
+    ? rawAllDefs.filter((d) => (d.target ?? 'TEAM') === renderedTarget)
+    : rawAllDefs
+  const formulaFields = scopedDefs.filter((d) => d.fieldType === 'formula' && d.fieldKey)
   if (formulaFields.length === 0) return {}
 
-  const { sorted, cyclicKeys } = topologicalSortFormulas(allDefs)
+  const { sorted, cyclicKeys } = topologicalSortFormulas(scopedDefs)
   const cyclicSet = new Set(cyclicKeys)
   const baseCtx: FormulaContext = props.formulaContext
     ? { ...(props.formulaContext as FormulaContext) }
     : {}
 
-  const targetHint = props.definitions[0]?.target
-  const localCf = buildCustomFieldNamespace(values.value, allDefs, targetHint)
+  const localCf = buildCustomFieldNamespace(values.value, scopedDefs, renderedTarget)
   const mergedCf = { ...(baseCtx.cf ?? {}), ...localCf }
-  const formulaCache: Record<string, FormulaContextValue> = { ...(baseCtx.formula ?? {}) }
+  const formulaCacheByTarget: Record<'MATCH' | 'PIT' | 'TEAM', Record<string, FormulaContextValue>> = {
+    MATCH: renderedTarget === 'MATCH' ? { ...(baseCtx.formula ?? {}) } : {},
+    PIT: renderedTarget === 'PIT' ? { ...(baseCtx.formula ?? {}) } : {},
+    TEAM: { ...(baseCtx.formula ?? {}) }
+  }
   const results: Record<string, FormulaDisplayResult> = {}
 
-  for (const key of cyclicKeys) {
-    results[key] = {
-      display: t('custom_fields.renderer.formula_empty'),
-      errorMsg: t('custom_fields.renderer.formula_cycle_error'),
-      isCycle: true
-    }
-  }
-
   for (const field of sorted) {
+    const fTarget = field.target ?? 'TEAM'
+    const isRenderedTarget = !renderedTarget || fTarget === renderedTarget
     const expr = field.formulaExpr?.trim() ?? ''
     if (!expr) {
-      results[field.fieldKey] = {
-        display: t('custom_fields.renderer.formula_empty'),
-        errorMsg: t('custom_fields.renderer.formula_eval_error')
+      if (isRenderedTarget) {
+        results[field.fieldKey] = {
+          display: t('custom_fields.renderer.formula_empty'),
+          errorMsg: t('custom_fields.renderer.formula_eval_error')
+        }
       }
       continue
     }
 
+    const formulaNs = fTarget === 'TEAM'
+      ? { ...formulaCacheByTarget.MATCH, ...formulaCacheByTarget.PIT, ...formulaCacheByTarget.TEAM }
+      : formulaCacheByTarget[fTarget]
+
     const ctx: FormulaContext = {
       ...baseCtx,
       cf: mergedCf,
-      pit_cf: targetHint === 'PIT' ? { ...(baseCtx.pit_cf ?? {}), ...localCf } : baseCtx.pit_cf,
-      formula: formulaCache
+      pit_cf: renderedTarget === 'PIT' ? { ...(baseCtx.pit_cf ?? {}), ...localCf } : baseCtx.pit_cf,
+      formula: formulaNs
     }
 
     const res = evaluateFormula(expr, ctx, {
-      target: field.target,
+      target: fTarget,
       fieldKey: field.fieldKey
     })
 
     if (res.error || res.reason === 'CIRCULAR_DEPENDENCY_RUNTIME') {
       const isCycle = res.reason === 'CIRCULAR_DEPENDENCY_RUNTIME' || res.errorCode === 'CIRCULAR_DEPENDENCY'
-      results[field.fieldKey] = {
-        display: t('custom_fields.renderer.formula_empty'),
-        errorMsg: isCycle ? t('custom_fields.renderer.formula_cycle_error') : (res.error || t('custom_fields.renderer.formula_eval_error')),
-        isCycle
+      if (isRenderedTarget) {
+        results[field.fieldKey] = {
+          display: t('custom_fields.renderer.formula_empty'),
+          errorMsg: isCycle ? t('custom_fields.renderer.formula_cycle_error') : (res.error || t('custom_fields.renderer.formula_eval_error')),
+          isCycle
+        }
       }
-      formulaCache[field.fieldKey] = null
+      formulaCacheByTarget[fTarget][field.fieldKey] = null
       continue
     }
 
-    formulaCache[field.fieldKey] = res.value
-    results[field.fieldKey] = formatFormulaValue(res.value, field)
+    formulaCacheByTarget[fTarget][field.fieldKey] = res.value
+    if (isRenderedTarget) {
+      results[field.fieldKey] = formatFormulaValue(res.value, field)
+    }
   }
 
   for (const f of formulaFields) {
+    const fTarget = f.target ?? 'TEAM'
+    if (renderedTarget && fTarget !== renderedTarget) continue
     if (!results[f.fieldKey] && cyclicSet.has(f.fieldKey)) {
       results[f.fieldKey] = {
         display: t('custom_fields.renderer.formula_empty'),
@@ -625,14 +669,14 @@ function formatFormulaValue(val: number | null, field: CustomFieldDefinition): F
             <input
               type="range"
               class="number-slider-input"
-              :value="getValue(field.fieldKey, field.defaultVal ? Number(field.defaultVal) : (field.minVal ?? 0))"
+              :value="getNumericDisplayValue(field)"
               :min="field.minVal ?? 0"
               :max="field.maxVal ?? 100"
               :step="field.stepVal ?? 1"
               @input="onNumberInput(field, $event)"
             />
             <span class="slider-value-badge">
-              {{ getValue(field.fieldKey, field.defaultVal ? Number(field.defaultVal) : (field.minVal ?? 0)) }}
+              {{ getNumericDisplayValue(field) }}
               <template v-if="field.unit">{{ field.unit }}</template>
             </span>
           </div>
@@ -655,7 +699,7 @@ function formatFormulaValue(val: number | null, field: CustomFieldDefinition): F
           </button>
           <div class="counter-value-box">
             <span class="counter-value-num">
-              {{ getValue(field.fieldKey, field.defaultVal ? Number(field.defaultVal) : (field.minVal ?? 0)) }}
+              {{ getNumericDisplayValue(field) }}
             </span>
             <span v-if="field.unit" class="display-unit">{{ field.unit }}</span>
           </div>
@@ -674,7 +718,7 @@ function formatFormulaValue(val: number | null, field: CustomFieldDefinition): F
           <input
             type="number"
             class="direct-number-input"
-            :value="getValue(field.fieldKey, field.defaultVal ? Number(field.defaultVal) : (field.minVal ?? 0))"
+            :value="getNumericDisplayValue(field)"
             :min="field.minVal ?? undefined"
             :max="field.maxVal ?? undefined"
             :step="field.stepVal ?? 1"
@@ -698,7 +742,7 @@ function formatFormulaValue(val: number | null, field: CustomFieldDefinition): F
               <input
                 type="number"
                 class="stepper-input"
-                :value="getValue(field.fieldKey, field.defaultVal ? Number(field.defaultVal) : (field.minVal ?? 0))"
+                :value="getNumericDisplayValue(field)"
                 :min="field.minVal ?? undefined"
                 :max="field.maxVal ?? undefined"
                 :step="field.stepVal ?? 1"

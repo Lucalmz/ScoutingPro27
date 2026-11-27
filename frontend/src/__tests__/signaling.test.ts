@@ -1,4 +1,5 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
+import { EventEmitter } from 'events'
 import { SignalingChannel, BUILTIN_BROKERS } from '../services/webrtc/signaling'
 import mqtt from 'mqtt'
 
@@ -225,5 +226,34 @@ describe('SignalingChannel Multi-Broker & LAN WebSocket', () => {
     } finally {
       localStorage.removeItem('sp27-custom-broker')
     }
+  })
+
+  it('swallows late mqtt.js connack timeout errors emitted after channel.close() without throwing uncaught EventEmitter errors', async () => {
+    const emitterClient = Object.assign(new EventEmitter(), {
+      subscribe: vi.fn(),
+      publish: vi.fn(),
+      connected: false,
+      unsubscribe: vi.fn(),
+      end: vi.fn()
+    })
+    vi.mocked(mqtt.connect).mockReturnValueOnce(emitterClient as any)
+
+    const channel = new SignalingChannel('test-room-close-error')
+    await channel.initTopic()
+    const onError = vi.fn()
+    channel.connect({
+      onMessage: vi.fn(),
+      onConnect: vi.fn(),
+      onError
+    })
+
+    // Positive prerequisite: active SignalingChannel registered its error listener on the EventEmitter
+    expect(emitterClient.listenerCount('error')).toBeGreaterThan(0)
+
+    channel.close()
+
+    expect(emitterClient.listenerCount('error')).toBe(1)
+    expect(() => emitterClient.emit('error', new Error('connack timeout'))).not.toThrow()
+    expect(onError).not.toHaveBeenCalled()
   })
 })

@@ -3,9 +3,15 @@ import { describe, it, expect, beforeEach, afterEach } from 'vitest'
 import { nextTick } from 'vue'
 import { createPinia, setActivePinia } from 'pinia'
 import { createRouter, createMemoryHistory } from 'vue-router'
+import { readFileSync } from 'node:fs'
+import { resolve } from 'node:path'
+import { parse, compileStyle } from '@vue/compiler-sfc'
 import App from '../App.vue'
 import InboxWidget from '../components/common/InboxWidget.vue'
+import AiCopilotDock from '../components/ai/AiCopilotDock.vue'
+import { i18n } from '../i18n'
 import { useUserStore } from '../stores/user'
+import { useAiStore } from '../stores/ai'
 
 const DummyLogin = { template: '<div class="login-view">Login View</div>' }
 const DummyDashboard = { template: '<div class="dashboard-view">Dashboard View</div>' }
@@ -158,5 +164,66 @@ describe('Inbox View Independence & Lifecycle Isolation', () => {
 
     // But it exists at the App level
     expect(wrapper.findComponent(InboxWidget).exists()).toBe(true)
+  })
+
+  it('InboxWidget compiled CSS scopes data-ai-dock-overlay strictly to .inbox-widget:not(.is-open) and never hides <html>', () => {
+    const sfcPath = resolve(__dirname, '../components/common/InboxWidget.vue')
+    const source = readFileSync(sfcPath, 'utf-8')
+    const { descriptor } = parse(source)
+    expect(descriptor.styles.length).toBeGreaterThan(0)
+
+    const compiledCss = descriptor.styles
+      .map((styleBlock, idx) => {
+        const res = compileStyle({
+          source: styleBlock.content,
+          filename: sfcPath,
+          id: `data-v-test-${idx}`,
+          scoped: Boolean(styleBlock.scoped)
+        })
+        expect(res.errors).toEqual([])
+        return res.code
+      })
+      .join('\n')
+
+    expect(compiledCss).toMatch(/html\[data-ai-dock-overlay=['"]true['"]\]\s+\.inbox-widget:not\(\.is-open\)/)
+    expect(compiledCss).not.toMatch(/html\[data-ai-dock-overlay=['"]true['"]\]\s*\{/)
+  })
+
+  it('AiCopilotDock toggles data-ai-dock-overlay on documentElement when expanded and cleans up on collapse/unmount', async () => {
+    const origWidth = window.innerWidth
+    Object.defineProperty(window, 'innerWidth', { writable: true, configurable: true, value: 1440 })
+    try {
+      const aiStore = useAiStore()
+      aiStore.setDockOpen(true)
+      aiStore.setDockExpanded(false)
+
+      const wrapper = track(mount(AiCopilotDock, {
+        props: { eventId: 'evt-overlay-test' },
+        global: {
+          plugins: [i18n],
+          stubs: { AiCopilotWorkspace: true }
+        }
+      }))
+
+      await nextTick()
+      expect(document.documentElement.dataset.aiDockOverlay).toBeUndefined()
+
+      aiStore.setDockExpanded(true)
+      await nextTick()
+      expect(document.documentElement.dataset.aiDockOverlay).toBe('true')
+
+      aiStore.setDockExpanded(false)
+      await nextTick()
+      expect(document.documentElement.dataset.aiDockOverlay).toBeUndefined()
+
+      aiStore.setDockExpanded(true)
+      await nextTick()
+      expect(document.documentElement.dataset.aiDockOverlay).toBe('true')
+
+      wrapper.unmount()
+      expect(document.documentElement.dataset.aiDockOverlay).toBeUndefined()
+    } finally {
+      Object.defineProperty(window, 'innerWidth', { writable: true, configurable: true, value: origWidth })
+    }
   })
 })

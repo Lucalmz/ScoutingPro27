@@ -68,6 +68,32 @@ class MainTest {
     }
 
     @Test
+    void isInstalledJcefBundleCompatibleChecksLockAndBuildMeta(@TempDir Path tempDir) throws Exception {
+        assertThat(Main.isInstalledJcefBundleCompatible(tempDir.toFile())).isFalse();
+
+        me.friwi.jcefmaven.CefBuildInfo expected = me.friwi.jcefmaven.CefBuildInfo.fromClasspath();
+        String currentPlatform = me.friwi.jcefmaven.EnumPlatform.getCurrentPlatform().getIdentifier();
+
+        // Missing install.lock -> incompatible
+        String matchingMeta = String.format(
+                "{\"jcef_url\":\"%s\",\"release_tag\":\"%s\",\"release_url\":\"%s\",\"platform\":\"%s\"}",
+                expected.getJcefUrl(), expected.getReleaseTag(), expected.getReleaseUrl(), currentPlatform);
+        Files.writeString(tempDir.resolve("build_meta.json"), matchingMeta);
+        assertThat(Main.isInstalledJcefBundleCompatible(tempDir.toFile())).isFalse();
+
+        // Both install.lock and matching build_meta.json -> compatible
+        Files.writeString(tempDir.resolve("install.lock"), "");
+        assertThat(Main.isInstalledJcefBundleCompatible(tempDir.toFile())).isTrue();
+
+        // Stale release_tag -> incompatible
+        String staleMeta = String.format(
+                "{\"jcef_url\":\"%s\",\"release_tag\":\"jcef-old+cef-100.0.0\",\"release_url\":\"%s\",\"platform\":\"%s\"}",
+                expected.getJcefUrl(), expected.getReleaseUrl(), currentPlatform);
+        Files.writeString(tempDir.resolve("build_meta.json"), staleMeta);
+        assertThat(Main.isInstalledJcefBundleCompatible(tempDir.toFile())).isFalse();
+    }
+
+    @Test
     void updateWindowShapeAppliesRoundedCornersOnlyOnWindowsNormalState() throws Exception {
         Assumptions.assumeFalse(GraphicsEnvironment.isHeadless(), "Swing JFrame test requires non-headless display");
         boolean isWindows = System.getProperty("os.name", "").toLowerCase(Locale.ROOT).contains("win");

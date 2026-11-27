@@ -58,8 +58,21 @@ const sortDir = ref<'asc' | 'desc'>('desc')
 // 标签筛选
 const selectedTagFilter = ref<string | null>(null)
 
+const activeEventId = computed<string>(() =>
+  eventStore.currentEvent?.id || recordStore.currentEventId || (route.params.eventId as string) || ''
+)
+
+const scopedTeamTags = computed(() => {
+  const eid = activeEventId.value
+  return eid ? recordStore.teamTags.filter(t => !t.eventId || t.eventId === eid) : recordStore.teamTags
+})
+
+watch(activeEventId, () => {
+  selectedTagFilter.value = null
+})
+
 const availableFilterTags = computed<string[]>(() => {
-  const all = recordStore.teamTags.map(t => t.tag)
+  const all = scopedTeamTags.value.map(t => t.tag)
   return Array.from(new Set(all))
 })
 
@@ -93,7 +106,7 @@ const filteredRankings = computed<RankingRow[]>(() => {
   let arr = [...props.rankings]
   if (selectedTagFilter.value) {
     const matchingTeams = new Set(
-      recordStore.teamTags
+      scopedTeamTags.value
         .filter(t => t.tag === selectedTagFilter.value)
         .map(t => t.teamNumber)
     )

@@ -569,4 +569,151 @@ describe('AI Voice Catalog, Audio Engine, Components & Session', () => {
     expect(session.isActive).toBe(false)
     expect(sentFrames.some(f => f.type === 'stop')).toBe(true)
   })
+
+  it('coordinates global StreamingSpeechSynthesizer instances and cleans up PcmAudioCapture on start error', async () => {
+    const cancelSpy = vi.fn()
+    class FakeUtterance {
+      text: string
+      lang = ''
+      rate = 1
+      voice: any = null
+      onend: (() => void) | null = null
+      onerror: (() => void) | null = null
+      constructor(text: string) {
+        this.text = text
+      }
+    }
+    vi.stubGlobal('SpeechSynthesisUtterance', FakeUtterance)
+    vi.stubGlobal('speechSynthesis', {
+      getVoices: () => [{ lang: 'en-US', name: 'EN' }],
+      speak: () => {
+        // intentionally keep utterance pending so synth1 remains speaking
+      },
+      cancel: cancelSpy
+    })
+
+    const states1: boolean[] = []
+    const states2: boolean[] = []
+    const synth1 = new StreamingSpeechSynthesizer({ locale: 'en', onSpeakingChange: s => states1.push(s) })
+    const synth2 = new StreamingSpeechSynthesizer({ locale: 'en', onSpeakingChange: s => states2.push(s) })
+
+    synth1.speakText('First speaker active.')
+    expect(states1).toEqual([true])
+
+    synth2.speakText('Second speaker interrupts.')
+    expect(states1).toEqual([true, false])
+    expect(states2).toEqual([true])
+    expect(cancelSpy).toHaveBeenCalled()
+
+    synth2.stop()
+  })
+
+  it('sends inputMode on start/mode toggle, passes forVoice=true, strips sp27-action, and cleans up capture on error', async () => {
+    const userStore = useUserStore()
+    userStore.$patch({ user: { id: 'u-v2', username: 'VoiceUser', token: 'jwt-v2' } })
+    const aiStore = useAiStore()
+    aiStore.profiles = [
+      makeProfile({
+        id: 'p-gem-v2',
+        protocol: 'GEMINI',
+        baseUrl: 'https://generativelanguage.googleapis.com/v1beta',
+        modelName: 'gemini-flash-latest'
+      })
+    ]
+    aiStore.activeProfileId = 'p-gem-v2'
+    const thread: AiChatThread = {
+      id: 'th-v2',
+      eventId: 'evt-v2',
+      title: 'Voice 2',
+      personaId: 'strategist',
+      pinned: false,
+      messages: [],
+      contextConfig: { enabled: true, sections: { rankings: true, schedule: true, pit: true, matches: true, tags: true }, focusTeams: [], focusMatch: null }
+    }
+    aiStore.threadDetailsById['th-v2'] = thread
+    aiStore.activeThreadIdByEvent['evt-v2'] = 'th-v2'
+
+    const sentFrames: any[] = []
+    let createdSocket: any = null
+    class FakeWebSocket {
+      static OPEN = 1
+      readyState = 1
+      onopen: (() => void) | null = null
+      onmessage: ((evt: { data: string }) => void) | null = null
+      onerror: (() => void) | null = null
+      onclose: ((evt: { code: number; reason?: string }) => void) | null = null
+      constructor(_url: string) {
+        createdSocket = this
+        queueMicrotask(() => this.onopen?.())
+      }
+      send(raw: string) {
+        sentFrames.push(JSON.parse(raw))
+      }
+      close() {}
+    }
+    vi.stubGlobal('WebSocket', FakeWebSocket as any)
+
+    const trackStopSpy = vi.fn()
+    vi.stubGlobal('navigator', {
+      mediaDevices: {
+        getUserMedia: vi.fn().mockResolvedValue({
+          getTracks: () => [{ stop: trackStopSpy }]
+        })
+      }
+    })
+    const ctxCloseSpy = vi.fn().mockResolvedValue(undefined)
+    class FailingAudioContext {
+      state = 'suspended'
+      sampleRate = 48000
+      destination = {}
+      resume = vi.fn().mockRejectedValue(new Error('Audio resume failed'))
+      close = ctxCloseSpy
+    }
+    vi.stubGlobal('AudioContext', FailingAudioContext as any)
+
+    const promptCalls: Array<{ forVoice?: boolean } | undefined> = []
+    const HostComp = {
+      template: '<div></div>',
+      setup() {
+        return useAiVoiceSession({
+          eventId: ref('evt-v2'),
+          activeThread: ref(thread),
+          buildEffectiveSystemPrompt: opts => {
+            promptCalls.push(opts)
+            return 'Sys'
+          },
+          buildBriefContextLabel: () => '10T'
+        })
+      }
+    }
+    const host = track(mount(HostComp, { global: { plugins: [i18n] } }))
+    const session = host.vm as any
+
+    await session.startSession()
+    await nextTick()
+
+    expect(promptCalls[0]).toEqual({ forVoice: true })
+    expect(sentFrames[0]).toMatchObject({ type: 'start', inputMode: 'vad' })
+
+    session.inputMode = 'ptt'
+    expect(sentFrames.some(f => f.type === 'mode' && f.inputMode === 'ptt')).toBe(true)
+
+    // Strip sp27-action block from assistant live voice transcript
+    await createdSocket!.onmessage?.({
+      data: JSON.stringify({
+        type: 'transcript',
+        role: 'assistant',
+        text: 'Pick #27570.\n```sp27-action\n{"actions":[{"type":"ban_team","teamNumber":111}]}\n```',
+        interim: false
+      })
+    })
+    expect(session.liveAssistantTranscript).toBe('Pick #27570.')
+
+    // Ready triggers capture.start() which fails on resume() -> must stop stream track & close AudioContext
+    await createdSocket!.onmessage?.({ data: JSON.stringify({ type: 'ready', inputSampleRate: 16000 }) })
+    await nextTick()
+    expect(session.status).toBe('error')
+    expect(trackStopSpy).toHaveBeenCalled()
+    expect(ctxCloseSpy).toHaveBeenCalled()
+  })
 })

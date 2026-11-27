@@ -110,7 +110,7 @@ function handleMessageClick(msg: SystemMessage) {
               :key="msg.id" 
               class="inbox-item" 
               :class="{ unread: !msg.read, clickable: msg.type === 'conflict' }"
-              @click="handleMessageClick(msg)"
+              @click.stop="handleMessageClick(msg)"
             >
               <div class="inbox-item-header">
                 <h4>{{ msg.title }}</h4>
@@ -134,8 +134,14 @@ function handleMessageClick(msg: SystemMessage) {
   position: fixed;
   bottom: 2rem;
   right: calc(2rem + var(--ai-dock-right-offset, 0px));
-  z-index: 1000;
-  transition: right var(--motion-duration-fast) var(--motion-ease-out);
+  z-index: 960;
+  transition: right 320ms var(--motion-profile-ease-flight),
+              opacity var(--motion-duration-fast) var(--motion-ease-out),
+              transform var(--motion-duration-fast) var(--motion-ease-out);
+}
+
+.inbox-widget.is-open {
+  z-index: 1010;
 }
 
 @media (max-width: 768px) {
@@ -378,5 +384,16 @@ function handleMessageClick(msg: SystemMessage) {
 }
 .delete-msg-btn:hover {
   color: var(--status-error);
+}
+</style>
+
+<style>
+/* When AI Copilot is in expanded focus mode or narrow-desktop slide-over drawer, hide closed FAB so it never blocks the Send button.
+   Kept in an unscoped <style> block so Vue's scoped CSS compiler never strips the descendant selector after :global(...). */
+html[data-ai-dock-overlay='true'] .inbox-widget:not(.is-open) {
+  opacity: 0;
+  visibility: hidden;
+  pointer-events: none;
+  transform: scale(0.85);
 }
 </style>

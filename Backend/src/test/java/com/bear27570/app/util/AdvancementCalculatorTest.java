@@ -634,4 +634,72 @@ public class AdvancementCalculatorTest {
         assertEquals("BUBBLE", byTeam.get(22407).get("advancementStatus").getAsString());
         assertEquals("BUBBLE", byTeam.get(19584).get("advancementStatus").getAsString());
     }
+
+    @Test
+    @DisplayName("Direct call falls back to official Slots when advancementSlots <= 0 and supports PascalCase + null fields")
+    void testDirectCallSlotsFallbackAndPascalCaseSupport() {
+        JsonArray rankings = new JsonArray();
+        for (int i = 1; i <= 4; i++) {
+            JsonObject r = new JsonObject();
+            r.addProperty("TeamNumber", 1000 + i);
+            r.addProperty("Rank", i);
+            r.addProperty("SortOrder1", 100.0 - i);
+            rankings.add(r);
+        }
+
+        JsonArray alliances = new JsonArray();
+        JsonObject al = new JsonObject();
+        al.addProperty("Number", 1);
+        JsonObject cap = new JsonObject();
+        cap.addProperty("Team", 1001);
+        al.add("Captain", cap);
+        alliances.add(al);
+
+        JsonArray awards = new JsonArray();
+        JsonObject aw = new JsonObject();
+        aw.addProperty("TeamNumber", 1002);
+        aw.addProperty("Name", "Inspire Award");
+        aw.addProperty("Series", 1);
+        awards.add(aw);
+
+        JsonArray matches = new JsonArray();
+        JsonObject m = new JsonObject();
+        m.addProperty("TournamentLevel", "PLAYOFF");
+        m.add("MatchNum", com.google.gson.JsonNull.INSTANCE);
+        m.addProperty("Description", "Finals 1");
+        JsonObject scores = new JsonObject();
+        JsonObject red = new JsonObject();
+        red.addProperty("FinalScore", 120);
+        JsonObject blue = new JsonObject();
+        blue.addProperty("FinalScore", 80);
+        scores.add("Red", red);
+        scores.add("Blue", blue);
+        m.add("Scores", scores);
+        JsonArray mTeams = new JsonArray();
+        JsonObject mt1 = new JsonObject();
+        mt1.addProperty("TeamNumber", 1001);
+        mt1.addProperty("Alliance", "Red");
+        JsonObject mt2 = new JsonObject();
+        mt2.addProperty("TeamNumber", 1003);
+        mt2.addProperty("Alliance", "Blue");
+        mTeams.add(mt1);
+        mTeams.add(mt2);
+        m.add("Teams", mTeams);
+        matches.add(m);
+
+        JsonObject officialAdv = com.google.gson.JsonParser.parseString("{\"Slots\":2,\"AdvancesTo\":\"CMP\",\"Advancement\":[]}").getAsJsonObject();
+
+        // advancementSlots = -1 -> falls back to official Slots = 2 (top 2 ADVANCING, #3/#4 BUBBLE)
+        JsonArray adv = AdvancementCalculator.calculateAdvancement(
+                rankings, alliances, awards, matches, -1, officialAdv, false);
+        assertEquals(4, adv.size());
+        int advancingCount = 0;
+        for (int i = 0; i < adv.size(); i++) {
+            JsonObject obj = adv.get(i).getAsJsonObject();
+            if ("ADVANCING".equals(obj.get("advancementStatus").getAsString())) {
+                advancingCount++;
+            }
+        }
+        assertEquals(2, advancingCount);
+    }
 }

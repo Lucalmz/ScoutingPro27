@@ -61,35 +61,50 @@ public class ScheduleRoutes {
                 throw new io.javalin.http.ForbiddenResponse("Only the event host can modify match schedule or assignments");
             }
 
-            JsonObject body = gson.fromJson(ctx.body(), JsonObject.class);
+            JsonObject body;
+            try {
+                body = gson.fromJson(ctx.body(), JsonObject.class);
+            } catch (com.google.gson.JsonSyntaxException e) {
+                ctx.status(400).result("Invalid JSON payload");
+                return;
+            }
             if (body == null || !body.has("items") || !body.get("items").isJsonArray()) {
                 ctx.status(400).result("items array required");
                 return;
             }
 
-            boolean replace = body.has("replace") && body.get("replace").getAsBoolean();
+            boolean replace = getBoolOrDefault(body, "replace", false);
             JsonArray itemsArray = body.getAsJsonArray("items");
             List<MatchScheduleItem> items = new ArrayList<>();
 
             for (JsonElement el : itemsArray) {
                 if (!el.isJsonObject()) continue;
                 JsonObject obj = el.getAsJsonObject();
-                int matchNumber = obj.has("matchNumber") ? obj.get("matchNumber").getAsInt() : 0;
+                int matchNumber = getIntOrDefault(obj, "matchNumber", 0);
                 if (matchNumber <= 0) continue;
 
-                String tournamentLevel = obj.has("tournamentLevel") && !obj.get("tournamentLevel").isJsonNull()
-                        ? obj.get("tournamentLevel").getAsString()
-                        : "QUALIFICATION";
-                int red1 = obj.has("red1") ? obj.get("red1").getAsInt() : 0;
-                int red2 = obj.has("red2") ? obj.get("red2").getAsInt() : 0;
-                int blue1 = obj.has("blue1") ? obj.get("blue1").getAsInt() : 0;
-                int blue2 = obj.has("blue2") ? obj.get("blue2").getAsInt() : 0;
+                String tournamentLevel = getStrOrDefault(obj, "tournamentLevel", "QUALIFICATION");
+                int red1 = getIntOrDefault(obj, "red1", 0);
+                int red2 = getIntOrDefault(obj, "red2", 0);
+                int blue1 = getIntOrDefault(obj, "blue1", 0);
+                int blue2 = getIntOrDefault(obj, "blue2", 0);
 
-                String id = obj.has("id") && !obj.get("id").isJsonNull() && !obj.get("id").getAsString().isBlank()
-                        ? obj.get("id").getAsString()
-                        : UUID.randomUUID().toString();
+                String rawId = getStrOrDefault(obj, "id", "");
+                String id = !rawId.isBlank() ? rawId : UUID.randomUUID().toString();
 
                 items.add(new MatchScheduleItem(id, eventId, matchNumber, tournamentLevel, red1, red2, blue1, blue2));
+            }
+
+            List<ScoutAssignment> explicitAssignments = new ArrayList<>();
+            if (body.has("assignments") && body.get("assignments").isJsonArray()) {
+                JsonArray arr = body.getAsJsonArray("assignments");
+                for (JsonElement el : arr) {
+                    if (!el.isJsonObject()) continue;
+                    ScoutAssignment parsed = parseAssignmentObject(eventId, el.getAsJsonObject());
+                    if (parsed != null) {
+                        explicitAssignments.add(parsed);
+                    }
+                }
             }
 
             jdbi.useTransaction(handle -> {
@@ -109,30 +124,8 @@ public class ScheduleRoutes {
                     initStationAssignment(dao, eventId, item.getMatchNumber(), item.getTournamentLevel(), "blue2", item.getBlue2());
                 }
 
-                if (body.has("assignments") && body.get("assignments").isJsonArray()) {
-                    JsonArray arr = body.getAsJsonArray("assignments");
-                    for (JsonElement el : arr) {
-                        if (!el.isJsonObject()) continue;
-                        JsonObject obj = el.getAsJsonObject();
-                        int matchNumber = obj.has("matchNumber") ? obj.get("matchNumber").getAsInt() : 0;
-                        String station = obj.has("station") ? obj.get("station").getAsString() : "";
-                        if (matchNumber <= 0 || station.isBlank()) continue;
-
-                        String tournamentLevel = obj.has("tournamentLevel") && !obj.get("tournamentLevel").isJsonNull()
-                                ? obj.get("tournamentLevel").getAsString()
-                                : "QUALIFICATION";
-                        int teamNumber = obj.has("teamNumber") ? obj.get("teamNumber").getAsInt() : 0;
-                        String scoutId = obj.has("scoutId") && !obj.get("scoutId").isJsonNull() ? obj.get("scoutId").getAsString() : null;
-                        String scoutName = obj.has("scoutName") && !obj.get("scoutName").isJsonNull() ? obj.get("scoutName").getAsString() : null;
-                        if (scoutId != null && scoutId.isBlank()) scoutId = null;
-                        if (scoutName != null && scoutName.isBlank()) scoutName = null;
-
-                        String id = obj.has("id") && !obj.get("id").isJsonNull() && !obj.get("id").getAsString().isBlank()
-                                ? obj.get("id").getAsString()
-                                : eventId + "_" + tournamentLevel + "_" + matchNumber + "_" + station;
-
-                        dao.upsertAssignment(new ScoutAssignment(id, eventId, matchNumber, tournamentLevel, station, teamNumber, scoutId, scoutName));
-                    }
+                for (ScoutAssignment a : explicitAssignments) {
+                    dao.upsertAssignment(a);
                 }
             });
 
@@ -171,7 +164,13 @@ public class ScheduleRoutes {
                 throw new io.javalin.http.ForbiddenResponse("Only the event host can modify match schedule or assignments");
             }
 
-            JsonObject body = gson.fromJson(ctx.body(), JsonObject.class);
+            JsonObject body;
+            try {
+                body = gson.fromJson(ctx.body(), JsonObject.class);
+            } catch (com.google.gson.JsonSyntaxException e) {
+                ctx.status(400).result("Invalid JSON payload");
+                return;
+            }
             if (body == null || !body.has("assignments") || !body.get("assignments").isJsonArray()) {
                 ctx.status(400).result("assignments array required");
                 return;
@@ -182,25 +181,10 @@ public class ScheduleRoutes {
 
             for (JsonElement el : arr) {
                 if (!el.isJsonObject()) continue;
-                JsonObject obj = el.getAsJsonObject();
-                int matchNumber = obj.has("matchNumber") ? obj.get("matchNumber").getAsInt() : 0;
-                String station = obj.has("station") ? obj.get("station").getAsString() : "";
-                if (matchNumber <= 0 || station.isBlank()) continue;
-
-                String tournamentLevel = obj.has("tournamentLevel") && !obj.get("tournamentLevel").isJsonNull()
-                        ? obj.get("tournamentLevel").getAsString()
-                        : "QUALIFICATION";
-                int teamNumber = obj.has("teamNumber") ? obj.get("teamNumber").getAsInt() : 0;
-                String scoutId = obj.has("scoutId") && !obj.get("scoutId").isJsonNull() ? obj.get("scoutId").getAsString() : null;
-                String scoutName = obj.has("scoutName") && !obj.get("scoutName").isJsonNull() ? obj.get("scoutName").getAsString() : null;
-                if (scoutId != null && scoutId.isBlank()) scoutId = null;
-                if (scoutName != null && scoutName.isBlank()) scoutName = null;
-
-                String id = obj.has("id") && !obj.get("id").isJsonNull() && !obj.get("id").getAsString().isBlank()
-                        ? obj.get("id").getAsString()
-                        : eventId + "_" + tournamentLevel + "_" + matchNumber + "_" + station;
-
-                list.add(new ScoutAssignment(id, eventId, matchNumber, tournamentLevel, station, teamNumber, scoutId, scoutName));
+                ScoutAssignment parsed = parseAssignmentObject(eventId, el.getAsJsonObject());
+                if (parsed != null) {
+                    list.add(parsed);
+                }
             }
 
             jdbi.useTransaction(handle -> {
@@ -236,5 +220,68 @@ public class ScheduleRoutes {
             );
             dao.upsertAssignment(updated);
         }
+    }
+
+    private static ScoutAssignment parseAssignmentObject(String eventId, JsonObject obj) {
+        int matchNumber = getIntOrDefault(obj, "matchNumber", 0);
+        String station = getStrOrDefault(obj, "station", "");
+        if (matchNumber <= 0 || station.isBlank()) {
+            return null;
+        }
+        String tournamentLevel = getStrOrDefault(obj, "tournamentLevel", "QUALIFICATION");
+        int teamNumber = getIntOrDefault(obj, "teamNumber", 0);
+        String scoutId = getStrOrDefault(obj, "scoutId", null);
+        String scoutName = getStrOrDefault(obj, "scoutName", null);
+        if (scoutId != null && scoutId.isBlank()) scoutId = null;
+        if (scoutName != null && scoutName.isBlank()) scoutName = null;
+
+        String rawId = getStrOrDefault(obj, "id", "");
+        String id = !rawId.isBlank() ? rawId : eventId + "_" + tournamentLevel + "_" + matchNumber + "_" + station;
+        return new ScoutAssignment(id, eventId, matchNumber, tournamentLevel, station, teamNumber, scoutId, scoutName);
+    }
+
+    private static int getIntOrDefault(JsonObject obj, String key, int fallback) {
+        if (!obj.has(key) || obj.get(key).isJsonNull()) {
+            return fallback;
+        }
+        JsonElement el = obj.get(key);
+        if (!el.isJsonPrimitive()) {
+            throw new io.javalin.http.BadRequestResponse("Invalid integer field: " + key);
+        }
+        try {
+            return el.getAsInt();
+        } catch (RuntimeException e) {
+            throw new io.javalin.http.BadRequestResponse("Invalid integer field: " + key);
+        }
+    }
+
+    private static boolean getBoolOrDefault(JsonObject obj, String key, boolean fallback) {
+        if (!obj.has(key) || obj.get(key).isJsonNull()) {
+            return fallback;
+        }
+        JsonElement el = obj.get(key);
+        if (!el.isJsonPrimitive()) {
+            throw new io.javalin.http.BadRequestResponse("Invalid boolean field: " + key);
+        }
+        if (el.getAsJsonPrimitive().isBoolean()) {
+            return el.getAsBoolean();
+        }
+        if (el.getAsJsonPrimitive().isString()) {
+            String raw = el.getAsString().trim().toLowerCase(java.util.Locale.ROOT);
+            if ("true".equals(raw)) return true;
+            if ("false".equals(raw)) return false;
+        }
+        throw new io.javalin.http.BadRequestResponse("Invalid boolean field: " + key);
+    }
+
+    private static String getStrOrDefault(JsonObject obj, String key, String fallback) {
+        if (!obj.has(key) || obj.get(key).isJsonNull()) {
+            return fallback;
+        }
+        JsonElement el = obj.get(key);
+        if (!el.isJsonPrimitive()) {
+            throw new io.javalin.http.BadRequestResponse("Invalid string field: " + key);
+        }
+        return el.getAsString();
     }
 }

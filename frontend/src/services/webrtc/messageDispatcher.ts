@@ -46,12 +46,23 @@ export interface MessageDispatcherContext {
   onRequestSync?: (sinceVersion: number, clientId: string) => void
 }
 
+const HIGH_PRIORITY_MSG_TYPES = new Set<string>([
+  'PING',
+  'PONG',
+  'CLOCK_SYNC_REQ',
+  'CLOCK_SYNC_RES',
+  'FORCE_CLOCK_RESYNC'
+])
+
 export function createMessageDispatcher(ctx: MessageDispatcherContext) {
   const RECORD_CHUNK_SIZE = 15
 
   function sendMessage(msg: WebRtcMessage, targetId?: string): Promise<void> {
     console.log(`[WebRTC] Sending message ${msg.type} to ${targetId || 'all'}`)
     const payload = JSON.stringify(msg)
+    const sendOpts = {
+      priority: HIGH_PRIORITY_MSG_TYPES.has(msg.type) ? ('high' as const) : ('normal' as const)
+    }
     const isControlMsg =
       msg.type === 'SESSION_CONFLICT' ||
       msg.type === 'SESSION_KICKED' ||
@@ -76,14 +87,14 @@ export function createMessageDispatcher(ctx: MessageDispatcherContext) {
         const c = ctx.clients.get(targetId) || ctx.stagedClients?.get(targetId)
         if (c) {
           if (c.dc && c.dc.readyState === 'open') {
-            if (!c.sender || (c.sender as any).channel !== c.dc) {
+            if (!c.sender || c.sender.isAborted() || c.sender.getChannel() !== c.dc) {
               c.sender = new DataChannelSender(c.dc)
             }
-            return c.sender.enqueueSend(payload)
+            return c.sender.enqueueSend(payload, sendOpts)
           } else if (c.drainingVirtualDc && c.drainingVirtualDc.readyState === 'open') {
             // Draining fallback: use local sender, do not mutate c.sender
             const localSender = new DataChannelSender(c.drainingVirtualDc)
-            return localSender.enqueueSend(payload)
+            return localSender.enqueueSend(payload, sendOpts)
           }
         }
         return Promise.resolve()
@@ -100,13 +111,13 @@ export function createMessageDispatcher(ctx: MessageDispatcherContext) {
           }
           if (peerSas === 'REJECTED') return
           if (c.dc && c.dc.readyState === 'open') {
-            if (!c.sender || (c.sender as any).channel !== c.dc) {
+            if (!c.sender || c.sender.isAborted() || c.sender.getChannel() !== c.dc) {
               c.sender = new DataChannelSender(c.dc)
             }
-            promises.push(c.sender.enqueueSend(payload))
+            promises.push(c.sender.enqueueSend(payload, sendOpts))
           } else if (c.drainingVirtualDc && c.drainingVirtualDc.readyState === 'open') {
             const localSender = new DataChannelSender(c.drainingVirtualDc)
-            promises.push(localSender.enqueueSend(payload))
+            promises.push(localSender.enqueueSend(payload, sendOpts))
           }
         })
         return Promise.all(promises).then(() => {})
@@ -124,13 +135,13 @@ export function createMessageDispatcher(ctx: MessageDispatcherContext) {
       const clientDc = ctx.getClientDc()
       if (clientDc && clientDc.readyState === 'open') {
         let clientSender = ctx.getClientSender()
-        if (!clientSender) {
+        if (!clientSender || clientSender.isAborted() || clientSender.getChannel() !== clientDc) {
           clientSender = new DataChannelSender(clientDc, (isCongested) => {
             if (isCongested) ctx.setStatus('unstable')
           })
           ctx.setClientSender(clientSender)
         }
-        return clientSender.enqueueSend(payload)
+        return clientSender.enqueueSend(payload, sendOpts)
       }
       return Promise.resolve()
     }
@@ -344,44 +355,65 @@ export function createMessageDispatcher(ctx: MessageDispatcherContext) {
     if (ctx.isHostMode()) {
       const targetClientIds = ctx.scoutIdToClientIds.get(payload.targetId)
       let sent = false
+      let buffered = false
+      let rejected = false
 
-      const deliverToClient = async (targetClient: ClientEntry): Promise<boolean> => {
-        if (targetClient.dc && targetClient.dc.readyState === 'open') {
-          if (!targetClient.sender || (targetClient.sender as any).channel !== targetClient.dc) {
-            targetClient.sender = new DataChannelSender(targetClient.dc)
-          }
-          await targetClient.sender.enqueueSend(JSON.stringify(directMsg))
-          return true
-        } else if (targetClient.drainingVirtualDc && targetClient.drainingVirtualDc.readyState === 'open') {
-          // Fallback to draining channel using a local sender without mutating targetClient.sender
-          const localSender = new DataChannelSender(targetClient.drainingVirtualDc)
-          await localSender.enqueueSend(JSON.stringify(directMsg))
-          return true
+      const deliverToClient = async (
+        peerId: string,
+        targetClient: ClientEntry
+      ): Promise<'sent' | 'buffered' | 'rejected' | 'unavailable'> => {
+        const peerSas = ctx.sas.clientSasStates.get(peerId)
+        if (peerSas === 'REJECTED') {
+          console.warn(`[WebRTC Security Gating] Dropping DIRECT_MESSAGE to rejected peer ${peerId}.`)
+          return 'rejected'
         }
-        return false
+        if (peerSas === 'PENDING_VERIFICATION') {
+          await sendMessage(directMsg, peerId)
+          return 'buffered'
+        }
+        if (
+          (targetClient.dc && targetClient.dc.readyState === 'open') ||
+          (targetClient.drainingVirtualDc && targetClient.drainingVirtualDc.readyState === 'open')
+        ) {
+          await sendMessage(directMsg, peerId)
+          return 'sent'
+        }
+        return 'unavailable'
       }
 
       if (targetClientIds && targetClientIds.size > 0) {
         for (const cid of targetClientIds) {
           const targetClient = ctx.clients.get(cid)
           if (targetClient) {
-            const ok = await deliverToClient(targetClient)
-            if (ok) sent = true
+            const outcome = await deliverToClient(cid, targetClient)
+            if (outcome === 'sent') sent = true
+            else if (outcome === 'buffered') buffered = true
+            else if (outcome === 'rejected') rejected = true
           }
         }
       } else {
         const targetClient = ctx.clients.get(payload.targetId)
         if (targetClient) {
-          const ok = await deliverToClient(targetClient)
-          if (ok) sent = true
+          const outcome = await deliverToClient(payload.targetId, targetClient)
+          if (outcome === 'sent') sent = true
+          else if (outcome === 'buffered') buffered = true
+          else if (outcome === 'rejected') rejected = true
         }
       }
 
-      if (!sent) {
+      if (!sent && !buffered && !rejected) {
         ctx.offlineMessages.enqueue(payload.targetId, directMsg)
       }
       return sent
     } else {
+      if (ctx.sas.clientSasState === 'REJECTED') {
+        console.warn('[WebRTC Security Gating] Dropping outgoing DIRECT_MESSAGE to rejected host.')
+        return false
+      }
+      if (ctx.sas.clientSasState === 'PENDING_VERIFICATION') {
+        await sendMessage(directMsg)
+        return false
+      }
       const clientDc = ctx.getClientDc()
       if (clientDc && clientDc.readyState === 'open') {
         await sendMessage(directMsg)

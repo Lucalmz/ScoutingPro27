@@ -54,6 +54,23 @@ describe('User Store', () => {
     expect(localStorage.getItem('scoutingpro-user')).toBeNull()
   })
 
+  it('logout clears multi-item pendingSasQueue and closes SAS modal', async () => {
+    const store = useUserStore()
+    const connStore = useConnectionStore()
+    store.user = { id: '123', username: 'testuser', token: 'tok' }
+    localStorage.setItem('scoutingpro-user', JSON.stringify(store.user))
+
+    connStore.setPendingSas({ peerId: 'peer-1', username: 'Bob', fingerprint: '1111-2222' })
+    connStore.setPendingSas({ peerId: 'peer-2', username: 'Carol', fingerprint: '3333-4444' })
+    expect(connStore.pendingSasQueue).toHaveLength(2)
+    expect(connStore.isSasModalOpen).toBe(true)
+
+    await store.logout()
+    expect(connStore.pendingSasQueue).toHaveLength(0)
+    expect(connStore.pendingSas).toBeNull()
+    expect(connStore.isSasModalOpen).toBe(false)
+  })
+
   it('restoreFromCache', () => {
     const store = useUserStore()
     localStorage.setItem('scoutingpro-user', JSON.stringify({ id: '999', username: 'cached' }))

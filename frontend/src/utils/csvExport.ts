@@ -7,9 +7,9 @@ export function downloadCSV(filename: string, headers: string[], rows: any[][]) 
       
       // Prevent CSV Injection (Formula Injection)
       // Only apply to actual strings, so we don't ruin legitimate negative numbers (e.g. -5.2)
-      if (typeof val === 'string' && /^[=+\-@]/.test(str)) {
-        // Double check it's not just a valid string-encoded number
-        if (isNaN(Number(str))) {
+      if (typeof val === 'string' && /^[=+\-@\t\r]/.test(str)) {
+        // Only skip plain finite numeric strings (never "\t", "\r", or "\t123")
+        if (!/^[+-]?(\d+\.?\d*|\.\d+)([eE][+-]?\d+)?$/.test(str)) {
           str = "'" + str;
         }
       }
@@ -18,8 +18,8 @@ export function downloadCSV(filename: string, headers: string[], rows: any[][]) 
       if (str.includes('"')) {
         str = str.replace(/"/g, '""');
       }
-      // Wrap in quotes if it contains comma, newline, or quotes
-      if (str.includes(',') || str.includes('\n') || str.includes('"')) {
+      // Wrap in quotes if it contains comma, newline, carriage return, or quotes
+      if (str.includes(',') || str.includes('\n') || str.includes('\r') || str.includes('"')) {
         str = `"${str}"`;
       }
       return str;

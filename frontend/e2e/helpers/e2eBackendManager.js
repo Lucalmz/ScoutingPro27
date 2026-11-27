@@ -13,8 +13,26 @@ const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
 export const REPO_ROOT = path.resolve(__dirname, '../../..');
+export const FRONTEND_DIR = path.resolve(__dirname, '../..');
 export const BACKEND_JAR_PATH = path.join(REPO_ROOT, 'Backend', 'target', 'ScoutingPro27.jar');
 export const STATIC_PUBLIC_DIR = path.join(REPO_ROOT, 'Backend', 'src', 'main', 'resources', 'public');
+
+export function ensureE2eBuildArtifacts() {
+  if (process.env.SKIP_BUILD === '1') {
+    return;
+  }
+  console.log('Building frontend (with VITE_ENABLE_E2E_BRIDGE=true) and packaging Backend fat JAR before E2E (set SKIP_BUILD=1 to skip)...');
+  execSync('npm run build', {
+    cwd: FRONTEND_DIR,
+    stdio: 'inherit',
+    env: { ...process.env, VITE_ENABLE_E2E_BRIDGE: 'true' }
+  });
+  const mavenCmd = os.platform() === 'win32' ? 'mvn.cmd' : 'mvn';
+  execSync(`${mavenCmd} package -DskipTests`, {
+    cwd: path.join(REPO_ROOT, 'Backend'),
+    stdio: 'inherit'
+  });
+}
 
 export async function allocateFreePorts(count, host = '127.0.0.1') {
   const servers = [];

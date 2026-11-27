@@ -52,7 +52,7 @@
 
 ## 📖 Documentation Map
 
-- **For Scouts & Team Leads**: Start with the illustrated guides 👉 **[Bilingual User Guide Hub](docs/USER_GUIDE.md)** · **[English Step-by-Step Guide](docs/USER_GUIDE.en.md)** · **[中文保姆级教程](docs/USER_GUIDE.zh.md)** (includes Windows `.msi` / macOS `.dmg` installation; run `npm run export:userguide-pdf` in `frontend/` to generate offline PDFs).
+- **For Scouts & Team Leads**: Start with the illustrated guides 👉 **[Bilingual User Guide Hub](docs/USER_GUIDE.md)** · **[English Step-by-Step Guide](docs/USER_GUIDE.en.md)** · **[中文保姆级教程](docs/USER_GUIDE.zh.md)** (includes Windows `.msi` / macOS `.dmg` installation & Gatekeeper bypass in [Chapter 0](docs/USER_GUIDE.en.md#chapter-0-download--install-macos-users-read-this-first); run `npm run export:userguide-pdf` in `frontend/` to generate offline PDFs).
 - **For Developers & Contributors**: Full HTTP REST routes, WebSocket signaling, TinyBase 8-table CRDT schema, ECDSA verification, and JCEF desktop bridge specifications live in **[CONTRACT.md](CONTRACT.md)**; QA & release docs live in **[docs/README.md](docs/README.md)**.
 
 ---
@@ -232,9 +232,34 @@ sequenceDiagram
 
 ---
 
-## 5. Quick Start & Automated Verification
+## 5. Download, Installation & Quick Start
 
-### 5.1 Prerequisites & Local Run
+### 5.1 Prebuilt Desktop Installers (Windows & macOS Apple Silicon)
+
+Download the latest release packages from **[GitHub Releases](https://github.com/Lucalmz/ScoutingPro27/releases)** (bleacher scouts on phones/tablets can use the zero-install Web/PWA directly by scanning the Host QR code):
+
+- **Windows (`ScoutingPro27-windows-<version>.msi`)**:
+  1. Double-click the `.msi` installer and follow the setup wizard.
+  2. If **Microsoft Defender SmartScreen** displays *"Windows protected your PC"*, click **More info** → **Run anyway** (expected because open-source builds are not EV/OV Authenticode-signed).
+  3. On first launch, approve the Windows UAC firewall prompt so ScoutingPro27 can add scoped inbound rules for LAN QR onboarding and WebRTC P2P.
+
+- **macOS Apple Silicon (`ScoutingPro27-mac-arm64-<version>.dmg`) — How to Bypass macOS Gatekeeper**:
+  1. Double-click the `.dmg` and drag **ScoutingPro27** into your **Applications** folder.
+  2. Because this open-source build uses an ad-hoc Apple Silicon signature rather than a paid Apple Developer notarization certificate, macOS Gatekeeper blocks the first launch (*"Apple could not verify 'ScoutingPro27' is free of malware"* on macOS 15 Sequoia / 26 Tahoe+, or *"cannot be opened because the developer cannot be verified"* on older macOS). Use **either** method once:
+     - **Option A — System Settings (Recommended; works on macOS 15 Sequoia, 26 Tahoe & macOS 13–14)**:
+       1. Double-click **ScoutingPro27** in **Finder → Applications** once and click **Done** when blocked.
+       2. Open **System Settings** → **Privacy & Security** → scroll down to **Security**.
+       3. Click **Open Anyway** next to the ScoutingPro27 blocked notice, authenticate with Touch ID or password, then click **Open**.
+     - **Option B — One-Line Terminal Fix (Fastest)**:
+       ```bash
+       xattr -cr /Applications/ScoutingPro27.app
+       ```
+       *(Or `xattr -dr com.apple.quarantine /Applications/ScoutingPro27.app`.)* Then double-click the app normally.
+     - *(Note: On **macOS 14 Sonoma & earlier**, Control-click / Right-click → Open also works; Apple removed that shortcut starting in macOS 15 Sequoia, so use Option A or B on macOS 15+.)*
+
+  See [User Guide Chapter 0](docs/USER_GUIDE.en.md#chapter-0-download--install-macos-users-read-this-first) for detailed walkthroughs.
+
+### 5.2 Build From Source & Local Run
 - **Requirements**: JDK 21+, Maven 3.8+, Node.js `>=22.18.0` or `>=24.12.0`
 - **Build & Launch**:
   ```powershell
@@ -251,7 +276,7 @@ sequenceDiagram
   mvn package -DskipTests
   ```
 
-### 5.2 Automated Verification Suites
+### 5.3 Automated Verification Suites
 ```powershell
 # 1. Frontend TypeScript 6 strict type check
 cd frontend

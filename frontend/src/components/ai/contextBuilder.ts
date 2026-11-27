@@ -45,8 +45,20 @@ export interface ContextPreviewStats {
 
 const DEFAULT_MAX_CHARS_BUDGET = 28000
 
+function sanitizePromptField(raw: unknown, maxLen = 400): string {
+  if (raw == null) return ''
+  return String(raw)
+    .replace(/```+/g, "'''")
+    .replace(/={3,}/g, '---')
+    .replace(/\|/g, '/')
+    .replace(/[\r\n\t]+/g, ' ')
+    .replace(/[\u0000-\u001F\u007F]/g, '')
+    .trim()
+    .slice(0, maxLen)
+}
+
 function formatTagForPrompt(tag: TeamTagItem): string {
-  return tag.tag
+  return sanitizePromptField(tag.tag, 60)
 }
 
 export function estimateTokenCount(text: string): number {
@@ -65,7 +77,8 @@ export function estimateTokenCount(text: string): number {
 }
 
 function buildMatchLine(rec: ScoutingRecord): string {
-  const cleanNotes = (rec.notes || '').replace(/\|/g, '/').replace(/[\r\n]+/g, ' ').trim() || '-'
+  const cleanNotes = sanitizePromptField(rec.notes, 300) || '-'
+  const cleanScout = sanitizePromptField(rec.scoutName || 'Scout', 60) || 'Scout'
   const brokenStr = rec.isBroken ? 'YES (Broken)' : 'NO'
   const level = getRecordTournamentLevel(rec)
   const matchLabel = level === 'PLAYOFF' ? `Playoff Match ${rec.matchNumber}` : `Match ${rec.matchNumber}`
@@ -87,7 +100,7 @@ function buildMatchLine(rec: ScoutingRecord): string {
     calcMatchPredictCycleTime(parsed.teleopCycles, parsed.teleopCycleTimestamps)
   const predictCycleStr = matchPredictCycle !== null ? `${matchPredictCycle.toFixed(1)}s` : '-'
 
-  return `${matchLabel} | Team ${rec.teamNumber} | ${rec.scoutName || 'Scout'} | ${rec.totalScore} | ${rec.autoScore} | ${rec.teleopScore} | ${rec.endgameScore} | ${brokenStr} | ${cleanNotes} | ${endgameDetailsStr} | ${predictCycleStr}`
+  return `${matchLabel} | Team ${rec.teamNumber} | ${cleanScout} | ${rec.totalScore} | ${rec.autoScore} | ${rec.teleopScore} | ${rec.endgameScore} | ${brokenStr} | ${cleanNotes} | ${endgameDetailsStr} | ${predictCycleStr}`
 }
 
 function appendFocusSection(
@@ -335,26 +348,27 @@ function appendPitSection(
       }
     }
 
-    const autoStr = pit.claimedAutoStrategy
-      ? `${pit.claimedAutoScore} pts (${pit.claimedAutoStrategy})`
+    const cleanAutoStrategy = sanitizePromptField(pit.claimedAutoStrategy, 200)
+    const autoStr = cleanAutoStrategy
+      ? `${pit.claimedAutoScore} pts (${cleanAutoStrategy})`
       : `${pit.claimedAutoScore} pts`
     const teleopStr = pit.claimedTeleopCycles != null
       ? `${pit.claimedTeleopScore} pts (${pit.claimedTeleopCycles} cycles)`
       : `${pit.claimedTeleopScore} pts`
     const baseRow = [
       pit.teamNumber,
-      pit.drivetrainType || 'N/A',
-      pit.ballCompatibility || 'N/A',
-      pit.launcherType || 'N/A',
-      pit.flowerMechanism || 'N/A',
+      sanitizePromptField(pit.drivetrainType, 40) || 'N/A',
+      sanitizePromptField(pit.ballCompatibility, 40) || 'N/A',
+      sanitizePromptField(pit.launcherType, 80) || 'N/A',
+      sanitizePromptField(pit.flowerMechanism, 80) || 'N/A',
       pit.hasColorSensor ? 'Yes' : 'No',
-      pit.odometryType || 'N/A',
+      sanitizePromptField(pit.odometryType, 40) || 'N/A',
       autoStr,
       teleopStr,
       `${pit.claimedEndgameScore ?? 0} pts`,
       `${pit.claimedTotalScore} pts`,
       bragStr,
-      pit.chassisSize || 'N/A'
+      sanitizePromptField(pit.chassisSize, 64) || 'N/A'
     ].join(' | ')
 
     if (hasExtraHardwareNotes) {
@@ -401,7 +415,8 @@ function appendCustomMetricsSection(
 
   const allTeamNums = new Set<number>([
     ...byTeam.keys(),
-    ...(activeTeamFields.length > 0 ? rankingByTeam.keys() : [])
+    ...(activeTeamFields.length > 0 ? rankingByTeam.keys() : []),
+    ...(activeTeamFields.length > 0 ? pitByTeam.keys() : [])
   ])
   if (allTeamNums.size === 0) return
 
@@ -423,13 +438,15 @@ function appendCustomMetricsSection(
     const tokens: string[] = []
     for (const s of [...matchSummaries, ...teamSummaries]) {
       if (s.error) continue
+      const fieldName = sanitizePromptField(s.definition.name, 80)
+      const fieldUnit = sanitizePromptField(s.definition.unit, 24)
       if (s.fieldType === 'boolean' && s.rate != null) {
-        tokens.push(`${s.definition.name}: ${Math.round(s.rate)}%`)
+        tokens.push(`${fieldName}: ${Math.round(s.rate)}%`)
       } else if (s.aggregatedDisplay != null) {
-        const unit = s.definition.unit && s.definition.displayFormat !== 'percent' ? s.definition.unit : ''
-        tokens.push(`${s.definition.name}: ${s.aggregatedDisplay}${unit}`)
+        const unit = fieldUnit && s.definition.displayFormat !== 'percent' ? fieldUnit : ''
+        tokens.push(`${fieldName}: ${sanitizePromptField(s.aggregatedDisplay, 40)}${unit}`)
       } else if (s.avg != null) {
-        tokens.push(`${s.definition.name}: ${s.avg.toFixed(1)}${s.definition.unit || ''}`)
+        tokens.push(`${fieldName}: ${s.avg.toFixed(1)}${fieldUnit}`)
       }
     }
     if (tokens.length > 0) {
@@ -539,15 +556,17 @@ function buildContextInternal(options: ContextOptions): {
   const secMatches = sections?.matches !== false
   const secTags = sections?.tags !== false
 
-  const activeRecords = records.filter(r => !r.isDeleted)
-  const activePitRecords = (pitRecords || []).filter(p => !p.isDeleted)
-  const scheduleList = schedules || []
+  const targetEventId = event?.id || ''
+  const activeRecords = records.filter(r => !r.isDeleted && (!targetEventId || !r.eventId || r.eventId === targetEventId))
+  const activePitRecords = (pitRecords || []).filter(p => !p.isDeleted && (!targetEventId || !p.eventId || p.eventId === targetEventId))
+  const scopedTags = (tags || []).filter(t => !targetEventId || !t.eventId || t.eventId === targetEventId)
+  const scheduleList = (schedules || []).filter(s => !targetEventId || !s.eventId || s.eventId === targetEventId)
   const focusSet = new Set<number>((focusTeams || []).map(Number).filter(n => !isNaN(n) && n > 0))
 
   if (
     activeRecords.length === 0 &&
     rankings.length === 0 &&
-    (!tags || tags.length === 0) &&
+    scopedTags.length === 0 &&
     activePitRecords.length === 0 &&
     scheduleList.length === 0
   ) {
@@ -563,9 +582,9 @@ function buildContextInternal(options: ContextOptions): {
 
   const lines: string[] = ['=== CURRENT FTC EVENT SCOUTING DATA ===']
   if (event) {
-    lines.push(`Event Name: ${event.name}`)
+    lines.push(`Event Name: ${sanitizePromptField(event.name, 120)}`)
     if (event.ftcEventCode) {
-      lines.push(`Event Code: ${event.ftcEventCode} (Year: ${event.ftcYear || 'N/A'})`)
+      lines.push(`Event Code: ${sanitizePromptField(event.ftcEventCode, 40)} (Year: ${event.ftcYear || 'N/A'})`)
     }
   }
   lines.push(
@@ -580,9 +599,9 @@ function buildContextInternal(options: ContextOptions): {
   }
   if (secRankings) appendRankingsSection(lines, rankings)
   if (secSchedule) appendScheduleSection(lines, scheduleList, myTeamNumber, focusSet, focusMatch)
-  if (secTags) appendTagsSection(lines, tags)
+  if (secTags) appendTagsSection(lines, scopedTags)
   if (secPit) appendPitSection(lines, activePitRecords, activeRecords)
-  if (secRankings) appendCustomMetricsSection(lines, customFields, activeRecords, rankings, activePitRecords)
+  appendCustomMetricsSection(lines, customFields, activeRecords, rankings, activePitRecords)
 
   const truncatedMatchesCount = secMatches
     ? appendBudgetedMatchesSection(lines, activeRecords, myTeamNumber, focusSet, focusMatch, maxCharsBudget)

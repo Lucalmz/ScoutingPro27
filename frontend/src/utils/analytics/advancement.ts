@@ -93,9 +93,45 @@ export function extractAllianceTeamNumber(ref: unknown): number {
   }
   if (ref && typeof ref === 'object') {
     const obj = ref as Record<string, unknown>
-    return extractAllianceTeamNumber(obj.teamNumber ?? obj.TeamNumber ?? obj.team)
+    return extractAllianceTeamNumber(obj.teamNumber ?? obj.TeamNumber ?? obj.team ?? obj.Team)
   }
   return 0
+}
+
+function pickCI<T = unknown>(obj: unknown, ...keys: string[]): T | undefined {
+  if (!obj || typeof obj !== 'object') return undefined
+  const rec = obj as Record<string, unknown>
+  for (const k of keys) {
+    if (rec[k] !== undefined && rec[k] !== null) {
+      return rec[k] as T
+    }
+  }
+  return undefined
+}
+
+function parseFiniteInt(val: unknown, fallback = 0): number {
+  if (typeof val === 'number' && Number.isFinite(val)) return Math.trunc(val)
+  if (typeof val === 'string' && val.trim()) {
+    const p = Number.parseInt(val.trim(), 10)
+    if (Number.isFinite(p)) return p
+  }
+  return fallback
+}
+
+function parseFiniteNumber(val: unknown, fallback = 0): number {
+  if (typeof val === 'number' && Number.isFinite(val)) return val
+  if (typeof val === 'string' && val.trim()) {
+    const p = Number(val.trim())
+    if (Number.isFinite(p)) return p
+  }
+  return fallback
+}
+
+function parseBooleanValue(val: unknown): boolean {
+  if (typeof val === 'boolean') return val
+  if (typeof val === 'number') return val !== 0
+  if (typeof val === 'string') return val.trim().toLowerCase() === 'true'
+  return false
 }
 
 /**
@@ -242,22 +278,20 @@ interface ParsedOfficialSlot {
 function parseOfficialAdvancementMap(
   officialAdvancement?: OfficialAdvancementResponse | null
 ): { advancesTo: string; slotMap: Map<number, ParsedOfficialSlot>; officialFirstCount: number } {
-  const advancesTo = (officialAdvancement?.advancesTo || '').trim()
+  const advancesTo = String(pickCI(officialAdvancement, 'advancesTo', 'AdvancesTo') ?? '').trim()
   const slotMap = new Map<number, ParsedOfficialSlot>()
-  const list: OfficialAdvancementSlot[] = Array.isArray(officialAdvancement?.advancement)
-    ? officialAdvancement!.advancement!
-    : []
+  const rawList = pickCI<unknown>(officialAdvancement, 'advancement', 'Advancement')
+  const list: OfficialAdvancementSlot[] = Array.isArray(rawList) ? rawList : []
 
   for (const item of list) {
     if (!item) continue
-    const teamNum =
-      typeof item.team === 'number' && Number.isFinite(item.team)
-        ? item.team
-        : Number.parseInt(String(item.displayTeam || ''), 10)
+    const teamNum = extractAllianceTeamNumber(
+      pickCI(item, 'team', 'teamNumber', 'displayTeam', 'Team', 'TeamNumber', 'DisplayTeam')
+    )
     if (!Number.isFinite(teamNum) || teamNum <= 0 || slotMap.has(teamNum)) continue
 
-    const declined = Boolean(item.declined)
-    let rawStatus = String(item.status || '').trim().toUpperCase()
+    const declined = parseBooleanValue(pickCI(item, 'declined', 'Declined'))
+    let rawStatus = String(pickCI(item, 'status', 'Status') ?? '').trim().toUpperCase()
     if (rawStatus === 'ALREADY_ADVANCED') rawStatus = 'ALREADY_ADVANCING'
 
     let skippedStatus: AdvancementStatus | null = null
@@ -266,8 +300,8 @@ function parseOfficialAdvancementMap(
     else if (declined) skippedStatus = 'DECLINED'
 
     slotMap.set(teamNum, {
-      slot: Number(item.slot) || 0,
-      criteria: String(item.criteria || '').trim(),
+      slot: parseFiniteInt(pickCI(item, 'slot', 'Slot'), 0),
+      criteria: String(pickCI(item, 'criteria', 'Criteria') ?? '').trim(),
       declined,
       rawStatus,
       skippedStatus,
@@ -295,40 +329,43 @@ export function calculateAdvancement(
   officialAdvancement?: OfficialAdvancementResponse | null,
   explicitSlotsOverride = false
 ): AdvancementDetail[] {
+  const rawOfficialSlots = parseFiniteInt(pickCI(officialAdvancement, 'slots', 'Slots'), 0)
   const slots =
-    advancementSlots && advancementSlots > 0
-      ? advancementSlots
-      : (officialAdvancement?.slots && officialAdvancement.slots > 0
-          ? officialAdvancement.slots
-          : DEFAULT_ADVANCEMENT_SLOTS)
+    typeof advancementSlots === 'number' && Number.isFinite(advancementSlots) && advancementSlots > 0
+      ? Math.trunc(advancementSlots)
+      : (rawOfficialSlots > 0 ? rawOfficialSlots : DEFAULT_ADVANCEMENT_SLOTS)
   const teamMap = new Map<number, TeamAccumulator>()
 
   const totalTeams = officialRankings.length
 
   // 1. 资格赛表现分
   for (const r of officialRankings) {
-    if (!r || r.teamNumber <= 0) continue
+    if (!r) continue
+    const teamNumber = extractAllianceTeamNumber(pickCI(r, 'teamNumber', 'TeamNumber', 'team', 'Team'))
+    if (teamNumber <= 0) continue
+    const rank = parseFiniteInt(pickCI(r, 'rank', 'Rank'), 0)
     const entry: TeamAccumulator = {
-      teamNumber: r.teamNumber,
-      qualRank: r.rank || 0,
+      teamNumber,
+      qualRank: rank,
       advancementRank: 0,
-      qualPoints: calcQualPoints(r.rank, totalTeams),
+      qualPoints: calcQualPoints(rank, totalTeams),
       alliancePoints: 0,
       playoffPoints: 0,
       awardPoints: 0,
       totalAdvancementPoints: 0,
       advancementStatus: 'COMPETING',
-      tiebreakerSort1: Number(r.sortOrder1) || 0,
-      tiebreakerSort2: Number(r.sortOrder2) || 0
+      tiebreakerSort1: parseFiniteNumber(pickCI(r, 'sortOrder1', 'SortOrder1'), 0),
+      tiebreakerSort2: parseFiniteNumber(pickCI(r, 'sortOrder2', 'SortOrder2'), 0)
     }
-    teamMap.set(r.teamNumber, entry)
+    teamMap.set(teamNumber, entry)
   }
 
   // 2. 选队联盟分（兼容整型及 FTC Official API v2.0 AllianceTeam 对象）
   if (officialAlliances.length > 0) {
     let maxSeed = 0
     for (const a of officialAlliances) {
-      if (a && a.number > maxSeed) maxSeed = a.number
+      const seed = parseFiniteInt(pickCI(a, 'number', 'Number'), 0)
+      if (seed > maxSeed) maxSeed = seed
     }
     const totalAlliances = officialAlliances.length >= 2
       ? Math.max(officialAlliances.length, maxSeed)
@@ -336,11 +373,11 @@ export function calculateAdvancement(
 
     for (const a of officialAlliances) {
       if (!a) continue
-      const seed = a.number || 0
-      const captain = extractAllianceTeamNumber(a.captain)
-      const round1 = extractAllianceTeamNumber(a.round1)
-      const round2 = extractAllianceTeamNumber(a.round2)
-      const round3 = extractAllianceTeamNumber(a.round3)
+      const seed = parseFiniteInt(pickCI(a, 'number', 'Number'), 0)
+      const captain = extractAllianceTeamNumber(pickCI(a, 'captain', 'Captain'))
+      const round1 = extractAllianceTeamNumber(pickCI(a, 'round1', 'Round1'))
+      const round2 = extractAllianceTeamNumber(pickCI(a, 'round2', 'Round2'))
+      const round3 = extractAllianceTeamNumber(pickCI(a, 'round3', 'Round3'))
 
       if (captain > 0) {
         let entry = teamMap.get(captain)
@@ -384,20 +421,22 @@ export function calculateAdvancement(
   const official4thPlaceTeams = new Set<number>()
 
   for (const aw of officialAwards) {
-    if (!aw || aw.teamNumber <= 0) continue
-    const name = (aw.name || '').toLowerCase()
+    if (!aw) continue
+    const awTeam = extractAllianceTeamNumber(pickCI(aw, 'teamNumber', 'TeamNumber', 'team', 'Team'))
+    if (awTeam <= 0) continue
+    const name = String(pickCI(aw, 'name', 'Name') ?? '').toLowerCase()
     if (isExcludedAwardName(name) || isJudgedTeamAwardName(name)) continue
 
     if (name.includes('winning alliance') || name.includes('获胜联盟') || name.includes('冠军联盟') || name.includes('优胜联盟') ||
       (!name.includes('semi') && !name.includes('quarter') && (name.includes('champion') || name.includes('winner')))) {
-      officialWinnerTeams.add(aw.teamNumber)
+      officialWinnerTeams.add(awTeam)
     } else if (name.includes('finalist alliance') || name.includes('决赛联盟') || name.includes('亚军联盟') ||
       (!name.includes('semi') && !name.includes('quarter') && (name.includes('finalist') || name.includes('runner')))) {
-      officialFinalistTeams.add(aw.teamNumber)
+      officialFinalistTeams.add(awTeam)
     } else if (name.includes('3rd') || name.includes('third') || name.includes('季军')) {
-      official3rdPlaceTeams.add(aw.teamNumber)
+      official3rdPlaceTeams.add(awTeam)
     } else if (name.includes('4th') || name.includes('fourth') || name.includes('殿军')) {
-      official4thPlaceTeams.add(aw.teamNumber)
+      official4thPlaceTeams.add(awTeam)
     }
   }
 
@@ -409,19 +448,21 @@ export function calculateAdvancement(
   const nonFinalMaxSeries = new Map<number, number>()
 
   for (const m of officialMatches) {
-    if (!m || (m.tournamentLevel || '').toUpperCase() !== 'PLAYOFF') continue
-    if (!m.scores || !m.teams) continue
+    if (!m || String(pickCI(m, 'tournamentLevel', 'TournamentLevel') ?? '').toUpperCase() !== 'PLAYOFF') continue
+    const scoresObj = pickCI<Record<string, unknown>>(m, 'scores', 'Scores')
+    const teamsArr = pickCI<unknown[]>(m, 'teams', 'Teams')
+    if (!scoresObj || !Array.isArray(teamsArr)) continue
 
-    const red = m.scores.red
-    const blue = m.scores.blue
+    const red = pickCI<Record<string, unknown>>(scoresObj, 'red', 'Red')
+    const blue = pickCI<Record<string, unknown>>(scoresObj, 'blue', 'Blue')
     if (!red || !blue) continue
 
-    const redScore = red.finalScore ?? red.totalPointsNp ?? 0
-    const blueScore = blue.finalScore ?? blue.totalPointsNp ?? 0
+    const redScore = parseFiniteInt(pickCI(red, 'finalScore', 'FinalScore', 'totalPointsNp', 'TotalPointsNp'), 0)
+    const blueScore = parseFiniteInt(pickCI(blue, 'finalScore', 'FinalScore', 'totalPointsNp', 'TotalPointsNp'), 0)
     const winningAlliance = redScore > blueScore ? 'red' : (blueScore > redScore ? 'blue' : 'tie')
-    const matchNum = m.matchNum || 0
-    const series = (m as any).series || 0
-    const desc = ((m as any).description || '').toLowerCase()
+    const matchNum = parseFiniteInt(pickCI(m, 'matchNum', 'MatchNum', 'matchNumber', 'MatchNumber'), 0)
+    const series = parseFiniteInt(pickCI(m, 'series', 'Series'), 0)
+    const desc = String(pickCI(m, 'description', 'Description') ?? '').toLowerCase()
     if (desc.includes('upper bracket') || desc.includes('lower bracket') || desc.includes('final bracket')) {
       isDoubleElim = true
     }
@@ -432,20 +473,22 @@ export function calculateAdvancement(
     const matchCompleted = (redScore > 0 || blueScore > 0) && winningAlliance !== 'tie'
     const bracketStep = series > 0 ? series : matchNum
 
-    for (const t of m.teams) {
-      if (!t || t.teamNumber <= 0) continue
-      const alliance = (t.alliance || '').toLowerCase()
+    for (const t of teamsArr) {
+      if (!t) continue
+      const tNum = extractAllianceTeamNumber(pickCI(t, 'teamNumber', 'TeamNumber', 'team', 'Team'))
+      if (tNum <= 0) continue
+      const alliance = String(pickCI(t, 'alliance', 'Alliance') ?? '').toLowerCase()
       const won = alliance === winningAlliance
       if (isFinals) {
-        finalsTeams.add(t.teamNumber)
+        finalsTeams.add(tNum)
         if (matchCompleted && won) {
-          finalsWins.set(t.teamNumber, (finalsWins.get(t.teamNumber) || 0) + 1)
+          finalsWins.set(tNum, (finalsWins.get(tNum) || 0) + 1)
         }
       } else {
-        semifinalTeams.add(t.teamNumber)
-        nonFinalMaxSeries.set(t.teamNumber, Math.max(nonFinalMaxSeries.get(t.teamNumber) || 0, bracketStep))
+        semifinalTeams.add(tNum)
+        nonFinalMaxSeries.set(tNum, Math.max(nonFinalMaxSeries.get(tNum) || 0, bracketStep))
         if (matchCompleted && won) {
-          semifinalWins.set(t.teamNumber, (semifinalWins.get(t.teamNumber) || 0) + 1)
+          semifinalWins.set(tNum, (semifinalWins.get(tNum) || 0) + 1)
         }
       }
     }
@@ -546,13 +589,17 @@ export function calculateAdvancement(
 
   // 4. 评审奖项分
   for (const aw of officialAwards) {
-    if (!aw || aw.teamNumber <= 0) continue
-    const pts = calcAwardPoints(aw.name, aw.series)
+    if (!aw) continue
+    const awTeam = extractAllianceTeamNumber(pickCI(aw, 'teamNumber', 'TeamNumber', 'team', 'Team'))
+    if (awTeam <= 0) continue
+    const awName = String(pickCI(aw, 'name', 'Name') ?? '')
+    const awSeries = parseFiniteInt(pickCI(aw, 'series', 'Series'), 1)
+    const pts = calcAwardPoints(awName, awSeries)
     if (pts > 0) {
-      let entry = teamMap.get(aw.teamNumber)
+      let entry = teamMap.get(awTeam)
       if (!entry) {
-        entry = createDefaultAccumulator(aw.teamNumber)
-        teamMap.set(aw.teamNumber, entry)
+        entry = createDefaultAccumulator(awTeam)
+        teamMap.set(awTeam, entry)
       }
       // Rule A215: 单支队伍每站仅取最高一项评审奖项积分
       entry.awardPoints = Math.max(entry.awardPoints, pts)

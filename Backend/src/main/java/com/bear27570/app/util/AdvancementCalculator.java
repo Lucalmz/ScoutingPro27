@@ -108,10 +108,12 @@ public class AdvancementCalculator {
             JsonElement el = obj.get(key);
             if (el.isJsonPrimitive()) {
                 try {
-                    return el.getAsInt();
+                    int val = el.getAsInt();
+                    if (val > 0) return val;
                 } catch (NumberFormatException ignored) {
                     try {
-                        return Integer.parseInt(el.getAsString().trim());
+                        int val = Integer.parseInt(el.getAsString().trim());
+                        if (val > 0) return val;
                     } catch (NumberFormatException ignored2) {
                     }
                 }
@@ -124,6 +126,51 @@ public class AdvancementCalculator {
             }
         }
         return 0;
+    }
+
+    private static int extractIntCI(JsonObject obj, int fallback, String... keys) {
+        if (obj == null || keys == null) return fallback;
+        for (String key : keys) {
+            if (key == null || !obj.has(key) || obj.get(key).isJsonNull()) continue;
+            JsonElement el = obj.get(key);
+            if (el.isJsonPrimitive()) {
+                try {
+                    return el.getAsInt();
+                } catch (NumberFormatException ignored) {
+                    try {
+                        return Integer.parseInt(el.getAsString().trim());
+                    } catch (NumberFormatException ignored2) {
+                    }
+                }
+            }
+        }
+        return fallback;
+    }
+
+    private static double extractDoubleCI(JsonObject obj, double fallback, String... keys) {
+        if (obj == null || keys == null) return fallback;
+        for (String key : keys) {
+            if (key == null || !obj.has(key) || obj.get(key).isJsonNull()) continue;
+            JsonElement el = obj.get(key);
+            if (el.isJsonPrimitive()) {
+                try {
+                    double v = el.getAsDouble();
+                    if (Double.isFinite(v)) return v;
+                } catch (NumberFormatException ignored) {
+                }
+            }
+        }
+        return fallback;
+    }
+
+    private static JsonElement getElementCI(JsonObject obj, String... keys) {
+        if (obj == null || keys == null) return null;
+        for (String key : keys) {
+            if (key != null && obj.has(key) && !obj.get(key).isJsonNull()) {
+                return obj.get(key);
+            }
+        }
+        return null;
     }
 
     /**
@@ -326,7 +373,12 @@ public class AdvancementCalculator {
             JsonObject rawOfficialAdvancement,
             boolean explicitSlotsOverride
     ) {
-        int slots = advancementSlots > 0 ? advancementSlots : DEFAULT_ADVANCEMENT_SLOTS;
+        int officialSlots = rawOfficialAdvancement != null
+                ? extractIntCI(rawOfficialAdvancement, 0, "slots", "Slots")
+                : 0;
+        int slots = advancementSlots > 0
+                ? advancementSlots
+                : (officialSlots > 0 ? officialSlots : DEFAULT_ADVANCEMENT_SLOTS);
         Map<Integer, TeamAdvancementEntry> teamMap = new LinkedHashMap<>();
 
         int totalTeams = (officialRankings != null) ? officialRankings.size() : 0;
@@ -336,8 +388,8 @@ public class AdvancementCalculator {
             for (JsonElement el : officialRankings) {
                 if (!el.isJsonObject()) continue;
                 JsonObject r = el.getAsJsonObject();
-                int teamNum = r.has("teamNumber") && !r.get("teamNumber").isJsonNull() ? r.get("teamNumber").getAsInt() : 0;
-                int rank = r.has("rank") && !r.get("rank").isJsonNull() ? r.get("rank").getAsInt() : 0;
+                int teamNum = extractTeamNumber(r, "teamNumber", "TeamNumber", "team", "Team");
+                int rank = extractIntCI(r, 0, "rank", "Rank");
                 if (teamNum <= 0) continue;
 
                 TeamAdvancementEntry entry = teamMap.computeIfAbsent(teamNum, k -> {
@@ -348,12 +400,8 @@ public class AdvancementCalculator {
 
                 entry.qualRank = rank;
                 entry.qualPoints = calcQualPoints(rank, totalTeams);
-                if (r.has("sortOrder1") && !r.get("sortOrder1").isJsonNull()) {
-                    entry.tiebreakerSort1 = r.get("sortOrder1").getAsDouble();
-                }
-                if (r.has("sortOrder2") && !r.get("sortOrder2").isJsonNull()) {
-                    entry.tiebreakerSort2 = r.get("sortOrder2").getAsDouble();
-                }
+                entry.tiebreakerSort1 = extractDoubleCI(r, entry.tiebreakerSort1, "sortOrder1", "SortOrder1");
+                entry.tiebreakerSort2 = extractDoubleCI(r, entry.tiebreakerSort2, "sortOrder2", "SortOrder2");
             }
         }
 
@@ -425,8 +473,8 @@ public class AdvancementCalculator {
             for (JsonElement el : officialAwards) {
                 if (!el.isJsonObject()) continue;
                 JsonObject aw = el.getAsJsonObject();
-                int teamNum = aw.has("teamNumber") && !aw.get("teamNumber").isJsonNull() ? aw.get("teamNumber").getAsInt() : 0;
-                String name = aw.has("name") && !aw.get("name").isJsonNull() ? aw.get("name").getAsString() : "";
+                int teamNum = extractTeamNumber(aw, "teamNumber", "TeamNumber", "team", "Team");
+                String name = extractString(aw, "name", "Name");
                 if (teamNum <= 0) continue;
 
                 String lowerName = name.toLowerCase(Locale.ROOT);
@@ -459,24 +507,28 @@ public class AdvancementCalculator {
             for (JsonElement el : officialMatches) {
                 if (!el.isJsonObject()) continue;
                 JsonObject m = el.getAsJsonObject();
-                String level = m.has("tournamentLevel") && !m.get("tournamentLevel").isJsonNull() ? m.get("tournamentLevel").getAsString() : "";
+                String level = extractString(m, "tournamentLevel", "TournamentLevel");
                 if (!level.equalsIgnoreCase("PLAYOFF")) continue;
 
-                if (!m.has("scores") || m.get("scores").isJsonNull() || !m.has("teams") || !m.get("teams").isJsonArray()) {
+                JsonElement scoresEl = getElementCI(m, "scores", "Scores");
+                JsonElement teamsEl = getElementCI(m, "teams", "Teams");
+                if (scoresEl == null || !scoresEl.isJsonObject() || teamsEl == null || !teamsEl.isJsonArray()) {
                     continue;
                 }
-                JsonObject scores = m.getAsJsonObject("scores");
-                JsonObject red = scores.has("red") && scores.get("red").isJsonObject() ? scores.getAsJsonObject("red") : null;
-                JsonObject blue = scores.has("blue") && scores.get("blue").isJsonObject() ? scores.getAsJsonObject("blue") : null;
+                JsonObject scores = scoresEl.getAsJsonObject();
+                JsonElement redEl = getElementCI(scores, "red", "Red");
+                JsonElement blueEl = getElementCI(scores, "blue", "Blue");
+                JsonObject red = redEl != null && redEl.isJsonObject() ? redEl.getAsJsonObject() : null;
+                JsonObject blue = blueEl != null && blueEl.isJsonObject() ? blueEl.getAsJsonObject() : null;
                 if (red == null || blue == null) continue;
 
-                int redScore = red.has("finalScore") && !red.get("finalScore").isJsonNull() ? red.get("finalScore").getAsInt() : (red.has("totalPointsNp") && !red.get("totalPointsNp").isJsonNull() ? red.get("totalPointsNp").getAsInt() : 0);
-                int blueScore = blue.has("finalScore") && !blue.get("finalScore").isJsonNull() ? blue.get("finalScore").getAsInt() : (blue.has("totalPointsNp") && !blue.get("totalPointsNp").isJsonNull() ? blue.get("totalPointsNp").getAsInt() : 0);
+                int redScore = extractIntCI(red, extractIntCI(red, 0, "totalPointsNp", "TotalPointsNp"), "finalScore", "FinalScore");
+                int blueScore = extractIntCI(blue, extractIntCI(blue, 0, "totalPointsNp", "TotalPointsNp"), "finalScore", "FinalScore");
 
                 String winningAlliance = redScore > blueScore ? "Red" : (blueScore > redScore ? "Blue" : "Tie");
-                int matchNum = m.has("matchNum") ? m.get("matchNum").getAsInt() : 0;
-                int series = m.has("series") && !m.get("series").isJsonNull() ? m.get("series").getAsInt() : 0;
-                String desc = m.has("description") && !m.get("description").isJsonNull() ? m.get("description").getAsString().toLowerCase(Locale.ROOT) : "";
+                int matchNum = extractIntCI(m, 0, "matchNum", "MatchNum", "matchNumber", "MatchNumber");
+                int series = extractIntCI(m, 0, "series", "Series");
+                String desc = extractString(m, "description", "Description").toLowerCase(Locale.ROOT);
                 if (desc.contains("upper bracket") || desc.contains("lower bracket") || desc.contains("final bracket")) {
                     isDoubleElim = true;
                 }
@@ -487,11 +539,11 @@ public class AdvancementCalculator {
                 boolean matchCompleted = (redScore > 0 || blueScore > 0) && !winningAlliance.equals("Tie");
                 int bracketStep = series > 0 ? series : matchNum;
 
-                for (JsonElement tEl : m.getAsJsonArray("teams")) {
+                for (JsonElement tEl : teamsEl.getAsJsonArray()) {
                     if (!tEl.isJsonObject()) continue;
                     JsonObject t = tEl.getAsJsonObject();
-                    int tNum = t.has("teamNumber") ? t.get("teamNumber").getAsInt() : 0;
-                    String alliance = t.has("alliance") ? t.get("alliance").getAsString() : "";
+                    int tNum = extractTeamNumber(t, "teamNumber", "TeamNumber", "team", "Team");
+                    String alliance = extractString(t, "alliance", "Alliance");
                     if (tNum <= 0) continue;
 
                     boolean won = alliance.equalsIgnoreCase(winningAlliance);
@@ -614,9 +666,9 @@ public class AdvancementCalculator {
             for (JsonElement el : officialAwards) {
                 if (!el.isJsonObject()) continue;
                 JsonObject aw = el.getAsJsonObject();
-                int teamNum = aw.has("teamNumber") && !aw.get("teamNumber").isJsonNull() ? aw.get("teamNumber").getAsInt() : 0;
-                String name = aw.has("name") && !aw.get("name").isJsonNull() ? aw.get("name").getAsString() : "";
-                int series = aw.has("series") && !aw.get("series").isJsonNull() ? aw.get("series").getAsInt() : 1;
+                int teamNum = extractTeamNumber(aw, "teamNumber", "TeamNumber", "team", "Team");
+                String name = extractString(aw, "name", "Name");
+                int series = extractIntCI(aw, 1, "series", "Series");
                 if (teamNum <= 0) continue;
 
                 int awardPts = calcAwardPoints(name, series);

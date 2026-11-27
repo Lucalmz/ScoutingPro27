@@ -80,6 +80,9 @@ public class RecordRoutes {
                             
                             boolean isHost = eventDao.isHost(record.getEventId(), userId);
                             ScoutingRecord existing = recordDao.findById(record.getId());
+                            if (existing != null && !Objects.equals(existing.getEventId(), record.getEventId())) {
+                                throw new io.javalin.http.ForbiddenResponse("Record belongs to another event");
+                            }
                             if (existing == null) {
                                 // New record: forcefully bind scoutId to authenticated user
                                 if (!isHost || record.getScoutId() == null || record.getScoutId().isBlank()) {
@@ -152,6 +155,9 @@ public class RecordRoutes {
                                 
                                 boolean isHost = eventDao.isHost(r.getEventId(), userId);
                                 ScoutingRecord existing = recordDao.findById(r.getId());
+                                if (existing != null && !Objects.equals(existing.getEventId(), r.getEventId())) {
+                                    throw new io.javalin.http.ForbiddenResponse("Record belongs to another event");
+                                }
                                 
                                 boolean isCryptographicallySignedPeerRecord = EcdsaRecordVerifier.verifyScoutingRecord(r);
                                 if (!isHost && !isCryptographicallySignedPeerRecord) {
@@ -234,9 +240,13 @@ public class RecordRoutes {
                         jdbi.useTransaction(handle -> {
                             EventDao eventDao = handle.attach(EventDao.class);
                             UserDao userDao = handle.attach(UserDao.class);
+                            if (eventDao.findById(eventId) == null) {
+                                throw new io.javalin.http.NotFoundResponse("Event not found");
+                            }
                             boolean isHost = eventDao.isHost(eventId, callerId);
-                            if (!isHost && !callerId.equals(oldScoutId) && !callerId.equals(newScoutId)) {
-                                throw new io.javalin.http.ForbiddenResponse("Only event host or the scout can migrate records");
+                            boolean isSelfMigration = eventDao.isMember(eventId, callerId) && callerId.equals(oldScoutId);
+                            if (!isHost && !isSelfMigration) {
+                                throw new io.javalin.http.ForbiddenResponse("Only event host or the migrating scout can migrate records");
                             }
 
                             // Ensure new placeholder exists in Host DB
@@ -266,9 +276,12 @@ public class RecordRoutes {
                             handle.execute("MERGE INTO event_users (event_id, user_id) KEY(event_id, user_id) VALUES (?, ?)", eventId, newScoutId);
                             handle.execute("UPDATE team_tags SET created_by = ? WHERE event_id = ? AND created_by = ?", newScoutId, eventId, oldScoutId);
 
-                            // If oldScoutId exists as a user in users table, cascade-merge all foreign keys and delete row
+                            // Only cascade-merge placeholder accounts or caller-owned self-migrations; never delete another registered user's account
                             User oldUser = userDao.findById(oldScoutId);
-                            if (oldUser != null && !oldScoutId.equals(newScoutId)) {
+                            boolean oldUserHasPassword = oldUser != null
+                                    && oldUser.getPassword() != null
+                                    && !oldUser.getPassword().isBlank();
+                            if (oldUser != null && !oldScoutId.equals(newScoutId) && (!oldUserHasPassword || callerId.equals(oldScoutId))) {
                                 UserDeterministicIdMigrator.mergeUserInto(handle, oldScoutId, newScoutId, newScoutName);
                             }
                         });

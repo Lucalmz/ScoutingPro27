@@ -62,7 +62,7 @@ const isSubmitting = ref(false)
 
 // 当前队伍已有的标签
 const currentTags = computed<TeamTagItem[]>(() => {
-  return recordStore.getTagsForTeam(props.teamNumber)
+  return recordStore.getTagsForTeam(props.teamNumber, props.eventId)
 })
 
 // 已选标签名集合（用于防重）
@@ -73,6 +73,7 @@ const activeTagKeys = computed<Set<string>>(() => {
 // 历史/已有事件标签建议（自动补全，V14）
 const tagSuggestions = computed<string[]>(() => {
   const allEventTags = recordStore.teamTags
+    .filter(t => !props.eventId || !t.eventId || t.eventId === props.eventId)
     .map(t => t.tag)
     .filter(t => !t.startsWith('preset.'))
   const unique = Array.from(new Set(allEventTags))

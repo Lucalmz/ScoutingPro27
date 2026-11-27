@@ -24,7 +24,7 @@ public final class AiSchemaBootstrap {
                         system_prompt      TEXT,
                         temperature        DOUBLE        DEFAULT 0.4,
                         max_tokens         INT           DEFAULT 4096,
-                        enable_thinking    BOOLEAN       NOT NULL DEFAULT TRUE,
+                        enable_thinking    BOOLEAN       NOT NULL DEFAULT FALSE,
                         thinking_budget    INT           DEFAULT 4096,
                         anthropic_version  VARCHAR(32)   DEFAULT '2023-06-01',
                         max_context_msgs   INT           DEFAULT 16,

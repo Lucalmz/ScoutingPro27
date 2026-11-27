@@ -94,18 +94,20 @@ function onMyTeamFieldInput(e: Event) {
       </span>
     </div>
 
-    <div v-if="showContextDetails" class="section-toggles-bar">
-      <button
-        v-for="sec in (['rankings', 'schedule', 'pit', 'matches', 'tags'] as const)"
-        :key="sec"
+    <Transition name="ai-ribbon-reveal">
+      <div v-if="showContextDetails" class="section-toggles-bar">
+        <button
+          v-for="sec in (['rankings', 'schedule', 'pit', 'matches', 'tags'] as const)"
+          :key="sec"
         type="button"
         class="sec-pill"
         :class="{ active: contextConfig.sections[sec] }"
         @click="emit('toggle-section', sec)"
       >
         {{ t(`ai.ctx_sec_${sec}`) }}
-      </button>
-    </div>
+        </button>
+      </div>
+    </Transition>
   </div>
 </template>
 
@@ -257,5 +259,23 @@ function onMyTeamFieldInput(e: Event) {
   border-color: var(--primary);
   color: var(--primary);
   background: var(--status-success-bg);
+}
+
+.ai-ribbon-reveal-enter-active {
+  transition:
+    opacity 160ms var(--motion-ease-out),
+    transform 160ms var(--motion-profile-ease-flight);
+}
+
+.ai-ribbon-reveal-leave-active {
+  transition:
+    opacity 120ms var(--motion-profile-ease-exit),
+    transform 120ms var(--motion-profile-ease-exit);
+}
+
+.ai-ribbon-reveal-enter-from,
+.ai-ribbon-reveal-leave-to {
+  opacity: 0;
+  transform: translateY(-4px);
 }
 </style>

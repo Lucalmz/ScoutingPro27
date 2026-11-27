@@ -638,4 +638,113 @@ public class AiEndToEndVerificationTest {
             mockServer.stop(0);
         }
     }
+
+    @Test
+    void testPerRequestThinkingOverrideAndBudgetZeroFallback() throws Exception {
+        HttpServer mockServer = HttpServer.create(new InetSocketAddress(0), 0);
+        java.util.List<String> geminiBodies = java.util.Collections.synchronizedList(new java.util.ArrayList<>());
+        AtomicReference<String> anthropicBody = new AtomicReference<>();
+
+        mockServer.createContext("/gem/v1beta/models", exchange -> {
+            String path = exchange.getRequestURI().getPath();
+            String reqBody = new String(exchange.getRequestBody().readAllBytes(), StandardCharsets.UTF_8);
+            geminiBodies.add(reqBody);
+            if (path.contains("gemini-2.5-pro-mock") && reqBody.contains("\"thinkingBudget\":0")) {
+                byte[] err = "{\"error\":{\"message\":\"Budget 0 is invalid for gemini-2.5-pro\"}}".getBytes(StandardCharsets.UTF_8);
+                exchange.sendResponseHeaders(400, err.length);
+                try (OutputStream os = exchange.getResponseBody()) { os.write(err); }
+                return;
+            }
+            exchange.getResponseHeaders().set("Content-Type", "text/event-stream; charset=UTF-8");
+            exchange.sendResponseHeaders(200, 0);
+            try (OutputStream os = exchange.getResponseBody()) {
+                os.write("data: {\"candidates\":[{\"content\":{\"parts\":[{\"text\":\"Quick reply\"}]}}]}\n\n".getBytes(StandardCharsets.UTF_8));
+                os.flush();
+            }
+        });
+
+        mockServer.createContext("/ant/v1/messages", exchange -> {
+            anthropicBody.set(new String(exchange.getRequestBody().readAllBytes(), StandardCharsets.UTF_8));
+            exchange.getResponseHeaders().set("Content-Type", "text/event-stream; charset=UTF-8");
+            exchange.sendResponseHeaders(200, 0);
+            try (OutputStream os = exchange.getResponseBody()) {
+                os.write("event: content_block_delta\ndata: {\"type\":\"content_block_delta\",\"delta\":{\"type\":\"text_delta\",\"text\":\"Claude answer\"}}\n\nevent: message_stop\ndata: {\"type\":\"message_stop\"}\n\n".getBytes(StandardCharsets.UTF_8));
+                os.flush();
+            }
+        });
+
+        mockServer.start();
+        int port = mockServer.getAddress().getPort();
+
+        try {
+            JavalinTest.test(app, (server, client) -> {
+                var regRes = client.post("/api/user/register", "{\"username\":\"think_ctrl\",\"password\":\"pass12345\"}");
+                assertThat(regRes.code()).isEqualTo(200);
+                var regJson = JsonParser.parseString(regRes.body().string()).getAsJsonObject();
+                String token = regJson.get("token").getAsString();
+                String userId = regJson.get("id").getAsString();
+
+                // Save Gemini profile with enableThinking=true
+                var gemSave = client.post("/api/users/" + userId + "/ai-profiles",
+                        "{\"name\":\"GemThink\",\"protocol\":\"GEMINI\",\"baseUrl\":\"http://localhost:" + port + "/gem\",\"apiKeyEncrypted\":\"AIzaSyTest1234\",\"modelName\":\"gemini-flash-mock\",\"enableThinking\":true,\"thinkingBudget\":4096}",
+                        b -> b.header("Authorization", "Bearer " + token));
+                assertThat(gemSave.code()).isEqualTo(200);
+                String geminiProfileId = JsonParser.parseString(gemSave.body().string()).getAsJsonObject().get("id").getAsString();
+
+                // Save Anthropic profile with default enableThinking=false
+                var antSave = client.post("/api/users/" + userId + "/ai-profiles",
+                        "{\"name\":\"AntDefaultOff\",\"protocol\":\"ANTHROPIC\",\"baseUrl\":\"http://localhost:" + port + "/ant\",\"apiKeyEncrypted\":\"sk-ant-test1234\",\"modelName\":\"claude-sonnet-4-20250514\"}",
+                        b -> b.header("Authorization", "Bearer " + token));
+                assertThat(antSave.code()).isEqualTo(200);
+                var antObj = JsonParser.parseString(antSave.body().string()).getAsJsonObject();
+                assertThat(antObj.get("enableThinking").getAsBoolean()).isFalse();
+                String anthropicProfileId = antObj.get("id").getAsString();
+
+                HttpClient http = HttpClient.newHttpClient();
+                String streamUrl = "http://localhost:" + server.port() + "/api/ai/chat/stream";
+
+                // 1. Per-request override disables thinking on Gemini profile that had enableThinking=true
+                var req1 = HttpRequest.newBuilder(URI.create(streamUrl))
+                        .header("Authorization", "Bearer " + token)
+                        .header("Content-Type", "application/json")
+                        .POST(HttpRequest.BodyPublishers.ofString("{\"profileId\":\"" + geminiProfileId + "\",\"enableThinking\":false,\"thinkingBudget\":0,\"messages\":[{\"role\":\"user\",\"content\":\"Fast check\"}]}"))
+                        .build();
+                String sse1 = http.send(req1, HttpResponse.BodyHandlers.ofString()).body();
+                assertThat(sse1).contains("Quick reply");
+                var sent1 = JsonParser.parseString(geminiBodies.get(0)).getAsJsonObject()
+                        .getAsJsonObject("generationConfig").getAsJsonObject("thinkingConfig");
+                assertThat(sent1.get("includeThoughts").getAsBoolean()).isFalse();
+                assertThat(sent1.get("thinkingBudget").getAsInt()).isEqualTo(0);
+
+                // 2. Gemini 2.5 Pro fallback when thinkingBudget=0 is rejected -> retries with 128
+                geminiBodies.clear();
+                var req2 = HttpRequest.newBuilder(URI.create(streamUrl))
+                        .header("Authorization", "Bearer " + token)
+                        .header("Content-Type", "application/json")
+                        .POST(HttpRequest.BodyPublishers.ofString("{\"profileId\":\"" + geminiProfileId + "\",\"modelName\":\"gemini-2.5-pro-mock\",\"enableThinking\":false,\"thinkingBudget\":0,\"messages\":[{\"role\":\"user\",\"content\":\"Pro check\"}]}"))
+                        .build();
+                String sse2 = http.send(req2, HttpResponse.BodyHandlers.ofString()).body();
+                assertThat(sse2).contains("Quick reply");
+                assertThat(geminiBodies).hasSize(2);
+                var retryCfg = JsonParser.parseString(geminiBodies.get(1)).getAsJsonObject()
+                        .getAsJsonObject("generationConfig").getAsJsonObject("thinkingConfig");
+                assertThat(retryCfg.get("includeThoughts").getAsBoolean()).isFalse();
+                assertThat(retryCfg.get("thinkingBudget").getAsInt()).isEqualTo(128);
+
+                // 3. Per-request override enables thinking on Anthropic profile that had enableThinking=false
+                var req3 = HttpRequest.newBuilder(URI.create(streamUrl))
+                        .header("Authorization", "Bearer " + token)
+                        .header("Content-Type", "application/json")
+                        .POST(HttpRequest.BodyPublishers.ofString("{\"profileId\":\"" + anthropicProfileId + "\",\"enableThinking\":true,\"thinkingBudget\":2048,\"messages\":[{\"role\":\"user\",\"content\":\"Deep check\"}]}"))
+                        .build();
+                String sse3 = http.send(req3, HttpResponse.BodyHandlers.ofString()).body();
+                assertThat(sse3).contains("Claude answer");
+                var antSent = JsonParser.parseString(anthropicBody.get()).getAsJsonObject();
+                assertThat(antSent.getAsJsonObject("thinking").get("type").getAsString()).isEqualTo("enabled");
+                assertThat(antSent.getAsJsonObject("thinking").get("budget_tokens").getAsInt()).isEqualTo(2048);
+            });
+        } finally {
+            mockServer.stop(0);
+        }
+    }
 }

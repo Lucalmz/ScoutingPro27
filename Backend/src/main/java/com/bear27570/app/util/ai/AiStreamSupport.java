@@ -1,6 +1,7 @@
 package com.bear27570.app.util.ai;
 
 import com.google.gson.Gson;
+import com.google.gson.JsonElement;
 import com.google.gson.JsonObject;
 
 import java.io.InputStream;
@@ -37,7 +38,11 @@ public final class AiStreamSupport {
         if (obj == null || !obj.has(field) || obj.get(field).isJsonNull()) {
             return null;
         }
-        String val = obj.get(field).getAsString();
+        JsonElement el = obj.get(field);
+        if (!el.isJsonPrimitive()) {
+            return null;
+        }
+        String val = el.getAsString();
         return val.isEmpty() ? null : val;
     }
 

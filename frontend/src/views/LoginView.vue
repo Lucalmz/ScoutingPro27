@@ -117,14 +117,14 @@ async function handleLogin() {
     await handleUsernameBlur()
   }
 
-  const pwd = password.value.trim()
-  if (!pwd) return
+  if (!password.value.trim()) return
+  const pwd = password.value
 
   if (isNewUser.value) {
     if (!confirmPassword.value.trim()) {
       return
     }
-    if (pwd !== confirmPassword.value.trim()) {
+    if (pwd !== confirmPassword.value) {
       toastStore.showError(t('login.password_mismatch'))
       return
     }

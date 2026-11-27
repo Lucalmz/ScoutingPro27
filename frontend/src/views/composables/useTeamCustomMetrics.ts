@@ -63,8 +63,9 @@ export function computeTeamMatchCustomMetrics(
   const matchFormulas = sortedFormulas.filter((f) => f.target === 'MATCH')
 
   // Pre-evaluate MATCH formulas per match in topological order
-  const nonBrokenMatches = matches
-    .filter((m) => !m.isDeleted && !m.isBroken)
+  const activeMatches = matches.filter((m) => !m.isDeleted)
+  const nonBrokenMatches = activeMatches
+    .filter((m) => !m.isBroken)
     .slice()
     .sort((a, b) => a.matchNumber - b.matchNumber)
 
@@ -114,7 +115,7 @@ export function computeTeamMatchCustomMetrics(
   for (const field of fields) {
     if (field.fieldType === 'number' || field.fieldType === 'level' || field.fieldType === 'timer') {
       const values: number[] = []
-      for (const m of matches) {
+      for (const m of activeMatches) {
         const cf = parseCustomFields(m)
         const val = cf[field.fieldKey]
         if (val !== undefined && val !== null && val !== '') {
@@ -143,7 +144,7 @@ export function computeTeamMatchCustomMetrics(
     } else if (field.fieldType === 'boolean') {
       let trueCount = 0
       let totalCount = 0
-      for (const m of matches) {
+      for (const m of activeMatches) {
         const cf = parseCustomFields(m)
         const val = cf[field.fieldKey]
         if (val !== undefined && val !== null) {
@@ -166,7 +167,7 @@ export function computeTeamMatchCustomMetrics(
       const optionMap: Record<string, number> = {}
       const numericVals: number[] = []
       let totalEvals = 0
-      for (const m of matches) {
+      for (const m of activeMatches) {
         const cf = parseCustomFields(m)
         const val = cf[field.fieldKey]
         if (val !== undefined && val !== null && val !== '') {
@@ -228,7 +229,7 @@ export function computeTeamMatchCustomMetrics(
       }
     } else if (field.fieldType === 'text') {
       const textEntries: { matchNumber: number; text: string }[] = []
-      for (const m of matches) {
+      for (const m of activeMatches) {
         const cf = parseCustomFields(m)
         const val = cf[field.fieldKey]
         if (typeof val === 'string' && val.trim().length > 0) {

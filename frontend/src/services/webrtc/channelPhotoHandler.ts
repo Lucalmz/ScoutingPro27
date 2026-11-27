@@ -118,6 +118,16 @@ export async function handleChannelPhotoMessage(
           updatedAt: now
         }
         photoChunkBuffers.set(transferId, buffer)
+      } else if (
+        buffer.totalChunks !== totalChunks ||
+        buffer.key !== key ||
+        buffer.eventId !== effectiveEventId ||
+        chunkIndex >= buffer.totalChunks
+      ) {
+        console.warn(
+          `[WebRTC Host] Dropped mismatched PIT_PHOTO_CHUNK for transfer ${transferId} (expected total=${buffer.totalChunks}, key=${buffer.key}, event=${buffer.eventId})`
+        )
+        return true
       }
 
       if (buffer.chunks[chunkIndex] === undefined) {

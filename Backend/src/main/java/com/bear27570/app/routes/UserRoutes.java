@@ -109,6 +109,20 @@ public class UserRoutes {
                         throw new RuntimeException("User already exists");
                     }
                     String userId = UserUtil.generateDeterministicUserId(trimmedUsername);
+                    User existingById = dao.findById(userId);
+                    boolean hasPassword = existingById != null && existingById.getPassword() != null && !existingById.getPassword().isBlank();
+                    String expectedHostPlaceholder = "Host " + userId.substring(0, Math.min(6, userId.length()));
+                    boolean isReclaimablePlaceholder = existingById != null && !hasPassword && (
+                            existingById.getUsername() == null
+                            || existingById.getUsername().isBlank()
+                            || trimmedUsername.equalsIgnoreCase(existingById.getUsername().trim())
+                            || expectedHostPlaceholder.equals(existingById.getUsername().trim())
+                    );
+                    if (existingById != null && (hasPassword || !isReclaimablePlaceholder)) {
+                        do {
+                            userId = UUID.randomUUID().toString();
+                        } while (dao.findById(userId) != null);
+                    }
                     User u = new User(userId, trimmedUsername);
                     u.setPassword(BCrypt.hashpw(password, BCrypt.gensalt()));
                     dao.upsert(u);

@@ -188,69 +188,81 @@ export class PcmAudioCapture {
     }
     this.stream = stream
 
-    const AudioCtx = window.AudioContext || (window as unknown as { webkitAudioContext: typeof AudioContext }).webkitAudioContext
-    const ctx = new AudioCtx()
-    this.audioCtx = ctx
-    if (ctx.state === 'suspended') {
-      await ctx.resume()
-    }
-
-    const source = ctx.createMediaStreamSource(stream)
-    this.sourceNode = source
-    const silentSink = ctx.createGain()
-    silentSink.gain.value = 0
-    this.muteGain = silentSink
-
-    const handleFloatFrame = (samples: Float32Array) => {
-      if (this.stopped) return
-      const level = this.muted ? 0 : computeRmsLevel(samples)
-      this.onLevel?.(level)
-      if (!this.muted) {
-        const resampled = downsampleFloat32ToInt16(samples, ctx.sampleRate, this.targetSampleRate)
-        if (resampled.length > 0) {
-          this.onChunk(resampled)
-        }
+    try {
+      const AudioCtx = window.AudioContext || (window as unknown as { webkitAudioContext: typeof AudioContext }).webkitAudioContext
+      const ctx = new AudioCtx()
+      this.audioCtx = ctx
+      if (ctx.state === 'suspended') {
+        await ctx.resume()
       }
-    }
+      if (this.stopped) {
+        this.stop()
+        return
+      }
 
-    if (typeof AudioWorkletNode !== 'undefined' && ctx.audioWorklet) {
-      try {
-        const blob = new Blob([CAPTURE_WORKLET_CODE], { type: 'application/javascript' })
-        this.workletBlobUrl = URL.createObjectURL(blob)
-        await ctx.audioWorklet.addModule(this.workletBlobUrl)
-        URL.revokeObjectURL(this.workletBlobUrl)
-        this.workletBlobUrl = null
+      const source = ctx.createMediaStreamSource(stream)
+      this.sourceNode = source
+      const silentSink = ctx.createGain()
+      silentSink.gain.value = 0
+      this.muteGain = silentSink
 
+      const handleFloatFrame = (samples: Float32Array) => {
         if (this.stopped) return
-        const node = new AudioWorkletNode(ctx, 'sp27-pcm-capture-processor')
-        node.port.onmessage = evt => {
-          if (evt.data instanceof Float32Array) {
-            handleFloatFrame(evt.data)
+        const level = this.muted ? 0 : computeRmsLevel(samples)
+        this.onLevel?.(level)
+        if (!this.muted) {
+          const resampled = downsampleFloat32ToInt16(samples, ctx.sampleRate, this.targetSampleRate)
+          if (resampled.length > 0) {
+            this.onChunk(resampled)
           }
         }
-        source.connect(node)
-        node.connect(silentSink)
-        silentSink.connect(ctx.destination)
-        this.workletNode = node
-        return
-      } catch {
-        if (this.workletBlobUrl) {
+      }
+
+      if (typeof AudioWorkletNode !== 'undefined' && ctx.audioWorklet) {
+        try {
+          const blob = new Blob([CAPTURE_WORKLET_CODE], { type: 'application/javascript' })
+          this.workletBlobUrl = URL.createObjectURL(blob)
+          await ctx.audioWorklet.addModule(this.workletBlobUrl)
           URL.revokeObjectURL(this.workletBlobUrl)
           this.workletBlobUrl = null
+
+          if (this.stopped) {
+            this.stop()
+            return
+          }
+          const node = new AudioWorkletNode(ctx, 'sp27-pcm-capture-processor')
+          node.port.onmessage = evt => {
+            if (evt.data instanceof Float32Array) {
+              handleFloatFrame(evt.data)
+            }
+          }
+          source.connect(node)
+          node.connect(silentSink)
+          silentSink.connect(ctx.destination)
+          this.workletNode = node
+          return
+        } catch {
+          if (this.workletBlobUrl) {
+            URL.revokeObjectURL(this.workletBlobUrl)
+            this.workletBlobUrl = null
+          }
         }
       }
-    }
 
-    // Fallback for environments where AudioWorklet is unavailable
-    const proc = ctx.createScriptProcessor(2048, 1, 1)
-    proc.onaudioprocess = evt => {
-      const data = evt.inputBuffer.getChannelData(0)
-      handleFloatFrame(new Float32Array(data))
+      // Fallback for environments where AudioWorklet is unavailable
+      const proc = ctx.createScriptProcessor(2048, 1, 1)
+      proc.onaudioprocess = evt => {
+        const data = evt.inputBuffer.getChannelData(0)
+        handleFloatFrame(new Float32Array(data))
+      }
+      source.connect(proc)
+      proc.connect(silentSink)
+      silentSink.connect(ctx.destination)
+      this.scriptNode = proc
+    } catch (err) {
+      this.stop()
+      throw err
     }
-    source.connect(proc)
-    proc.connect(silentSink)
-    silentSink.connect(ctx.destination)
-    this.scriptNode = proc
   }
 
   setMuted(muted: boolean): void {
@@ -405,6 +417,8 @@ export class PcmAudioPlayer {
   }
 }
 
+let activeSpeechSynthesizer: StreamingSpeechSynthesizer | null = null
+
 export class StreamingSpeechSynthesizer {
   private buffer = ''
   private queue: string[] = []
@@ -465,6 +479,9 @@ export class StreamingSpeechSynthesizer {
     this.buffer = ''
     this.queue = []
     this.activeUtterance = null
+    if (activeSpeechSynthesizer === this) {
+      activeSpeechSynthesizer = null
+    }
     if (typeof window !== 'undefined' && 'speechSynthesis' in window) {
       try {
         window.speechSynthesis.cancel()
@@ -489,12 +506,20 @@ export class StreamingSpeechSynthesizer {
   private pumpNext(): void {
     if (this.queue.length === 0) {
       this.activeUtterance = null
+      if (activeSpeechSynthesizer === this) {
+        activeSpeechSynthesizer = null
+      }
       if (this.speaking) {
         this.speaking = false
         this.onSpeakingChange?.(false)
       }
       return
     }
+
+    if (activeSpeechSynthesizer && activeSpeechSynthesizer !== this) {
+      activeSpeechSynthesizer.stop()
+    }
+    activeSpeechSynthesizer = this
 
     const next = this.queue.shift()!
     const utter = new SpeechSynthesisUtterance(next)

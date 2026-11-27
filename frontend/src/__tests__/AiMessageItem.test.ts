@@ -238,4 +238,154 @@ describe('AiMessageItem.vue', () => {
     await nextTick()
     expect(copyBtn.text()).toBe('已复制 ✓')
   })
+
+  it('keeps team chips clickable during streaming and renders Turbo execution receipt while hiding raw sp27-action JSON', async () => {
+    const msg: AiChatMessage = {
+      id: 'm-turbo-1',
+      role: 'assistant',
+      aiMode: 'turbo',
+      content: [
+        'I have updated #27570 as requested.',
+        '',
+        '```sp27-action',
+        '{"actions":[{"type":"add_tag","teamNumber":27570,"tag":"fast-cycle"}]}',
+        '```'
+      ].join('\n'),
+      turboActions: [
+        {
+          id: 'act-1',
+          type: 'add_tag',
+          status: 'success',
+          summary: 'Added tag "fast-cycle" to #27570',
+          actedAsUsername: 'captain'
+        },
+        {
+          id: 'act-2',
+          type: 'ban_team',
+          status: 'error',
+          summary: 'Ban #19600',
+          error: 'Permission denied: only event Host can ban teams',
+          actedAsUsername: 'captain'
+        }
+      ]
+    }
+
+    const wrapper = track(mount(AiMessageItem, {
+      props: {
+        message: msg,
+        isStreaming: true,
+        isLatestAssistant: true,
+        knownTeamRegex: null
+      },
+      global: { plugins: [i18n] }
+    }))
+
+    // Team chip is clickable immediately while streaming
+    const chip = wrapper.find('[data-team="27570"]')
+    expect(chip.exists()).toBe(true)
+    await chip.trigger('click')
+    expect(wrapper.emitted('teamClick')?.[0]).toEqual([27570])
+
+    // Raw sp27-action block is stripped from rendered markdown
+    expect(wrapper.find('.markdown-body').text()).not.toContain('sp27-action')
+    expect(wrapper.find('.markdown-body').text()).not.toContain('"actions"')
+
+    // Turbo badge & execution receipt card are rendered in DOM
+    expect(wrapper.find('.msg-turbo-pill').exists()).toBe(true)
+    const receipt = wrapper.find('.turbo-receipt-card')
+    expect(receipt.exists()).toBe(true)
+    expect(receipt.text()).toContain('Turbo Execution (1/2)')
+    expect(receipt.text()).toContain('Acted as: captain')
+    expect(receipt.text()).toContain('Added tag "fast-cycle" to #27570')
+    expect(receipt.text()).toContain('Permission denied: only event Host can ban teams')
+  })
+
+  it('escapes HTML quotes/tags in user messages and blocks dangerous link protocols in assistant markdown', () => {
+    const userMsg: AiChatMessage = {
+      id: 'm-user-xss',
+      role: 'user',
+      content: `<img src=x onerror="alert('xss')"> check #27570`
+    }
+    const userWrapper = track(mount(AiMessageItem, {
+      props: {
+        message: userMsg,
+        isStreaming: false,
+        isLatestAssistant: false,
+        knownTeamRegex: /\b(27570)\b/g
+      },
+      global: { plugins: [i18n] }
+    }))
+
+    const userTextEl = userWrapper.find('.user-text')
+    expect(userTextEl.exists()).toBe(true)
+    expect(userTextEl.find('img').exists()).toBe(false)
+    expect(userTextEl.text()).toContain(`<img src=x onerror="alert('xss')">`)
+    expect(userTextEl.find('[data-team="27570"]').exists()).toBe(true)
+
+    const asstMsg: AiChatMessage = {
+      id: 'm-asst-xss',
+      role: 'assistant',
+      content: [
+        '[ClickJS](javascript:alert(1))',
+        '[ClickVBS](vbscript:msgbox(1))',
+        '[ClickData](data:text/html,<script>alert(1)</script>)',
+        '[Team 27570](https://ftc-events.firstinspires.org/team/27570)'
+      ].join('\n')
+    }
+    const asstWrapper = track(mount(AiMessageItem, {
+      props: {
+        message: asstMsg,
+        isStreaming: false,
+        isLatestAssistant: true,
+        knownTeamRegex: /\b(27570)\b/g
+      },
+      global: { plugins: [i18n] }
+    }))
+
+    const mdBody = asstWrapper.find('.markdown-body')
+    expect(mdBody.exists()).toBe(true)
+    const links = mdBody.findAll('a')
+    for (const a of links) {
+      const href = (a.attributes('href') || '').toLowerCase()
+      expect(href.startsWith('javascript:')).toBe(false)
+      expect(href.startsWith('vbscript:')).toBe(false)
+      expect(href.startsWith('data:text/html')).toBe(false)
+    }
+    // Safe external link should remain intact without nested .team-chip
+    expect(links.length).toBe(1)
+    expect(links[0]!.attributes('href')).toBe('https://ftc-events.firstinspires.org/team/27570')
+    expect(links[0]!.find('.team-chip').exists()).toBe(false)
+  })
+
+  it('strips sp27-action blocks from copy/TTS and hides copy button on action-only messages without prose', async () => {
+    const mixedMsg: AiChatMessage = {
+      id: 'm-mixed',
+      role: 'assistant',
+      content: 'Clean tactical advice.\n```sp27-action\n{"actions":[{"type":"set_my_team","teamNumber":27570}]}\n```',
+      turboActions: [{ id: 'a1', type: 'set_my_team', status: 'success', summary: 'Set my team to #27570' }]
+    }
+    const mixedWrapper = track(mount(AiMessageItem, {
+      props: { message: mixedMsg, isStreaming: false, isLatestAssistant: false, knownTeamRegex: null },
+      global: { plugins: [i18n] }
+    }))
+
+    const copyBtn = mixedWrapper.find('.btn-msg-act[title="Copy content"]')
+    expect(copyBtn.exists()).toBe(true)
+    await copyBtn.trigger('click')
+    expect(writeTextMock).toHaveBeenCalledWith('Clean tactical advice.')
+
+    const actionOnlyMsg: AiChatMessage = {
+      id: 'm-action-only',
+      role: 'assistant',
+      content: '```sp27-action\n{"actions":[{"type":"set_my_team","teamNumber":27570}]}\n```',
+      turboActions: [{ id: 'a2', type: 'set_my_team', status: 'success', summary: 'Set my team to #27570' }]
+    }
+    const actionOnlyWrapper = track(mount(AiMessageItem, {
+      props: { message: actionOnlyMsg, isStreaming: false, isLatestAssistant: false, knownTeamRegex: null },
+      global: { plugins: [i18n] }
+    }))
+
+    expect(actionOnlyWrapper.find('.turbo-receipt-card').exists()).toBe(true)
+    expect(actionOnlyWrapper.find('.btn-msg-act[title="Copy content"]').exists()).toBe(false)
+  })
 })

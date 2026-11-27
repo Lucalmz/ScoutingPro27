@@ -1,5 +1,6 @@
 import { i18n } from '@/i18n'
 import type { AiTokenUsage } from '@/types'
+import { aiFetch } from './constants'
 
 export interface ChatMessage {
   id: string
@@ -15,9 +16,13 @@ export interface StreamAiChatRequest {
   provider?: string
   modelName?: string
   temperature?: number
+  enableThinking?: boolean
+  thinkingBudget?: number
+  reasoningEffort?: string
   systemPrompt: string
   messages: Array<{ role: string; content: string }>
   signal: AbortSignal
+  onRefreshedToken?: (token: string) => void
 }
 
 export interface StreamAiChatDelta {
@@ -123,11 +128,12 @@ export async function streamAiChat(
   }
 
   try {
-    const res = await fetch('/api/ai/chat/stream', {
+    const res = await aiFetch('/api/ai/chat/stream', {
       method: 'POST',
+      token: req.token,
+      onRefreshedToken: req.onRefreshedToken,
       headers: {
         'Content-Type': 'application/json',
-        Authorization: `Bearer ${req.token}`,
         Accept: 'text/event-stream'
       },
       body: JSON.stringify({
@@ -135,6 +141,9 @@ export async function streamAiChat(
         provider: req.provider || undefined,
         modelName: req.modelName || undefined,
         temperature: req.temperature,
+        enableThinking: req.enableThinking,
+        thinkingBudget: req.thinkingBudget,
+        reasoningEffort: req.reasoningEffort || undefined,
         systemPrompt: req.systemPrompt,
         messages: req.messages
       }),
@@ -144,11 +153,16 @@ export async function streamAiChat(
     const contentType = res.headers.get('content-type') || ''
     if (!res.ok || !contentType.includes('text/event-stream')) {
       let errMsg = i18n.global.t('ai.err_connect_failed')
-      try {
-        const errJson = await res.json()
-        errMsg = errJson.error || errJson.message || JSON.stringify(errJson)
-      } catch {
-        errMsg = (await res.text().catch(() => '')) || `HTTP ${res.status}`
+      const rawText = await res.text().catch(() => '')
+      if (rawText.trim()) {
+        try {
+          const errJson = JSON.parse(rawText)
+          errMsg = errJson.error || errJson.message || rawText.trim()
+        } catch {
+          errMsg = rawText.trim()
+        }
+      } else {
+        errMsg = `HTTP ${res.status}`
       }
       handlers.onPreflightError?.(errMsg)
       return {

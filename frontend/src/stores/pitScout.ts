@@ -34,6 +34,7 @@ export const usePitScoutStore = defineStore('pitScout', () => {
   const officialTeams = ref<OfficialTeamInfo[]>([])
   const loading = ref(false)
   const error = ref<string | null>(null)
+  let fetchSeq = 0
 
   // 检索与筛选状态
   const searchQuery = ref('')
@@ -42,13 +43,50 @@ export const usePitScoutStore = defineStore('pitScout', () => {
   const sortBy = ref<'teamNumber' | 'bragAsc' | 'bragDesc' | 'scoreDesc'>('teamNumber')
 
   // 本地缓存存取
-  function loadFromLocalStorage(eventId: string) {
+  function loadFromLocalStorage(eventId: string, resetMemory = true) {
+    if (resetMemory) {
+      records.value = []
+      officialTeams.value = []
+    } else {
+      records.value = records.value.filter((r) => !r.eventId || r.eventId === eventId)
+      officialTeams.value = officialTeams.value.filter((t) => !t.eventId || t.eventId === eventId)
+    }
     try {
       const rawRecs = localStorage.getItem(`${STORAGE_PREFIX}records_${eventId}`)
-      if (rawRecs) records.value = JSON.parse(rawRecs)
+      if (rawRecs) {
+        const parsed = JSON.parse(rawRecs)
+        if (Array.isArray(parsed)) {
+          const cleaned = parsed
+            .filter((r: any) => r && (!r.eventId || r.eventId === eventId))
+            .map((r: any) => ({ ...r, eventId: r.eventId || eventId }))
+          if (cleaned.length !== parsed.length) {
+            localStorage.setItem(`${STORAGE_PREFIX}records_${eventId}`, JSON.stringify(cleaned))
+          }
+          if (resetMemory || records.value.length === 0) {
+            records.value = cleaned
+          } else {
+            const memMap = new Map(records.value.map((r) => [r.teamNumber, r]))
+            for (const c of cleaned) {
+              if (!memMap.has(c.teamNumber)) memMap.set(c.teamNumber, c)
+            }
+            records.value = Array.from(memMap.values())
+          }
+        }
+      }
 
       const rawTeams = localStorage.getItem(`${STORAGE_PREFIX}teams_${eventId}`)
-      if (rawTeams) officialTeams.value = JSON.parse(rawTeams)
+      if (rawTeams) {
+        const parsed = JSON.parse(rawTeams)
+        if (Array.isArray(parsed)) {
+          const cleanedTeams = parsed.filter((t: any) => t && (!t.eventId || t.eventId === eventId))
+          if (cleanedTeams.length !== parsed.length) {
+            localStorage.setItem(`${STORAGE_PREFIX}teams_${eventId}`, JSON.stringify(cleanedTeams))
+          }
+          if (resetMemory || officialTeams.value.length === 0) {
+            officialTeams.value = cleanedTeams
+          }
+        }
+      }
     } catch {
       // 忽略本地反序列化错误
     }
@@ -56,8 +94,10 @@ export const usePitScoutStore = defineStore('pitScout', () => {
 
   function saveToLocalStorage(eventId: string) {
     try {
-      localStorage.setItem(`${STORAGE_PREFIX}records_${eventId}`, JSON.stringify(records.value))
-      localStorage.setItem(`${STORAGE_PREFIX}teams_${eventId}`, JSON.stringify(officialTeams.value))
+      const scopedRecords = records.value.filter((r) => !r.eventId || r.eventId === eventId)
+      const scopedTeams = officialTeams.value.filter((t) => !t.eventId || t.eventId === eventId)
+      localStorage.setItem(`${STORAGE_PREFIX}records_${eventId}`, JSON.stringify(scopedRecords))
+      localStorage.setItem(`${STORAGE_PREFIX}teams_${eventId}`, JSON.stringify(scopedTeams))
     } catch (e) {
       console.warn('[PitScoutStore] Failed to save to localStorage:', e)
     }
@@ -210,18 +250,32 @@ export const usePitScoutStore = defineStore('pitScout', () => {
   // --- API 与同步操作 ---
 
   async function fetchPitData(eventId: string) {
+    const prevEventId = currentEventId.value
+    const reqSeq = ++fetchSeq
     currentEventId.value = eventId
+    if (prevEventId !== eventId) {
+      searchQuery.value = ''
+      filterDrivetrain.value = 'all'
+      filterRecordStatus.value = 'all'
+    }
     loading.value = true
     error.value = null
-    loadFromLocalStorage(eventId)
+    loadFromLocalStorage(eventId, prevEventId !== eventId)
 
     try {
       const res = await fetchPitRecords(eventId)
+      if (reqSeq !== fetchSeq || currentEventId.value !== eventId) return
       if (res) {
         if (Array.isArray(res.records)) {
-          // 3-way merge with local records
-          const localMap = new Map(records.value.map((r) => [r.teamNumber, r]))
-          for (const serverRec of res.records) {
+          // 3-way merge with local records (strictly scoped to eventId)
+          const localMap = new Map(
+            records.value
+              .filter((r) => !r.eventId || r.eventId === eventId)
+              .map((r) => [r.teamNumber, { ...r, eventId: r.eventId || eventId }])
+          )
+          for (const rawServerRec of res.records) {
+            if (rawServerRec.eventId && rawServerRec.eventId !== eventId) continue
+            const serverRec: PitScoutingRecord = { ...rawServerRec, eventId: rawServerRec.eventId || eventId }
             const local = localMap.get(serverRec.teamNumber)
             if (!local) {
               localMap.set(serverRec.teamNumber, serverRec)
@@ -250,6 +304,8 @@ export const usePitScoutStore = defineStore('pitScout', () => {
 
         if (Array.isArray(res.officialTeams)) {
           officialTeams.value = res.officialTeams
+            .filter((t) => !t.eventId || t.eventId === eventId)
+            .map((t) => ({ ...t, eventId: t.eventId || eventId }))
         }
 
         saveToLocalStorage(eventId)
@@ -257,7 +313,9 @@ export const usePitScoutStore = defineStore('pitScout', () => {
     } catch (e: any) {
       console.warn('[PitScoutStore] Failed to fetch pit data from backend:', e.message)
     } finally {
-      loading.value = false
+      if (reqSeq === fetchSeq) {
+        loading.value = false
+      }
     }
   }
 
@@ -267,18 +325,18 @@ export const usePitScoutStore = defineStore('pitScout', () => {
 
   function syncFromCrdt(eventId: string) {
     if (!eventId) return
+    if (currentEventId.value && currentEventId.value !== eventId) return
     const handle = getExistingEventCrdt(eventId)
     if (!handle) return
     const crdtRecs = readPitRecordsFromCrdt(handle.store, eventId)
-    const otherEvents = records.value.filter((r) => r.eventId && r.eventId !== eventId)
     const activeMap = new Map<number, PitScoutingRecord>()
     for (const r of crdtRecs) {
-      activeMap.set(r.teamNumber, r)
+      if (!r.eventId || r.eventId === eventId) {
+        activeMap.set(r.teamNumber, { ...r, eventId: r.eventId || eventId })
+      }
     }
-    records.value = [...otherEvents, ...Array.from(activeMap.values())]
-    if (currentEventId.value === eventId || !currentEventId.value) {
-      saveToLocalStorage(eventId)
-    }
+    records.value = Array.from(activeMap.values())
+    saveToLocalStorage(eventId)
   }
 
   async function saveRecord(record: PitScoutingRecord) {
@@ -342,7 +400,7 @@ export const usePitScoutStore = defineStore('pitScout', () => {
   async function flushPendingPitRecords(targetEventId?: string) {
     const eid = targetEventId || currentEventId.value
     if (!eid) return
-    const pending = records.value.filter((r) => r.syncStatus === 'PENDING')
+    const pending = records.value.filter((r) => r.syncStatus === 'PENDING' && (!r.eventId || r.eventId === eid))
     if (pending.length === 0) return
 
     console.log(`[PitScoutStore] Flushing ${pending.length} pending pit records for event ${eid}...`)
@@ -380,43 +438,46 @@ export const usePitScoutStore = defineStore('pitScout', () => {
 
   function applyRemoteUpdate(record: PitScoutingRecord) {
     if (!record || !record.teamNumber) return
+    if (currentEventId.value && record.eventId && record.eventId !== currentEventId.value) return
+    const normalizedRecord: PitScoutingRecord =
+      currentEventId.value && !record.eventId ? { ...record, eventId: currentEventId.value } : record
 
-    const idx = records.value.findIndex((r) => r.teamNumber === record.teamNumber)
+    const idx = records.value.findIndex((r) => r.teamNumber === normalizedRecord.teamNumber)
     if (idx >= 0) {
       const local = records.value[idx]
       if (local) {
         // 如果本地有正在等待同步的更改，且版本更高或相同，保留本地编辑，仅合并照片
-        if (local.syncStatus === 'PENDING' && (local.version || 0) >= (record.version || 0)) {
-          if (record.photoKeys && record.photoKeys.length > 0) {
-            local.photoKeys = Array.from(new Set([...(local.photoKeys || []), ...record.photoKeys]))
+        if (local.syncStatus === 'PENDING' && (local.version || 0) >= (normalizedRecord.version || 0)) {
+          if (normalizedRecord.photoKeys && normalizedRecord.photoKeys.length > 0) {
+            local.photoKeys = Array.from(new Set([...(local.photoKeys || []), ...normalizedRecord.photoKeys]))
             if (currentEventId.value) saveToLocalStorage(currentEventId.value)
           }
           return
         }
 
-        const shouldAccept = (record.version || 0) > (local.version || 0) ||
-          ((record.version || 0) === (local.version || 0) && (record.updatedAt || '') >= (local.updatedAt || ''))
+        const shouldAccept = (normalizedRecord.version || 0) > (local.version || 0) ||
+          ((normalizedRecord.version || 0) === (local.version || 0) && (normalizedRecord.updatedAt || '') >= (local.updatedAt || ''))
         if (shouldAccept) {
           // 合并本地可能拍摄的照片 key，防止覆盖
           if (local.photoKeys && local.photoKeys.length > 0) {
-            record.photoKeys = Array.from(new Set([...(record.photoKeys || []), ...local.photoKeys]))
+            normalizedRecord.photoKeys = Array.from(new Set([...(normalizedRecord.photoKeys || []), ...local.photoKeys]))
           }
-          record.syncStatus = 'SYNCED'
-          records.value[idx] = record
+          normalizedRecord.syncStatus = 'SYNCED'
+          records.value[idx] = normalizedRecord
         } else {
           // 拒绝已过时的旧版本更新，禁止污染本地与远程数据库
           return
         }
       }
     } else {
-      record.syncStatus = 'SYNCED'
-      records.value.push(record)
+      normalizedRecord.syncStatus = 'SYNCED'
+      records.value.push(normalizedRecord)
     }
 
     if (currentEventId.value) {
       const crdtHandle = getExistingEventCrdt(currentEventId.value)
       if (crdtHandle) {
-        const storedRec = records.value.find((r) => r.teamNumber === record.teamNumber)
+        const storedRec = records.value.find((r) => r.teamNumber === normalizedRecord.teamNumber)
         if (storedRec) {
           withLocalCrdtWrite(currentEventId.value, () => {
             writePitRecordToCrdt(crdtHandle.store, storedRec)
@@ -428,7 +489,7 @@ export const usePitScoutStore = defineStore('pitScout', () => {
       // Host 端收到客户端推送时，自动批量落盘
       const eventStore = useEventStore()
       if (eventStore.isHost) {
-        apiSavePitRecord(currentEventId.value, record).catch((err) => {
+        apiSavePitRecord(currentEventId.value, normalizedRecord).catch((err) => {
           console.warn('[PitScoutStore Host] Failed to persist incoming remote pit record:', err)
         })
       }
@@ -437,9 +498,15 @@ export const usePitScoutStore = defineStore('pitScout', () => {
 
   function applyFullSync(incomingRecords: PitScoutingRecord[]) {
     if (!Array.isArray(incomingRecords)) return
+    const activeEid = currentEventId.value
+    const scopedIncoming = activeEid
+      ? incomingRecords
+          .filter((r) => r && (!r.eventId || r.eventId === activeEid))
+          .map((r) => (r.eventId ? r : { ...r, eventId: activeEid }))
+      : incomingRecords
 
     const map = new Map(records.value.map((r) => [r.teamNumber, r]))
-    for (const inc of incomingRecords) {
+    for (const inc of scopedIncoming) {
       const cur = map.get(inc.teamNumber)
       if (!cur) {
         inc.syncStatus = 'SYNCED'
@@ -501,39 +568,52 @@ export const usePitScoutStore = defineStore('pitScout', () => {
   }
 
   async function syncFtcRoster(season: number, eventCode: string) {
-    if (!currentEventId.value || !eventCode) return
+    const targetEid = currentEventId.value
+    if (!targetEid || !eventCode) return
     loading.value = true
     try {
       const fetched = await fetchFtcTeams(season, eventCode)
+      if (currentEventId.value !== targetEid) return
       if (Array.isArray(fetched) && fetched.length > 0) {
-        officialTeams.value = fetched
-        saveToLocalStorage(currentEventId.value)
+        const stamped = fetched.map((t) => ({ ...t, eventId: t.eventId || targetEid }))
+        officialTeams.value = stamped
+        saveToLocalStorage(targetEid)
 
         // 落盘到后端
-        await syncOfficialTeams(currentEventId.value, fetched)
+        await syncOfficialTeams(targetEid, stamped)
 
         // WebRTC 广播给同赛事房间内的其他侦察员
         const connStore = useConnectionStore()
         if (connStore.rtcService) {
           connStore.rtcService.sendMessage({
             type: 'OFFICIAL_ROSTER_SYNC',
-            teams: fetched
+            teams: stamped
           })
         }
       }
     } catch (e: any) {
-      error.value = e.message || 'Failed to sync FTC official roster'
+      if (currentEventId.value === targetEid) {
+        error.value = e.message || 'Failed to sync FTC official roster'
+      }
       throw e
     } finally {
-      loading.value = false
+      if (currentEventId.value === targetEid) {
+        loading.value = false
+      }
     }
   }
 
   function applyOfficialRosterSync(teams: OfficialTeamInfo[]) {
     if (Array.isArray(teams) && teams.length > 0) {
-      officialTeams.value = teams
-      if (currentEventId.value) {
-        saveToLocalStorage(currentEventId.value)
+      const activeEid = currentEventId.value
+      const scoped = activeEid
+        ? teams
+            .filter((t) => !t.eventId || t.eventId === activeEid)
+            .map((t) => ({ ...t, eventId: t.eventId || activeEid }))
+        : teams
+      officialTeams.value = scoped
+      if (activeEid) {
+        saveToLocalStorage(activeEid)
       }
     }
   }

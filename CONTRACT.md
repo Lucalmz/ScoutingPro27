@@ -13,24 +13,24 @@
 
 | 章节 | 行号范围 (`[StartLine, EndLine]`) | 核心域与契约内容 | 主要关联文件 |
 | :--- | :--- | :--- | :--- |
-| 全局约定 | `[61, 85]` | 全局鉴权、JWT 规范、异常映射与前端 API 客户端约定 | `ApiRoutes.java`, `JwtUtil.java`, `services/api.ts`, `crdtApi.ts` |
-| §0 | `[10, 57]` | 快速导航目录与多 Agent 并行改码分片地图 | `CONTRACT.md` |
-| §1 | `[89, 155]` | 用户与鉴权模块（注册/登录/校验/改名/账号合并） | `UserRoutes.java`, `UserDao.java`, `stores/user.ts` |
-| §2 | `[159, 212]` | 系统与网络模块（网卡探测/防火墙/日志/测试清理） | `SystemRoutes.java`, `NetworkUtil.java` |
-| §3 | `[216, 355]` | 信令、WebRTC 安全票据、混合信道、主备选举与 P2P 协议 | `SignalingRoutes.java`, `WebRtcRoutes.java`, `services/webrtc/*` |
-| §4 | `[359, 452]` | 赛事、成员、TURN 配置与禁选战队模块 | `EventRoutes.java`, `EventDao.java`, `stores/events.ts` |
-| §5 | `[456, 488]` | 战队标签模块 | `TeamTagRoutes.java`, `model/TeamTag.java` |
-| §6 | `[492, 547]` | 赛程与排班模块 | `ScheduleRoutes.java`, `stores/schedule.ts` |
-| §7 | `[551, 693]` | 比赛侦察记录、`rawData` 架构与 ECDSA 签名协议 | `RecordRoutes.java`, `RecordDao.java`, `EcdsaRecordVerifier.java`, `stores/records.ts` |
-| §8 | `[697, 810]` | Pit 展位侦察、官方战队底册与照片存储模块 | `PitScoutRoutes.java`, `PitScoutDao.java`, `stores/pitScout.ts` |
-| §9 | `[814, 970]` | 自定义字段与公式引擎（文法/函数/命名空间/DAG） | `CustomFieldRoutes.java`, `FormulaValidator.java`, `utils/formula/*` |
-| §10 | `[974, 1019]` | CRDT 状态快照与 TinyBase 8 表关系投影 | `CrdtRoutes.java`, `CrdtProjectionService.java`, `services/crdt/*` |
-| §11 | `[1023, 1192]` | FTC 官方数据代理与晋级分汇算（Java + TS 双端同步） | `FtcProxyRoutes.java`, `AdvancementCalculator.java`, `advancement.ts` |
-| §12 | `[1196, 1568]` | AI Copilot 配置、连通探测、SSE 流式、实时语音与多会话 | `AiRoutes.java`, `routes/ai/*`, `stores/ai.ts`, `components/ai/*` |
-| §13 | `[1572, 1599]` | JCEF 桌面容器、静态托管与前端全局桥接 | `Main.java`, `desktopShell.ts`, `stores/connection.ts` |
-| §14 | `[1603, 1657]` | 运行时存储路径、H2/HikariCP/Flyway 与 CLI/环境变量 | `Main.java`, `AppConfig.java`, `JdbiConfig.java` |
-| §15 | `[1661, 1820]` | H2 数据库 Schema 与索引契约（V1–V10 + 启动自愈） | `resources/db/V*.sql`, `CrdtProjectionService.java`, `AiSchemaBootstrap.java` |
-| §16 | `[1824, 1898]` | 前端持久化存储、Pinia Stores、路由、i18n 与离线同步格式 | `stores/*`, `router/index.ts`, `i18n.ts`, `offlineSync.ts` |
+| 全局约定 | `[62, 86]` | 全局鉴权、JWT 规范、异常映射与前端 API 客户端约定 | `ApiRoutes.java`, `JwtUtil.java`, `services/api.ts`, `crdtApi.ts` |
+| §0 | `[10, 58]` | 快速导航目录与多 Agent 并行改码分片地图 | `CONTRACT.md` |
+| §1 | `[90, 156]` | 用户与鉴权模块（注册/登录/校验/改名/账号合并） | `UserRoutes.java`, `UserDao.java`, `stores/user.ts` |
+| §2 | `[160, 213]` | 系统与网络模块（网卡探测/防火墙/日志/测试清理） | `SystemRoutes.java`, `NetworkUtil.java` |
+| §3 | `[217, 359]` | 信令、WebRTC 安全票据、混合信道、主备选举与 P2P 协议 | `SignalingRoutes.java`, `WebRtcRoutes.java`, `services/webrtc/*` |
+| §4 | `[363, 456]` | 赛事、成员、TURN 配置与禁选战队模块 | `EventRoutes.java`, `EventDao.java`, `stores/events.ts` |
+| §5 | `[460, 492]` | 战队标签模块 | `TeamTagRoutes.java`, `model/TeamTag.java` |
+| §6 | `[496, 551]` | 赛程与排班模块 | `ScheduleRoutes.java`, `stores/schedule.ts` |
+| §7 | `[555, 697]` | 比赛侦察记录、`rawData` 架构与 ECDSA 签名协议 | `RecordRoutes.java`, `RecordDao.java`, `EcdsaRecordVerifier.java`, `stores/records.ts` |
+| §8 | `[701, 814]` | Pit 展位侦察、官方战队底册与照片存储模块 | `PitScoutRoutes.java`, `PitScoutDao.java`, `stores/pitScout.ts` |
+| §9 | `[818, 976]` | 自定义字段与公式引擎（文法/函数/命名空间/DAG） | `CustomFieldRoutes.java`, `FormulaValidator.java`, `utils/formula/*` |
+| §10 | `[980, 1033]` | CRDT 状态快照与 TinyBase 8 表关系投影 | `CrdtRoutes.java`, `CrdtProjectionService.java`, `services/crdt/*` |
+| §11 | `[1037, 1207]` | FTC 官方数据代理与晋级分汇算（Java + TS 双端同步） | `FtcProxyRoutes.java`, `AdvancementCalculator.java`, `advancement.ts` |
+| §12 | `[1211, 1605]` | AI Copilot 配置、连通探测、SSE 流式、实时语音与多会话 | `AiRoutes.java`, `routes/ai/*`, `stores/ai.ts`, `components/ai/*` |
+| §13 | `[1609, 1639]` | JCEF 桌面容器、静态托管与前端全局桥接 | `Main.java`, `desktopShell.ts`, `stores/connection.ts` |
+| §14 | `[1643, 1697]` | 运行时存储路径、H2/HikariCP/Flyway 与 CLI/环境变量 | `Main.java`, `AppConfig.java`, `JdbiConfig.java` |
+| §15 | `[1701, 1860]` | H2 数据库 Schema 与索引契约（V1–V10 + 启动自愈） | `resources/db/V*.sql`, `CrdtProjectionService.java`, `AiSchemaBootstrap.java` |
+| §16 | `[1864, 1941]` | 前端持久化存储、Pinia Stores、路由、i18n 与离线同步格式 | `stores/*`, `router/index.ts`, `i18n.ts`, `offlineSync.ts` |
 
 ### 0.2 统一模块文件与测试归属矩阵 (Unified Ownership Matrix)
 
@@ -52,9 +52,10 @@
 | **§13–§15 桌面/配置/DB** | `Main.java`, `SplashScreen.java`, `db/{AppConfig,JdbiConfig}.java`, `ui/{CustomTitleBar,WindowResizer}.java`, `Backend/src/main/resources/db/V*.sql` | `utils/desktopShell.ts` |
 | **§16 路由/存储/工具/分析** | — | `router/index.ts`, `i18n.ts`, `locales/{en,zh}.json`, `stores/{navigation,inbox,toast}.ts`, `utils/{identityStore,tournament,bragIndex,errorHelper,csvExport,pwaUpdater}.ts`, `utils/analytics/{npOpr,rankings,predictCycleTime,audit}.ts` |
 
-- **测试目录约定**：
-  - **后端测试 (`Backend/src/test/java/com/bear27570/app/`)**：按模块对应 `db/`、`routes/`（含 `RouteTestSupport.java` 与 `*RoutesTest.java`）、`ui/`、`util/`。
-  - **前端测试**：Vitest 单测位于 `frontend/src/__tests__/*.test.ts`；Playwright E2E 位于 `frontend/e2e/*.e2e.js`（辅助工具在 `frontend/e2e/helpers/`）。
+- **测试目录、质量门禁与分工契约**：
+  - **后端测试 (`Backend/src/test/java/com/bear27570/app/`)**：按模块对应 `db/`、`routes/`（含 `RouteTestSupport.java` 与 `*RoutesTest.java`）、`service/`、`ui/`、`util/`；JaCoCo 构建期门禁 `LINE COVEREDRATIO >= 0.76`（`Backend/pom.xml`）。
+  - **前端单测与类型检查**：Vitest 单测位于 `frontend/src/__tests__/*.test.ts`（覆盖率门禁 `statements >= 77%`, `lines >= 77%`，`@vitest/coverage-v8`）。类型检查采用渐进式 `tsconfig.vitest.json`（保留对全部业务源码与非遗留/新增单测的严格校验，显式排除 35 个早期局部 Mock 历史测试文件以避免大面积重写无关旧用例）。
+  - **端到端 E2E 测试 (`frontend/e2e/*.e2e.js`)**：基于 **Puppeteer + Node `assert`**（辅助工具在 `frontend/e2e/helpers/`；`ensureE2eBuildArtifacts()` 在单独运行 `test:e2e:qr` / `inbox` / `interactive` 时自动构建含 `VITE_ENABLE_E2E_BRIDGE=true` 的前端产物；`capture-userguide-screens.js` 使用 `os.tmpdir()` 隔离 `--data-dir` 避免污染仓库根目录数据库）。真实 WebRTC ICE / PeerConnection / MQTT Broker / JCEF 全链路集成由 Puppeteer E2E 兜底，单测专注状态机、安全不变量与协议分支。
 
 ---
 
@@ -116,7 +117,7 @@
   - 错误码：`400` (`"token required"`), `401` (`"Invalid token signature"`), `404` (`"User not found"`)
 
 ### `POST /api/user/register`
-- **说明**：注册新账号（BCrypt 加密密码），生成确定性 `userId`（基于 `username.trim()`）与 JWT Token（免鉴权）。
+- **说明**：注册新账号（BCrypt 加密密码），生成确定性 `userId`（基于 `username.trim()`）与 JWT Token（免鉴权）；若该确定性 `userId` 为无密码占位符且用户名为空、同名或由 `external-sync` 创建的 `"Host <6-char-prefix>"`，则直接认领激活该占位符。若 `users` 表中该确定性 `userId` 已被其他已设密（如曾改名）或不同用户名的占位符账号占用，自动回退生成随机非碰撞 UUID (`UUID.randomUUID()`)，绝不覆盖既有注册账号。
 - **Request**：
   ```ts
   interface RegisterBody {
@@ -250,11 +251,15 @@
    - **优雅退场 (`HOST_LEAVING`)**：Host 调用 `disconnect()` 时广播 `{ type: 'HOST_LEAVING', hostSessionId, deviceId }` 并关闭所有 `clients`/`stagedClients` 连接；Client 收到后立即 `hardResetChannels()`、置状态为 `offline` 并触发 `onActiveHostLeft`。
 3. **ECDH + SAS 信任门禁（`sasManager.ts`）**：
    - 首连执行 ECDH 密钥交换并可选校验证书票据；未在 `localStorage['scoutingpro_verified_sas_<inviteCode>_<pubHex>']` 或 IndexedDB 信任库记录的对端进入 `PENDING_VERIFICATION` 状态，所有入站/出站业务帧入队门禁，直至双方用户 `confirmSas` 放行或 `rejectSas` 立即断开。
-4. **虚拟 DataChannel 与自愈（`virtualDataChannel.ts` / `selfHealing.ts`）**：
+4. **虚拟 DataChannel、自愈、ICE 优先级保留与心跳韧性（`virtualDataChannel.ts` / `selfHealing.ts` / `iceCandidateOptimizer.ts` / `clientHeartbeat.ts`）**：
    - 原生 UDP 打洞超时时，通过 `SignalingChannel` 传输 ECDH AES-256-GCM 密文 `{ encrypted, clientSessionId }`（内层接受 `{ vdc: 'open' | 'data', sessionId, payload? }`）；原生通道恢复后支持 `startDrain(5000, 1000)` 无感热切回。
    - `selfHealing.ts`：网络 `online` 与页面 `visible` 恢复时受 `THROTTLE_MS = 1200`、`RESUME_DEBOUNCE_MS = 500` 及 `connecting < 15000ms` 保护；Host 侧 `handleOnline` 保留 `connected`/`waiting`/`connecting` 态，`handleResume` 保留除 `offline`/`long_offline` 外的全部状态，严禁拆房重连。
-5. **DataChannel 业务消息协议（`WebRtcMessage` 联合类型，`types/index.ts:209-609`）**：
-   - 单帧上限 `MAX_PAYLOAD_SIZE = 64 KiB`（`dataChannelSender.ts:37`），背压超时 `5000ms`。
+   - `iceCandidateOptimizer.ts`：接收端（`clientSession.ts` / `hostSession.ts`）处理远端候选时必须传入 `{ preserveRemoteSrflxTier: true }`，保留发送端显式标注的代理出口降权（IPv4 `typePref = 80`，IPv6 `115`/`95`）与国内直连提权（IPv4 `95`，IPv6 `126`/`105`），同时继续清洗 TUN 虚拟 `raddr` 与 `network-cost <= 50`；`synthesizeSymmetricNatPortCandidates` 对 `incomingTypePref <= 80` 的降权代理出口候选将预测端口上限压制在 `< 80`（`Math.max(20, incomingTypePref - 2) = 78`），避免预测端口反超代理出口基准或国内直连候选。
+   - `clientHeartbeat.ts`：原生通道单次 `PING` 超时按已观测 RTT 自适应缩放（`clamp(round(rttMs * 4 + 1200), 1800, 4500)` ms）；`handlePong` 即使在 `PING` 已超时出表后仍更新 `lastPongReceivedAt`、重置连续丢包计数并恢复 `degraded -> connected`；突发大数据发送期间若 `bufferedAmount` 或发送队列长度存在前向排空进展（`madeDrainProgress`），将连续未回包计数封顶于 `HEARTBEAT_DEGRADE_MISSES (2)`，防止误触发 `heartbeat_timeout (8)` 重建，而对完全僵死零进展的 SCTP 仍如期触发重建。
+   - `useEventWebRtcBridge.ts`（瞬时降级/拥塞恢复门控）：Client/Standby 收到 `degraded` 时仅保守调用 `setCrdtTransportActive(eventId, false)`，保留 `openCrdtPeers` 与 `hostChannelNeedsFullSync`；同一 `'host'` DataChannel 保持打开（`openCrdtPeers.has('host') && !hostChannelNeedsFullSync`）且由 `degraded`/`unstable` 恢复至 `connected` 时，仅恢复 `setCrdtTransportActive(eventId, true)`、更新本地 CRDT 投影状态（`degraded -> connected` 时调用 `syncRecordsFromCrdt`）并刷新离线 Pit/照片队列，不重复触发 `REQUEST_SYNC` 与 `triggerFullSyncWithPeer('host')`；仅在真实 `onPeerDataChannelClose('host')` 或 `offline`/`long_offline` 后重连才重置 `hostChannelNeedsFullSync = true` 并执行全量重同步。
+5. **DataChannel 业务消息协议、双车道优先级与 CRDT 分片（`WebRtcMessage` 联合类型，`types/index.ts:209-609`）**：
+   - `DataChannelSender` 与 `messageDispatcher.ts`：单帧上限 `MAX_PAYLOAD_SIZE = 64 KiB`、背压超时 `5000ms`；维护 `highQueue`/`queue` 双车道 FIFO 队列，将 `PING`/`PONG`/`CLOCK_SYNC_REQ`/`CLOCK_SYNC_RES`/`FORCE_CLOCK_RESYNC` 路由至 `high` 优先级抢占大块业务分片；小控制帧（`<= 4096B`）放宽控制面背压上限至 `64 KiB`（`BUFFER_HIGH_WATERMARK * 2`），其余帧沿用 `32 KiB / 16 KiB` 水位线并在 `while (needsWait())` 循环中复检缓冲与中止状态；派发层通过 `sender.isAborted() || sender.getChannel() !== dc` 校验通道实例一致性。
+   - CRDT 分片与同步超时（`crdtChunker.ts` / `webrtcCrdtSynchronizer.ts`）：`CRDT_MAX_FRAME_BYTES = 16 KiB`、`CRDT_CHUNK_DATA_CHARS = 12 KiB`（按 UTF-8 字节安全切分且不拆断代理对，确保慢速 VPN 下控制帧可平滑插队）；`createWebRtcCrdtSynchronizerHub` 默认请求超时 `requestTimeoutSeconds = 12`（12 秒）。
    - 同步与记录：`REQUEST_SYNC`、`SYNC_DATA`、`ACK_SYNC`（含 `stampedRecords`、`rejectedRecordIds`）、`CRDT_SYNC_MSG`、`CRDT_SYNC_CHUNK`
    - 时钟校准：`CLOCK_SYNC_REQ`、`CLOCK_SYNC_RES`、`FORCE_CLOCK_RESYNC`、`PING`、`PONG`
    - 照片分片：`PIT_PHOTO_UPLOAD`、`PIT_PHOTO_CHUNK`（接收端上限 `totalChunks <= 500`、5 分钟分片超时清理，`channelPhotoHandler.ts:83,104`）、`PIT_PHOTO_ACK`
@@ -405,7 +410,7 @@ interface ScoutingEvent {
   - 错误码：`400` (`"Event ID required"`), `401` (`"Unauthorized"`)
 
 ### `POST /api/events/external-sync`
-- **说明**：将从远端 Host 同步来的权威赛事元数据写入本地数据库（不存在 `hostId` 时自动创建 `"Host <prefix>"` 占位符用户，`name` 为空时回退 `"Event <CODE>"` 并截断至 `<= 100` 字符，同时加密或清空 `customTurnConfig`），在通过归属与邀请码不可变校验后，仅允许解绑本地临时存根（`ext_*` / `evt-*` / `external_host`）的 `invite_code` 并原子过户（`reparentEventData`）12 张关联表（`scouting_records`, `pit_scouting_records`, `event_official_teams`, `match_schedules`, `scout_assignments`, `team_tags`, `banned_teams`, `event_users`, `ai_chat_sessions`, `ai_chat_threads`, `event_custom_fields`, `event_crdt_state`）及物理目录 `pit_photos/<eventId>` 到权威 `eventId`（冲突行去重删除）。
+- **说明**：将从远端 Host 同步来的权威赛事元数据写入本地数据库（不存在 `hostId` 时自动创建 `"Host <prefix>"` 占位符用户，`name` 为空时回退 `"Event <CODE>"` 并截断至 `<= 100` 字符，同时加密或清空 `customTurnConfig`），在通过归属与邀请码不可变校验后，仅允许解绑未设密占位符或同一调用者持有的本地临时存根（`ext_*` 且非他方已设密本地用户托管，或 `hostId === "external_host"`）的 `invite_code` 并原子过户（`reparentEventData`）12 张关联表（`scouting_records`, `pit_scouting_records`, `event_official_teams`, `match_schedules`, `scout_assignments`, `team_tags`, `banned_teams`, `event_users`, `ai_chat_sessions`, `ai_chat_threads`, `event_custom_fields`, `event_crdt_state`）及物理目录 `pit_photos/<eventId>` 到权威 `eventId`（冲突行去重删除）；绝不允许将 `evt-*` 权威赛事作为临时存根解绑夺权。
   - **`inviteCode` 全局不可变与防夺权约束**：赛事 `inviteCode` 一经生成，**任何人（含赛事 Host 本人）均不可修改**——若目标 `id` 已存在且传入不同的 `inviteCode`，直接拒绝（`400 "Event inviteCode is immutable and cannot be changed"`）；若同 `inviteCode` 已被其他非存根权威赛事占用，无论调用者是否为 Host 均拒绝解绑覆盖（`403 "Event inviteCode is immutable; cannot overwrite invite code of an existing event"`）；若目标 `id` 已存在且非占位符存根，禁止修改 `hostId`（`403 "Cannot hijack host ownership of an existing event"`），且原 `hostId` 为本机已设密注册账号时非 Host 禁止修改（`403 "Only the event host can modify an authoritative local event"`）。
 - **Request**：`Body: ScoutingEvent`（必填非空 `id`、`inviteCode`）
 - **Response**：`ScoutingEvent`
@@ -475,14 +480,14 @@ interface TeamTag {
   - 错误码：`403` (`"Not a member of this event"`)
 
 ### `POST /api/events/{id}/teams/{teamNumber}/tags`
-- **说明**：赛事成员为指定战队添加或更新标签（每队最多 15 个标签）。
+- **说明**：赛事成员为指定战队（`teamNumber > 0`）添加或更新标签（每队最多 15 个标签）。
 - **Request**：`{ tag: string; color?: string }`
   - *前端兼容*：`api.ts` `addTeamTag` 可附带 `isPreset?: boolean`，后端忽略并强制写为 `false`。
 - **Response**：`TeamTag`
   - 错误码：`400` (`"Invalid teamNumber format"` / `"tag required"` / `"Tag must be between 1 and 30 characters"` / `"Tags cannot contain '.'"` / `"Tag contains invalid characters"` / `"Maximum 15 tags per team allowed"`), `403` (`"Not a member of this event"`), `404` (`"Event not found"`)
 
 ### `DELETE /api/events/{id}/teams/{teamNumber}/tags/{tag}`
-- **说明**：赛事成员删除指定战队的标签（仅标签创建者或赛事 Host 可删；标签不存在时幂等返回 `200`）。
+- **说明**：赛事成员删除指定战队（`teamNumber > 0`）的标签（仅标签创建者或赛事 Host 可删；标签不存在时幂等返回 `200`；直接使用 Javalin 已解码的 `pathParam("tag")`，不执行二次 `URLDecoder.decode`）。
 - **Request**：`Path: { id: string; teamNumber: number; tag: string }`（`tag` 需 URL 编码，后端同步尝试小写规范化与原始值匹配）
 - **Response**：`200 ("OK")`
   - 错误码：`400` (`"Invalid teamNumber format"`), `403` (`"Not a member of this event"` / `"Only the tag creator or event host can delete this tag"`), `404` (`"Event not found"`)
@@ -534,17 +539,17 @@ interface ScoutAssignment {
   }
   ```
 - **Response**：`{ success: true; count: number }`
-  - 错误码：`400` (`"items array required"`), `403` (`"Only the event host can modify match schedule or assignments"`), `404` (`"Event not found"`)
+  - 错误码：`400` (`"Invalid JSON payload"` / `"items array required"` / `"Invalid integer field: ..."` / `"Invalid boolean field: ..."` / `"Invalid string field: ..."`), `403` (`"Only the event host can modify match schedule or assignments"`), `404` (`"Event not found"`)
 
 ### `DELETE /api/events/{id}/schedule`
 - **Request**：`Path: { id: string }` → **Response**：`{ success: true }`
   - 错误码：`403` (`"Only the event host can modify match schedule or assignments"`), `404` (`"Event not found"`)
 
 ### `PUT /api/events/{id}/assignments`
-- **说明**：Host 批量更新工位排班（空白 `scoutId`/`scoutName` 自动归一化为 `null`；缺省 `id` 时使用 `${eventId}_${tournamentLevel}_${matchNumber}_${station}`；`matchNumber <= 0` 或 `station` 为空的条目静默跳过）。
+- **说明**：Host 批量更新工位排班（空白 `scoutId`/`scoutName` 自动归一化为 `null`；缺省 `id` 时使用 `${eventId}_${tournamentLevel}_${matchNumber}_${station}`；`matchNumber <= 0` 或 `station` 为空的条目静默跳过；`JsonNull` 回退默认值，非原始类型返回 `400`）。
 - **Request**：`{ assignments: Array<{ id?: string; matchNumber: number; tournamentLevel?: string; station: string; teamNumber?: number; scoutId?: string | null; scoutName?: string | null }> }`
 - **Response**：`{ success: true; count: number }`
-  - 错误码：`400` (`"assignments array required"`), `403` (`"Only the event host can modify match schedule or assignments"`), `404` (`"Event not found"`)
+  - 错误码：`400` (`"Invalid JSON payload"` / `"assignments array required"` / `"Invalid integer field: ..."` / `"Invalid string field: ..."`), `403` (`"Only the event host can modify match schedule or assignments"`), `404` (`"Event not found"`)
 
 ---
 
@@ -663,22 +668,22 @@ interface ScoutingFormData {
   - 错误码：`400` (`"eventId required"`), `403` (`"Not a member of this event"`)
 
 #### `POST /api/records`
-- **说明**：赛事成员新增或更新单条比赛记录（非 Host 仅可修改本人记录，且强制绑定 `scoutId = userId`）。
+- **说明**：赛事成员新增或更新单条比赛记录（非 Host 仅可修改本人记录，且强制绑定 `scoutId = userId`；禁止跨赛事复用已有 `record.id`）。
 - **Request**：`Body: ScoutingRecord`
 - **Response**：`200 ("OK")`
-  - 错误码：`400` (`"Invalid JSON body"` / `"Invalid matchNumber or teamNumber"` / `"Event ID cannot be blank"` / `"Invalid data: ..."`), `403` (`"Not a member of this event"` / `"Cannot modify another scout's record"`)
+  - 错误码：`400` (`"Invalid JSON body"` / `"Invalid matchNumber or teamNumber"` / `"Event ID cannot be blank"` / `"Invalid data: ..."`), `403` (`"Not a member of this event"` / `"Record belongs to another event"` / `"Cannot modify another scout's record"`)
 
 #### `POST /api/records/sync`
-- **说明**：批量同步比赛侦察记录（按 `id` 排序加锁事务落库，并强制写 `syncStatus = "SYNCED"`；非 Host 仅可同步本人未签名记录，或经 ECDSA 验签且满足公钥绑定与作者不可变约束的队友签名记录）。
+- **说明**：批量同步比赛侦察记录（按 `id` 排序加锁事务落库，并强制写 `syncStatus = "SYNCED"`；禁止跨赛事复用已有 `record.id`；非 Host 仅可同步本人未签名记录，或经 ECDSA 验签且满足公钥绑定与作者不可变约束的队友签名记录）。
 - **Request**：`Body: ScoutingRecord[]`
 - **Response**：`200 ("OK")`
-  - 错误码：`400` (`"Invalid JSON body"` / `"Sync failed: ..."`), `403` (`"Not a member of event: ..."` / `"Cannot sync records belonging to another scout"` / `"Cannot modify another scout's record"` / ECDSA 拒绝原因：`"Invalid ECDSA signature"` / `"Signed record is missing scoutId"` / `"Cannot alter the author of an existing record"` / `"Author public key mismatch for existing record"` / `"Cannot retroactively sign another scout's unsigned record"` / `"Author public key is not bound to scoutId"` / `"Author public key is already bound to another scout"`)
+  - 错误码：`400` (`"Invalid JSON body"` / `"Sync failed: ..."`), `403` (`"Not a member of event: ..."` / `"Record belongs to another event"` / `"Cannot sync records belonging to another scout"` / `"Cannot modify another scout's record"` / ECDSA 拒绝原因：`"Invalid ECDSA signature"` / `"Signed record is missing scoutId"` / `"Cannot alter the author of an existing record"` / `"Author public key mismatch for existing record"` / `"Cannot retroactively sign another scout's unsigned record"` / `"Author public key is not bound to scoutId"` / `"Author public key is already bound to another scout"`)
 
 #### `POST /api/records/migrate-scout`
-- **说明**：将指定赛事下 `oldScoutId` 的比赛记录、排班、Pit 记录、标签及成员关系迁移至 `newScoutId`（仅 Host、`oldScoutId` 或 `newScoutId` 本人可调用；若 `oldScoutId` 存在于 `users` 表则级联执行 `UserDeterministicIdMigrator.mergeUserInto`）。
+- **说明**：将指定赛事下 `oldScoutId` 的比赛记录、排班、Pit 记录、标签及成员关系迁移至 `newScoutId`（仅赛事 Host 或该赛事成员本人迁移自身 `callerId === oldScoutId` 可调用，禁止仅凭 `callerId === newScoutId` 接管他人数据；仅当 `oldScoutId` 为无密码占位符账号或当前调用者本人自迁移时级联执行 `UserDeterministicIdMigrator.mergeUserInto`，绝不通过赛事 Host 权限全局删除其他已设密注册用户）。
 - **Request**：`{ eventId: string; oldScoutId: string; newScoutId: string; newScoutName: string }`
 - **Response**：`200 ("OK")`
-  - 错误码：`400` (`"Invalid JSON body"` / `"eventId, oldScoutId, newScoutId, and newScoutName required"`), `401` (`"Unauthorized"`), `403` (`"Only event host or the scout can migrate records"`), `500` (`"Migrate scout failed: ..."`)
+  - 错误码：`400` (`"Invalid JSON body"` / `"eventId, oldScoutId, newScoutId, and newScoutName required"`), `401` (`"Unauthorized"`), `403` (`"Only event host or the migrating scout can migrate records"`), `404` (`"Event not found"`), `500` (`"Migrate scout failed: ..."`)
 
 #### `GET /api/records/pending`
 - **说明**：赛事成员获取指定赛事下 `sync_status = 'PENDING'` 的待同步记录。
@@ -768,16 +773,16 @@ interface OfficialTeam { // 前端 types/index.ts 命名为 OfficialTeamInfo（�
   - 错误码：`400` (`"Invalid eventId"`), `403` (`"Not a member of this event"`)
 
 #### `POST /api/events/{eventId}/pit-records`
-- **说明**：赛事成员新增或更新单条 Pit 侦察记录（自动生成缺失 `id`、回填 `scoutId`/`scoutName` 并执行 `normalizePitRecord`）。
+- **说明**：赛事成员新增或更新单条 Pit 侦察记录（要求 `teamNumber > 0`，自动生成缺失 `id`、回填 `scoutId`/`scoutName` 并执行 `normalizePitRecord`；禁止跨赛事复用已有 Pit 记录 `id`）。
 - **Request**：`Body: PitScoutingRecord`
 - **Response**：`{ success: true; record: PitScoutingRecord }`
-  - 错误码：`400` (`"Invalid PitScoutingRecord payload"`), `403` (`"Not a member of this event"`), `500` (`"Save pit record failed: ..."`)
+  - 错误码：`400` (`"Invalid PitScoutingRecord payload"` / `"Invalid teamNumber"`), `403` (`"Not a member of this event"` / `"Pit record ID belongs to another event"`), `500` (`"Save pit record failed: ..."`)
 
 #### `POST /api/events/{eventId}/pit-records/batch`
-- **说明**：赛事成员批量同步 Pit 侦察记录（按 `id` 排序加锁事务写入；请求体为 `null` 或空数组 `[]` 时直接返回 `200 { success: true, count: 0 }`）。
+- **说明**：赛事成员批量同步 Pit 侦察记录（按 `id` 排序加锁事务写入，校验 `teamNumber > 0` 并拒绝跨赛事 `id` 复用；请求体为 `null` 或空数组 `[]` 时直接返回 `200 { success: true, count: 0 }`）。
 - **Request**：`Body: PitScoutingRecord[]`
 - **Response**：`{ success: true; count: number }`
-  - 错误码：`403` (`"Not a member of this event"`), `500` (`"Batch pit sync failed: ..."`)
+  - 错误码：`400` (`"Invalid teamNumber"`), `403` (`"Not a member of this event"` / `"Pit record ID belongs to another event"`), `500` (`"Batch pit sync failed: ..."`)
 
 #### `POST /api/events/{eventId}/official-teams/sync`
 - **说明**：赛事成员批量保存或同步官方参赛战队名录底册（空数组直接返回 `{ success: true, count: 0 }`）。
@@ -895,7 +900,7 @@ interface FormulaValidationErrorResponse {
 
 ### 9.1 公式文法、前后端强一致约束与运行时引擎约定
 > 契约测试用例见 `shared/formula-conformance-cases.json`（Java `FormulaValidatorTest` 与前端 `formulaEngine.test.ts` 共用同一份用例库）。
-- **静态与运行时限额**：表达式 `<= 1000` 字符、Token `<= 256`、AST 嵌套深度 `<= 20`、AST 节点数 `<= 200`；前端求值器附加 `MAX_STEP_BUDGET = 500`、`MAX_EVAL_DEPTH = 16`（超限或运行时错误返回 `{ value: null, reason: 'STEP_BUDGET_EXCEEDED' | 'MAX_EVAL_DEPTH_EXCEEDED' | 'CIRCULAR_DEPENDENCY_RUNTIME' | 'DIV_BY_ZERO' | 'NON_FINITE_RESULT' | 'NULL_RESULT' | 'DISALLOWED_FUNCTION' | 'EVAL_ERROR' }`，且 `evaluateFormula` 亦透传 `parsed.errorCode`）。
+- **静态与运行时限额**：表达式 `<= 1000` 字符、Token `<= 256`、AST 嵌套深度 `<= 20`（Java `FormulaValidator` 与 TS `parser.ts` 均以 0-based `depth > 20` 严格一致判定，恰好 20 层允许、21 层拒绝）、AST 节点数 `<= 200`；前端求值器附加 `MAX_STEP_BUDGET = 500`、`MAX_EVAL_DEPTH = 16`（超限或运行时错误返回 `{ value: null, reason: 'STEP_BUDGET_EXCEEDED' | 'MAX_EVAL_DEPTH_EXCEEDED' | 'CIRCULAR_DEPENDENCY_RUNTIME' | 'DIV_BY_ZERO' | 'NON_FINITE_RESULT' | 'NULL_RESULT' | 'DISALLOWED_FUNCTION' | 'EVAL_ERROR' }`，且 `evaluateFormula` 亦透传 `parsed.errorCode`）。
 - **优先级（低 → 高）**：`?:`（右结合） `<` `||` `<` `&&` `<` `== !=` `<` `< <= > >=` `<` `+ -` `<` `* / %` `<` 一元 `! - +` `<` `^`（右结合，高于一元负号，即 `-2^2 = -4`、`2^3^2 = 512`） `<` 函数调用 / 原子。
 - **防注入与命名空间白名单**：严禁 `__proto__`、`constructor`、`prototype`、`window`、`globalThis`、`process`、`eval`、`Function`、`import`、`require`、`this`、`self`（大小写不敏感匹配）及 `;`、`=`、`[]`、字符串字面量、多级点链 `a.b.c`。变量引用必须为 `namespace.fieldKey`：
   - `MATCH` 允许：`match.*`、`cf.*`、`formula.*`
@@ -907,7 +912,8 @@ interface FormulaValidationErrorResponse {
   2. 禁用标识符：对 `FORBIDDEN_IDENTIFIERS` 统一忽略大小写拦截并返回 `FORBIDDEN_IDENTIFIER`。
   3. 数字字面量：尾部悬空小数点（如 `1.`）在词法阶段统一拒绝并返回 `INVALID_TOKEN`。
   4. 零参函数调用：所有零参调用（如 `ABS()`、`SUM()`）在语法阶段统一拒绝并返回 `INVALID_SYNTAX`。
-  5. DAG 环路输出与原位编辑：`fieldKey` 统一转小写建图，编辑已有公式时按 `candidate.id` 跳过自身旧定义；检测到环路时 `cyclePath` 统一返回首尾闭合路径（如 `[metric_a, metric_b, metric_a]`）。
+  5. 命名空间方法调用：在检查 `namespace` 合法性前先校验 `.` 后字段名与无 `LPAREN` 调用约束，对 `system.env()`、`opr.np()` 等统一返回 `INVALID_SYNTAX`。
+  6. 目标隔离 DAG 与原位编辑：`fieldKey` 统一转小写并按 `<TARGET>:<fieldKey>`（如 `MATCH:score` vs `TEAM:score`）作用域建图，允许跨目标同名键且不误报伪自环；编辑已有公式时按 `candidate.id` 跳过自身旧定义；检测到环路时 `cyclePath` 统一剥离 `<TARGET>:` 前缀并返回首尾闭合路径（如 `[metric_a, metric_b, metric_a]`）。
 
 ### 9.2 允许函数白名单与语义 (`frontend/src/utils/formula/functions.ts`)
 所有函数名大小写不敏感；数值转换规则：`boolean` 转为 `1/0`，`NaN`/`Infinity` 视为 `null`；真值规则：`boolean` 原值，有限非零数 `true`，其余 `false`。
@@ -959,13 +965,14 @@ interface FormulaValidationErrorResponse {
   - 错误码：`400` (`"Invalid JSON body"` / `"Field name is required"` / `"Field name cannot exceed 100 characters"` / `"Invalid target: must be 'MATCH', 'PIT', or 'TEAM'"` / `"Invalid fieldType: ..."` / `"TEAM custom fields must have fieldType 'formula'"` / `"Field key must contain only letters, numbers, and underscores (max 100 chars)"` / `"Field key '...' already exists for target ..."` / `"Description cannot exceed 300 characters"` / `"configJson cannot exceed 8192 bytes"` / `"configJson must be a valid JSON object"` / `"Invalid aggregationMode: ..."` / `"Invalid displayFormat: ..."` / `FormulaValidationErrorResponse`), `403` (`"Only event host can manage custom fields"`), `404` (`"Event not found"`)
 
 #### `PUT /api/events/{eventId}/custom-fields/{id}`
-- **说明**：Host 修改现有自定义字段或公式定义（`target` 与 `fieldKey` 不可变更；修改时重新执行校验与全赛事 DAG 环检测）。
+- **说明**：Host 部分更新现有自定义字段或公式定义（`target` 与 `fieldKey` 不可变更；仅对 JSON 请求体中显式传入的字段执行更新，未传字段保留库内原值不被覆写为 `null`；修改时重新执行校验与全赛事 DAG 环检测）。
 - **Request**：`Path: { eventId: string; id: string }`, `Body: Partial<CustomFieldDefinition>`
 - **Response**：`CustomFieldDefinition`
   - 错误码：`400` (同 `POST` 参数及 `FormulaValidationErrorResponse`), `403` (`"Only event host can manage custom fields"`), `404` (`"Event not found"` / `"Custom field not found"`)
 
 #### `DELETE /api/events/{eventId}/custom-fields/{id}`
 - **说明**：Host 删除指定自定义字段或公式定义。
+- **设计取舍**：后端删除接口有意不硬拦截仍被其他公式引用的字段（前端弹窗通过 `findDependentFormulas` 给出依赖警告并由 Host 确认），以便赛事中快速清理废弃字段；运行期 `evaluateFormula` 将缺失字段安全求值为 `null`。
 - **Response**：`{ success: true; id: string }`
   - 错误码：`403` (`"Only event host can manage custom fields"`), `404` (`"Event not found"` / `"Custom field not found"`)
 
@@ -1003,20 +1010,28 @@ interface FormulaValidationErrorResponse {
 
 #### `PUT /api/events/{eventId}/crdt-state`
 - **说明**：保存 `snapshot` 至 `event_crdt_state` 并按 `dirtyRows`（或 `fullProjection === true`，或首次写入且 `dirtyRows` 为空）事务投影至关系表。
-  - **Epoch / Revision 规则 (`CrdtProjectionService.java:156-192`)**：
+  - **Epoch / Revision 与 Host 独占抬升规则 (`CrdtProjectionService.java`)**：
     - `requestedEpoch = Math.max(1, hostEpoch)`；若 `< DB.hostEpoch` 返回 `409 (stale_epoch)`。
+    - **非 Host 严禁抬升 `hostEpoch`**：当 `eventHostId` 为本机已设密注册账号（`isRegisteredUserWithPassword(eventHostId) == true`）且请求方非该 Host（`!callerUserId.equals(eventHostId)`）时，若 `requestedEpoch > currentEpoch` 直接拒绝并返回 `403 Forbidden`（`"Only the event host can advance hostEpoch"`），防止普通成员恶意抬高纪元锁死真 Host（`409`）。
     - 若 `requestedEpoch == DB.hostEpoch && snapshotRevision > 0 && snapshotRevision < DB.snapshotRevision` 返回 `409 (stale_revision)`。
     - 首次写入（`existing == null`）：`effectiveRev = Math.max(1L, snapshotRevision)`（即使传入 `0` 也返回 `1`）；新纪元跃迁（`requestedEpoch > existing.hostEpoch`）：`effectiveRev = Math.max(snapshotRevision, existing.snapshotRevision + 1)`。
-  - **非 Host 快照强一致净化（`member_identities` + `scouting_records`）**：
+  - **非 Host 快照强一致净化与只读表隔离（`member_identities`、`scouting_records`、`custom_fields`、`schedules`、`assignments`、`team_tags`、`pit_records`）**：
     - `member_identities`：当 `eventHostId` 为本机已设密注册账号时，严禁非 Host 成员注入自签名 Host 主密钥引导锚点（仅在从机冷备库 `eventHostId` 为无密码占位符且尚未钉住任何 Host 公钥时，允许引导唯一一条合法自签名 Host 锚点）；非 Host 仅可写入本人的无 `hostSig` 设备公钥行（`userId === callerUserId` 且不覆盖已有 `hostSig`）或经可信 Host 公钥有效背书（`SP27_ID_V1` 验签通过）的身份行；篡改或省略他人既有身份锚点自动回滚为库内可信行。
-    - `scouting_records`：对快照内全部行执行作者归属与 ECDSA 验签；伪造新增行被剥离且跳过投影，篡改或省略他人已有行自动回滚为库内可信行并裁剪 TinyBase Stamp 哈希。
+    - `scouting_records`：对快照内全部行执行作者归属、跨赛事 `id` 隔离（即使 Host 亦不可通过 CRDT 投影跨赛事劫持既有 `scouting_records.id`）与 ECDSA 验签；伪造新增行或跨赛事冲突行被剥离/跳过投影，篡改或省略他人已有行自动回滚为库内可信行并裁剪 TinyBase Stamp 哈希。
+    - Host 独占配置表（`custom_fields`、`schedules`、`assignments`）：在权威 Host 本机库（`!isHost && hostIsRegisteredLocalUser`）中，非 Host 成员对这三张表的任意增删改均被回滚至库内最新可信快照并跳过关系表投影。
+    - `team_tags`：在权威 Host 本机库上对非 Host 强制执行创建者删改隔离（不可删除他人创建的标签、不可伪造 `isPreset` 或冒充他人 `createdBy`、不可超越单队 15 标签上限及字符白名单，超限/越权行回滚至既有快照并同步跳过关系表越权删除）。
+    - `pit_records`：非 Host 在权威 Host 本机库上不得将他人提交的 Pit 记录标记为 `isDeleted = true`（越权软删回滚为原记录）。
+  - **设计取舍与有意边界（CRDT 离线协作模型）**：
+    - **冷备副本例外 (`!hostIsRegisteredLocalUser`)**：当赛事由 `POST /api/events/external-sync` 同步进只读备机（`events.host_id` 为无密码占位符），允许授权事件成员将远端 P2P `Host Takeover` 产生的高 `hostEpoch` 与配置快照镜像写入本地备机，保证备机跨主切换与接管后不与远端主库分裂。
+    - **Pit 侦察协同写入**：与 `PitScoutRoutes` 一致，`pit_records` 与 `pit_photo_keys` 允许同赛事侦察员协作增补展位信息与照片，仅禁止非 Host 软删除他人 Pit 记录。
+    - **CRDT 离线公式环容错**：`projectCustomFields` 对离线同步的公式强制校验语法、注入、DoS 与命名空间白名单，但有意容忍多端离线编辑合入的潜在公式环并落盘持久化（前端求值器运行期通过 `CIRCULAR_DEPENDENCY_RUNTIME` 安全降级，避免单条坏公式阻塞整包 CRDT 同步）。
   - **Pit 投影归一化**：`projectPitAndPhotos` 写入 `pit_scouting_records` 前统一调用 `PitScoutRoutes.normalizePitRecord` 执行 BIOBUZZ 终局与总分归一化。
   - **`dirtyRows` 键名**：必须严格使用 snake_case（`scouting_records`, `pit_records`, `pit_photo_keys`, `team_tags`, `custom_fields`, `schedules`, `assignments`）。
 - **Request**：`{ hostEpoch?: number; snapshotRevision?: number; fullProjection?: boolean; snapshot?: unknown[] | string; crdtSnapshotJson?: unknown[] | string; dirtyRows?: Record<string, string[]> }`
 - **Response**：
   - `200 OK`: `{ saved: true, stale: false, eventId, hostEpoch, snapshotRevision, projectedCounts: { pit_records, team_tags, custom_fields, schedules, assignments, scouting_records } }`
   - `409 Conflict`: `{ saved: false, stale: true, error: 'stale_epoch' | 'stale_revision', eventId, hostEpoch, snapshotRevision }`
-  - 错误码：`400` (`{ error: "Invalid eventId" | "Request body must be a JSON object" | "Invalid JSON body" | "snapshot array is required" }`), `403` (`"Not a member of this event"`)
+  - 错误码：`400` (`{ error: "Invalid eventId" | "Request body must be a JSON object" | "Invalid JSON body" | "snapshot array is required" }`), `403` (`"Not a member of this event"` / `"Only the event host can advance hostEpoch"`)
 
 ---
 
@@ -1125,6 +1140,7 @@ interface FormulaValidationErrorResponse {
 
 ### `GET /api/ftc/{season}/advancement/{eventCode}`
 - **说明**：实时汇算赛事全部战队的 FTC 官方标准晋级分、晋级状态及顺延结果。若 `rankings` 为空但 `teams` 非空，则按队伍顺序构建默认 `rank = 1..N`。
+- **设计取舍（`slots <= 0` 与双大小写解析）**：`slots <= 0`（或非有限数）在 HTTP 参数、Java `AdvancementCalculator` 及 TS `advancement.ts` 中均有意视为“未指定名额”，统一回退至官方 `/v2.0/{season}/advancement/{eventCode}` 返回的 `slots` 后再回退默认 `4`；负队号在双端统一夹紧丢弃；场次/队伍/排名同时兼容 FTC API 原始 PascalCase（`MatchNum`/`TeamNumber`/`Alliance` 等）与前端归一化 camelCase 字段。
 - **Request**：`Path: { season: number; eventCode: string }`, `Query: { slots?: number }`（可选覆盖官方晋级名额；**非整数或 `<= 0` 时静默忽略**并回退至官方 `/v2.0/{season}/advancement/{eventCode}` 的 `slots`，再回退默认 `4`）
 - **Response**：
   ```ts
@@ -1213,8 +1229,8 @@ interface AiProviderProfile {
   systemPrompt: string;
   temperature: number;     // 默认 0.4
   maxTokens: number;       // 默认 4096 (<= 0 时重置为 4096)
-  enableThinking: boolean; // 默认 true
-  thinkingBudget: number;  // 默认 4096 (< 1024 时重置为 4096)
+  enableThinking: boolean; // 默认 false（可在前端聊天栏按次切换 off/low/medium/high）
+  thinkingBudget: number;  // 默认 4096 (< 1024 时重置为 4096；按次覆盖支持 0 关闭)
   anthropicVersion: string;// 默认 '2023-06-01'
   maxContextMsgs: number;  // 默认 16 (<= 0 时重置为 16)
   proxyHost: string;
@@ -1246,7 +1262,8 @@ interface AiSettings { // 旧版兼容模型
 
 ### `POST /api/users/{userId}/ai-profiles`
 - **说明**：创建或更新 AI 服务商配置档案。
-  - **Key 解析与沿用**：优先读取 `body.apiKey`，其次 `body.apiKeyEncrypted`；若为空或脱敏占位符（包含 `***`、`****`、`ERR_KEY_LOST`），在**更新已有档案**且提交值不是 `"ERR_KEY_LOST"` 时沿用原加密 Key；仅当 `protocol === 'OPENAI'` 且 `baseUrl` 为 Loopback 地址时允许免 Key（`""`）。
+  - **归属与列宽安全**：若客户端传入 `id`（先 `trim()`，上限 `128` 字符）且该 `id` 在全局已存在但 `user_id != sessionUserId`，直接返回 `403`；`UPDATE` 严格限定 `WHERE id = :id AND user_id = :userId`。校验 `baseUrl`（<=500）与 `proxyHost`（<=255，`AiUrlGuard.isSafeProxyHost`）、`proxyPort`（`1..65535`）、`temperature`（`[0, 2]`），拒绝 `apiKey`/`anthropicVersion` 中的 CR/LF 控制字符，并对 `name`（120）、`presetId`（48）、`modelName`（200）、`anthropicVersion`（32）安全截断。
+  - **Key 解析、密文损坏拦截与沿用**：优先读取 `body.apiKey`，其次 `body.apiKeyEncrypted`；当更新已有档案但库内密文不可解密（`!AiUrlGuard.isDecryptableEncryptedKey`）时，若请求未提供有效新明文（空串、脱敏占位符或 `"ERR_KEY_LOST"`，且非显式 `clearApiKey === true` 本地免密清除），强制返回 `400 ("Saved API key could not be decrypted; please re-enter your API key")` 严禁静默覆盖或保留坏密文；当库内密文完好且提交值为空或非 `"ERR_KEY_LOST"` 的脱敏占位符（`***` / `****`）时沿用原加密 Key；仅当 `protocol === 'OPENAI'` 且 `baseUrl` 为 Loopback 地址时允许免 Key（`""`）或通过 `clearApiKey: true` 清除。
   - **默认值与激活**：新建 `GEMINI` 档案且 `customModels` 为空时自动填充 `["gemini-flash-latest", "gemini-pro-latest", "gemini-flash-lite-latest"]`。若 `isActive === true`、用户尚无任何档案、或更新当前激活档案且请求体未显式传 `isActive` 字段，则自动设为唯一激活档案。
 - **Request**：
   ```ts
@@ -1257,6 +1274,7 @@ interface AiSettings { // 旧版兼容模型
     protocol: 'OPENAI' | 'GEMINI' | 'ANTHROPIC';
     apiKey?: string;
     apiKeyEncrypted?: string;
+    clearApiKey?: boolean;
     baseUrl?: string;
     modelName?: string;
     customModels?: string[];
@@ -1288,13 +1306,13 @@ interface AiSettings { // 旧版兼容模型
   - 错误码：`403`, `404` (`{ error: "AI profile not found" }`)
 
 ### `GET /api/users/{userId}/ai-settings` & `POST /api/users/{userId}/ai-settings`（旧版兼容）
-- **说明**：读取或保存旧版按 `provider` 存储的 `AiSettings`（Key 脱敏与沿用规则同上，但不支持免 Key）。
+- **说明**：读取或保存旧版按 `provider`（`OPENAI | GEMINI | ANTHROPIC`）存储的 `AiSettings`（Key 脱敏与沿用规则同上，但不支持免 Key；`POST` 同样强制执行 `baseUrl` / `proxyHost` SSRF 校验、`proxyPort` `1..65535` 校验及 Key CR/LF 校验）。
 - **Response (`GET`)**：`AiSettings[]`；**Response (`POST`)**：`{ success: true }`
-  - 错误码：`400` (`{ error: "Invalid JSON body..." | "Invalid JSON body or missing provider" | "API Key is required for new provider configuration" }`), `403`, `500`
+  - 错误码：`400` (`{ error: "Invalid JSON body..." | "Invalid JSON body or missing provider" | "API Key is required for new provider configuration" | "Forbidden baseUrl: SSRF protection blocked access" | "Forbidden proxyHost: SSRF protection blocked access" }`), `403`, `500`
 
 ### `POST /api/ai/test-connection`（别名：`GET /api/ai/test-connection`、`POST /api/ai/models`）
-- **说明**：测试 AI 服务商连通性并在线拉取可用模型列表（支持 `OPENAI`、`GEMINI`、`ANTHROPIC`；当未传明文 `apiKey` 且传入的 `baseUrl` 为空或与已存档案的 `baseUrl` 忽略大小写完全一致时，才允许解密已存 Key，防止篡改 `baseUrl` 触发 SSRF 窃取 Key）。
-  - **SSRF 安全边界（`AiUrlGuard.isSafeUrl`）**：仅允许 `http://` 或 `https://`；除显式放行本机 Loopback（`localhost`、`127.0.0.1`、`::1`、`0:0:0:0:0:0:0:1`）外，严禁访问其他 Loopback（如 `127.0.0.2`）、局域网私网段（`10.0.0.0/8`、`172.16.0.0/12`、`192.168.0.0/16`）、链路本地/云元数据地址（`169.254.0.0/16`）及未指定地址。
+- **说明**：测试 AI 服务商连通性并在线拉取可用模型列表（支持 `OPENAI`、`GEMINI`、`ANTHROPIC`；当未传明文 `apiKey` 且按协议归一化比对 `AiUrlGuard.isTrustedSavedUrl(customBaseUrl, savedBaseUrl, protocol)` 为真时——包括库内或请求 `baseUrl` 为空回退协议默认基址及尾部斜杠 `/` 差异——允许解密已存 Key，防止篡改远端宿主触发 SSRF 窃取 Key）。
+  - **SSRF 安全边界（`AiUrlGuard.isSafeUrl` / `isSafeProxyHost`）**：仅允许 `http://` 或 `https://`（禁止 URL `userInfo` 与控制字符）；通过 `InetAddress.getAllByName` 校验全部解析记录；除显式放行本机 Loopback（`localhost`、`127.0.0.1`、`::1`、`0:0:0:0:0:0:0:1`）外，严禁访问其他 Loopback（如 `127.0.0.2`）、局域网私网段（`10.0.0.0/8`、`172.16.0.0/12`、`192.168.0.0/16`）、CGNAT（`100.64.0.0/10`）、链路本地/云元数据地址（`169.254.0.0/16`、`fe80::/10`）、IPv6 ULA（`fc00::/7`）、IPv4-mapped IPv6（`::ffff:0:0/96`）、IPv4-compatible IPv6（`::/96`，按内嵌 `bytes[12..15]` IPv4 规则校验并拦截私网/元数据/回环段）、多播与未指定地址（`0.0.0.0/8`、`::`）；自定义 `proxyHost` 同样受 `isSafeProxyHost` 约束。
   - **HTTP 状态码约定**：参数或 SSRF 校验失败返回 HTTP `400`；进入上游 HTTP 探测后，即使上游返回错误或超时（8s 连接/请求超时），本接口 HTTP 状态码**始终返回 `200`**。
 - **Request**：（支持 JSON Body 或同名 Query 参数）
   ```ts
@@ -1325,7 +1343,7 @@ interface AiSettings { // 旧版兼容模型
   - 错误码：`400` (`{ error: "Missing provider/protocol" | "Unsupported protocol: ..." | "Forbidden target URL: SSRF protection blocked access to private or metadata addresses" | "Invalid proxy port" }`)
 
 ### `POST /api/ai/chat`
-- **说明**：执行非流式 AI 对话请求（当仅传旧版 `provider` 而未传 `profileId` 时自动关闭深度思考 `enableThinking = false`；若无正文返回 `"[No Content Returned]"`）。
+- **说明**：执行非流式 AI 对话请求（当仅传旧版 `provider` 而未传 `profileId` 且未显式传 `enableThinking` 时自动关闭深度思考 `enableThinking = false`；若无正文返回 `"[No Content Returned]"`）。**与流式接口同样强制执行 `AiUrlGuard.isSafeUrl` / `isSafeProxyHost`、`temperature` (`[0, 2]`) 及严格 JSON 类型校验（非法类型返回 `400`）**。
 - **Request**：
   ```ts
   interface AiChatBody {
@@ -1334,6 +1352,9 @@ interface AiSettings { // 旧版兼容模型
     systemPrompt?: string;
     modelName?: string;
     temperature?: number;
+    enableThinking?: boolean;   // 可选：按次覆盖档案深度思考开关（Gemini 显式下发 thinkingConfig.includeThoughts/thinkingBudget）
+    thinkingBudget?: number;    // 可选：按次覆盖思考 Token 预算（>= 0；false+0 时 Gemini 自动降级 128/省略以兼容仅支持思考模型）
+    reasoningEffort?: 'none' | 'minimal' | 'low' | 'medium' | 'high'; // 可选：OpenAI o1/o3/o4/gpt-5 reasoning_effort 映射
     messages: Array<{ role: 'user' | 'assistant' | 'system'; content: string }>;
   }
   ```
@@ -1341,7 +1362,7 @@ interface AiSettings { // 旧版兼容模型
   - 错误码：`400` (`{ error: "Request body must be a JSON object" | "Invalid JSON format: ..." | "Missing provider or profileId" | "AI Settings not configured for provider: ..." }`), `401`, `500` (`{ error: string }`)
 
 ### `POST /api/ai/chat/stream`
-- **说明**：执行三协议统一的 SSE（`text/event-stream; charset=UTF-8`）流式 AI 对话（含 15 秒 `: heartbeat` 保活、深度思考 `reasoning` 块、正文 `text` 块与 Token `usage` 统计；进入流式前对非空 `profile.baseUrl` 执行 `AiUrlGuard.isSafeUrl` 校验）。
+- **说明**：执行三协议统一的 SSE（`text/event-stream; charset=UTF-8`）流式 AI 对话（显式设置 `AsyncContext.setTimeout(300_000L)`、含 15 秒 `: heartbeat` 保活、深度思考 `reasoning` 块、正文 `text` 块与 Token `usage` 统计；进入流式前及 `AiClient.chatStream` 拼接最终 endpoint 后均执行 `AiUrlGuard.isSafeUrl` 校验）。
 - **Request**：同 `AiChatBody`
 - **Response**：`200 text/event-stream; charset=UTF-8`
   ```ts
@@ -1372,11 +1393,13 @@ interface AiSettings { // 旧版兼容模型
         provider?: 'GEMINI' | 'OPENAI' | string;
         model?: string;
         voice?: string;        // GEMINI 默认 'Kore'；OPENAI 默认 'alloy'
+        inputMode?: 'vad' | 'ptt'; // 默认 'vad'；OPENAI 'ptt' 模式将 turn_detection 设为 null
         systemPrompt?: string; // 含赛事上下文与人设的完整系统提示词
         history?: Array<{ role: 'user' | 'assistant' | 'model'; content: string }>; // 最多截取最近 12 轮 / 12,000 字符
       }
     | { type: 'audio'; data: string }            // Base64 Raw PCM16 Little-Endian Mono
-    | { type: 'audio_end'; commit?: boolean }    // 暂停拾音 / PTT 结束提交（默认 commit = true）
+    | { type: 'audio_end'; commit?: boolean }    // 暂停拾音 / PTT 结束提交（默认 commit = true；OpenAI 仅 'ptt' 模式发送 commit+response.create）
+    | { type: 'mode'; inputMode: 'vad' | 'ptt' } // 通话中动态切换 OpenAI Realtime 的 VAD/PTT 模式
     | { type: 'text'; text: string }             // 通话中静默补充文字指令
     | { type: 'interrupt' }                      // 主动打断 AI 当前语音输出
     | { type: 'stop' };                          // 主动结束并关闭会话
@@ -1402,12 +1425,12 @@ interface AiSettings { // 旧版兼容模型
     | { type: 'error'; code: string; message: string };
   ```
 - **完整错误码 (`error.code`)**：
-  - 鉴权/协议与帧校验：`AUTH_TIMEOUT`、`UNAUTHORIZED`、`BAD_MESSAGE`、`INVALID_JSON`、`MISSING_TYPE`、`UNKNOWN_TYPE`、`NOT_STARTED`、`MISSING_PROFILE`、`PROFILE_NOT_FOUND`、`FORBIDDEN_URL`、`KEY_DECRYPT_FAILED`、`API_KEY_REQUIRED`、`UNSUPPORTED_PROTOCOL`。
+  - 鉴权/协议与帧校验：`AUTH_TIMEOUT`、`UNAUTHORIZED`、`ALREADY_STARTED`、`BAD_MESSAGE`、`INVALID_JSON`、`MISSING_TYPE`、`UNKNOWN_TYPE`、`NOT_STARTED`、`MISSING_PROFILE`、`PROFILE_NOT_FOUND`、`FORBIDDEN_URL`、`KEY_DECRYPT_FAILED`、`API_KEY_REQUIRED`、`UNSUPPORTED_PROTOCOL`。
   - 上游中继：`UPSTREAM_CONNECT_FAILED`、`UPSTREAM_SEND_FAILED`、`UPSTREAM_ERROR`、`UPSTREAM_WS_ERROR`。
 - **Token 用量帧闭环**：前端 `useAiVoiceSession.ts` 在 `socket.onmessage` 中监听 `type: 'usage'` 帧，无论该帧先于或紧随 `turn_complete` 到达，均将 `usage`（`promptTokens`/`completionTokens`/`totalTokens`/`thoughtsTokens`）挂载至对应 `viaVoice` 助手消息并触发 `scheduleSaveThread` 持久化。
 
 ### `POST /api/ai/audio/transcribe`
-- **说明**：统一语音识别（STT）后端接口（音频解码上限 `10 MB`，并对 `profile.baseUrl` 执行 `AiUrlGuard.isSafeUrl` 校验）。
+- **说明**：统一语音识别（STT）后端接口（请求体上限 `15 MB`、音频解码上限 `10 MB` 且使用 `Base64.getMimeDecoder()` 兼容换行，并对 `profile.baseUrl` 与 `proxyHost` 执行 `AiUrlGuard` 校验）。
   - `GEMINI`：向 `:generateContent` 发送 `inline_data` 音频做逐字转录；模型优先取 `model` 覆盖参数，其次取不含 `live`/`tts` 的 `profile.modelName`，否则回退 `gemini-flash-latest`。
   - `OPENAI`：向 `<baseUrl>/audio/transcriptions` 发送 `multipart/form-data`（若未传 `model`，按厂商自动选择：Groq → `whisper-large-v3-turbo`、SiliconFlow → `FunAudioLLM/SenseVoiceSmall`、OpenAI 官方 → `gpt-4o-mini-transcribe`、其余兼容网关 → `whisper-1`）。
   - `ANTHROPIC`：返回 `400`（不支持音频转录）。
@@ -1434,6 +1457,17 @@ interface AiTokenUsage {
   thoughtsTokens?: number;
 }
 
+interface AiTurboActionResult {
+  id: string;
+  type: string;
+  status: 'pending' | 'success' | 'error';
+  summary: string;
+  detail?: string;
+  error?: string;
+  actedAsUsername?: string;
+  executedAt?: string;
+}
+
 interface AiChatMessage {
   id: string;
   role: 'user' | 'assistant';
@@ -1449,6 +1483,8 @@ interface AiChatMessage {
   viaVoice?: boolean;
   stopped?: boolean;
   error?: string;
+  aiMode?: 'ask' | 'turbo';
+  turboActions?: AiTurboActionResult[];
 }
 
 interface AiContextSections {
@@ -1485,7 +1521,7 @@ interface AiContextConfig {
     personaId: string;
     pinned: boolean;
     messageCount: number;
-    lastMessagePreview: string; // 取最后一条消息 content 压缩空白后截断 80 字符
+    lastMessagePreview: string; // 剥离已闭合及尾部未闭合 sp27-action 块并压缩空白后截断 80 字符；纯 action 消息回退 "[Turbo] <summary>"
     createdAt?: string;
     updatedAt?: string;
   }
@@ -1494,7 +1530,7 @@ interface AiContextConfig {
   - 错误码：`401`, `403` (`"Not a member of this event"`)
 
 ### `POST /api/events/{id}/ai-threads`
-- **说明**：赛事成员在当前赛事下创建新的 AI 会话线程。
+- **说明**：赛事成员在当前赛事下创建新的 AI 会话线程（强归属校验：若传入 `id` 在全局已存在且属于其他用户返回 `403`，同用户但属于其他赛事返回 `409`；`id` 上限 `128` 字符，`personaId` 截断 `48` 字符，`pinned` 必须为布尔值）。
 - **Request**：
   ```ts
   interface CreateAiThreadBody {
@@ -1521,16 +1557,16 @@ interface AiContextConfig {
     updatedAt?: string;
   }
   ```
-  - 错误码：`400` (`{ error: "Invalid JSON body" }`), `401`, `403`
+  - 错误码：`400` (`{ error: "Invalid JSON body" }`), `401`, `403`, `409`
 
 ### `GET /api/events/{id}/ai-threads/{threadId}`
-- **说明**：赛事成员获取单个 AI 会话线程的完整消息与上下文配置。
+- **说明**：赛事成员获取单个 AI 会话线程的完整消息与上下文配置（线程属于其他用户返回 `403`，不存在或属于其他赛事返回 `404`）。
 - **Request**：`Path: { id: string; threadId: string }`
 - **Response**：`AiThreadPayload`
   - 错误码：`401`, `403`, `404` (`{ error: "Thread not found" }`)
 
 ### `PUT /api/events/{id}/ai-threads/{threadId}`
-- **说明**：赛事成员更新（或按 ID 幂等创建）单个 AI 会话线程；`messages`/`messagesJson` 与 `contextConfig`/`contextConfigJson` 互斥优先取对象/数组字段。
+- **说明**：赛事成员更新（或按 ID 幂等创建）单个 AI 会话线程（归属核验：属于其他用户返回 `403`，同用户属于其他赛事返回 `409`，SQL `UPDATE` 严格限定 `WHERE id = :id AND user_id = :userId AND event_id = :eventId`）；`messages`/`messagesJson` 与 `contextConfig`/`contextConfigJson` 互斥优先取对象/数组字段。
 - **Request**：
   ```ts
   interface UpdateAiThreadBody {
@@ -1544,10 +1580,10 @@ interface AiContextConfig {
   }
   ```
 - **Response**：`AiThreadPayload`
-  - 错误码：`400` (`{ error: "Request body must be a JSON object" | "Invalid JSON: ..." | "messages must be a JSON array" | "messagesJson must be a JSON array string" | "contextConfig must be a JSON object" | "contextConfigJson must be a JSON object string" }`), `401`, `403`
+  - 错误码：`400` (`{ error: "Request body must be a JSON object" | "Invalid JSON: ..." | "messages must be a JSON array" | "messagesJson must be a JSON array string" | "contextConfig must be a JSON object" | "contextConfigJson must be a JSON object string" }`), `401`, `403`, `409`
 
 ### `DELETE /api/events/{id}/ai-threads/{threadId}`
-- **说明**：赛事成员删除本人的指定 AI 会话线程。
+- **说明**：赛事成员删除本人的指定 AI 会话线程（属于其他用户返回 `403`）。
 - **Request**：`Path: { id: string; threadId: string }`
 - **Response**：`{ success: true }`
   - 错误码：`401`, `403`, `404` (`{ error: "Thread not found" }`)
@@ -1563,8 +1599,10 @@ interface AiContextConfig {
 - **`protocolCatalog.ts` / `presets.ts`**：
   - `PROTOCOL_META` 定义三协议默认基址与鉴权头：`OPENAI` (`https://api.openai.com/v1`, `Authorization: Bearer <KEY>`)、`GEMINI` (`https://generativelanguage.googleapis.com/v1beta`, `x-goog-api-key: <KEY>`)、`ANTHROPIC` (`https://api.anthropic.com`, `x-api-key: <KEY>` + `anthropic-version: 2023-06-01`)。
   - `GEMINI_DEFAULT_MODELS` 为 `['gemini-flash-latest', 'gemini-pro-latest', 'gemini-flash-lite-latest']`。
-  - `AI_PROFILE_DEFAULTS` 与后端一致：`temperature: 0.4`, `maxTokens: 4096`, `enableThinking: true`, `thinkingBudget: 4096`, `anthropicVersion: '2023-06-01'`, `maxContextMsgs: 16`。
+  - `AI_PROFILE_DEFAULTS` 与后端一致：`temperature: 0.4`, `maxTokens: 4096`, `enableThinking: false`, `thinkingBudget: 4096`, `anthropicVersion: '2023-06-01'`, `maxContextMsgs: 16`。
   - `isMaskedOrPlaceholderApiKey` 识别空串、`****`、`ERR_KEY_LOST` 或含 `***` 的脱敏串，避免前端回传覆盖后端密文。
+- **`turboAgent.ts` & `sp27-action` 协议隔离**：Turbo 模式以当前登录用户身份执行前端/CRDT/后端真实写入（`add_tag`/`remove_tag`/`create_match_record`/`update_match_record`/`delete_match_record`/`upsert_pit_record`/`ban_team`/`unban_team`/`assign_scout`/`set_my_team`/`create_custom_field`/`update_custom_field`/`delete_custom_field`），严格校验 Host/作者权限；`ask` 模式严格只读不执行任何 `sp27-action` 块。`sp27-action` 块在历史上下文（`payloadMessages`）、消息复制、Markdown 导出、TTS 朗读（流式推送同步保留末尾反引号前缀缓冲）及侧边栏摘要中统一剥离，仅持久化人类可读正文 + `turboActions` 回执；纯 action 无正文且有已执行回执时**不填充** `ai.no_content_returned`；SSE 流错误响应仅单次读取 `res.text()` 后尝试 `JSON.parse`，保留上游非 JSON 明文错误提示。
+- **`teamMatcher.ts` 设计取舍（3–6 位 FTC 队号约束）**：交互式队号高亮与芯片解析刻意限定匹配 3–6 位数字（`100..999999`），避免比赛场号/得分等 1–2 位常见数字误触发战队跳转芯片（`#1`、`Q2` 等）。
 - **`contextBuilder.ts`**：`DEFAULT_MAX_CHARS_BUDGET = 28000`；`buildEventDataContext` 按 Focus/MyTeam → BannedTeams → Rankings（含 SP-NP OPR、Predict Cycle、Advancement）→ Schedule（优先相关场次，最多 32 场）→ Tags → Pit → CustomMetrics → Budgeted Matches 组装紧凑文本快照。
 
 ---
@@ -1577,10 +1615,11 @@ interface AiContextConfig {
 - **说明**：`Main.buildLocalAppUrl(port, hasCustomTitleBar)` 在 Windows 桌面端（`hasCustomTitleBar = true`，使用无边框 `JFrame` + Swing `CustomTitleBar` + `WindowResizer`，`1024x768`，`#0B0E10` 背景，`24px` 圆角、`MAXIMIZED_BOTH` 时取消圆角）启动内嵌浏览器时加载 `http://localhost:<port>/index.html?shell=desktop`；macOS / Linux 使用系统原生标题栏（`hasCustomTitleBar = false`，macOS 额外追加 `--no-sandbox` 防止 `NSWindowStyleMaskBorderless` SIGTRAP），加载 `http://localhost:<port>/index.html`（不带 `shell` 参数）。
 - **前端识别与表现**：`frontend/src/utils/desktopShell.ts#hasDesktopTitleBar()` 通过 `new URLSearchParams(window.location.search).get('shell') === 'desktop'` 判定；返回 `true` 时，`DashboardView.vue` 为 `.topbar` 添加 `.is-desktop-shell` 并用 `.page-heading` 替代 `.brand` Logo，`EventView.vue` 隐藏 `.event-brand-logo`，避免与桌面自定义标题栏重复展示品牌元素。
 
-### `JCEF Bridge: window.__rtcDisconnect` & `window.__rtcSimulateNetworkDrop`
+### `JCEF & E2E Bridges: window.__rtcDisconnect` / `__rtcSimulateNetworkDrop` / `__sp27E2eBridge`
 - **说明**：
   - `window.__rtcDisconnect()`：在 `frontend/src/stores/connection.ts` 中绑定 `() => svc?.disconnect()`。桌面主窗口关闭（`windowClosing`）时，Swing 宿主通过 `browser.executeJavaScript("if (window.__rtcDisconnect) { window.__rtcDisconnect(); }", browser.getURL(), 0)` 触发前端立即广播 `HOST_LEAVING` 并主动断开 WebRTC / 信令连接，随后等待 `150ms` 再销毁 CEF 与 Javalin 实例。
   - `window.__rtcSimulateNetworkDrop()`（测试辅助 Hook）：在 `frontend/src/stores/connection.ts` 中绑定，仅关闭底层 `DataChannel`（不关闭信令连接），供 E2E 模拟断网重连测试使用。
+  - `window.__sp27E2eBridge`（含 `sendForgedRecordAttacks`）与 `__LAST_CRDT_FUTURE_SKEW__` / `__LAST_CRDT_SECURITY_REJECTS__`：仅在 `import.meta.env.DEV || import.meta.env.VITE_ENABLE_E2E_BRIDGE === 'true'` 编译期门禁为真时挂载至 `window`（`useEventWebRtcBridge.ts`），生产打包（`npm run build`）完全剔除，严禁暴露给线上 PWA 或桌面正式版。
 
 ### `JCEF Bridge: CefDisplayHandler.onConsoleMessage`
 - **说明**：JCEF 拦截前端所有 `console.log / warn / error` 输出，自动格式化为 `[<ISO_LOCAL_DATE_TIME>] [Frontend-Console] (<source>:<line>) <message>` 并追加落盘至桌面端 `<logDir>/scoutingpro_*.log`（`<logDir>` 解析规则见 `§14`）。
@@ -1596,7 +1635,8 @@ interface AiContextConfig {
 ### `JCEF & Javalin Network / Profile / Bundle Storage`（端口、请求上限、目录隔离与原生库缓存）
 - **HTTP/WS 上限与端口开孔**：Javalin `config.http.maxRequestSize = 15_000_000L`（15 MB）；Jetty WebSocket 配置 `maxTextMessageSize = 2 * 1024 * 1024`（2 MB）、`maxBinaryMessageSize = 2 * 1024 * 1024`（2 MB）、`idleTimeout = 15 min`；JCEF 启动参数固定包含 `--use-fake-ui-for-media-stream`、`--disable-features=WebRtcHideLocalIpsWithMdns,WebUsb,MediaRouter,CalculateNativeWinOcclusion`、`--force-fieldtrials=WebRTC-IPv6Default/Enabled/WebRTC-BindUsingInterfaceIndex/Enabled/WebRTC-IceFieldTrials/send_ping_on_switch_ice_controlling:true,send_ping_on_selected_ice_controlling:true,send_ping_on_nomination_ice_controlled:true/WebRTC-Bwe-Bbr/Enabled/`、`--disable-device-discovery-notifications`、`--disable-usb-keyboard-detect`（macOS 追加 `--no-sandbox`）；`onContextInitialized` 锁定 `webrtc.udp_port_range=50000-50099`；后台 `PortForwardingService` 在物理网卡上以 `12_000 ms` 预算异步探测 UPnP IGDv1/v2（含 `WANIPv6FirewallControl:1`）、NAT-PMP、PCP，为 `50000-50009/UDP` 申请短租约（默认 `300s`，上限 `600s`，退出时自动清理）。
 - **Profile 隔离（`<dataDir>/jcef_profile*`）**：`Main.resolveJcefProfileDir()` 优先锁定持久化主目录 `<dataDir>/jcef_profile`（检查 Chromium `lockfile` 并持有应用级 `.instance.lock`）；被占用时依次探测 `jcef_profile_2` .. `jcef_profile_10`；全满时回退至 `java.io.tmpdir/scoutingpro-jcef-<timestamp>`。注意：仅桌面窗口 `windowClosing` 回调会递归删除 `scoutingpro-jcef-*` 临时目录，`gracefulShutdown`（`/api/test/shutdown` 或 JVM ShutdownHook）仅释放锁不删除临时目录。
-- **原生二进制缓存**：`Main.ensureJcefBundle()` 固定使用 `~/.scoutingpro27/jcef-bundle`（以 `.extracted_v3_ok` 标记校验，不受 `--data-dir` 影响；Windows 防火墙放行规则 `ScoutingPro27 App JCEF` 指向其中的 `jcef_helper.exe`）。
+- **原生二进制缓存**：`Main.ensureJcefBundle()` 固定使用 `~/.scoutingpro27/jcef-bundle`（以 `.extracted_v3_ok` 标记校验；当打包内嵌离线归档 `/jcef-bundle.tar.gz` 或 `/jcef-bundle.zip` 存在时，额外通过 `CefInstallationChecker.checkInstallation()` 校验 `install.lock` 与 `build_meta.json` 版本匹配，防止跨版本升级后残留旧版 JCEF 触发离线联网下载；macOS 解压或复用时自动执行 `xattr -r -d com.apple.quarantine`；且 GUI 模式下在 `ensureJcefBundle()` 完成后再异步触发 `firewall-check`，确保 Windows 防火墙规则 `ScoutingPro27 App JCEF` 命中刚解压的 `jcef_helper.exe`）。
+- **原生安装包构建规范（`.github/workflows/build-installer.yml`）**：Windows `.msi` 固定 `--win-upgrade-uuid 1640af3f-2837-35d3-b98a-d8d8fe87e5e7` 与 `--vendor "FTC Team 27570 B.E.A.R."`；macOS Apple Silicon 先产出 `.app` (`--type app-image` + `java.awt.peer`/`sun.awt`/`sun.lwawt`/`sun.lwawt.macosx` `--add-opens`)，向 `Info.plist` 注入 `NSMicrophoneUsageDescription`、`NSCameraUsageDescription` 与 `LSMinimumSystemVersion=11.0`，由内向外执行 Apple Silicon ad-hoc `codesign --force --sign -` 验签后通过 `ditto` + `ln -s /Applications` + `hdiutil create -format UDZO` 封装 `.dmg`，并在 CI 挂载 `.dmg` 复验签名与 `Info.plist`。
 
 ---
 
@@ -1804,7 +1844,7 @@ interface AiContextConfig {
 - `name VARCHAR(120) NOT NULL`, `preset_id VARCHAR(48) DEFAULT 'custom'`, `protocol VARCHAR(20) NOT NULL`
 - `api_key_encrypted TEXT DEFAULT ''`, `base_url VARCHAR(500) DEFAULT ''`, `model_name VARCHAR(200) DEFAULT ''`
 - `custom_models_json CLOB DEFAULT '[]'`, `system_prompt TEXT`
-- `temperature DOUBLE DEFAULT 0.4`, `max_tokens INT DEFAULT 4096`, `enable_thinking BOOLEAN NOT NULL DEFAULT TRUE`, `thinking_budget INT DEFAULT 4096`
+- `temperature DOUBLE DEFAULT 0.4`, `max_tokens INT DEFAULT 4096`, `enable_thinking BOOLEAN NOT NULL DEFAULT FALSE`（`AiSchemaBootstrap`；`V9` 历史迁移为 `TRUE`）, `thinking_budget INT DEFAULT 4096`
 - `anthropic_version VARCHAR(32) DEFAULT '2023-06-01'`, `max_context_msgs INT DEFAULT 16`
 - `proxy_host VARCHAR(255) DEFAULT ''`, `proxy_port INT DEFAULT NULL`, `is_active BOOLEAN NOT NULL DEFAULT FALSE`
 - `created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP`, `updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP`
@@ -1825,11 +1865,13 @@ interface AiContextConfig {
 
 ### `16.1 Pinia Stores 与状态不变量 (frontend/src/stores/)`
 - **`user.ts` (`useUserStore`)**：
-  - 监听 `window` 事件 `'auth-unauthorized'` 自动登出；`logout()` 先并发执行 `beforeLogoutHooks`（上限 `2000ms`），再断连 WebRTC、清除用户态缓存（`scoutingpro-user` 等），**刻意保留**跨账号共享缓存（`sp27_epoch_*`, `sp27_clock_anchor_*`, IndexedDB 密钥与离线照片）。
+  - 监听 `window` 事件 `'auth-unauthorized'` 自动登出；`logout()` 先并发执行 `beforeLogoutHooks`（上限 `2000ms`），同步调用 `useAiStore().resetUserSession()` 清理 AI 用户态，再断连 WebRTC、清除用户态与单赛事内存态缓存（`scoutingpro-user`、`recordStore.clearMemoryOnly()`、`pitStore.clearLocalCache()`、`scheduleStore.clearLocalCache()` 等），**刻意保留**跨账号共享缓存（`sp27_epoch_*`, `sp27_clock_anchor_*`, IndexedDB 密钥与离线照片）。
 - **`events.ts` (`useEventsStore`)**：
   - `isHost` 强制要求 `!isMobileDevice() && isDesktopHost()`；`sanitizeEventList` 自动剔除与权威 UUID 同 `inviteCode` 的 `evt-*` / `ext_*` 占位符；删除赛事时同步清理 `scoutingpro27_schedule_<id>`、`scoutingpro27_assignments_<id>`、`sp27_*_<id>`；切换 `currentEvent` 时同步更新 `connectivity.ts` 的自定义 TURN 配置。
-- **`schedule.ts` (`useScheduleStore`)**：
-  - `assignments` 字典键格式 `${LEVEL}_${matchNumber}_${station}`（兼容旧 `${matchNumber}_${station}`）；`importSchedules` 写入本地与 CRDT 后同步；`loadSchedule` 先读本地缓存再请求后端，离线时静默降级。
+- **`records.ts` (`useRecordStore`)**：
+  - 维护跨赛事严格隔离：`currentRecords` 与 `currentTeamTags` 按 `currentEventId` 过滤，提供 `getTagsForEvent(eventId)` 与 `getTagsForTeam(teamNumber, eventId)`；`fetchRecords` 切换赛事前先冲刷上一赛事防抖持久化，并通过单调序号 `fetchSeq` 拦截过期异步返回对 `officialMatches`/`officialAdvancement`/`bannedTeams` 的回写；跨 Tab `storage` 监听仅按 `sp27_*_<currentEventId>` 同步当前赛事；`applyTagsFullSync` 严格剔除非目标赛事标签后再落盘与投影至 CRDT。
+- **`pitScout.ts` (`usePitScoutStore`) & `schedule.ts` (`useScheduleStore`)**：
+  - 单赛事内存态模型：切换或离开赛事（`fetchPitData` / `loadSchedule` / `EventView` 离开路由）时先清空内存并仅加载目标 `eventId` 缓存，同时对 `localStorage` 反序列化与持久化执行 `eventId` 自愈过滤，严禁将上一赛事数据带入新赛事缓存或后端合并；所有异步拉取均带 `fetchSeq` 过期丢弃守卫，CRDT/WebRTC 同步入口严格校对 `eventId` 并暴露 `clearLocalCache()` 供登出与离场清理。
 - **`connection.ts` (`useConnectionStore`)**：
   - `isStandbyHost` 在移动端强制为 `false`；`takeoverHost` 受 `3000ms` 互斥冷却保护；`setRtcService` 挂载 `window.__rtcDisconnect` 与 `window.__rtcSimulateNetworkDrop`；`pendingSasQueue` 驱动 `isSasModalOpen`。
 - **`ai.ts` & `stores/aiModules/*` (`useAiStore`)**：
@@ -1837,6 +1879,7 @@ interface AiContextConfig {
   - `aiDockState.ts`：`sp27_ai_dock_width` 强制夹紧至 `[360, 680]`，默认 `420`。
   - `aiThreads.ts`：采用 `650ms` 防抖保存（`scheduleSaveThread`），切换/创建线程或卸载前通过 `flushPendingSaves(threadId, keepalive)` 冲刷挂起 `PUT` 请求；删除或清空线程前必须先调用 `stopStreaming(threadId)` 中止 `AbortController`。
   - `aiStreaming.ts`：仅允许同一线程单并发流式请求；每次发送至 `/api/ai/chat/stream` 时按 `profile.maxContextMsgs`（默认 `16`）截断历史消息并过滤含 `error` 的失败消息。
+  - `AiCopilotWorkspace.vue` & `contextBuilder.ts`：注入至 AI 系统提示词、Token 预算统计、队伍 `@` 自动补全与 Hover 预览卡的全部赛事数据（`records`、`teamTags`、`pitRecords`、`officialTeams`、`schedules`、`assignments`、`rankings`、`bannedTeams`）均按当前 `props.eventId` 严格过滤，杜绝跨赛事上下文串台。
 - **`navigation.ts` (`useNavigationStore`)**：
   - 管理跨页面跳转前的滚动位置与上下文恢复（`EventTab = 'scout' | 'rankings' | 'history' | 'schedule' | 'whiteboard' | 'scouts' | 'ai' | 'pit'`）。
   - 持久化至 `sessionStorage` 键 `sp27_nav_pos_<eventId>`；提供 `saveEventPosition`、`getEventPosition`、`consumeEventPosition`（读取后删除）、`clearEventPosition`。
@@ -1874,7 +1917,7 @@ interface AiContextConfig {
 | `localStorage` | `sp27_clock_anchor_<eventId>` | `services/clock/calibratedClock.ts` | 赛事校准时钟锚点偏移缓存 |
 | `localStorage` | `sp27_whiteboard_v1_<eventId>` | `useTacticalWhiteboard.ts` | 战术白板本地状态 |
 | `localStorage` | `scoutingpro_rankings_custom_cols` | `useRankingsCustomColumns.ts` | 排行榜自定义显示列 |
-| `localStorage` | `sp27_ai_dock_open` / `sp27_ai_dock_width` / `sp27_ai_dock_expanded` / `sp27_ai_my_team_by_event` / `sp27_ai_active_profile_id` / `sp27_ai_voice_prefs` | `stores/aiModules/{aiDockState,aiProfiles}.ts`, `voiceCatalog.ts` | AI 侧边栏布局、我方队号、激活档案 ID 与语音偏好 |
+| `localStorage` | `sp27_ai_dock_open` / `sp27_ai_dock_width` / `sp27_ai_dock_expanded` / `sp27_ai_my_team_by_event` / `sp27_ai_active_profile_id` / `sp27_ai_voice_prefs` / `sp27_ai_mode` / `sp27_ai_thinking_mode` | `stores/aiModules/{aiDockState,aiProfiles}.ts`, `voiceCatalog.ts` | AI 侧边栏布局、我方队号、激活档案 ID、语音偏好、Ask/Turbo 模式与按次思考深度 |
 | `localStorage` | `sp27-cloud-pwa-url` / `sp27-custom-broker` / `sp27-disable-turn` | `MobileQrModal.vue`, `signaling.ts`, `clientSession.ts` | 云端 PWA 地址、自定义 MQTT/WS 信令、禁用 TURN 开关 |
 | `localStorage` | `sp27_device_identity` / `scoutingpro_verified_sas_<inviteCode>_<pubHex>` / `scoutingpro_verified_sas_<inviteCode>_<userId>_<pubHex>` / `sp27_epoch_<INVITE_CODE>` | `crdtStore.ts`, `sasManager.ts`, `epochStore.ts` | 设备标识、已验证 SAS 与 Host Epoch 缓存 |
 | `sessionStorage` | `sp27_nav_pos_<eventId>` | `stores/navigation.ts` | 页面跳转滚动位置与 Tab 上下文 |

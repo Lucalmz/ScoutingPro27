@@ -603,23 +603,51 @@ export async function evaluatePeerKeyTrust(params: {
     }
   }
 
-  // Case 1b: Seamless binding when public key matches and either previous or incoming is pseudo/anonymous (e.g. temporary scout-xxx upgraded to real account)
+  // Case 1b: Seamless upgrade when previous record was temporary/pseudo (e.g. scout-xxx upgraded to real account),
+  // or unauthenticated/empty userId reconnect on matching key without mutating the real user's record.
   if (
     latestDeviceRecord &&
     latestDeviceRecord.publicKeyHex.toLowerCase() === publicKeyHex.toLowerCase() &&
     (isPreviousPseudo || isIncomingPseudo)
   ) {
-    latestDeviceRecord.lastSeenAt = Date.now()
-    if (userId && !isInvalidPseudoUser(userId)) {
-      latestDeviceRecord.userId = userId
+    if (!isPreviousPseudo && isIncomingPseudo) {
+      if (isInvalidPseudoUser(userId)) {
+        const updatedRecord: PeerTrustRecord = {
+          ...latestDeviceRecord,
+          lastSeenAt: Date.now()
+        }
+        await savePeerTrustRecord(updatedRecord)
+        return {
+          status: 'TRUSTED_MATCH',
+          record: updatedRecord
+        }
+      }
+      if (latestDeviceRecord.userId !== userId) {
+        return {
+          status: 'MULTI_USER_DEVICE_SWITCH',
+          existingRecord: latestDeviceRecord,
+          requestedUserId: userId,
+          requestedUsername: username || userId,
+          message: `检测到设备 [${deviceId}] 曾绑定侦察员 [${latestDeviceRecord.username || latestDeviceRecord.userId}]，当前请求用户为 [${username || userId}]。必须通过安全码核验重新绑定。`
+        }
+      }
     }
-    if (username) {
-      latestDeviceRecord.username = username
+
+    const prevKey = `${latestDeviceRecord.eventId}:${latestDeviceRecord.userId}:${latestDeviceRecord.deviceId}`
+    const nextUserId = userId && !isInvalidPseudoUser(userId) ? userId : latestDeviceRecord.userId
+    const upgradedRecord: PeerTrustRecord = {
+      ...latestDeviceRecord,
+      userId: nextUserId,
+      username: username || latestDeviceRecord.username,
+      lastSeenAt: Date.now()
     }
-    await savePeerTrustRecord(latestDeviceRecord)
+    if (nextUserId !== latestDeviceRecord.userId) {
+      memTrustedPeers.delete(prevKey)
+    }
+    await savePeerTrustRecord(upgradedRecord)
     return {
       status: 'TRUSTED_MATCH',
-      record: latestDeviceRecord
+      record: upgradedRecord
     }
   }
 

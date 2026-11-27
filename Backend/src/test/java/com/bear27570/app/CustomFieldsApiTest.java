@@ -12,6 +12,8 @@ import com.bear27570.app.model.User;
 import com.bear27570.app.routes.ApiRoutes;
 import com.bear27570.app.util.AESUtil;
 import com.bear27570.app.util.JwtUtil;
+import com.google.gson.JsonObject;
+import com.google.gson.JsonParser;
 import io.javalin.Javalin;
 import io.javalin.testtools.JavalinTest;
 import org.flywaydb.core.Flyway;
@@ -523,6 +525,88 @@ class CustomFieldsApiTest {
             assertThat(cyclePutBody).contains("CIRCULAR_DEPENDENCY");
             assertThat(cyclePutBody).contains("team_power");
             assertThat(cyclePutBody).contains("team_helper");
+
+            // 12. Partial PUT preserves omitted fields and explicit null clears nullable field
+            var numPostRes = client.post("/api/events/" + eventId + "/custom-fields", """
+                {
+                    "target": "MATCH",
+                    "name": "Cycle Count",
+                    "fieldKey": "cycle_cnt",
+                    "fieldType": "number",
+                    "minVal": 0,
+                    "maxVal": 25,
+                    "stepVal": 1,
+                    "description": "Keep me on partial PUT",
+                    "configJson": "{\\"inputMode\\":\\"stepper\\"}"
+                }
+            """, b -> b.header("Authorization", "Bearer " + hostToken));
+            assertThat(numPostRes.code()).isEqualTo(201);
+            String numFieldId = JsonParser.parseString(numPostRes.body().string()).getAsJsonObject().get("id").getAsString();
+
+            var partialPut = client.put("/api/events/" + eventId + "/custom-fields/" + numFieldId, """
+                {
+                    "name": "Cycle Count Renamed",
+                    "isActive": false
+                }
+            """, b -> b.header("Authorization", "Bearer " + hostToken));
+            assertThat(partialPut.code()).isEqualTo(200);
+            JsonObject partialJson = JsonParser.parseString(partialPut.body().string()).getAsJsonObject();
+            assertThat(partialJson.get("name").getAsString()).isEqualTo("Cycle Count Renamed");
+            assertThat(partialJson.get("isActive").getAsBoolean()).isFalse();
+            assertThat(partialJson.get("minVal").getAsDouble()).isEqualTo(0.0);
+            assertThat(partialJson.get("maxVal").getAsDouble()).isEqualTo(25.0);
+            assertThat(partialJson.get("description").getAsString()).isEqualTo("Keep me on partial PUT");
+            assertThat(partialJson.get("configJson").getAsString()).contains("stepper");
+
+            var clearDescPut = client.put("/api/events/" + eventId + "/custom-fields/" + numFieldId, """
+                {
+                    "description": null
+                }
+            """, b -> b.header("Authorization", "Bearer " + hostToken));
+            assertThat(clearDescPut.code()).isEqualTo(200);
+            JsonObject clearedJson = JsonParser.parseString(clearDescPut.body().string()).getAsJsonObject();
+            assertThat(clearedJson.has("description") && !clearedJson.get("description").isJsonNull()).isFalse();
+
+            // 13. Non-host PUT & DELETE return 403; missing event returns 404
+            var scoutReg = client.post("/api/user/register", "{\"username\":\"cf_member_scout\",\"password\":\"pass123\"}");
+            String scoutToken = JsonParser.parseString(scoutReg.body().string()).getAsJsonObject().get("token").getAsString();
+            var hostEventJson = JsonParser.parseString(client.get("/api/events",
+                    b -> b.header("Authorization", "Bearer " + hostToken)).body().string()).getAsJsonArray();
+            String inviteCode = hostEventJson.get(0).getAsJsonObject().get("inviteCode").getAsString();
+            assertThat(client.post("/api/events/join", "{\"inviteCode\":\"" + inviteCode + "\"}",
+                    b -> b.header("Authorization", "Bearer " + scoutToken)).code()).isEqualTo(200);
+
+            assertThat(client.put("/api/events/" + eventId + "/custom-fields/" + numFieldId, "{\"name\":\"Hacked\"}",
+                    b -> b.header("Authorization", "Bearer " + scoutToken)).code()).isEqualTo(403);
+            assertThat(client.delete("/api/events/" + eventId + "/custom-fields/" + numFieldId, null,
+                    b -> b.header("Authorization", "Bearer " + scoutToken)).code()).isEqualTo(403);
+            assertThat(client.post("/api/events/nonexistent-evt/custom-fields", "{\"name\":\"X\"}",
+                    b -> b.header("Authorization", "Bearer " + hostToken)).code()).isEqualTo(404);
+
+            // 14. Cross-target same fieldKey allowed (MATCH.eff + TEAM.eff referencing formula.eff)
+            assertThat(client.post("/api/events/" + eventId + "/custom-fields", """
+                {
+                    "target": "MATCH",
+                    "name": "Match Eff",
+                    "fieldKey": "eff",
+                    "fieldType": "formula",
+                    "formulaExpr": "match.autoScore + match.teleopScore"
+                }
+            """, b -> b.header("Authorization", "Bearer " + hostToken)).code()).isEqualTo(201);
+            var sameKeyTeam = client.post("/api/events/" + eventId + "/custom-fields", """
+                {
+                    "target": "TEAM",
+                    "name": "Team Eff",
+                    "fieldKey": "eff",
+                    "fieldType": "formula",
+                    "formulaExpr": "formula.eff + opr.np"
+                }
+            """, b -> b.header("Authorization", "Bearer " + hostToken));
+            assertThat(sameKeyTeam.code()).isEqualTo(201);
+
+            // 15. Deleting a field referenced by another formula succeeds per contract
+            assertThat(client.delete("/api/events/" + eventId + "/custom-fields/" + teamFormulaId, null,
+                    b -> b.header("Authorization", "Bearer " + hostToken)).code()).isEqualTo(200);
         });
     }
 }

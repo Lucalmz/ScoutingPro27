@@ -10,8 +10,6 @@ import org.jdbi.v3.core.Jdbi;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
-import java.net.URLDecoder;
-import java.nio.charset.StandardCharsets;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
@@ -48,6 +46,10 @@ public class TeamTagRoutes {
             try {
                 teamNumber = Integer.parseInt(ctx.pathParam("teamNumber"));
             } catch (NumberFormatException e) {
+                ctx.status(400).result("Invalid teamNumber format");
+                return;
+            }
+            if (teamNumber <= 0) {
                 ctx.status(400).result("Invalid teamNumber format");
                 return;
             }
@@ -128,7 +130,11 @@ public class TeamTagRoutes {
                 ctx.status(400).result("Invalid teamNumber format");
                 return;
             }
-            String tagValue = URLDecoder.decode(ctx.pathParam("tag"), StandardCharsets.UTF_8).trim();
+            if (teamNumber <= 0) {
+                ctx.status(400).result("Invalid teamNumber format");
+                return;
+            }
+            String tagValue = ctx.pathParam("tag").trim();
             String normalizedTag = tagValue;
             if (normalizedTag.matches("^[A-Za-z0-9 _#-]+$")) {
                 normalizedTag = normalizedTag.toLowerCase();

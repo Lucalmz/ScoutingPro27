@@ -58,7 +58,7 @@ describe('CustomFieldsManagerModal & CustomFieldBuilderForm', () => {
     maxVal: 20,
     stepVal: 1,
     optionsJson: null,
-    sortOrder: 0,
+    orderSeq: 0,
     isActive: true
   }
 
@@ -90,11 +90,11 @@ describe('CustomFieldsManagerModal & CustomFieldBuilderForm', () => {
       name: '防守评级',
       fieldKey: 'def_level',
       fieldType: 'level',
-      sortOrder: 1
+      orderSeq: 1
     }
     vi.spyOn(store, 'fetchFields').mockResolvedValue([sampleField, secondField])
     vi.spyOn(store, 'getFields').mockReturnValue([sampleField, secondField])
-    const toggleSpy = vi.spyOn(store, 'toggleFieldActive').mockResolvedValue()
+    const toggleSpy = vi.spyOn(store, 'toggleFieldActive').mockResolvedValue(null)
     const moveSpy = vi.spyOn(store, 'moveFieldOrder').mockResolvedValue()
     const deleteSpy = vi.spyOn(store, 'deleteField').mockResolvedValue()
 

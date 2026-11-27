@@ -200,14 +200,21 @@ export function isBogusOrTunCandidate(candidateStr: string, _allowClientTunSrflx
   return false
 }
 
+const PRESERVED_REMOTE_V6_SRFLX_TIERS = new Set([115, 95, 122, 98, 126, 105])
+const PRESERVED_REMOTE_V4_SRFLX_TIERS = new Set([80, 88, 95])
+
 /**
  * 根据 RFC 8445 计算重写 candidate 优先级，并净化 TUN 反射候选元数据：
  * 1. 先将所有非 relay 候选上的 TUN 虚拟 raddr (198.18.x.x / 172.19.0.x / fdfe:...) 统一清洗为 0.0.0.0 / ::，
  *    并将 network-cost <= 50 归一化为 10（修复原代码在第 751 行提前 return 导致 raddr 与 network-cost 50 未被清洗的致命 Bug）
  * 2. 真机环境下将无法被入站连接的 TCP 端口 9 (tcptype active) 候选降权至 typePref = 15，防止其排在 UDP srflx 之前阻塞打洞
  * 3. 将 TUN 网卡反射出的合法公网 srflx 候选赋予 typePref = 88（紧随物理口 srflx 的 90 之后）
+ * 4. 当 opts.preserveRemoteSrflxTier === true 时，保留发送端显式标记的分流代理降权/直连提权 srflx 优先级层级
  */
-export function optimizeCandidatePriority(candidateStr: string): string {
+export function optimizeCandidatePriority(
+  candidateStr: string,
+  opts?: { preserveRemoteSrflxTier?: boolean }
+): string {
   if (!candidateStr || typeof candidateStr !== 'string') return candidateStr
   try {
     const trimmed = candidateStr.trim()
@@ -224,6 +231,10 @@ export function optimizeCandidatePriority(candidateStr: string): string {
       const body = hasCandPrefix ? `candidate:${arr.join(' ')}` : arr.join(' ')
       return hasAttrPrefix ? `a=${body}` : body
     }
+
+    const incomingPrio = parseInt(parts[3] || '0', 10)
+    const incomingTypePref =
+      Number.isFinite(incomingPrio) && incomingPrio > 0 ? Math.floor(incomingPrio / 16777216) : 0
 
     const compStr = parts[1] || '1'
     const component = parseInt(compStr, 10) || 1
@@ -299,6 +310,13 @@ export function optimizeCandidatePriority(candidateStr: string): string {
       if (candType === 'host') typePref = isTestEnv ? 120 : 126
       else if (candType === 'prflx') typePref = isTestEnv ? 110 : 125
       else if (candType === 'srflx') {
+        if (
+          opts?.preserveRemoteSrflxTier === true &&
+          protocol === 'udp' &&
+          PRESERVED_REMOTE_V6_SRFLX_TIERS.has(incomingTypePref)
+        ) {
+          return formatOut(parts)
+        }
         if (wasTunReflectedSrflx) {
           typePref = isTestEnv ? 98 : 122
         } else {
@@ -335,6 +353,14 @@ export function optimizeCandidatePriority(candidateStr: string): string {
 
     // 3. 公网 IPv4 STUN / 对端反射穿透候选 (srflx / prflx)
     if (candType === 'srflx' || candType === 'prflx') {
+      if (
+        opts?.preserveRemoteSrflxTier === true &&
+        candType === 'srflx' &&
+        protocol === 'udp' &&
+        PRESERVED_REMOTE_V4_SRFLX_TIERS.has(incomingTypePref)
+      ) {
+        return formatOut(parts)
+      }
       const typePref = candType === 'prflx' ? 85 : 90
       const localPref = 32768 - tieBreaker
       const boostedPriority = typePref * 16777216 + localPref * 256 + (256 - component)
@@ -595,6 +621,13 @@ export function synthesizeSymmetricNatPortCandidates(
   if (!ip || ip.includes(':') || isPrivateIpv4Address(ip) || isTunVirtualAddress(ip)) return []
   if (basePort <= 1024 || basePort >= 65530) return []
 
+  const incomingPrio = parseInt(parts[3] || '0', 10)
+  const incomingTypePref =
+    Number.isFinite(incomingPrio) && incomingPrio > 0 ? Math.floor(incomingPrio / 16777216) : 0
+  // 若源 srflx 已被发送端降权（如分流代理出口 typePref <= 80），其预测端口必须严格低于源候选本身（例如 78 < 80），避免反超源候选与直连候选
+  const typePref =
+    incomingTypePref > 0 && incomingTypePref <= 80 ? Math.max(20, incomingTypePref - 2) : 86
+
   const results: string[] = []
   for (let i = 0; i < portOffsets.length; i++) {
     const delta = portOffsets[i]!
@@ -604,8 +637,6 @@ export function synthesizeSymmetricNatPortCandidates(
     const cloned = [...parts]
     // 赋予独立 foundation 确保 libwebrtc 为每个预测端口创建独立的 CandidatePair 检查队列
     cloned[0] = `${foundation}p${delta > 0 ? delta : 'm' + Math.abs(delta)}`
-    // 优先级设为 typePref = 86（略低于原始 srflx 的 90/88，确保若对端是 Cone NAT 则原始端口 P 优先命中）
-    const typePref = 86
     const localPref = Math.max(1024, 30000 - i * 256)
     const prio = typePref * 16777216 + localPref * 256 + (256 - component)
     cloned[3] = String(prio)

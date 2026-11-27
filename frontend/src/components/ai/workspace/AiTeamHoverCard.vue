@@ -36,6 +36,7 @@ const { t } = useI18n()
     <div v-if="preview.tags.length > 0" class="thc-tags">
       <span v-for="tg in preview.tags" :key="tg" class="thc-tag">{{ tg }}</span>
     </div>
+    <div class="thc-hint">{{ t('ai.hover_click_detail') }}</div>
   </div>
 </template>
 
@@ -86,5 +87,13 @@ const { t } = useI18n()
   background: var(--surface-recessed);
   border: 1px solid var(--border-subtle);
   color: var(--muted-foreground);
+}
+
+.thc-hint {
+  font-size: 10.5px;
+  color: var(--status-ai);
+  opacity: 0.9;
+  padding-top: 2px;
+  border-top: 1px solid var(--border-subtle);
 }
 </style>

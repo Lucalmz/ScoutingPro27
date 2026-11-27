@@ -4,6 +4,9 @@ import com.bear27570.app.dao.UserDao;
 import com.bear27570.app.db.UserDeterministicIdMigrator;
 import com.bear27570.app.util.JwtUtil;
 import com.bear27570.app.util.UserUtil;
+import com.google.gson.JsonArray;
+import com.google.gson.JsonObject;
+import com.google.gson.JsonParser;
 import io.javalin.testtools.JavalinTest;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
@@ -363,6 +366,122 @@ class UserRoutesTest {
                     b -> b.header("Authorization", "Bearer " + sourceToken));
             assertThat(mergeRes.code()).isEqualTo(200);
             assertThat(mergeRes.body().string()).contains("\"id\":\"" + targetId + "\"");
+        });
+    }
+
+    @Test
+    void testGlobalAuthFilterAndVerifyTokenDeletedUser404() {
+        JavalinTest.test(support.app, (server, client) -> {
+            // Missing or invalid JWT returns 401 on protected endpoint
+            assertThat(client.get("/api/events").code()).isEqualTo(401);
+            assertThat(client.get("/api/events", b -> b.header("Authorization", "Bearer invalid.jwt.token")).code()).isEqualTo(401);
+
+            // Register, verify 200, then delete user from DB -> verify-token returns 404
+            var regRes = client.post("/api/user/register", "{\"username\":\"ghost_check\",\"password\":\"Pass123\"}");
+            assertThat(regRes.code()).isEqualTo(200);
+            String regBody = regRes.body().string();
+            String token = regBody.split("\"token\":\"")[1].split("\"")[0];
+            String userId = regBody.split("\"id\":\"")[1].split("\"")[0];
+
+            assertThat(client.post("/api/user/verify-token", "{\"token\":\"" + token + "\"}").code()).isEqualTo(200);
+
+            support.jdbi.useHandle(h -> h.createUpdate("DELETE FROM users WHERE id = :id").bind("id", userId).execute());
+            assertThat(client.post("/api/user/verify-token", "{\"token\":\"" + token + "\"}").code()).isEqualTo(404);
+            assertThat(client.get("/api/events", b -> b.header("Authorization", "Bearer " + token)).code()).isEqualTo(401);
+        });
+    }
+
+    @Test
+    void testRegisterReclaimsExternalSyncHostPlaceholderWithoutBreakingCollisionFallback() {
+        JavalinTest.test(support.app, (server, client) -> {
+            // 1. Register a scout client who syncs an external event authored by HostB before HostB registers
+            var scoutReg = client.post("/api/user/register", "{\"username\":\"ClientScout\",\"password\":\"ClientPass123\"}");
+            assertThat(scoutReg.code()).isEqualTo(200);
+            String scoutToken = JsonParser.parseString(scoutReg.body().string())
+                    .getAsJsonObject().get("token").getAsString();
+
+            String hostUsername = "HostB";
+            String deterministicHostId = UserUtil.generateDeterministicUserId(hostUsername);
+            String expectedPlaceholderName = "Host " + deterministicHostId.substring(0, 6);
+
+            String syncBody = "{\"id\":\"evt-external-hostb\",\"name\":\"HostB Championship\",\"inviteCode\":\"SYNC99\",\"hostId\":\""
+                    + deterministicHostId + "\"}";
+            var syncRes = client.post("/api/events/external-sync", syncBody,
+                    b -> b.header("Authorization", "Bearer " + scoutToken));
+            assertThat(syncRes.code()).isEqualTo(200);
+
+            support.jdbi.useHandle(h -> {
+                var placeholder = h.createQuery("SELECT username, password FROM users WHERE id = :id")
+                        .bind("id", deterministicHostId).mapToMap().one();
+                assertThat(placeholder.get("username")).isEqualTo(expectedPlaceholderName);
+                assertThat((String) placeholder.get("password")).isBlank();
+            });
+
+            // Positive precondition: non-host scout is rejected from host-only actions
+            var scoutBanAttempt = client.post("/api/events/evt-external-hostb/banned-teams",
+                    "{\"teamNumber\":27570}",
+                    b -> b.header("Authorization", "Bearer " + scoutToken));
+            assertThat(scoutBanAttempt.code()).isEqualTo(403);
+
+            // 2. HostB registers and MUST reclaim the deterministic hostId placeholder
+            var hostReg = client.post("/api/user/register",
+                    "{\"username\":\"" + hostUsername + "\",\"password\":\"HostBPass123\"}");
+            assertThat(hostReg.code()).isEqualTo(200);
+            JsonObject hostJson = JsonParser.parseString(hostReg.body().string()).getAsJsonObject();
+            String reclaimedHostId = hostJson.get("id").getAsString();
+            String hostToken = hostJson.get("token").getAsString();
+
+            assertThat(reclaimedHostId).isEqualTo(deterministicHostId);
+            assertThat(hostJson.get("username").getAsString()).isEqualTo(hostUsername);
+
+            // HostB sees the synced event via GET /api/events with matching hostId and succeeds on host-only actions
+            var hostEventsRes = client.get("/api/events", b -> b.header("Authorization", "Bearer " + hostToken));
+            assertThat(hostEventsRes.code()).isEqualTo(200);
+            JsonArray events = JsonParser.parseString(hostEventsRes.body().string()).getAsJsonArray();
+            assertThat(events).hasSize(1);
+            JsonObject syncedEvent = events.get(0).getAsJsonObject();
+            assertThat(syncedEvent.get("id").getAsString()).isEqualTo("evt-external-hostb");
+            assertThat(syncedEvent.get("hostId").getAsString()).isEqualTo(deterministicHostId);
+
+            var hostBanRes = client.post("/api/events/evt-external-hostb/banned-teams",
+                    "{\"teamNumber\":27570}",
+                    b -> b.header("Authorization", "Bearer " + hostToken));
+            assertThat(hostBanRes.code()).isEqualTo(200);
+
+            // 3. Contrast A: Password-bearing account at deterministic ID (e.g. renamed user) must NOT be reclaimed
+            var origReg = client.post("/api/user/register", "{\"username\":\"RenamedSource\",\"password\":\"OrigPass123\"}");
+            assertThat(origReg.code()).isEqualTo(200);
+            JsonObject origJson = JsonParser.parseString(origReg.body().string()).getAsJsonObject();
+            String origId = origJson.get("id").getAsString();
+            String origToken = origJson.get("token").getAsString();
+            assertThat(client.post("/api/user/rename",
+                    "{\"newUsername\":\"RenamedTarget\",\"oldPassword\":\"OrigPass123\"}",
+                    b -> b.header("Authorization", "Bearer " + origToken)).code()).isEqualTo(200);
+
+            var newcomerReg = client.post("/api/user/register", "{\"username\":\"RenamedSource\",\"password\":\"NewPass123\"}");
+            assertThat(newcomerReg.code()).isEqualTo(200);
+            String newcomerId = JsonParser.parseString(newcomerReg.body().string())
+                    .getAsJsonObject().get("id").getAsString();
+            assertThat(newcomerId).isNotEqualTo(origId);
+
+            // 4. Contrast B: Unrelated passwordless username placeholder at deterministic ID must NOT be reclaimed
+            String otherHostName = "OtherHost";
+            String otherHostDetId = UserUtil.generateDeterministicUserId(otherHostName);
+            support.jdbi.useExtension(UserDao.class, dao ->
+                    dao.ensureScoutUserPlaceholder(otherHostDetId, "UnrelatedScoutName"));
+
+            var otherHostReg = client.post("/api/user/register",
+                    "{\"username\":\"" + otherHostName + "\",\"password\":\"OtherPass123\"}");
+            assertThat(otherHostReg.code()).isEqualTo(200);
+            String allocatedId = JsonParser.parseString(otherHostReg.body().string())
+                    .getAsJsonObject().get("id").getAsString();
+            assertThat(allocatedId).isNotEqualTo(otherHostDetId);
+
+            support.jdbi.useHandle(h -> {
+                var untouched = h.createQuery("SELECT username FROM users WHERE id = :id")
+                        .bind("id", otherHostDetId).mapTo(String.class).one();
+                assertThat(untouched).isEqualTo("UnrelatedScoutName");
+            });
         });
     }
 }

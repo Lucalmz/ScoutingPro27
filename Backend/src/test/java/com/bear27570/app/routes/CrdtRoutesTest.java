@@ -1155,4 +1155,202 @@ class CrdtRoutesTest {
             assertThat(idRowsFinal.get(aliceId + "::alice-host-dev").get("signingPubKeyHex").getAsString()).isEqualTo(realAlicePub);
         });
     }
+
+    @Test
+    void testNonHostCannotAdvanceEpochOrMutateHostOnlyTablesOnAuthoritativeHostDb() throws Exception {
+        JavalinTest.test(app, (server, client) -> {
+            Map<?, ?> alice = registerUser(client, "epoch_host_alice");
+            String aliceId = (String) alice.get("id");
+            String aliceToken = (String) alice.get("token");
+            Map<?, ?> evt = createEvent(client, aliceToken, "Epoch Guard Event");
+            String eventId = (String) evt.get("id");
+            String inviteCode = (String) evt.get("inviteCode");
+
+            Map<?, ?> bob = registerUser(client, "epoch_member_bob");
+            String bobId = (String) bob.get("id");
+            String bobToken = (String) bob.get("token");
+            assertThat(client.post("/api/events/join", gson.toJson(Map.of("inviteCode", inviteCode)),
+                    req -> req.header("Authorization", "Bearer " + bobToken)).code()).isEqualTo(200);
+
+            Map<?, ?> carol = registerUser(client, "epoch_member_carol");
+            String carolId = (String) carol.get("id");
+            String carolToken = (String) carol.get("token");
+            assertThat(client.post("/api/events/join", gson.toJson(Map.of("inviteCode", inviteCode)),
+                    req -> req.header("Authorization", "Bearer " + carolToken)).code()).isEqualTo(200);
+
+            // 1. Host Alice seeds baseline CRDT at epoch=1 with custom_fields, schedules, assignments, carol tag, carol pit
+            Map<String, Map<String, Map<String, Object>>> baseline = createBaselineTables(eventId, carolId, true);
+            baseline.put("team_tags", Map.of(
+                    "27570::carol-tag", Map.of(
+                            "id", "tag-carol-1",
+                            "eventId", eventId,
+                            "teamNumber", 27570,
+                            "tag", "carol-tag",
+                            "color", "purple",
+                            "isPreset", false,
+                            "active", true,
+                            "createdBy", carolId
+                    )
+            ));
+            JsonObject hostInitReq = new JsonObject();
+            hostInitReq.addProperty("hostEpoch", 1);
+            hostInitReq.addProperty("snapshotRevision", 1);
+            hostInitReq.addProperty("fullProjection", true);
+            hostInitReq.add("snapshot", buildSnapshot(baseline));
+            assertThat(client.put("/api/events/" + eventId + "/crdt-state", gson.toJson(hostInitReq),
+                    req -> req.header("Authorization", "Bearer " + aliceToken)).code()).isEqualTo(200);
+
+            // 2. Non-host Bob attempts to raise hostEpoch to 99 -> MUST return 403 and NOT advance DB host_epoch
+            JsonObject bobEpochAttack = new JsonObject();
+            bobEpochAttack.addProperty("hostEpoch", 99);
+            bobEpochAttack.addProperty("snapshotRevision", 1);
+            bobEpochAttack.add("snapshot", buildSnapshot(baseline));
+            var attackRes = client.put("/api/events/" + eventId + "/crdt-state", gson.toJson(bobEpochAttack),
+                    req -> req.header("Authorization", "Bearer " + bobToken));
+            assertThat(attackRes.code()).isEqualTo(403);
+            assertThat(attackRes.body().string()).contains("Only the event host can advance hostEpoch");
+
+            // Host Alice subsequent flush at epoch=1 rev=2 MUST still succeed (200), proving no 409 DoS
+            JsonObject hostAfterAttack = new JsonObject();
+            hostAfterAttack.addProperty("hostEpoch", 1);
+            hostAfterAttack.addProperty("snapshotRevision", 2);
+            hostAfterAttack.add("snapshot", buildSnapshot(baseline));
+            assertThat(client.put("/api/events/" + eventId + "/crdt-state", gson.toJson(hostAfterAttack),
+                    req -> req.header("Authorization", "Bearer " + aliceToken)).code()).isEqualTo(200);
+
+            // 3. Non-host Bob at valid epoch=1 tries to tamper custom_fields, schedules, assignments, delete Carol's tag, and delete Carol's pit
+            Map<String, Map<String, Map<String, Object>>> tampered = new LinkedHashMap<>();
+            tampered.put("custom_fields", Map.of(
+                    "cf-rogue", Map.ofEntries(
+                            Map.entry("id", "cf-rogue"),
+                            Map.entry("eventId", eventId),
+                            Map.entry("target", "MATCH"),
+                            Map.entry("phase", "overall"),
+                            Map.entry("name", "Rogue Field"),
+                            Map.entry("fieldKey", "rogue_field"),
+                            Map.entry("fieldType", "number"),
+                            Map.entry("orderSeq", 9),
+                            Map.entry("isActive", true),
+                            Map.entry("isDeleted", false)
+                    )
+            ));
+            tampered.put("schedules", Map.of(
+                    "QUALIFICATION_99", Map.of(
+                            "id", eventId + "_M99",
+                            "eventId", eventId,
+                            "matchNumber", 99,
+                            "tournamentLevel", "QUALIFICATION",
+                            "red1", 9999, "red2", 8888, "blue1", 7777, "blue2", 6666,
+                            "isDeleted", false
+                    )
+            ));
+            tampered.put("assignments", Map.of(
+                    "QUALIFICATION_1_red1", Map.of(
+                            "id", eventId + "_QUALIFICATION_1_red1",
+                            "eventId", eventId,
+                            "matchNumber", 1,
+                            "tournamentLevel", "QUALIFICATION",
+                            "station", "red1",
+                            "teamNumber", 27570,
+                            "scoutId", bobId,
+                            "scoutName", "HijackedBob",
+                            "isDeleted", false
+                    )
+            ));
+            tampered.put("team_tags", Map.of(
+                    "27570::carol-tag", Map.of(
+                            "id", "tag-carol-1",
+                            "eventId", eventId,
+                            "teamNumber", 27570,
+                            "tag", "carol-tag",
+                            "color", "purple",
+                            "isPreset", false,
+                            "active", false,
+                            "createdBy", carolId
+                    ),
+                    "27570::bob-own", Map.of(
+                            "id", "tag-bob-1",
+                            "eventId", eventId,
+                            "teamNumber", 27570,
+                            "tag", "bob-own",
+                            "color", "green",
+                            "isPreset", false,
+                            "active", true,
+                            "createdBy", bobId
+                    )
+            ));
+            tampered.put("pit_records", Map.of(
+                    "27570", Map.ofEntries(
+                            Map.entry("id", "pit-27570"),
+                            Map.entry("eventId", eventId),
+                            Map.entry("teamNumber", 27570),
+                            Map.entry("scoutId", carolId),
+                            Map.entry("scoutName", "Carol"),
+                            Map.entry("version", 3),
+                            Map.entry("isDeleted", true)
+                    )
+            ));
+
+            JsonObject bobTamperReq = new JsonObject();
+            bobTamperReq.addProperty("hostEpoch", 1);
+            bobTamperReq.addProperty("snapshotRevision", 3);
+            bobTamperReq.add("snapshot", buildSnapshot(tampered));
+            bobTamperReq.add("dirtyRows", JsonParser.parseString(gson.toJson(Map.of(
+                    "custom_fields", List.of("cf-rogue"),
+                    "schedules", List.of("QUALIFICATION_99"),
+                    "assignments", List.of("QUALIFICATION_1_red1"),
+                    "team_tags", List.of("27570::carol-tag", "27570::bob-own"),
+                    "pit_records", List.of("27570")
+            ))));
+            var bobTamperRes = client.put("/api/events/" + eventId + "/crdt-state", gson.toJson(bobTamperReq),
+                    req -> req.header("Authorization", "Bearer " + bobToken));
+            assertThat(bobTamperRes.code()).isEqualTo(200);
+            JsonObject counts = JsonParser.parseString(bobTamperRes.body().string()).getAsJsonObject().getAsJsonObject("projectedCounts");
+            assertThat(counts.get("custom_fields").getAsInt()).isZero();
+            assertThat(counts.get("schedules").getAsInt()).isZero();
+            assertThat(counts.get("assignments").getAsInt()).isZero();
+            assertThat(counts.get("team_tags").getAsInt()).isEqualTo(1);
+            assertThat(counts.get("pit_records").getAsInt()).isZero();
+
+            jdbi.useHandle(h -> {
+                assertThat(h.createQuery("SELECT COUNT(*) FROM event_custom_fields WHERE id = 'cf-rogue'").mapTo(Integer.class).one()).isZero();
+                assertThat(h.createQuery("SELECT COUNT(*) FROM event_custom_fields WHERE id = 'cf-1'").mapTo(Integer.class).one()).isEqualTo(1);
+                assertThat(h.createQuery("SELECT COUNT(*) FROM match_schedules WHERE event_id = :eid AND match_number = 99").bind("eid", eventId).mapTo(Integer.class).one()).isZero();
+                String assignedScout = h.createQuery("SELECT scout_id FROM scout_assignments WHERE event_id = :eid AND match_number = 1 AND station = 'red1'")
+                        .bind("eid", eventId).mapTo(String.class).one();
+                assertThat(assignedScout).isEqualTo(carolId);
+                assertThat(h.createQuery("SELECT COUNT(*) FROM team_tags WHERE event_id = :eid AND tag = 'carol-tag'").bind("eid", eventId).mapTo(Integer.class).one()).isEqualTo(1);
+                assertThat(h.createQuery("SELECT COUNT(*) FROM team_tags WHERE event_id = :eid AND tag = 'bob-own'").bind("eid", eventId).mapTo(Integer.class).one()).isEqualTo(1);
+                assertThat(h.createQuery("SELECT is_deleted FROM pit_scouting_records WHERE event_id = :eid AND team_number = 27570").bind("eid", eventId).mapTo(Boolean.class).one()).isFalse();
+            });
+
+            // 4. Host takeover (Alice raises hostEpoch to 2) MUST succeed
+            JsonObject hostTakeoverReq = new JsonObject();
+            hostTakeoverReq.addProperty("hostEpoch", 2);
+            hostTakeoverReq.addProperty("snapshotRevision", 1);
+            hostTakeoverReq.add("snapshot", buildSnapshot(baseline));
+            var hostTakeoverRes = client.put("/api/events/" + eventId + "/crdt-state", gson.toJson(hostTakeoverReq),
+                    req -> req.header("Authorization", "Bearer " + aliceToken));
+            assertThat(hostTakeoverRes.code()).isEqualTo(200);
+            assertThat(JsonParser.parseString(hostTakeoverRes.body().string()).getAsJsonObject().get("hostEpoch").getAsInt()).isEqualTo(2);
+
+            // 5. Cold-standby replica (events.host_id is passwordless placeholder) mirroring higher epoch MUST succeed
+            var syncRes = client.post("/api/events/external-sync", gson.toJson(Map.of(
+                    "id", "evt-cold-standby-1",
+                    "name", "Cold Standby Event",
+                    "inviteCode", "COLD27",
+                    "hostId", "remote-placeholder-host"
+            )), req -> req.header("Authorization", "Bearer " + bobToken));
+            assertThat(syncRes.code()).isEqualTo(200);
+
+            JsonObject coldMirrorReq = new JsonObject();
+            coldMirrorReq.addProperty("hostEpoch", 3);
+            coldMirrorReq.addProperty("snapshotRevision", 1);
+            coldMirrorReq.add("snapshot", buildSnapshot(Map.of()));
+            var coldRes = client.put("/api/events/evt-cold-standby-1/crdt-state", gson.toJson(coldMirrorReq),
+                    req -> req.header("Authorization", "Bearer " + bobToken));
+            assertThat(coldRes.code()).isEqualTo(200);
+            assertThat(JsonParser.parseString(coldRes.body().string()).getAsJsonObject().get("hostEpoch").getAsInt()).isEqualTo(3);
+        });
+    }
 }

@@ -13,5 +13,16 @@ export default defineConfig({
     environment: 'happy-dom',
     exclude: ['node_modules', 'e2e/**', 'generators/**'],
     isolate: true,
+    testTimeout: 15000,
+    coverage: {
+      provider: 'v8',
+      reporter: ['text', 'json-summary'],
+      include: ['src/**/*.{ts,vue}'],
+      exclude: ['src/__tests__/**', 'src/main.ts', 'src/types/**'],
+      thresholds: {
+        statements: 77,
+        lines: 77
+      }
+    }
   },
 })

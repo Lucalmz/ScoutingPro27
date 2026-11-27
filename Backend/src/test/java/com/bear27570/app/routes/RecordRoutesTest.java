@@ -399,4 +399,40 @@ class RecordRoutesTest {
             });
         });
     }
+
+    @Test
+    void testHostSoftDeleteOtherScoutRecordPendingAndMarkSyncedEndpoints() {
+        JavalinTest.test(support.app, (server, client) -> {
+            RoomFixture f = RouteTestSupport.setupRoomFixture(client);
+
+            // Seed two PENDING records: rec_pend_a (scoutA) and rec_pend_b (scoutB)
+            String recA = "{\"id\":\"rec_pend_a\",\"eventId\":\"" + f.eventId + "\",\"matchNumber\":1,\"teamNumber\":11115,\"totalScore\":50,\"syncStatus\":\"PENDING\",\"version\":1}";
+            String recB = "{\"id\":\"rec_pend_b\",\"eventId\":\"" + f.eventId + "\",\"matchNumber\":2,\"teamNumber\":27570,\"totalScore\":60,\"syncStatus\":\"PENDING\",\"version\":1}";
+            assertThat(client.post("/api/records", recA, b -> b.header("Authorization", "Bearer " + f.scoutAToken)).code()).isEqualTo(200);
+            assertThat(client.post("/api/records", recB, b -> b.header("Authorization", "Bearer " + f.scoutBToken)).code()).isEqualTo(200);
+
+            var pendingRes = client.get("/api/records/pending?eventId=" + f.eventId,
+                    b -> b.header("Authorization", "Bearer " + f.scoutAToken));
+            assertThat(pendingRes.code()).isEqualTo(200);
+            String pendingBody = pendingRes.body().string();
+            assertThat(pendingBody).contains("rec_pend_a").contains("rec_pend_b");
+
+            // ScoutA tries to mark both synced -> only rec_pend_a (owned by ScoutA) is marked SYNCED
+            var markRes = client.post("/api/records/mark-synced", "[\"rec_pend_a\",\"rec_pend_b\"]",
+                    b -> b.header("Authorization", "Bearer " + f.scoutAToken));
+            assertThat(markRes.code()).isEqualTo(200);
+
+            var pendingAfter = client.get("/api/records/pending?eventId=" + f.eventId,
+                    b -> b.header("Authorization", "Bearer " + f.scoutAToken)).body().string();
+            assertThat(pendingAfter).doesNotContain("rec_pend_a").contains("rec_pend_b");
+
+            // Host can soft-delete ScoutA's record via POST /api/records
+            String hostSoftDelete = "{\"id\":\"rec_pend_a\",\"eventId\":\"" + f.eventId + "\",\"scoutId\":\"" + f.scoutAId + "\",\"matchNumber\":1,\"teamNumber\":11115,\"isDeleted\":true,\"version\":2}";
+            var delRes = client.post("/api/records", hostSoftDelete, b -> b.header("Authorization", "Bearer " + f.hostToken));
+            assertThat(delRes.code()).isEqualTo(200);
+            support.jdbi.useExtension(RecordDao.class, dao -> {
+                assertThat(dao.findById("rec_pend_a").getIsDeleted()).isTrue();
+            });
+        });
+    }
 }

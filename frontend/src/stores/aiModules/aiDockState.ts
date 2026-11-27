@@ -1,10 +1,24 @@
 import { ref } from 'vue'
+import type { AiAssistantMode, AiThinkingMode } from '@/types'
 import { DEFAULT_DOCK_WIDTH, MAX_DOCK_WIDTH, MIN_DOCK_WIDTH } from '@/components/ai/constants'
 
 const KEY_DOCK_OPEN = 'sp27_ai_dock_open'
 const KEY_DOCK_WIDTH = 'sp27_ai_dock_width'
 const KEY_DOCK_EXPANDED = 'sp27_ai_dock_expanded'
 const KEY_MY_TEAM_MAP = 'sp27_ai_my_team_by_event'
+const KEY_AI_MODE = 'sp27_ai_mode'
+const KEY_THINKING_MODE = 'sp27_ai_thinking_mode'
+
+function normalizeThinkingMode(raw: string | null): AiThinkingMode {
+  if (raw === 'low' || raw === 'medium' || raw === 'high' || raw === 'off') {
+    return raw
+  }
+  return 'off'
+}
+
+function normalizeAiMode(raw: string | null): AiAssistantMode {
+  return raw === 'turbo' ? 'turbo' : 'ask'
+}
 
 export function readAiStorage(key: string): string | null {
   try {
@@ -27,6 +41,23 @@ export function writeAiStorage(key: string, val: string): void {
   }
 }
 
+export function removeAiStorage(key: string): void {
+  try {
+    if (typeof window !== 'undefined' && window.localStorage) {
+      window.localStorage.removeItem(key)
+    }
+  } catch {
+    // ignore storage restriction
+  }
+}
+
+function budgetToThinkingMode(budget?: number | null): AiThinkingMode {
+  if (typeof budget !== 'number' || !Number.isFinite(budget)) return 'medium'
+  if (budget <= 1024) return 'low'
+  if (budget >= 8192) return 'high'
+  return 'medium'
+}
+
 export function clampDockWidth(width: number): number {
   if (!Number.isFinite(width)) return DEFAULT_DOCK_WIDTH
   return Math.max(MIN_DOCK_WIDTH, Math.min(MAX_DOCK_WIDTH, Math.round(width)))
@@ -39,6 +70,10 @@ export function createAiDockState() {
   const settingsModalOpen = ref(false)
   const settingsModalTargetProfileId = ref<string | null>(null)
   const threadSidebarOpen = ref(false)
+  const aiMode = ref<AiAssistantMode>(normalizeAiMode(readAiStorage(KEY_AI_MODE)))
+  const initialRawThinking = readAiStorage(KEY_THINKING_MODE)
+  const thinkingMode = ref<AiThinkingMode>(normalizeThinkingMode(initialRawThinking))
+  let hasManualThinkingOverride = initialRawThinking !== null
 
   const initialMyTeamMap = (() => {
     try {
@@ -83,6 +118,33 @@ export function createAiDockState() {
     settingsModalOpen.value = false
   }
 
+  function setAiMode(mode: AiAssistantMode) {
+    const normalized = normalizeAiMode(mode)
+    aiMode.value = normalized
+    writeAiStorage(KEY_AI_MODE, normalized)
+  }
+
+  function setThinkingMode(mode: AiThinkingMode) {
+    const normalized = normalizeThinkingMode(mode)
+    hasManualThinkingOverride = true
+    thinkingMode.value = normalized
+    writeAiStorage(KEY_THINKING_MODE, normalized)
+  }
+
+  function syncThinkingModeFromProfile(profile: { enableThinking?: boolean; thinkingBudget?: number } | null) {
+    if (hasManualThinkingOverride || !profile) return
+    thinkingMode.value = profile.enableThinking ? budgetToThinkingMode(profile.thinkingBudget) : 'off'
+  }
+
+  function resetUserSession() {
+    settingsModalOpen.value = false
+    settingsModalTargetProfileId.value = null
+    threadSidebarOpen.value = false
+    const raw = readAiStorage(KEY_THINKING_MODE)
+    hasManualThinkingOverride = raw !== null
+    thinkingMode.value = normalizeThinkingMode(raw)
+  }
+
   function getMyTeamNumber(eventId: string): number | null {
     return myTeamNumberByEvent.value[eventId] ?? null
   }
@@ -107,6 +169,8 @@ export function createAiDockState() {
     settingsModalTargetProfileId,
     threadSidebarOpen,
     myTeamNumberByEvent,
+    aiMode,
+    thinkingMode,
     setDockOpen,
     toggleDock,
     setDockWidth,
@@ -114,6 +178,10 @@ export function createAiDockState() {
     setDockExpanded,
     openSettingsModal,
     closeSettingsModal,
+    setAiMode,
+    setThinkingMode,
+    syncThinkingModeFromProfile,
+    resetUserSession,
     getMyTeamNumber,
     setMyTeamNumber
   }

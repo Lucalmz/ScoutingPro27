@@ -478,6 +478,44 @@ describe('identityStore - Persistent Device Identity & TOFU Engine', () => {
 
     // Same key -> TRUSTED_MATCH, never false MULTI_USER_DEVICE_SWITCH
     expect(evalResult.status).toBe('TRUSTED_MATCH')
+
+    // Real user's stored record must NOT be mutated in-place
+    const aliceStored = await getPeerTrustRecord(eventId, 'user_lucalmz_83aa', devId)
+    expect(aliceStored?.userId).toBe('user_lucalmz_83aa')
+  })
+
+  it('Guarantee 12: Temporary scout-* pseudo user cannot hijack a real user trust record in-place', async () => {
+    const eventId = 'evt_pseudo_hijack'
+    const keyPair = await generateEcdhKeyPair()
+    const pubHex = await exportEcdhPublicKey(keyPair.publicKey)
+    const devId = 'dev_alice_real'
+
+    await savePeerTrustRecord({
+      eventId,
+      userId: 'user_alice_real',
+      username: 'Alice',
+      deviceId: devId,
+      publicKeyHex: pubHex,
+      firstSeenAt: 1000,
+      lastSeenAt: 1000,
+      trustedAt: 1000,
+      trustLevel: 'TOFU_TRUSTED'
+    })
+
+    const evalGuest = await evaluatePeerKeyTrust({
+      eventId,
+      userId: 'scout-temp-999',
+      username: 'GuestScout',
+      deviceId: devId,
+      publicKeyHex: pubHex
+    })
+    expect(evalGuest.status).toBe('MULTI_USER_DEVICE_SWITCH')
+
+    // Alice's record remains intact and uncorrupted
+    const aliceAfter = await getPeerTrustRecord(eventId, 'user_alice_real', devId)
+    expect(aliceAfter?.userId).toBe('user_alice_real')
+    expect(aliceAfter?.username).toBe('Alice')
+    expect(await getPeerTrustRecord(eventId, 'scout-temp-999', devId)).toBeNull()
   })
 })
 

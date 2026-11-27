@@ -68,6 +68,24 @@ const hostFilteredRecords = computed(() => {
   return recordStore.records.filter((r) => r.eventId === currentEvent.value!.id)
 })
 
+const hostFilteredTags = computed(() => {
+  if (!currentEvent.value) return []
+  const eid = currentEvent.value.id
+  return recordStore.teamTags.filter((tg) => !tg.eventId || tg.eventId === eid)
+})
+
+const hostFilteredSchedules = computed(() => {
+  if (!currentEvent.value) return []
+  const eid = currentEvent.value.id
+  return scheduleStore.schedules.filter((s) => !s.eventId || s.eventId === eid)
+})
+
+const hostFilteredAssignments = computed(() => {
+  if (!currentEvent.value) return []
+  const eid = currentEvent.value.id
+  return Object.values(scheduleStore.assignments).filter((a) => !a.eventId || a.eventId === eid)
+})
+
 const clientFilteredRecords = computed(() => {
   if (!currentEvent.value) return []
   const myRecs = recordStore.records.filter((r) => r.eventId === currentEvent.value!.id && r.scoutId === userStore.userId)
@@ -78,7 +96,7 @@ const canHostExport = computed(() => {
   if (!currentEvent.value) return false
   return (
     hostFilteredRecords.value.length > 0 ||
-    recordStore.teamTags.length > 0 ||
+    hostFilteredTags.value.length > 0 ||
     Boolean(getExistingEventCrdt(currentEvent.value.id))
   )
 })
@@ -148,8 +166,8 @@ function handleExportEvent() {
       username: userStore.username,
       role: isHost.value ? 'HOST' : 'SCOUT'
     },
-    scheduleStore.schedules,
-    Object.values(scheduleStore.assignments)
+    hostFilteredSchedules.value,
+    hostFilteredAssignments.value
   )
   const filename = generateEventFileName(currentEvent.value)
   triggerFileDownload(filename, content)
@@ -178,7 +196,7 @@ function handleExportSync() {
       targetUsername: isHost.value && hostTargetType.value === 'SPECIFIC' ? hostSpecificTarget.value : undefined
     },
     records,
-    teamTags: isHost.value ? recordStore.teamTags : undefined,
+    teamTags: isHost.value ? hostFilteredTags.value : undefined,
     hostSessionId: undefined,
     crdtSnapshot
   })
@@ -407,7 +425,7 @@ async function applyImport() {
 
             <div class="export-summary">
               <div>{{ t('offline_sync.records_to_export') }}: <strong>{{ hostFilteredRecords.length }}</strong></div>
-              <div>{{ t('offline_sync.tags_to_export') }}: <strong>{{ recordStore.teamTags.length }}</strong></div>
+              <div>{{ t('offline_sync.tags_to_export') }}: <strong>{{ hostFilteredTags.length }}</strong></div>
               <div class="filename-box">
                 <span class="material-icons file-icon">description</span>
                 <code>{{ previewFileName }}</code>

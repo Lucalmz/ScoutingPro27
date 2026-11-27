@@ -646,6 +646,11 @@ export class SignalingChannel {
         if (typeof this.client.removeAllListeners === 'function') {
           this.client.removeAllListeners()
         }
+        if (typeof this.client.on === 'function') {
+          // Keep a no-op error listener so late/in-flight mqtt.js errors (e.g. connack timeout)
+          // emitted during or after teardown never surface as uncaught EventEmitter exceptions.
+          this.client.on('error', () => {})
+        }
         if (typeof this.client.unsubscribe === 'function') {
           this.client.unsubscribe(this.topic)
           if (this.beaconTopic) {

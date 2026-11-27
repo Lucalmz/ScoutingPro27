@@ -644,7 +644,9 @@ export function createHostSignalingHandler(ctx: HostSessionContext) {
               if (isBogusOrTunCandidate(candidateObj.candidate, true)) {
                 continue
               }
-              candidateObj.candidate = optimizeCandidatePriority(candidateObj.candidate)
+              candidateObj.candidate = optimizeCandidatePriority(candidateObj.candidate, {
+                preserveRemoteSrflxTier: true
+              })
               log.info(`Remote ICE Candidate (pending) added from ${sender}: ${String(candidateObj.candidate).trim()}`)
             }
             await pc.addIceCandidate(toIceCandidate(candidateObj))
@@ -765,12 +767,14 @@ export function createHostSignalingHandler(ctx: HostSessionContext) {
           }
         }
         if (candidateData && candidateData.candidate) {
-          // 传入 allowClientTunSrflx = true 允许 Client（手机端）通过 VPN 隧道反射的二阶 srflx 候选到达，由 optimizeCandidatePriority 降权至 45 保留打洞机会
+          // 传入 allowClientTunSrflx = true 允许 Client（手机端）通过 VPN 隧道反射的二阶 srflx 候选到达，并保留发送端分流代理降权 (typePref=80) 与国内直连提权 (typePref=95)
           if (isBogusOrTunCandidate(candidateData.candidate, true)) {
             log.info(`Dropped remote bogus/TUN poison candidate from ${sender}:`, candidateData.candidate)
             return
           }
-          candidateData.candidate = optimizeCandidatePriority(candidateData.candidate)
+          candidateData.candidate = optimizeCandidatePriority(candidateData.candidate, {
+            preserveRemoteSrflxTier: true
+          })
         }
 
         const staged = stagedClients.get(sender)

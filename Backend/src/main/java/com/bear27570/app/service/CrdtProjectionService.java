@@ -47,12 +47,25 @@ public class CrdtProjectionService {
     public record SaveResult(
             boolean saved,
             boolean stale,
+            boolean forbidden,
             String reason,
             String eventId,
             int hostEpoch,
             long snapshotRevision,
             Map<String, Integer> projectedCounts
-    ) {}
+    ) {
+        public SaveResult(
+                boolean saved,
+                boolean stale,
+                String reason,
+                String eventId,
+                int hostEpoch,
+                long snapshotRevision,
+                Map<String, Integer> projectedCounts
+        ) {
+            this(saved, stale, false, reason, eventId, hostEpoch, snapshotRevision, projectedCounts);
+        }
+    }
 
     private record ExistingStateMeta(int hostEpoch, long snapshotRevision, String crdtSnapshotJson) {}
 
@@ -156,11 +169,28 @@ public class CrdtProjectionService {
                         .orElse(null);
 
                 int requestedEpoch = Math.max(1, hostEpoch);
+                String eventHostId = queryEventHostId(handle, eventId);
+                boolean hostIsRegisteredLocalUser = isRegisteredUserWithPassword(handle, eventHostId);
+                int currentEpoch = existing != null ? existing.hostEpoch() : 1;
+                if (!isHost && hostIsRegisteredLocalUser && requestedEpoch > currentEpoch) {
+                    return new SaveResult(
+                            false,
+                            false,
+                            true,
+                            "Only the event host can advance hostEpoch",
+                            eventId,
+                            currentEpoch,
+                            existing != null ? existing.snapshotRevision() : 0L,
+                            Map.of()
+                    );
+                }
+
                 if (existing != null) {
                     if (requestedEpoch < existing.hostEpoch()) {
                         return new SaveResult(
                                 false,
                                 true,
+                                false,
                                 "stale_epoch",
                                 eventId,
                                 existing.hostEpoch(),
@@ -174,6 +204,7 @@ public class CrdtProjectionService {
                         return new SaveResult(
                                 false,
                                 true,
+                                false,
                                 "stale_revision",
                                 eventId,
                                 existing.hostEpoch(),
@@ -195,6 +226,9 @@ public class CrdtProjectionService {
 
                 JsonElement persistedSnapshotEl = snapshotEl.deepCopy();
                 Set<String> rejectedScoutingRowIds = Collections.emptySet();
+                Set<String> rejectedTagRowIds = Collections.emptySet();
+                Set<String> rejectedPitRowIds = Collections.emptySet();
+                boolean enforceAuthoritativeNonHostGuards = !isHost && hostIsRegisteredLocalUser;
                 if (!isHost) {
                     JsonElement previousSnapshotEl = parseNullableJsonArray(existing != null ? existing.crdtSnapshotJson() : null);
                     sanitizeNonHostMemberIdentities(
@@ -202,6 +236,16 @@ public class CrdtProjectionService {
                     NonHostSanitizeResult sanitizeResult = sanitizeNonHostScoutingSnapshot(
                             handle, eventId, callerUserId, persistedSnapshotEl, previousSnapshotEl);
                     rejectedScoutingRowIds = sanitizeResult.rejectedRowIds();
+
+                    if (enforceAuthoritativeNonHostGuards) {
+                        sanitizeNonHostReadOnlyTable(persistedSnapshotEl, previousSnapshotEl, "custom_fields");
+                        sanitizeNonHostReadOnlyTable(persistedSnapshotEl, previousSnapshotEl, "schedules");
+                        sanitizeNonHostReadOnlyTable(persistedSnapshotEl, previousSnapshotEl, "assignments");
+                        rejectedTagRowIds = sanitizeNonHostTeamTags(
+                                handle, eventId, callerUserId, persistedSnapshotEl, previousSnapshotEl);
+                        rejectedPitRowIds = sanitizeNonHostPitDeletes(
+                                handle, eventId, callerUserId, persistedSnapshotEl, previousSnapshotEl);
+                    }
                 }
 
                 boolean noDirtyMap = dirtyRows == null || dirtyRows.isEmpty();
@@ -225,14 +269,20 @@ public class CrdtProjectionService {
                         .execute();
 
                 Map<String, Integer> counts = new LinkedHashMap<>();
-                counts.put("pit_records", projectPitAndPhotos(handle, eventId, persistedSnapshotEl, dirtyRows, projectAll));
-                counts.put("team_tags", projectTeamTags(handle, eventId, persistedSnapshotEl, dirtyRows, projectAll));
-                counts.put("custom_fields", projectCustomFields(handle, eventId, persistedSnapshotEl, dirtyRows, projectAll));
-                counts.put("schedules", projectSchedules(handle, eventId, persistedSnapshotEl, dirtyRows, projectAll));
-                counts.put("assignments", projectAssignments(handle, eventId, persistedSnapshotEl, dirtyRows, projectAll));
+                counts.put("pit_records", projectPitAndPhotos(handle, eventId, persistedSnapshotEl, dirtyRows, projectAll, rejectedPitRowIds));
+                counts.put("team_tags", projectTeamTags(handle, eventId, callerUserId, enforceAuthoritativeNonHostGuards, persistedSnapshotEl, dirtyRows, projectAll, rejectedTagRowIds));
+                if (enforceAuthoritativeNonHostGuards) {
+                    counts.put("custom_fields", 0);
+                    counts.put("schedules", 0);
+                    counts.put("assignments", 0);
+                } else {
+                    counts.put("custom_fields", projectCustomFields(handle, eventId, persistedSnapshotEl, dirtyRows, projectAll));
+                    counts.put("schedules", projectSchedules(handle, eventId, persistedSnapshotEl, dirtyRows, projectAll));
+                    counts.put("assignments", projectAssignments(handle, eventId, persistedSnapshotEl, dirtyRows, projectAll));
+                }
                 counts.put("scouting_records", projectedScoutingCount);
 
-                return new SaveResult(true, false, null, eventId, effectiveEpoch, effectiveRev, counts);
+                return new SaveResult(true, false, false, null, eventId, effectiveEpoch, effectiveRev, counts);
             }));
         }
     }
@@ -565,6 +615,9 @@ public class CrdtProjectionService {
         }
         ScoutingRecord candidate = toCandidateScoutingRecord(id, eventId, row);
         ScoutingRecord existing = queryExistingScoutingRecord(handle, id);
+        if (existing != null && !Objects.equals(existing.getEventId(), eventId)) {
+            return false;
+        }
         if (Objects.equals(candidate.getScoutId(), callerUserId)) {
             return existing == null || Objects.equals(existing.getScoutId(), callerUserId);
         }
@@ -642,6 +695,283 @@ public class CrdtProjectionService {
     }
 
     /**
+     * Restores host-only CRDT tables (`custom_fields`, `schedules`, `assignments`) back to their
+     * previously persisted state when a non-Host member calls PUT /crdt-state on an authoritative Host DB.
+     */
+    private void sanitizeNonHostReadOnlyTable(
+            JsonElement persistedSnapshotEl,
+            JsonElement previousSnapshotEl,
+            String tableId
+    ) {
+        Map<String, JsonElement> incomingRawRows = extractRawTableRows(persistedSnapshotEl, tableId);
+        Map<String, JsonElement> previousRawRows = extractRawTableRows(previousSnapshotEl, tableId);
+        if (incomingRawRows.isEmpty() && previousRawRows.isEmpty()) {
+            return;
+        }
+        MutableTableHandle tableHandle = getOrCreateMutableTable(persistedSnapshotEl, tableId);
+        if (tableHandle == null) {
+            return;
+        }
+        boolean snapshotMutated = false;
+        for (String rowId : new ArrayList<>(incomingRawRows.keySet())) {
+            JsonElement incomingRaw = incomingRawRows.get(rowId);
+            JsonElement previousRaw = previousRawRows.get(rowId);
+            if (previousRaw == null) {
+                tableHandle.rowsObj().remove(rowId);
+                snapshotMutated = true;
+            } else if (!previousRaw.equals(incomingRaw)) {
+                tableHandle.rowsObj().add(rowId, previousRaw.deepCopy());
+                snapshotMutated = true;
+            }
+        }
+        for (Map.Entry<String, JsonElement> prevEntry : previousRawRows.entrySet()) {
+            if (!incomingRawRows.containsKey(prevEntry.getKey())) {
+                tableHandle.rowsObj().add(prevEntry.getKey(), prevEntry.getValue().deepCopy());
+                snapshotMutated = true;
+            }
+        }
+        if (snapshotMutated) {
+            trimStampHash(tableHandle.tableStamp());
+            trimStampHash(tableHandle.tablesStamp());
+        }
+    }
+
+    private static boolean isValidTeamTagName(String normalizedTag) {
+        return normalizedTag != null
+                && !normalizedTag.isEmpty()
+                && normalizedTag.length() <= 30
+                && !normalizedTag.contains(".")
+                && normalizedTag.matches("^[\\p{L}\\p{N} _#-]+$");
+    }
+
+    /**
+     * Enforces TeamTagRoutes parity on `team_tags` when a non-Host member pushes CRDT state
+     * to an authoritative Host DB: creator-only delete, no creator/preset spoofing, tag char/length
+     * whitelist, and <= 15 active tags per team.
+     */
+    private Set<String> sanitizeNonHostTeamTags(
+            Handle handle,
+            String eventId,
+            String callerUserId,
+            JsonElement persistedSnapshotEl,
+            JsonElement previousSnapshotEl
+    ) {
+        Map<String, JsonObject> incomingPlainRows = extractTableRows(persistedSnapshotEl, "team_tags");
+        Map<String, JsonElement> incomingRawRows = extractRawTableRows(persistedSnapshotEl, "team_tags");
+        Map<String, JsonObject> previousPlainRows = extractTableRows(previousSnapshotEl, "team_tags");
+        Map<String, JsonElement> previousRawRows = extractRawTableRows(previousSnapshotEl, "team_tags");
+        Set<String> rejectedRowIds = new HashSet<>();
+
+        if (incomingRawRows.isEmpty() && previousRawRows.isEmpty()) {
+            return rejectedRowIds;
+        }
+        MutableTableHandle tableHandle = getOrCreateMutableTable(persistedSnapshotEl, "team_tags");
+        if (tableHandle == null) {
+            return rejectedRowIds;
+        }
+
+        // Load existing DB tag creators & per-team counts for authoritative checks
+        Map<String, String> dbCreatorByTeamAndTag = new HashMap<>();
+        Map<String, String> dbCreatorById = new HashMap<>();
+        Map<Integer, Set<String>> activeTagsByTeam = new HashMap<>();
+        handle.createQuery("SELECT id, team_number, LOWER(tag) AS ltag, created_by FROM team_tags WHERE event_id = :eventId")
+                .bind("eventId", eventId)
+                .map((rs, ctx) -> {
+                    String id = rs.getString("id");
+                    int teamNum = rs.getInt("team_number");
+                    String ltag = rs.getString("ltag");
+                    String creator = rs.getString("created_by");
+                    if (id != null && creator != null) dbCreatorById.put(id, creator);
+                    if (ltag != null) {
+                        if (creator != null) dbCreatorByTeamAndTag.put(teamNum + "::" + ltag, creator);
+                        activeTagsByTeam.computeIfAbsent(teamNum, k -> new HashSet<>()).add(ltag);
+                    }
+                    return null;
+                })
+                .list();
+
+        boolean snapshotMutated = false;
+        for (String rowId : new ArrayList<>(incomingRawRows.keySet())) {
+            JsonElement incomingRaw = incomingRawRows.get(rowId);
+            JsonElement previousRaw = previousRawRows.get(rowId);
+            if (previousRaw != null && previousRaw.equals(incomingRaw)) {
+                continue;
+            }
+            JsonObject row = incomingPlainRows.get(rowId);
+            JsonObject prevPlain = previousPlainRows.get(rowId);
+            boolean reject = false;
+            if (row == null) {
+                reject = true;
+            } else {
+                String rowEventId = getStr(row, "eventId", eventId);
+                int teamNumber = getInt(row, "teamNumber", parseTeamPrefix(rowId));
+                String rawTag = getStr(row, "tag", "");
+                if (rawTag.isEmpty()) {
+                    int idx = rowId.indexOf("::");
+                    if (idx >= 0 && idx + 2 < rowId.length()) {
+                        rawTag = rowId.substring(idx + 2);
+                    }
+                }
+                String normalizedTag = normalizeTag(rawTag);
+                String rowTagId = nonBlankOr(getStr(row, "id", ""), eventId + "_tag_" + teamNumber + "_" + normalizedTag);
+                boolean active = getBool(row, "active", true);
+                String existingCreator = prevPlain != null ? getStrOrNull(prevPlain, "createdBy") : null;
+                if (existingCreator == null || existingCreator.isBlank()) {
+                    existingCreator = dbCreatorByTeamAndTag.get(teamNumber + "::" + normalizedTag.toLowerCase(Locale.ROOT));
+                }
+                if ((existingCreator == null || existingCreator.isBlank()) && !rowTagId.isBlank()) {
+                    existingCreator = dbCreatorById.get(rowTagId);
+                }
+
+                if ((!rowEventId.isEmpty() && !eventId.equals(rowEventId))
+                        || teamNumber <= 0
+                        || !isValidTeamTagName(normalizedTag)) {
+                    reject = true;
+                } else if (!active) {
+                    boolean existedBefore = prevPlain != null
+                            || dbCreatorByTeamAndTag.containsKey(teamNumber + "::" + normalizedTag.toLowerCase(Locale.ROOT))
+                            || dbCreatorById.containsKey(rowTagId);
+                    if (existedBefore) {
+                        boolean isCreator = callerUserId != null
+                                && existingCreator != null
+                                && callerUserId.equals(existingCreator.trim());
+                        if (!isCreator) {
+                            reject = true;
+                        }
+                    }
+                } else {
+                    boolean isPreset = getBool(row, "isPreset", false);
+                    String rowCreatedBy = getStr(row, "createdBy", "").trim();
+                    if (isPreset) {
+                        reject = true;
+                    } else if (existingCreator != null && !existingCreator.isBlank()) {
+                        if (!Objects.equals(existingCreator.trim(), callerUserId)
+                                && !rowCreatedBy.isEmpty()
+                                && !Objects.equals(rowCreatedBy, existingCreator.trim())) {
+                            reject = true;
+                        }
+                    } else {
+                        if (!rowCreatedBy.isEmpty() && !Objects.equals(rowCreatedBy, callerUserId)) {
+                            reject = true;
+                        } else {
+                            Set<String> teamTags = activeTagsByTeam.computeIfAbsent(teamNumber, k -> new HashSet<>());
+                            String lowerTag = normalizedTag.toLowerCase(Locale.ROOT);
+                            if (!teamTags.contains(lowerTag) && teamTags.size() >= 15) {
+                                reject = true;
+                            } else {
+                                teamTags.add(lowerTag);
+                            }
+                        }
+                    }
+                }
+            }
+
+            if (reject) {
+                rejectedRowIds.add(rowId);
+                if (previousRaw != null) {
+                    tableHandle.rowsObj().add(rowId, previousRaw.deepCopy());
+                } else {
+                    tableHandle.rowsObj().remove(rowId);
+                }
+                snapshotMutated = true;
+            }
+        }
+
+        for (Map.Entry<String, JsonElement> prevEntry : previousRawRows.entrySet()) {
+            String prevRowId = prevEntry.getKey();
+            if (incomingRawRows.containsKey(prevRowId)) {
+                continue;
+            }
+            JsonObject prevPlain = previousPlainRows.get(prevRowId);
+            String prevCreator = prevPlain != null ? getStr(prevPlain, "createdBy", "").trim() : "";
+            if (!Objects.equals(prevCreator, callerUserId)) {
+                tableHandle.rowsObj().add(prevRowId, prevEntry.getValue().deepCopy());
+                rejectedRowIds.add(prevRowId);
+                snapshotMutated = true;
+            }
+        }
+
+        if (snapshotMutated) {
+            trimStampHash(tableHandle.tableStamp());
+            trimStampHash(tableHandle.tablesStamp());
+        }
+        return rejectedRowIds;
+    }
+
+    /**
+     * Allows collaborative pit edits by non-host members, while blocking non-host soft-deletion
+     * (`isDeleted = true`) of pit records authored by another user on an authoritative Host DB.
+     */
+    private Set<String> sanitizeNonHostPitDeletes(
+            Handle handle,
+            String eventId,
+            String callerUserId,
+            JsonElement persistedSnapshotEl,
+            JsonElement previousSnapshotEl
+    ) {
+        Map<String, JsonObject> incomingPlainRows = extractTableRows(persistedSnapshotEl, "pit_records");
+        Map<String, JsonElement> incomingRawRows = extractRawTableRows(persistedSnapshotEl, "pit_records");
+        Map<String, JsonObject> previousPlainRows = extractTableRows(previousSnapshotEl, "pit_records");
+        Map<String, JsonElement> previousRawRows = extractRawTableRows(previousSnapshotEl, "pit_records");
+        Set<String> rejectedRowIds = new HashSet<>();
+
+        if (incomingRawRows.isEmpty() && previousRawRows.isEmpty()) {
+            return rejectedRowIds;
+        }
+        MutableTableHandle tableHandle = getOrCreateMutableTable(persistedSnapshotEl, "pit_records");
+        if (tableHandle == null) {
+            return rejectedRowIds;
+        }
+
+        Map<Integer, String> dbScoutByTeam = new HashMap<>();
+        handle.createQuery("SELECT team_number, scout_id FROM pit_scouting_records WHERE event_id = :eventId")
+                .bind("eventId", eventId)
+                .map((rs, ctx) -> {
+                    String sId = rs.getString("scout_id");
+                    if (sId != null) dbScoutByTeam.put(rs.getInt("team_number"), sId);
+                    return null;
+                })
+                .list();
+
+        boolean snapshotMutated = false;
+        for (String rowId : new ArrayList<>(incomingRawRows.keySet())) {
+            JsonElement incomingRaw = incomingRawRows.get(rowId);
+            JsonElement previousRaw = previousRawRows.get(rowId);
+            if (previousRaw != null && previousRaw.equals(incomingRaw)) {
+                continue;
+            }
+            JsonObject row = incomingPlainRows.get(rowId);
+            if (row == null) continue;
+            boolean isDeleted = getBool(row, "isDeleted", false);
+            if (!isDeleted) continue;
+
+            int teamNumber = getInt(row, "teamNumber", parseIntSafe(rowId, 0));
+            JsonObject prevPlain = previousPlainRows.get(rowId);
+            String existingScoutId = prevPlain != null ? getStr(prevPlain, "scoutId", "").trim() : "";
+            if (existingScoutId.isEmpty() && teamNumber > 0) {
+                String fromDb = dbScoutByTeam.get(teamNumber);
+                if (fromDb != null) existingScoutId = fromDb.trim();
+            }
+            if (!existingScoutId.isEmpty() && !Objects.equals(existingScoutId, callerUserId)) {
+                rejectedRowIds.add(rowId);
+                if (teamNumber > 0) rejectedRowIds.add(String.valueOf(teamNumber));
+                if (previousRaw != null) {
+                    tableHandle.rowsObj().add(rowId, previousRaw.deepCopy());
+                } else {
+                    tableHandle.rowsObj().remove(rowId);
+                }
+                snapshotMutated = true;
+            }
+        }
+
+        if (snapshotMutated) {
+            trimStampHash(tableHandle.tableStamp());
+            trimStampHash(tableHandle.tablesStamp());
+        }
+        return rejectedRowIds;
+    }
+
+    /**
      * Unwraps TinyBase MergeableContent JSON for a given tableId into plain { rowId -> { cellId: primitive } }.
      * TinyBase format: [ [ { tableId: [ { rowId: [ { cellId: [val, hlc?, hash?] }, ... ] }, ... ] }, ... ], values ]
      */
@@ -690,7 +1020,8 @@ public class CrdtProjectionService {
             String eventId,
             JsonElement snapshotEl,
             Map<String, List<String>> dirtyRows,
-            boolean projectAll
+            boolean projectAll,
+            Set<String> rejectedPitRowIds
     ) {
         Map<String, JsonObject> pitRows = extractTableRows(snapshotEl, "pit_records");
         Map<String, JsonObject> photoRows = extractTableRows(snapshotEl, "pit_photo_keys");
@@ -736,6 +1067,9 @@ public class CrdtProjectionService {
 
         int count = 0;
         for (int teamNum : targetTeams) {
+            if (rejectedPitRowIds != null && rejectedPitRowIds.contains(String.valueOf(teamNum))) {
+                continue;
+            }
             JsonObject row = pitRows.get(String.valueOf(teamNum));
             if (row == null) {
                 for (JsonObject candidate : pitRows.values()) {
@@ -861,15 +1195,21 @@ public class CrdtProjectionService {
     private int projectTeamTags(
             Handle handle,
             String eventId,
+            String callerUserId,
+            boolean enforceNonHostRules,
             JsonElement snapshotEl,
             Map<String, List<String>> dirtyRows,
-            boolean projectAll
+            boolean projectAll,
+            Set<String> rejectedTagRowIds
     ) {
         Map<String, JsonObject> rows = extractTableRows(snapshotEl, "team_tags");
         Set<String> targetRowIds = collectTargetRowIds(rows, dirtyRows, "team_tags", projectAll);
         int count = 0;
 
         for (String rowId : targetRowIds) {
+            if (rejectedTagRowIds != null && rejectedTagRowIds.contains(rowId)) {
+                continue;
+            }
             JsonObject row = rows.get(rowId);
             if (row == null) continue;
             String rowEventId = getStr(row, "eventId", eventId);
@@ -886,10 +1226,29 @@ public class CrdtProjectionService {
             if (teamNumber <= 0 || rawTag.isEmpty()) continue;
 
             String normalizedTag = truncate(normalizeTag(rawTag), 30);
+            if (enforceNonHostRules && !isValidTeamTagName(normalizedTag)) continue;
             String id = nonBlankOr(getStr(row, "id", ""), eventId + "_tag_" + teamNumber + "_" + normalizedTag);
             boolean active = getBool(row, "active", true);
 
             if (!active) {
+                if (enforceNonHostRules) {
+                    String existingCreator = handle.createQuery(
+                                    "SELECT created_by FROM team_tags WHERE event_id = :eventId AND " +
+                                    "((team_number = :teamNumber AND LOWER(tag) = LOWER(:tag)) OR id = :id) LIMIT 1")
+                            .bind("eventId", eventId)
+                            .bind("teamNumber", teamNumber)
+                            .bind("tag", normalizedTag)
+                            .bind("id", id)
+                            .mapTo(String.class)
+                            .findFirst()
+                            .orElse(null);
+                    if (existingCreator != null && !Objects.equals(existingCreator.trim(), callerUserId)) {
+                        continue;
+                    }
+                    if (existingCreator == null) {
+                        continue;
+                    }
+                }
                 handle.createUpdate(
                                 "DELETE FROM team_tags WHERE event_id = :eventId AND " +
                                 "((team_number = :teamNumber AND LOWER(tag) = LOWER(:tag)) OR id = :id)")
@@ -903,8 +1262,11 @@ public class CrdtProjectionService {
             }
 
             String color = truncate(nonBlankOr(getStr(row, "color", ""), "blue"), 16);
-            boolean isPreset = getBool(row, "isPreset", false);
+            boolean isPreset = !enforceNonHostRules && getBool(row, "isPreset", false);
             String createdBy = getStrOrNull(row, "createdBy");
+            if (enforceNonHostRules && (createdBy == null || createdBy.isBlank())) {
+                createdBy = callerUserId;
+            }
 
             handle.createUpdate("""
                     MERGE INTO team_tags (id, event_id, team_number, tag, color, is_preset, created_by, updated_at)
@@ -1189,6 +1551,10 @@ public class CrdtProjectionService {
             if (id.isEmpty() || matchNumber <= 0 || teamNumber <= 0) continue;
 
             ScoutingRecord candidate = toCandidateScoutingRecord(id, eventId, row);
+            ScoutingRecord existing = queryExistingScoutingRecord(handle, id);
+            if (existing != null && !Objects.equals(existing.getEventId(), eventId)) {
+                continue;
+            }
             if (!isHost && !isNonHostScoutingRowAuthorized(handle, eventId, eventHostId, callerUserId, rowId, row)) {
                 continue;
             }

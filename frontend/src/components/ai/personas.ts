@@ -49,7 +49,7 @@ export function getBiobuzzRulesBase(locale: string): string {
       '- 花朵与 Garden：Nectar 大球 (+2/个)、Bottom Bonus 占底 (+5/朵)、Pollen 小球 (+2/个)、Garden 推进 (+1/个)。',
       '- 关键犯规与高阶指标：G418 允许掏取敌方花底 Pollen 拆台 (Descore)；G410 为比赛剩余时间 >60s 时误投 Nectar 大犯规；Predict Cycle Time（单场需至少 5 次有效周期，剔除最快 1 次后取较短 4 次均值）与 Spread（循环耗时离散度）；Brag Index 吹牛指数（展位自报对比实测得分，~1.0x 真实守信，>1.25x 存在夸大）。',
       '【输出铁律】',
-      '1. 请优先使用简洁清晰的中文回答；所有队伍编号必须统一写作 `#27570` 或 `Team 27570` 格式（不要省略或拆分数字），以便界面高亮为可点击队伍芯片。',
+      '1. 请优先使用简洁清晰的中文回答；所有队伍编号必须统一写作 #27570 或 Team 27570 格式（切勿用反引号 ` ` 包裹队号，也不要省略或拆分数字），以便界面高亮为可点击队伍芯片。',
       '2. 严格依据提供的赛事考察数据进行推演；明确区分「展位自述」与「赛场实测」，数据不足时直说样本不足，严禁凭空编造未出现的场次或分数。'
     ].join('\n')
   }
@@ -60,7 +60,7 @@ export function getBiobuzzRulesBase(locale: string): string {
     '- Flowers & Garden: Nectar (+2/ball), Bottom Bonus (+5/flower), Pollen (+2/ball), Garden (+1/ball).',
     '- Critical Tactics & Metrics: G418 allows descoring enemy bottom Pollen; G410 is an early-Nectar foul when >60s remain in TeleOp; Predict Cycle Time (requires >=5 valid intervals in a match, dropping fastest 1 and averaging next 4) & Cycle Spread (variance); Brag Index (pit claim vs actual max/avg, ~1.0x realistic vs >1.25x overclaimed).',
     '[Grounding & Formatting Rules]',
-    '1. Always respond in clear, concise English and format every team number as `#27570` or `Team 27570` so the UI renders interactive team chips.',
+    '1. Always respond in clear, concise English and format every team number as #27570 or Team 27570 (never wrap team numbers in backticks/code formatting) so the UI renders interactive team chips.',
     '2. Ground all claims strictly in provided scouting data; distinguish pit self-claims from match measurements, never invent missing stats, and state gaps when sample size is small.'
   ].join('\n')
 }

@@ -78,6 +78,7 @@ export function useEventWebRtcBridge({
   let crdtUnbind: (() => void) | null = null
   let crdtHub: WebRtcCrdtSynchronizerHub | null = null
   const openCrdtPeers = new Set<string>()
+  let hostChannelNeedsFullSync = true
 
   function bindCrdtSyncTrigger(): void {
     connStore.setCrdtSyncTrigger(async (peerId = 'host') => {
@@ -104,20 +105,22 @@ export function useEventWebRtcBridge({
           maxSkewMs: scan.maxSkewMs,
           maxIncomingPt: scan.maxIncomingPt
         })
-        if (typeof window !== 'undefined') {
-          const win = window as any
-          const list = Array.isArray(win.__LAST_CRDT_FUTURE_SKEW__) ? win.__LAST_CRDT_FUTURE_SKEW__ : []
-          list.push({
-            ts: Date.now(),
-            eventId: handle.eventId,
-            senderPeerId,
-            maxSkewMs: scan.maxSkewMs,
-            maxIncomingPt: scan.maxIncomingPt
-          })
-          if (list.length > 50) {
-            list.splice(0, list.length - 50)
+        if (import.meta.env.DEV || import.meta.env.VITE_ENABLE_E2E_BRIDGE === 'true') {
+          if (typeof window !== 'undefined') {
+            const win = window as any
+            const list = Array.isArray(win.__LAST_CRDT_FUTURE_SKEW__) ? win.__LAST_CRDT_FUTURE_SKEW__ : []
+            list.push({
+              ts: Date.now(),
+              eventId: handle.eventId,
+              senderPeerId,
+              maxSkewMs: scan.maxSkewMs,
+              maxIncomingPt: scan.maxIncomingPt
+            })
+            if (list.length > 50) {
+              list.splice(0, list.length - 50)
+            }
+            win.__LAST_CRDT_FUTURE_SKEW__ = list
           }
-          win.__LAST_CRDT_FUTURE_SKEW__ = list
         }
         const rtc = connStore.rtcService
         if (rtc?.isHostMode()) {
@@ -153,22 +156,24 @@ export function useEventWebRtcBridge({
               rejectedIdentities: res.rejectedIdentities
             })
           )
-          if (typeof window !== 'undefined') {
-            const win = window as any
-            const list = Array.isArray(win.__LAST_CRDT_SECURITY_REJECTS__)
-              ? win.__LAST_CRDT_SECURITY_REJECTS__
-              : []
-            list.push({
-              ts: Date.now(),
-              eventId: handle.eventId,
-              senderPeerId,
-              rejectedRecords: res.rejectedRecords,
-              rejectedIdentities: res.rejectedIdentities
-            })
-            if (list.length > 50) {
-              list.splice(0, list.length - 50)
+          if (import.meta.env.DEV || import.meta.env.VITE_ENABLE_E2E_BRIDGE === 'true') {
+            if (typeof window !== 'undefined') {
+              const win = window as any
+              const list = Array.isArray(win.__LAST_CRDT_SECURITY_REJECTS__)
+                ? win.__LAST_CRDT_SECURITY_REJECTS__
+                : []
+              list.push({
+                ts: Date.now(),
+                eventId: handle.eventId,
+                senderPeerId,
+                rejectedRecords: res.rejectedRecords,
+                rejectedIdentities: res.rejectedIdentities
+              })
+              if (list.length > 50) {
+                list.splice(0, list.length - 50)
+              }
+              win.__LAST_CRDT_SECURITY_REJECTS__ = list
             }
-            win.__LAST_CRDT_SECURITY_REJECTS__ = list
           }
         }
         return { ...msg, body: res.msgBody }
@@ -235,6 +240,7 @@ export function useEventWebRtcBridge({
   }
 
   function publishE2eBridge(): void {
+    if (!(import.meta.env.DEV || import.meta.env.VITE_ENABLE_E2E_BRIDGE === 'true')) return
     if (typeof window === 'undefined') return
     ;(window as any).__sp27E2eBridge = {
       getEventId: () => activeCrdtEventId || eventId.value,
@@ -654,8 +660,10 @@ export function useEventWebRtcBridge({
       await disposeEventCrdt(eid)
     }
     activeCrdtEventId = ''
-    if (typeof window !== 'undefined') {
-      delete (window as any).__sp27E2eBridge
+    if (import.meta.env.DEV || import.meta.env.VITE_ENABLE_E2E_BRIDGE === 'true') {
+      if (typeof window !== 'undefined') {
+        delete (window as any).__sp27E2eBridge
+      }
     }
   }
 
@@ -782,12 +790,18 @@ export function useEventWebRtcBridge({
       },
       onPeerDataChannelOpen: (peerId) => {
         openCrdtPeers.add(peerId)
+        if (peerId === 'host') {
+          hostChannelNeedsFullSync = true
+        }
         if (!crdtHub) return
         setCrdtTransportActive(activeCrdtEventId || eventId.value, true)
         void crdtHub.attachPeer(peerId, { awaitInitialSync: false })
       },
       onPeerDataChannelClose: (peerId) => {
         openCrdtPeers.delete(peerId)
+        if (peerId === 'host') {
+          hostChannelNeedsFullSync = true
+        }
         if (openCrdtPeers.size === 0 && (activeCrdtEventId || eventId.value)) {
           setCrdtTransportActive(activeCrdtEventId || eventId.value, false)
         }
@@ -795,14 +809,18 @@ export function useEventWebRtcBridge({
       },
       onStatusChange: (s) => {
         connStore.setStatus(s)
-        if (
-          (!eventStore.isHost || connStore.isStandbyHost) &&
-          (s === 'offline' || s === 'long_offline' || s === 'degraded')
-        ) {
-          openCrdtPeers.clear()
+        if (!eventStore.isHost || connStore.isStandbyHost) {
           const crdtEid = activeCrdtEventId || eventId.value
-          if (crdtEid) {
-            setCrdtTransportActive(crdtEid, false)
+          if (s === 'offline' || s === 'long_offline') {
+            openCrdtPeers.clear()
+            hostChannelNeedsFullSync = true
+            if (crdtEid) {
+              setCrdtTransportActive(crdtEid, false)
+            }
+          } else if (s === 'degraded') {
+            if (crdtEid) {
+              setCrdtTransportActive(crdtEid, false)
+            }
           }
         }
       },
@@ -850,10 +868,7 @@ export function useEventWebRtcBridge({
           eventIdVal === curId ||
           (Boolean(curId) &&
             Boolean(eventIdVal) &&
-            (curId!.startsWith('evt-') ||
-              curId!.startsWith('EXT_') ||
-              eventIdVal.startsWith('evt-') ||
-              eventIdVal.startsWith('EXT_')))
+            (isPlaceholderEventId(curId) || isPlaceholderEventId(eventIdVal)))
         if (isMatch) {
           recordStore.applyTagUpdate(tag, action)
         }
@@ -861,7 +876,11 @@ export function useEventWebRtcBridge({
 
       onRequestTagsSync: (senderId) => {
         if (eventStore.currentEvent?.id && connStore.rtcService) {
-          connStore.rtcService.sendTagsFullSync(recordStore.teamTags, eventStore.currentEvent.id, senderId)
+          connStore.rtcService.sendTagsFullSync(
+            recordStore.getTagsForEvent(eventStore.currentEvent.id),
+            eventStore.currentEvent.id,
+            senderId
+          )
         }
       },
 
@@ -871,20 +890,23 @@ export function useEventWebRtcBridge({
           eventIdVal === curId ||
           (Boolean(curId) &&
             Boolean(eventIdVal) &&
-            (curId!.startsWith('evt-') ||
-              curId!.startsWith('EXT_') ||
-              eventIdVal.startsWith('evt-') ||
-              eventIdVal.startsWith('EXT_')))
+            (isPlaceholderEventId(curId) || isPlaceholderEventId(eventIdVal)))
         if (isMatch) {
-          recordStore.applyTagsFullSync(tags)
+          const targetEid = eventIdVal && !isPlaceholderEventId(eventIdVal) ? eventIdVal : curId || eventIdVal
+          recordStore.applyTagsFullSync(tags, targetEid)
         }
       },
 
       onRequestScheduleSync: async (senderId) => {
         try {
           if (eventStore.isHost && connStore.rtcService) {
-            const allSchedules = scheduleStore.schedules
-            const allAssignments = Object.values(scheduleStore.assignments)
+            const eid = eventStore.currentEvent?.id || eventId.value
+            const allSchedules = eid
+              ? scheduleStore.schedules.filter((s) => !s.eventId || s.eventId === eid)
+              : scheduleStore.schedules
+            const allAssignments = Object.values(scheduleStore.assignments).filter(
+              (a) => !eid || !a.eventId || a.eventId === eid
+            )
             const CHUNK_SIZE = 20
             if (allSchedules.length <= CHUNK_SIZE) {
               await connStore.rtcService.sendMessage(
@@ -964,7 +986,10 @@ export function useEventWebRtcBridge({
       onRequestPitSync: async (senderId) => {
         try {
           if (eventStore.isHost && connStore.rtcService) {
-            const allRecords = pitStore.records
+            const eid = eventStore.currentEvent?.id || eventId.value
+            const allRecords = eid
+              ? pitStore.records.filter((r) => !r.eventId || r.eventId === eid)
+              : pitStore.records
             const CHUNK_SIZE = 15
             if (allRecords.length <= CHUNK_SIZE) {
               await connStore.rtcService.sendMessage(
@@ -1312,6 +1337,29 @@ export function useEventWebRtcBridge({
             return
           }
 
+          const crdtEid = activeCrdtEventId || evt.id
+          if (openCrdtPeers.has('host') && crdtEid) {
+            setCrdtTransportActive(crdtEid, true)
+            if (oldStatus === 'degraded') {
+              recordStore.syncRecordsFromCrdt(evt.id)
+            }
+          }
+
+          const isTransientRecoveryOnSameChannel =
+            (oldStatus === 'degraded' || oldStatus === 'unstable') &&
+            !hostChannelNeedsFullSync &&
+            openCrdtPeers.has('host')
+
+          if (isTransientRecoveryOnSameChannel) {
+            try {
+              await pitStore.flushPendingPitRecords(evt.id)
+            } catch (e) {
+              console.warn('[EventView] Failed to flush pending pit records:', e)
+            }
+            flushOfflinePhotos(evt.id)
+            return
+          }
+
           await triggerClientSyncPipeline()
         } else {
           // Host 连通或恢复后，同样主动巡检照片队列
@@ -1333,6 +1381,7 @@ export function useEventWebRtcBridge({
       return
     }
     lastSyncPipelineTriggeredAt = now
+    hostChannelNeedsFullSync = false
 
     // Client / Standby Host 连接／重连：注册身份与刷新私信队列，业务数据完全交由 TinyBase CRDT 增量同步
     connStore.requestSync(
@@ -1372,6 +1421,7 @@ export function useEventWebRtcBridge({
   function cleanupWebRTC() {
     rtcStartedAsHost = false
     openCrdtPeers.clear()
+    hostChannelNeedsFullSync = true
     connStore.setCrdtSyncTrigger(null)
     const crdtEid = activeCrdtEventId || eventId.value
     if (crdtEid) {

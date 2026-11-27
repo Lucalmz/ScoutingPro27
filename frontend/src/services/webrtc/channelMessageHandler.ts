@@ -5,11 +5,10 @@ import type {
 } from '@/types'
 import { safeJsonParse } from '@/utils/json'
 import { syncRecords } from '@/services/api'
-import { DataChannelSender } from '@/services/dataChannelSender'
 import { useInboxStore } from '@/stores/inbox'
 import { getActivePinia } from 'pinia'
 import { useUserStore } from '@/stores/user'
-import type { WebRtcCallbacks, ClientEntry } from './types'
+import type { SasState, WebRtcCallbacks, ClientEntry } from './types'
 import type { OfflineMessageManager } from './offlineQueue'
 import { handleChannelPhotoMessage, isChannelPhotoMessageType } from './channelPhotoHandler'
 import { handleChannelIdentityAndTakeoverMessage, isChannelIdentityAndTakeoverMessageType } from './channelIdentityHandler'
@@ -33,6 +32,7 @@ export interface ChannelMessageHandlerContext {
   takeoverCooldowns: Map<string, number>
   offlineMessages: OfflineMessageManager
   sendMessage: (msg: WebRtcMessage, targetId?: string) => Promise<void>
+  getPeerSasState?: (peerId: string) => SasState | undefined
   promoteTakeover: (userId: string, username: string, newClientId: string, oldClientId: string | undefined, reason: string) => void
   enqueueHostTask: (sender: string, task: () => Promise<void>) => Promise<void>
   cleanupPeerResources: (peerId: string) => void
@@ -454,21 +454,20 @@ export function createChannelMessageHandler(ctx: ChannelMessageHandlerContext): 
               senderId
             )
 
-            // 步骤 4：唯有 Host 持久化成功后，才向房间内其他 Client 广播更新
+            // 步骤 4：唯有 Host 持久化成功后，才向房间内其他 Client 广播更新（经由 SAS 门控）
             if (accepted.length > 0) {
               const BATCH_SIZE = 15
               for (let i = 0; i < accepted.length; i += BATCH_SIZE) {
                 const chunk = accepted.slice(i, i + BATCH_SIZE)
-                const payload = JSON.stringify({
+                const broadcastMsg: WebRtcMessage = {
                   type: 'SYNC_DATA',
                   records: chunk,
                   authCode: currentInviteCode,
                   hostSessionId: ctx.getHostSessionId()
-                })
-                ctx.clients.forEach((c, cid) => {
-                  if (cid !== senderId && c.dc && c.dc.readyState === 'open') {
-                    if (!c.sender) c.sender = new DataChannelSender(c.dc)
-                    c.sender.enqueueSendQuiet(payload, `records broadcast to ${cid}`)
+                }
+                ctx.clients.forEach((_c, cid) => {
+                  if (cid !== senderId) {
+                    void ctx.sendMessage(broadcastMsg, cid).catch(() => {})
                   }
                 })
               }
@@ -519,32 +518,45 @@ export function createChannelMessageHandler(ctx: ChannelMessageHandlerContext): 
           })
         }
 
-        // Host 负责星型拓扑下的私信转发
+        // Host 负责星型拓扑下的私信转发（严格遵守 SAS 门控）
         if (isHostMode) {
           if (msg.targetId && msg.targetId !== myUserId && msg.targetId !== 'host') {
             const targetClientIds = ctx.scoutIdToClientIds.get(msg.targetId)
-            let forwarded = false
+            let forwardedOrGated = false
+            let rejected = false
+
+            const forwardToClient = (cid: string, targetClient: ClientEntry) => {
+              const peerSas = ctx.getPeerSasState?.(cid)
+              if (peerSas === 'REJECTED') {
+                rejected = true
+                return
+              }
+              if (
+                peerSas === 'PENDING_VERIFICATION' ||
+                (targetClient.dc && targetClient.dc.readyState === 'open') ||
+                (targetClient.drainingVirtualDc && targetClient.drainingVirtualDc.readyState === 'open')
+              ) {
+                void ctx.sendMessage(msg, cid).catch(() => {})
+                forwardedOrGated = true
+              }
+            }
+
             if (targetClientIds && targetClientIds.size > 0) {
               for (const cid of targetClientIds) {
                 if (cid === senderId) continue // Do not echo back to the sender's device socket
                 const targetClient = ctx.clients.get(cid)
-                if (targetClient && targetClient.dc && targetClient.dc.readyState === 'open') {
-                  if (!targetClient.sender) targetClient.sender = new DataChannelSender(targetClient.dc)
-                  targetClient.sender.enqueueSendQuiet(JSON.stringify(msg), 'DIRECT_MESSAGE forward')
-                  forwarded = true
+                if (targetClient) {
+                  forwardToClient(cid, targetClient)
                 }
               }
-            } else {
+            } else if (msg.targetId !== senderId) {
               const targetClient = ctx.clients.get(msg.targetId)
-              if (targetClient && targetClient.dc && targetClient.dc.readyState === 'open') {
-                if (msg.targetId !== senderId) {
-                  if (!targetClient.sender) targetClient.sender = new DataChannelSender(targetClient.dc)
-                  targetClient.sender.enqueueSendQuiet(JSON.stringify(msg), 'DIRECT_MESSAGE forward')
-                  forwarded = true
-                }
+              if (targetClient) {
+                forwardToClient(msg.targetId, targetClient)
               }
             }
-            if (!forwarded) {
+
+            if (!forwardedOrGated && !rejected) {
               ctx.offlineMessages.enqueue(msg.targetId, msg)
             }
           }
@@ -563,10 +575,9 @@ export function createChannelMessageHandler(ctx: ChannelMessageHandlerContext): 
           callbacks.onTagUpdateReceived?.(msg.tag, msg.action, msg.eventId, msg.teamNumber)
           // Host 广播给其他 Client
           if (isHostMode && senderId) {
-            ctx.clients.forEach((c, cid) => {
-              if (cid !== senderId && c.dc && c.dc.readyState === 'open') {
-                if (!c.sender) c.sender = new DataChannelSender(c.dc)
-                c.sender.enqueueSendQuiet(JSON.stringify(msg), 'TEAM_TAGS_UPDATE broadcast')
+            ctx.clients.forEach((_c, cid) => {
+              if (cid !== senderId) {
+                void ctx.sendMessage(msg, cid).catch(() => {})
               }
             })
           }
@@ -609,11 +620,10 @@ export function createChannelMessageHandler(ctx: ChannelMessageHandlerContext): 
         if (msg.field) {
           callbacks.onCustomFieldUpdateReceived?.(msg.field, msg.action, msg.eventId)
           if (isHostMode) {
-            // Forward to other clients
-            ctx.clients.forEach((c, cid) => {
-              if (cid !== senderId && c.dc && c.dc.readyState === 'open') {
-                if (!c.sender) c.sender = new DataChannelSender(c.dc)
-                c.sender.enqueueSendQuiet(JSON.stringify(msg), 'CUSTOM_FIELD_UPDATE broadcast')
+            // Forward to other clients through SAS-gated sendMessage
+            ctx.clients.forEach((_c, cid) => {
+              if (cid !== senderId) {
+                void ctx.sendMessage(msg, cid).catch(() => {})
               }
             })
           }
@@ -651,11 +661,10 @@ export function createChannelMessageHandler(ctx: ChannelMessageHandlerContext): 
         if (msg.assignment) {
           callbacks.onAssignmentUpdateReceived?.(msg.assignment)
           if (isHostMode) {
-            // Forward to other clients
-            ctx.clients.forEach((c, cid) => {
-              if (cid !== senderId && c.dc && c.dc.readyState === 'open') {
-                if (!c.sender) c.sender = new DataChannelSender(c.dc)
-                c.sender.enqueueSendQuiet(JSON.stringify(msg), 'ASSIGNMENT_UPDATE broadcast')
+            // Forward to other clients through SAS-gated sendMessage
+            ctx.clients.forEach((_c, cid) => {
+              if (cid !== senderId) {
+                void ctx.sendMessage(msg, cid).catch(() => {})
               }
             })
           }
@@ -685,11 +694,10 @@ export function createChannelMessageHandler(ctx: ChannelMessageHandlerContext): 
           }
           callbacks.onPitScoutUpdateReceived?.(msg.record)
           if (isHostMode) {
-            // Forward to other clients
-            ctx.clients.forEach((c, cid) => {
-              if (cid !== senderId && c.dc && c.dc.readyState === 'open') {
-                if (!c.sender) c.sender = new DataChannelSender(c.dc)
-                c.sender.enqueueSendQuiet(JSON.stringify(msg), 'PIT_SCOUT_UPDATE broadcast')
+            // Forward to other clients through SAS-gated sendMessage
+            ctx.clients.forEach((_c, cid) => {
+              if (cid !== senderId) {
+                void ctx.sendMessage(msg, cid).catch(() => {})
               }
             })
             // 回传确认回执给发送方 Client
@@ -718,11 +726,10 @@ export function createChannelMessageHandler(ctx: ChannelMessageHandlerContext): 
           }
           callbacks.onPitScoutBatchSyncReceived?.(msg.records, senderId)
           if (isHostMode) {
-            // Forward to other clients
-            ctx.clients.forEach((c, cid) => {
-              if (cid !== senderId && c.dc && c.dc.readyState === 'open') {
-                if (!c.sender) c.sender = new DataChannelSender(c.dc)
-                c.sender.enqueueSendQuiet(JSON.stringify(msg), 'PIT_SCOUT_BATCH_SYNC broadcast')
+            // Forward to other clients through SAS-gated sendMessage
+            ctx.clients.forEach((_c, cid) => {
+              if (cid !== senderId) {
+                void ctx.sendMessage(msg, cid).catch(() => {})
               }
             })
             // 回传批量确认回执给发送方 Client

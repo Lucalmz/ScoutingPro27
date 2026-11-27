@@ -1,4 +1,5 @@
 import type { AiChatThread } from '@/types'
+import { stripTurboActionBlocks } from './turboAgent'
 
 export interface ThreadExportLabels {
   event: string
@@ -25,7 +26,17 @@ export function exportThreadToMarkdown(params: {
     if (m.reasoning) {
       lines.push(`<details><summary>${labels.reasoning}</summary>\n\n${m.reasoning}\n\n</details>\n`)
     }
-    lines.push(m.content || '')
+    const cleanBody = m.role === 'assistant'
+      ? stripTurboActionBlocks(m.content || '').displayContent
+      : (m.content || '')
+    if (cleanBody) {
+      lines.push(cleanBody)
+    }
+    if (m.turboActions && m.turboActions.length > 0) {
+      for (const act of m.turboActions) {
+        lines.push(`- [${act.status}] ${act.summary}${act.detail ? ` — ${act.detail}` : ''}`)
+      }
+    }
     lines.push('')
   }
   const blob = new Blob([lines.join('\n')], { type: 'text/markdown;charset=utf-8' })

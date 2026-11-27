@@ -670,3 +670,40 @@
     gap: 4px;
   }
 }
+
+/* Voice Stage Expand/Shrink & Mini Bar Slide Transitions */
+.voice-stage-zoom-enter-active {
+  transition:
+    transform 260ms var(--motion-profile-ease-flight),
+    opacity 200ms var(--motion-ease-out);
+}
+
+.voice-stage-zoom-leave-active {
+  transition:
+    transform 200ms var(--motion-profile-ease-exit),
+    opacity 160ms var(--motion-profile-ease-exit);
+}
+
+.voice-stage-zoom-enter-from,
+.voice-stage-zoom-leave-to {
+  transform: scale(0.94) translateY(14px);
+  opacity: 0;
+}
+
+.voice-mini-slide-enter-active {
+  transition:
+    transform 220ms var(--motion-profile-ease-flight),
+    opacity 180ms var(--motion-ease-out);
+}
+
+.voice-mini-slide-leave-active {
+  transition:
+    transform 160ms var(--motion-profile-ease-exit),
+    opacity 140ms var(--motion-profile-ease-exit);
+}
+
+.voice-mini-slide-enter-from,
+.voice-mini-slide-leave-to {
+  transform: translateY(100%);
+  opacity: 0;
+}

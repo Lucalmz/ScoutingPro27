@@ -74,6 +74,7 @@ export const useScheduleStore = defineStore('schedule', () => {
   const assignments = ref<Record<string, ScoutAssignment>>({})
   const loading = ref(false)
   const error = ref<string | null>(null)
+  let fetchSeq = 0
 
   // 划选集合与划选状态 (Mouse drag / wheel selection)
   const selectedMatches = ref<Set<string | number>>(new Set())
@@ -168,25 +169,71 @@ export const useScheduleStore = defineStore('schedule', () => {
   // --- 本地持久化缓存 ---
   function saveToLocalStorage(eventId: string) {
     try {
-      localStorage.setItem(`scoutingpro27_schedule_${eventId}`, JSON.stringify(schedules.value))
-      localStorage.setItem(`scoutingpro27_assignments_${eventId}`, JSON.stringify(assignments.value))
+      const scopedSchedules = schedules.value.filter((s) => !s.eventId || s.eventId === eventId)
+      const scopedAssignments: Record<string, ScoutAssignment> = {}
+      for (const [k, a] of Object.entries(assignments.value)) {
+        if (a && (!a.eventId || a.eventId === eventId)) {
+          scopedAssignments[k] = a
+        }
+      }
+      localStorage.setItem(`scoutingpro27_schedule_${eventId}`, JSON.stringify(scopedSchedules))
+      localStorage.setItem(`scoutingpro27_assignments_${eventId}`, JSON.stringify(scopedAssignments))
     } catch (e) {
       console.warn('[ScheduleStore] Failed to save to localStorage:', e)
     }
   }
 
-  function loadFromLocalStorage(eventId: string): boolean {
+  function loadFromLocalStorage(eventId: string, resetMemory = true): boolean {
+    if (resetMemory) {
+      schedules.value = []
+      assignments.value = {}
+    } else {
+      schedules.value = schedules.value.filter((s) => !s.eventId || s.eventId === eventId)
+      const keptAssign: Record<string, ScoutAssignment> = {}
+      for (const [k, a] of Object.entries(assignments.value)) {
+        if (a && (!a.eventId || a.eventId === eventId)) {
+          keptAssign[k] = a
+        }
+      }
+      assignments.value = keptAssign
+    }
     try {
       const rawSched = localStorage.getItem(`scoutingpro27_schedule_${eventId}`)
       const rawAssign = localStorage.getItem(`scoutingpro27_assignments_${eventId}`)
       let hasData = false
       if (rawSched) {
-        schedules.value = deduplicateSchedules(JSON.parse(rawSched))
-        hasData = true
+        const parsedSched = JSON.parse(rawSched)
+        if (Array.isArray(parsedSched)) {
+          const scoped = parsedSched
+            .filter((s: any) => s && (!s.eventId || s.eventId === eventId))
+            .map((s: any) => ({ ...s, eventId: s.eventId || eventId }))
+          if (scoped.length !== parsedSched.length) {
+            localStorage.setItem(`scoutingpro27_schedule_${eventId}`, JSON.stringify(scoped))
+          }
+          if (resetMemory || schedules.value.length === 0) {
+            schedules.value = deduplicateSchedules(scoped)
+          }
+          hasData = schedules.value.length > 0
+        }
       }
       if (rawAssign) {
-        assignments.value = JSON.parse(rawAssign)
-        hasData = true
+        const parsedAssign = JSON.parse(rawAssign)
+        if (parsedAssign && typeof parsedAssign === 'object' && !Array.isArray(parsedAssign)) {
+          const scopedAssign: Record<string, ScoutAssignment> = {}
+          const entries = Object.entries(parsedAssign as Record<string, ScoutAssignment>)
+          for (const [k, a] of entries) {
+            if (a && (!a.eventId || a.eventId === eventId)) {
+              scopedAssign[k] = { ...a, eventId: a.eventId || eventId }
+            }
+          }
+          if (Object.keys(scopedAssign).length !== entries.length) {
+            localStorage.setItem(`scoutingpro27_assignments_${eventId}`, JSON.stringify(scopedAssign))
+          }
+          if (resetMemory || Object.keys(assignments.value).length === 0) {
+            assignments.value = scopedAssign
+          }
+          if (Object.keys(assignments.value).length > 0) hasData = true
+        }
       }
       return hasData
     } catch (e) {
@@ -197,35 +244,46 @@ export const useScheduleStore = defineStore('schedule', () => {
 
   function syncFromCrdt(eventId: string) {
     if (!eventId) return
+    if (currentEventId.value && currentEventId.value !== eventId) return
     const handle = getExistingEventCrdt(eventId)
     if (!handle) return
     schedules.value = deduplicateSchedules(readSchedulesFromCrdt(handle.store, eventId))
     assignments.value = readAssignmentsFromCrdt(handle.store, eventId)
-    if (currentEventId.value === eventId || !currentEventId.value) {
-      saveToLocalStorage(eventId)
-    }
+    saveToLocalStorage(eventId)
   }
 
   // --- 加载赛程与排班 ---
   async function loadSchedule(eventId: string) {
+    const prevEventId = currentEventId.value
+    const reqSeq = ++fetchSeq
+    if (prevEventId !== eventId) {
+      clearSelection()
+    }
     currentEventId.value = eventId
     loading.value = true
     error.value = null
 
     // 先读本地缓存秒级上屏
-    loadFromLocalStorage(eventId)
+    loadFromLocalStorage(eventId, prevEventId !== eventId)
 
     try {
       const res = await fetchEventSchedule(eventId)
+      if (reqSeq !== fetchSeq || currentEventId.value !== eventId) return
       if (res && res.schedules) {
-        if (res.schedules.length > 0 || schedules.value.length === 0) {
-          schedules.value = deduplicateSchedules(res.schedules)
+        const scopedFetched = res.schedules
+          .filter((s) => !s.eventId || s.eventId === eventId)
+          .map((s) => ({ ...s, eventId: s.eventId || eventId }))
+        if (scopedFetched.length > 0 || schedules.value.length === 0) {
+          schedules.value = deduplicateSchedules(scopedFetched)
         }
       }
       if (res && res.assignments) {
-        if (res.assignments.length > 0 || Object.keys(assignments.value).length === 0) {
+        const scopedFetchedAssign = res.assignments
+          .filter((a) => !a.eventId || a.eventId === eventId)
+          .map((a) => ({ ...a, eventId: a.eventId || eventId }))
+        if (scopedFetchedAssign.length > 0 || Object.keys(assignments.value).length === 0) {
           const assignMap: Record<string, ScoutAssignment> = {}
-          for (const a of res.assignments) {
+          for (const a of scopedFetchedAssign) {
             assignMap[getAssignmentKey(a.matchNumber, a.station, a.tournamentLevel)] = a
           }
           assignments.value = assignMap
@@ -236,7 +294,9 @@ export const useScheduleStore = defineStore('schedule', () => {
       // 离线环境静默降级到已加载的本地数据
       console.warn('[ScheduleStore] Remote fetch schedule failed, using local cache:', e.message)
     } finally {
-      loading.value = false
+      if (reqSeq === fetchSeq) {
+        loading.value = false
+      }
     }
   }
 
@@ -743,13 +803,21 @@ export const useScheduleStore = defineStore('schedule', () => {
 
   // --- 接收对端 WebRTC 同步 ---
   function applyScheduleFullSync(incomingSchedules: MatchScheduleItem[], incomingAssignments: ScoutAssignment[]) {
+    const activeEid = currentEventId.value
     if (incomingSchedules) {
-      schedules.value = deduplicateSchedules(incomingSchedules)
+      const scopedSchedules = activeEid
+        ? incomingSchedules
+            .filter((s) => !s.eventId || s.eventId === activeEid)
+            .map((s) => (s.eventId ? s : { ...s, eventId: activeEid }))
+        : incomingSchedules
+      schedules.value = deduplicateSchedules(scopedSchedules)
     }
     if (incomingAssignments) {
       const assignMap: Record<string, ScoutAssignment> = {}
       for (const a of incomingAssignments) {
-        assignMap[getAssignmentKey(Number(a.matchNumber), a.station, a.tournamentLevel)] = a
+        if (activeEid && a.eventId && a.eventId !== activeEid) continue
+        const stamped = activeEid && !a.eventId ? { ...a, eventId: activeEid } : a
+        assignMap[getAssignmentKey(Number(stamped.matchNumber), stamped.station, stamped.tournamentLevel)] = stamped
       }
       assignments.value = assignMap
     }
@@ -765,17 +833,25 @@ export const useScheduleStore = defineStore('schedule', () => {
     batchIndex: number,
     totalBatches: number
   ) {
+    const activeEid = currentEventId.value
+    const scopedSchedules = (incomingSchedules || [])
+      .filter((s) => !activeEid || !s.eventId || s.eventId === activeEid)
+      .map((s) => (activeEid && !s.eventId ? { ...s, eventId: activeEid } : s))
+    const scopedAssignments = (incomingAssignments || [])
+      .filter((a) => !activeEid || !a.eventId || a.eventId === activeEid)
+      .map((a) => (activeEid && !a.eventId ? { ...a, eventId: activeEid } : a))
+
     if (batchIndex === 0) {
-      schedules.value = deduplicateSchedules(incomingSchedules || [])
+      schedules.value = deduplicateSchedules(scopedSchedules)
       const assignMap: Record<string, ScoutAssignment> = {}
-      for (const a of incomingAssignments || []) {
+      for (const a of scopedAssignments) {
         assignMap[getAssignmentKey(Number(a.matchNumber), a.station, a.tournamentLevel)] = a
       }
       assignments.value = assignMap
     } else {
-      schedules.value = deduplicateSchedules([...schedules.value, ...(incomingSchedules || [])])
+      schedules.value = deduplicateSchedules([...schedules.value, ...scopedSchedules])
       const assignMap = { ...assignments.value }
-      for (const a of incomingAssignments || []) {
+      for (const a of scopedAssignments) {
         assignMap[getAssignmentKey(Number(a.matchNumber), a.station, a.tournamentLevel)] = a
       }
       assignments.value = assignMap
@@ -788,14 +864,18 @@ export const useScheduleStore = defineStore('schedule', () => {
 
   function applyAssignmentUpdate(incomingAssignment: ScoutAssignment) {
     if (!incomingAssignment) return
-    const key = getAssignmentKey(incomingAssignment.matchNumber, incomingAssignment.station, incomingAssignment.tournamentLevel)
-    assignments.value[key] = incomingAssignment
+    const activeEid = currentEventId.value
+    if (activeEid && incomingAssignment.eventId && incomingAssignment.eventId !== activeEid) return
+    const normalizedAssignment =
+      activeEid && !incomingAssignment.eventId ? { ...incomingAssignment, eventId: activeEid } : incomingAssignment
+    const key = getAssignmentKey(normalizedAssignment.matchNumber, normalizedAssignment.station, normalizedAssignment.tournamentLevel)
+    assignments.value[key] = normalizedAssignment
     if (currentEventId.value) {
       const crdtHandle = getExistingEventCrdt(currentEventId.value)
       if (crdtHandle) {
         const eid = currentEventId.value
         withLocalCrdtWrite(eid, () => {
-          writeAssignmentToCrdt(crdtHandle.store, { ...incomingAssignment, eventId: incomingAssignment.eventId || eid }, false)
+          writeAssignmentToCrdt(crdtHandle.store, { ...normalizedAssignment, eventId: normalizedAssignment.eventId || eid }, false)
         })
       }
       saveToLocalStorage(currentEventId.value)
@@ -852,6 +932,14 @@ export const useScheduleStore = defineStore('schedule', () => {
     }
   }
 
+  function clearLocalCache() {
+    schedules.value = []
+    assignments.value = {}
+    currentEventId.value = null
+    error.value = null
+    clearSelection()
+  }
+
   return {
     currentEventId,
     schedules,
@@ -879,6 +967,7 @@ export const useScheduleStore = defineStore('schedule', () => {
     endDragSelection,
     selectAllMatches,
     clearSelection,
+    clearLocalCache,
     broadcastScheduleSync,
     broadcastAssignmentUpdate,
     applyScheduleFullSync,

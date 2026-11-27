@@ -149,9 +149,10 @@ export const useUserStore = defineStore('user', () => {
         oldPassword: oldPassword || undefined,
         newPassword: newPassword || undefined
       })
+      const immutableId = oldId || res.id
       user.value = {
         ...user.value,
-        id: res.id || oldId,
+        id: immutableId,
         username: res.username,
         token: res.token || user.value.token
       }
@@ -243,7 +244,8 @@ export const useUserStore = defineStore('user', () => {
       const eventStore = useEventStore()
 
       const cleanTargetUser = targetUsername.trim()
-      const cleanTargetPwd = targetPassword.trim()
+      // Preserve exact password whitespace per CONTRACT.md §1
+      const rawTargetPwd = targetPassword ?? ''
       let res: { id: string; username: string; token?: string }
 
       const isRemoteClient = Boolean(
@@ -254,7 +256,7 @@ export const useUserStore = defineStore('user', () => {
         try {
           const mergeResult = await connStore.rtcService.requestAccountMerge(
             cleanTargetUser,
-            cleanTargetPwd,
+            rawTargetPwd,
             oldId,
             currentUsername
           )
@@ -274,14 +276,14 @@ export const useUserStore = defineStore('user', () => {
           const { mergeUser: apiMergeUser } = await import('@/services/api')
           res = await apiMergeUser({
             targetUsername: cleanTargetUser,
-            targetPassword: cleanTargetPwd
+            targetPassword: rawTargetPwd
           })
         }
       } else {
         const { mergeUser: apiMergeUser } = await import('@/services/api')
         const apiRes = await apiMergeUser({
           targetUsername: cleanTargetUser,
-          targetPassword: cleanTargetPwd
+          targetPassword: rawTargetPwd
         })
         if (!apiRes || !apiRes.id) {
           throw new Error('Invalid response from merge API')
@@ -362,7 +364,7 @@ export const useUserStore = defineStore('user', () => {
       connStore.rtcService = null
       connStore.status = 'offline'
       connStore.clearConnectedScouts()
-      connStore.clearPendingSas()
+      connStore.setPendingSas(null)
       connStore.clearSessionConflict()
       connStore.clearTakeoverPrompt()
     } catch (e) {
@@ -373,20 +375,22 @@ export const useUserStore = defineStore('user', () => {
     // (H2, sp27_epoch_*, sp27_clock_anchor_*, IndexedDB identity keys, and offline cached photos)
     // so switching accounts on a shared standby/teammate laptop preserves offline work seamlessly.
     try {
-      const [{ useRecordStore }, { useEventStore }, { useInboxStore }, { usePitScoutStore }, { useScheduleStore }] =
+      const [{ useRecordStore }, { useEventStore }, { useInboxStore }, { usePitScoutStore }, { useScheduleStore }, { useAiStore }] =
         await Promise.all([
           import('@/stores/records'),
           import('@/stores/events'),
           import('@/stores/inbox'),
           import('@/stores/pitScout'),
-          import('@/stores/schedule')
+          import('@/stores/schedule'),
+          import('@/stores/ai')
         ])
 
       useRecordStore().clearMemoryOnly()
       useEventStore().clearUserSessionCache()
       useInboxStore().clearAllMessages()
       usePitScoutStore().clearLocalCache()
-      useScheduleStore().clearSelection()
+      useScheduleStore().clearLocalCache()
+      useAiStore().resetUserSession()
     } catch (e) {
       console.warn('[userStore] Error clearing user session caches on logout:', e)
     }

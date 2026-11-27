@@ -53,13 +53,25 @@ function handleStaticHostFallback<T>(method: string, path: string, body?: unknow
   if (path.startsWith('/user/verify-token')) {
     return Promise.resolve({ valid: true, userId: 'pwa-user', username: 'PWA Scout' } as unknown as T)
   }
-  // 4. Rename user
+  // 4. Rename user (preserve immutable userId from active session)
   if (path.startsWith('/user/rename')) {
     const b = (body || {}) as UpdateProfileParams
+    let storedId = ''
+    let storedToken = ''
+    try {
+      const raw = localStorage.getItem('scoutingpro-user')
+      if (raw) {
+        const parsed = JSON.parse(raw)
+        if (typeof parsed?.id === 'string') storedId = parsed.id
+        if (typeof parsed?.token === 'string') storedToken = parsed.token
+      }
+    } catch {
+      // Ignore storage parse failure
+    }
     return Promise.resolve({
-      id: b.newId || 'scout-' + Date.now().toString(36),
+      id: storedId || b.newId || 'scout-' + Date.now().toString(36),
       username: b.newUsername || 'Scout',
-      token: 'pwa-' + Date.now().toString(36)
+      token: storedToken || 'pwa-' + Date.now().toString(36)
     } as unknown as T)
   }
   // 4b. Merge user -> static cloud host cannot perform direct database merge; reject so callers fail gracefully

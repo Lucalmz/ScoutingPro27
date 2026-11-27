@@ -4,7 +4,8 @@ import { useAiStore } from '@/stores/ai'
 import { useUserStore } from '@/stores/user'
 import { useToastStore } from '@/stores/toast'
 import type { AiChatMessage, AiChatThread, AiProviderProfile, AiTokenUsage } from '@/types'
-import { DEFAULT_THREAD_TITLES, isZhLocale } from '@/components/ai/constants'
+import { aiFetch, DEFAULT_THREAD_TITLES, isZhLocale } from '@/components/ai/constants'
+import { stripTurboActionBlocks } from '@/components/ai/turboAgent'
 import {
   PcmAudioCapture,
   PcmAudioPlayer,
@@ -54,7 +55,7 @@ interface BrowserSpeechRecognition {
 export interface UseAiVoiceSessionOptions {
   eventId: Ref<string> | (() => string)
   activeThread: Ref<AiChatThread | null>
-  buildEffectiveSystemPrompt: () => string
+  buildEffectiveSystemPrompt: (opts?: { forVoice?: boolean }) => string
   buildBriefContextLabel: () => string | undefined
 }
 
@@ -98,7 +99,9 @@ export function useAiVoiceSession(options: UseAiVoiceSessionOptions) {
   const assistantText = ref('')
   const lastCompletedTurn = ref<{ user: string; assistant: string } | null>(null)
   const liveUserTranscript = computed(() => `${userFinalText.value}${userInterimText.value}`.trim())
-  const liveAssistantTranscript = computed(() => assistantText.value.trim())
+  const liveAssistantTranscript = computed(() =>
+    stripTurboActionBlocks(assistantText.value).displayContent
+  )
 
   const activeProfile = computed(() => aiStore.activeProfile)
   const forceOpenAiRealtime = computed(() => {
@@ -114,11 +117,16 @@ export function useAiVoiceSession(options: UseAiVoiceSessionOptions) {
     set: mode => {
       prefs.value = { ...prefs.value, inputMode: mode }
       saveVoicePrefs(prefs.value)
-      if (capture && isActive.value && isNativeLive.value) {
-        if (mode === 'ptt' && !isPttHolding.value) {
-          capture.setMuted(true)
-        } else if (mode === 'vad') {
-          capture.setMuted(isMuted.value)
+      if (isActive.value && isNativeLive.value) {
+        if (capture) {
+          if (mode === 'ptt' && !isPttHolding.value) {
+            capture.setMuted(true)
+          } else if (mode === 'vad') {
+            capture.setMuted(isMuted.value)
+          }
+        }
+        if (ws && ws.readyState === WebSocket.OPEN) {
+          ws.send(JSON.stringify({ type: 'mode', inputMode: mode }))
         }
       }
     }
@@ -248,7 +256,7 @@ export function useAiVoiceSession(options: UseAiVoiceSessionOptions) {
   })
 
   function buildVoiceSystemPrompt(): string {
-    const base = options.buildEffectiveSystemPrompt()
+    const base = options.buildEffectiveSystemPrompt({ forVoice: isNativeLive.value })
     const isZh = isZhLocale(locale.value)
     const addendum = isZh
       ? '【语音直接对话模式指令】你正在与侦察员/教练进行实时语音通话。请用自然、口语化、简洁直白的语言直接回答重点（避免输出冗长 Markdown 表格或大量符号），队号直接报数字，必要时简短确认关键战术数字。'
@@ -269,7 +277,7 @@ export function useAiVoiceSession(options: UseAiVoiceSessionOptions) {
   function commitActiveTurnToThread(force = false) {
     if (activeTurnCommitted && !force) return
     const uText = `${userFinalText.value}${userInterimText.value}`.trim()
-    const aText = assistantText.value.trim()
+    const aText = stripTurboActionBlocks(assistantText.value).displayContent
     if (!uText && !aText) return
 
     const thread = options.activeThread.value
@@ -435,6 +443,11 @@ export function useAiVoiceSession(options: UseAiVoiceSessionOptions) {
     try {
       await localPlayer.warmup()
     } catch {}
+    if (mySession !== sessionToken || !isActive.value) {
+      localPlayer.close()
+      if (player === localPlayer) player = null
+      return
+    }
 
     const socket = new WebSocket(buildVoiceWsUrl())
     ws = socket
@@ -457,6 +470,7 @@ export function useAiVoiceSession(options: UseAiVoiceSessionOptions) {
           provider: profile.protocol,
           model: selectedModel.value,
           voice: selectedVoice.value,
+          inputMode: inputMode.value,
           systemPrompt: buildVoiceSystemPrompt(),
           history: recentHistory
         })
@@ -610,6 +624,7 @@ export function useAiVoiceSession(options: UseAiVoiceSessionOptions) {
           errorMessage.value = errText
           status.value = 'error'
           toastStore.showError(errText)
+          cleanupTransportResources()
           break
         }
       }
@@ -620,6 +635,7 @@ export function useAiVoiceSession(options: UseAiVoiceSessionOptions) {
       if (status.value !== 'error') {
         errorMessage.value = t('ai.voice.err_ws_failed')
         status.value = 'error'
+        cleanupTransportResources()
       }
     }
 
@@ -629,6 +645,7 @@ export function useAiVoiceSession(options: UseAiVoiceSessionOptions) {
         if (evt.code !== 1000 && evt.code !== 1001) {
           errorMessage.value = evt.reason || t('ai.voice.err_ws_closed', { code: evt.code })
           status.value = 'error'
+          cleanupTransportResources()
         } else {
           stopSession()
         }
@@ -756,6 +773,7 @@ export function useAiVoiceSession(options: UseAiVoiceSessionOptions) {
 
     const sttProfile = activeSttProfile.value
     if (sttProfile && capture) {
+      const mySession = sessionToken
       capture.stop()
       capture = null
       const chunks = turnPcmChunks
@@ -768,11 +786,16 @@ export function useAiVoiceSession(options: UseAiVoiceSessionOptions) {
       status.value = 'transcribing'
       try {
         const wavBase64 = encodeWavBase64(chunks, 16000)
-        const res = await fetch('/api/ai/audio/transcribe', {
+        const res = await aiFetch('/api/ai/audio/transcribe', {
           method: 'POST',
+          token: userStore.token,
+          onRefreshedToken: newToken => {
+            if (userStore.user) {
+              userStore.user = { ...userStore.user, token: newToken }
+            }
+          },
           headers: {
-            'Content-Type': 'application/json',
-            Authorization: `Bearer ${userStore.token}`
+            'Content-Type': 'application/json'
           },
           body: JSON.stringify({
             profileId: sttProfile.id,
@@ -782,7 +805,9 @@ export function useAiVoiceSession(options: UseAiVoiceSessionOptions) {
             language: isZhLocale(locale.value) ? 'zh' : 'en'
           })
         })
+        if (!isActive.value || mySession !== sessionToken) return
         const data = await res.json().catch(() => ({}))
+        if (!isActive.value || mySession !== sessionToken) return
         if (!res.ok) {
           throw new Error(data.error || `HTTP ${res.status}`)
         }
@@ -793,6 +818,7 @@ export function useAiVoiceSession(options: UseAiVoiceSessionOptions) {
         }
         await submitTurnVoicePrompt(recognized)
       } catch (err: any) {
+        if (!isActive.value || mySession !== sessionToken) return
         errorMessage.value = err?.message || t('ai.voice.err_transcribe_failed')
         status.value = 'error'
       }
@@ -800,6 +826,7 @@ export function useAiVoiceSession(options: UseAiVoiceSessionOptions) {
     }
 
     if (speechRec) {
+      const mySession = sessionToken
       const rec = speechRec
       speechRec = null
       try {
@@ -809,6 +836,7 @@ export function useAiVoiceSession(options: UseAiVoiceSessionOptions) {
       const text = `${userFinalText.value}${userInterimText.value}`.trim()
       userFinalText.value = ''
       userInterimText.value = ''
+      if (!isActive.value || mySession !== sessionToken) return
       if (text) {
         await submitTurnVoicePrompt(text)
       } else if (status.value !== 'error') {
@@ -820,17 +848,18 @@ export function useAiVoiceSession(options: UseAiVoiceSessionOptions) {
   async function submitTurnVoicePrompt(prompt: string): Promise<void> {
     const evtId = getEventId()
     const clean = prompt.trim()
-    if (!evtId || !clean) return
+    if (!evtId || !clean || !isActive.value) return
+    const mySession = sessionToken
 
     const thread = await aiStore.ensureActiveThread(evtId)
-    if (!thread) return
+    if (!thread || !isActive.value || mySession !== sessionToken) return
 
     userFinalText.value = clean
     userInterimText.value = ''
     assistantText.value = ''
     status.value = 'thinking'
 
-    let lastLen = 0
+    let lastCleanLen = 0
     if (stopWatchTurnStream) {
       stopWatchTurnStream()
       stopWatchTurnStream = null
@@ -845,11 +874,13 @@ export function useAiVoiceSession(options: UseAiVoiceSessionOptions) {
         return msg?.content || ''
       },
       newContent => {
-        if (!isActive.value || isNativeLive.value) return
+        if (!isActive.value || mySession !== sessionToken || isNativeLive.value) return
         assistantText.value = newContent
-        if (newContent.length > lastLen) {
-          const delta = newContent.slice(lastLen)
-          lastLen = newContent.length
+        const rawClean = stripTurboActionBlocks(newContent).displayContent
+        const safeClean = rawClean.replace(/`{1,3}[a-z0-9-]*$/i, '')
+        if (safeClean.length > lastCleanLen) {
+          const delta = safeClean.slice(lastCleanLen)
+          lastCleanLen = safeClean.length
           if (autoSpeakTurnVoice.value) {
             tts.pushDelta(delta)
           }
@@ -877,14 +908,24 @@ export function useAiVoiceSession(options: UseAiVoiceSessionOptions) {
     }
     aiStore.scheduleSaveThread(thread)
 
+    if (!isActive.value || mySession !== sessionToken) {
+      userFinalText.value = ''
+      assistantText.value = ''
+      return
+    }
+
+    const finalClean = stripTurboActionBlocks(assistantText.value).displayContent
     if (autoSpeakTurnVoice.value && ok) {
+      if (finalClean.length > lastCleanLen) {
+        tts.pushDelta(finalClean.slice(lastCleanLen))
+      }
       tts.flush()
     }
-    lastCompletedTurn.value = { user: clean, assistant: assistantText.value.trim() }
+    lastCompletedTurn.value = { user: clean, assistant: finalClean }
     userFinalText.value = ''
     assistantText.value = ''
     const currentStatus = (): VoiceSessionStatus => status.value
-    if (isActive.value && currentStatus() !== 'speaking') {
+    if (isActive.value && mySession === sessionToken && currentStatus() !== 'speaking') {
       status.value = 'listening'
     }
   }
@@ -955,6 +996,8 @@ export function useAiVoiceSession(options: UseAiVoiceSessionOptions) {
     sessionToken += 1
     if (isActive.value && isNativeLive.value) {
       commitActiveTurnToThread()
+    } else if (isActive.value && !isNativeLive.value) {
+      aiStore.stopStreaming(options.activeThread.value?.id)
     }
     cleanupTransportResources()
     const thread = options.activeThread.value

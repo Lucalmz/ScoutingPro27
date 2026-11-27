@@ -1,7 +1,7 @@
 import type { WebRtcCrdtSyncChunk, WebRtcCrdtSyncMsg } from '@/types'
 
-export const CRDT_MAX_FRAME_BYTES = 48 * 1024 // Strictly below DataChannelSender 64 KiB cap
-export const CRDT_CHUNK_DATA_CHARS = 34 * 1024 // Safe UTF-8 + JSON envelope headroom (< 48 KiB)
+export const CRDT_MAX_FRAME_BYTES = 16 * 1024 // Keep individual frames <= 16 KiB so control frames interleave on slow links
+export const CRDT_CHUNK_DATA_CHARS = 12 * 1024 // Target slice length (~12 KiB ASCII, dynamically clamped for multi-byte UTF-8)
 
 const utf8Encoder = new TextEncoder()
 
@@ -17,22 +17,62 @@ export function encodeCrdtSyncFrames(
     return [msg]
   }
 
-  const totalChunks = Math.ceil(serialized.length / CRDT_CHUNK_DATA_CHARS)
   const transferId = `crdt_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 8)}`
-  const chunks: WebRtcCrdtSyncChunk[] = []
+  // Reserve conservative digit width for chunkIndex/totalChunks when sizing UTF-8 frame budget
+  const estimatedMaxChunks = Math.max(9999, serialized.length)
+  const buildCandidateFrame = (chunkData: string, chunkIndex: number, totalChunks: number): WebRtcCrdtSyncChunk => ({
+    type: 'CRDT_SYNC_CHUNK',
+    eventId: msg.eventId,
+    transferId,
+    chunkIndex,
+    totalChunks,
+    chunkData,
+    authCode: msg.authCode
+  })
 
-  for (let i = 0; i < totalChunks; i++) {
-    chunks.push({
-      type: 'CRDT_SYNC_CHUNK',
-      eventId: msg.eventId,
-      transferId,
-      chunkIndex: i,
-      totalChunks,
-      chunkData: serialized.slice(i * CRDT_CHUNK_DATA_CHARS, (i + 1) * CRDT_CHUNK_DATA_CHARS),
-      authCode: msg.authCode
-    })
+  const slices: string[] = []
+  let offset = 0
+  while (offset < serialized.length) {
+    let end = Math.min(serialized.length, offset + CRDT_CHUNK_DATA_CHARS)
+    const fitsFrame = (candidateEnd: number): boolean => {
+      const candidate = buildCandidateFrame(
+        serialized.slice(offset, candidateEnd),
+        estimatedMaxChunks,
+        estimatedMaxChunks
+      )
+      return measureUtf8Bytes(JSON.stringify(candidate)) <= CRDT_MAX_FRAME_BYTES
+    }
+
+    if (!fitsFrame(end)) {
+      let low = offset + 1
+      let high = end - 1
+      let best = offset + 1
+      while (low <= high) {
+        const mid = (low + high) >> 1
+        if (fitsFrame(mid)) {
+          best = mid
+          low = mid + 1
+        } else {
+          high = mid - 1
+        }
+      }
+      end = best
+    }
+
+    // Avoid splitting a UTF-16 surrogate pair when advancing to the next slice
+    if (end < serialized.length && end > offset + 1) {
+      const lastCode = serialized.charCodeAt(end - 1)
+      if (lastCode >= 0xd800 && lastCode <= 0xdbff) {
+        end--
+      }
+    }
+
+    slices.push(serialized.slice(offset, end))
+    offset = end
   }
-  return chunks
+
+  const totalChunks = slices.length
+  return slices.map((chunkData, chunkIndex) => buildCandidateFrame(chunkData, chunkIndex, totalChunks))
 }
 
 interface PendingTransfer {
