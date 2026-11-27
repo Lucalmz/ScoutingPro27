@@ -6,7 +6,7 @@
   <img src="https://img.shields.io/badge/CRDT-TinyBase_10_%2B_HLC-8A2BE2?style=for-the-badge" alt="CRDT" />
   <img src="https://img.shields.io/badge/Architecture-P2P_Mesh_%2B_Local_Host-00B0FF?style=for-the-badge&logo=webrtc&logoColor=white" alt="P2P" />
   <img src="https://img.shields.io/badge/Security-Zero_Trust_%26_ECDSA-00C853?style=for-the-badge&logo=auth0&logoColor=white" alt="Security" />
-  <img src="https://img.shields.io/badge/Tests-1101_Unit_%2B_4_E2E-10B981?style=for-the-badge&logo=checkmarx&logoColor=white" alt="Tests" />
+  <img src="https://img.shields.io/badge/Tests-1295_Unit_%2B_5_E2E-10B981?style=for-the-badge&logo=checkmarx&logoColor=white" alt="Tests" />
   <img src="https://img.shields.io/badge/Vue_3_%2B_Vite_8-35495E?style=for-the-badge&logo=vue.js&logoColor=4FC08D" alt="Vue.js" />
   <img src="https://img.shields.io/badge/TypeScript_6-007ACC?style=for-the-badge&logo=typescript&logoColor=white" alt="TypeScript" />
   <img src="https://img.shields.io/badge/Java_21_%2B_Javalin_7-ED8B00?style=for-the-badge&logo=openjdk&logoColor=white" alt="Java" />
@@ -228,7 +228,7 @@ sequenceDiagram
 | **CRDT & Cryptography (`frontend/src/services/`)** | **TinyBase 10.1** `MergeableStore`, `CalibratedMonotonicClock`, chunked WebRTC sync, Web Crypto `ECDH`/`ECDSA P-256`/`PBKDF2-HMAC` |
 | **Desktop Host & Container (`Backend/`)** | **Java 21 LTS** + **Javalin 7.2** (Jetty 12) + **JCEF Chromium 146** (custom frameless rounded title bar on Windows; native frame on macOS/Linux) |
 | **Storage & NAT Traversal (`Backend/src/main/`)** | **H2 2.2** + **HikariCP** + **Jdbi3** + **Flyway 13 (`V1`–`V10`)** + **Auth0 JWT / jBCrypt / AES-256-GCM** + **Offbynull PortMapper** |
-| **Shared Conformance & QA (`shared/`, `e2e/`)** | `shared/formula-conformance-cases.json`, **Vitest** (98 files / 887 tests), **JUnit 5** (42 classes / 214 tests), **Puppeteer** (4 multi-node E2E suites) |
+| **Shared Conformance & QA (`shared/`, `e2e/`)** | `shared/formula-conformance-cases.json`, **Vitest** (120 files / 1,029 tests), **JUnit 5** (51 classes / 266 tests), **Puppeteer** (5 multi-node E2E suites) |
 
 ---
 
@@ -282,14 +282,14 @@ Download the latest release packages from **[GitHub Releases](https://github.com
 cd frontend
 npm run type-check
 
-# 2. Frontend Vitest unit & component suite (98 test files / 887 tests)
+# 2. Frontend Vitest unit & component suite (120 test files / 1,029 tests)
 npx vitest run
 
-# 3. Backend Maven JUnit 5 suite (42 test classes / 214 tests, incl. Flyway V1-V10, ECDSA & CRDT projection)
+# 3. Backend Maven JUnit 5 suite (51 test classes / 266 tests, incl. Flyway V1-V10, ECDSA & CRDT projection)
 cd ../Backend
 mvn test
 
-# 4. Full-stack multi-node disaster-recovery & interactive E2E suites
+# 4. Full-stack multi-node disaster-recovery & interactive E2E suites (5 suites incl. webrtc-resilience)
 cd ../frontend
 npm run test:e2e
 ```

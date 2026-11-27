@@ -6,7 +6,7 @@
   <img src="https://img.shields.io/badge/CRDT-TinyBase_10_%2B_HLC-8A2BE2?style=for-the-badge" alt="CRDT" />
   <img src="https://img.shields.io/badge/Architecture-P2P_Mesh_%2B_Local_Host-00B0FF?style=for-the-badge&logo=webrtc&logoColor=white" alt="P2P" />
   <img src="https://img.shields.io/badge/Security-Zero_Trust_%26_ECDSA-00C853?style=for-the-badge&logo=auth0&logoColor=white" alt="Security" />
-  <img src="https://img.shields.io/badge/Tests-1101_Unit_%2B_4_E2E-10B981?style=for-the-badge&logo=checkmarx&logoColor=white" alt="Tests" />
+  <img src="https://img.shields.io/badge/Tests-1295_Unit_%2B_5_E2E-10B981?style=for-the-badge&logo=checkmarx&logoColor=white" alt="Tests" />
   <img src="https://img.shields.io/badge/Vue_3_%2B_Vite_8-35495E?style=for-the-badge&logo=vue.js&logoColor=4FC08D" alt="Vue.js" />
   <img src="https://img.shields.io/badge/TypeScript_6-007ACC?style=for-the-badge&logo=typescript&logoColor=white" alt="TypeScript" />
   <img src="https://img.shields.io/badge/Java_21_%2B_Javalin_7-ED8B00?style=for-the-badge&logo=openjdk&logoColor=white" alt="Java" />
@@ -234,7 +234,7 @@ sequenceDiagram
 | **CRDT 与密码学层 (`frontend/src/services/`)** | **TinyBase 10.1** `MergeableStore`、自研 `CalibratedMonotonicClock`、WebRTC 分片同步器、Web Crypto `ECDH`/`ECDSA P-256`/`PBKDF2-HMAC` |
 | **主机后端与桌面壳 (`Backend/`)** | **Java 21 LTS** + **Javalin 7.2** (Jetty 12) + **JCEF Chromium 146**（Windows 自定义圆角无边框标题栏 / macOS & Linux 原生窗口） |
 | **存储与网络穿透 (`Backend/src/main/`)** | **H2 2.2** + **HikariCP** + **Jdbi3** + **Flyway 13 (`V1`–`V10`)** + **Auth0 JWT / jBCrypt / AES-256-GCM** + **Offbynull PortMapper** |
-| **共享契约与测试 (`shared/`, `e2e/`)** | 双端公式契约集 `shared/formula-conformance-cases.json`、**Vitest**（98 文件 / 887 单测）、**JUnit 5**（42 类 / 214 单测）、**Puppeteer**（4 套多节点容灾 E2E） |
+| **共享契约与测试 (`shared/`, `e2e/`)** | 双端公式契约集 `shared/formula-conformance-cases.json`、**Vitest**（120 文件 / 1,029 单测）、**JUnit 5**（51 类 / 266 单测）、**Puppeteer**（5 套多节点容灾 E2E） |
 
 ---
 
@@ -288,14 +288,14 @@ sequenceDiagram
 cd frontend
 npm run type-check
 
-# 2. 前端 Vitest 单元测试套件（98 个测试文件 / 887 项单测）
+# 2. 前端 Vitest 单元测试套件（120 个测试文件 / 1,029 项单测）
 npx vitest run
 
-# 3. 后端 Maven JUnit 5 测试套件（42 个测试类 / 214 项单测，覆盖 Flyway V1-V10、零信任验签与 CRDT 脏行投影）
+# 3. 后端 Maven JUnit 5 测试套件（51 个测试类 / 266 项单测，覆盖 Flyway V1-V10、零信任验签与 CRDT 脏行投影）
 cd ../Backend
 mvn test
 
-# 4. 全栈多实例容灾与交互 E2E 套件（4 套核心 E2E；单独运行 12 步跨机灾难恢复可执行 npm run test:e2e:multi）
+# 4. 全栈多实例容灾与交互 E2E 套件（5 套核心 E2E；单独运行 12 步跨机灾难恢复可执行 npm run test:e2e:multi）
 cd ../frontend
 npm run test:e2e
 ```

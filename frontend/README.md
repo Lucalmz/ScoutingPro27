@@ -25,12 +25,13 @@ npm install
 | `npm run type-check` | Run `vue-tsc --build` static type checking |
 | `npm run build` | Type-check and build bundled assets into `Backend/src/main/resources/public/` |
 | `npm run build:pwa` | Build standalone static PWA bundle into `frontend/dist-pwa/` |
-| `npm test` | Run Vitest unit & component suite (`vitest run`, 95 files / 811 tests) |
-| `npm run test:e2e` | Run all 4 canonical Puppeteer E2E suites sequentially |
+| `npm test` | Run Vitest unit & component suite (`vitest run`, 120 files / 1,029 tests) |
+| `npm run test:e2e` | Run all 5 canonical Puppeteer E2E suites sequentially |
 | `npm run test:e2e:multi` | Run 12-step multi-host disaster-recovery E2E (`e2e/multi-client.e2e.js`; `test:e2e:ui` shows browser UI) |
 | `npm run test:e2e:qr` | Run QR mobile join & single-handed wizard E2E (`e2e/qr-mobile-join.e2e.js`) |
 | `npm run test:e2e:inbox` | Run Inbox outbox/delivery E2E (`e2e/inbox-lifecycle.e2e.js`) |
 | `npm run test:e2e:interactive` | Run full-interaction E2E (`e2e/comprehensive-interactive.e2e.js`) |
+| `npm run test:e2e:resilience` | Run WebRTC VPN/TUN & VirtualDataChannel resilience E2E (`e2e/webrtc-resilience.e2e.js`) |
 | `npm run capture:userguide` | Regenerate 17 ZH + 17 EN annotated guide screenshots into `docs/images/userguide/` *(gitignored)* |
 | `npm run export:userguide-pdf` | Export `docs/ScoutingPro27_UserGuide_ZH.pdf` & `_EN.pdf` *(gitignored)* |
 
